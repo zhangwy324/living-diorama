@@ -1,0 +1,325 @@
+import { WORLD_TOLERANCES, type RegionPosition, type Vec2 } from "@living-diorama/content-schema";
+import type { ConnectionModel, WorldModel } from "../world/world-model";
+import { distanceField, findGridPath, pathLength } from "./grid-path";
+import { distanceToPortal, type Navigation } from "./region-graph";
+import { CellState, type RegionMask } from "./walkability";
+
+// Hierarchical route planning (roadmap M3 task 5, ADR 0006). Each usable portal gets a few
+// crossings: pairs of edge-adjacent walkable cells, one on each side. Their cells are the doors
+// of a small graph whose in-region edge costs come from exact walking-distance fields, so the
+// region-level search picks the truly shortest sequence of regions. Grid A* then fills in each
+// region's leg.
+
+/** Crossings on one portal are at least this far apart, in metres. */
+const CROSSING_SPACING = 1;
+
+/** One way across a portal: from a walkable cell in one region into an adjacent one in the next. */
+export interface Crossing {
+  connectionId: string;
+  fromRegionId: string;
+  toRegionId: string;
+  fromCell: number;
+  toCell: number;
+  /** Cell centres. The region changes halfway, on the shared cell edge. */
+  from: Vec2;
+  to: Vec2;
+  /** Distance between the centres plus the connection's extra cost. */
+  cost: number;
+}
+
+/** The part of a route inside one region. */
+export interface RouteLeg {
+  regionId: string;
+  /** Smoothed waypoints; the first is the start or the entry, the last the goal or the exit. */
+  points: Vec2[];
+  /** How the route leaves this region; absent on the last leg. */
+  exit?: Crossing;
+}
+
+export interface Route {
+  legs: RouteLeg[];
+  /** Horizontal walking distance in metres. */
+  length: number;
+}
+
+export type RouteFailure = "start_not_walkable" | "goal_not_walkable" | "unreachable";
+
+export type RouteResult =
+  { ok: true; route: Route } | { ok: false; reason: RouteFailure; detail: string };
+
+const doorKey = (regionId: string, cell: number) => `${regionId}#${cell}`;
+
+/** Route planning for one navigation profile. Derived data is built lazily and cached. */
+export class Pathfinder {
+  readonly #crossings = new Map<string, Crossing[]>();
+  readonly #fields = new Map<string, Float64Array>();
+
+  constructor(
+    readonly world: WorldModel,
+    readonly navigation: Navigation,
+  ) {}
+
+  /** The crossings of a connection in both usable directions; empty if it is unusable. */
+  crossings(connection: ConnectionModel): readonly Crossing[] {
+    let found = this.#crossings.get(connection.id);
+    if (!found) {
+      found = this.#buildCrossings(connection);
+      this.#crossings.set(connection.id, found);
+    }
+    return found;
+  }
+
+  /**
+   * Drops cached routing data for these regions and every connection touching them. For future
+   * world edits (unused in v1); the walkability masks themselves come from `navigation`.
+   */
+  invalidateRegions(regionIds: Iterable<string>): void {
+    const ids = new Set(regionIds);
+    for (const connection of this.world.connections) {
+      if (ids.has(connection.from) || ids.has(connection.to)) this.#crossings.delete(connection.id);
+    }
+    for (const key of [...this.#fields.keys()]) {
+      if (ids.has(key.slice(0, key.lastIndexOf("#")))) this.#fields.delete(key);
+    }
+  }
+
+  findRoute(from: RegionPosition, to: RegionPosition): RouteResult {
+    const startMask = this.navigation.masks.get(from.regionId);
+    const goalMask = this.navigation.masks.get(to.regionId);
+    const startCell = startMask?.cellAt(from.x, from.z) ?? -1;
+    const goalCell = goalMask?.cellAt(to.x, to.z) ?? -1;
+    if (!startMask || startMask.state(startCell) !== CellState.walkable) {
+      return fail("start_not_walkable", `${describe(from)} is not walkable`);
+    }
+    if (!goalMask || goalMask.state(goalCell) !== CellState.walkable) {
+      return fail("goal_not_walkable", `${describe(to)} is not walkable`);
+    }
+
+    if (from.regionId === to.regionId) {
+      const points = findGridPath(startMask, point(from), point(to));
+      return points
+        ? {
+            ok: true,
+            route: { legs: [{ regionId: from.regionId, points }], length: pathLength(points) },
+          }
+        : fail(
+            "unreachable",
+            `no path inside "${from.regionId}" from ${describe(from)} to ${describe(to)}`,
+          );
+    }
+
+    const crossings = this.#crossingSequence(from.regionId, startCell, to.regionId, goalCell);
+    if (!crossings) {
+      return fail("unreachable", `no route from ${describe(from)} to ${describe(to)}`);
+    }
+    const legs: RouteLeg[] = [];
+    let entry = point(from);
+    let regionId = from.regionId;
+    let length = 0;
+    for (const exit of [...crossings, undefined]) {
+      const mask = this.navigation.masks.get(regionId);
+      const target = exit ? exit.from : point(to);
+      const points = mask && findGridPath(mask, entry, target);
+      if (!points) {
+        return fail(
+          "unreachable",
+          `no path inside "${regionId}" towards ${describe({ regionId, ...target })}`,
+        );
+      }
+      length += pathLength(points);
+      legs.push(exit ? { regionId, points, exit } : { regionId, points });
+      if (exit) {
+        length += Math.hypot(exit.to.x - exit.from.x, exit.to.z - exit.from.z);
+        entry = exit.to;
+        regionId = exit.toRegionId;
+      }
+    }
+    return { ok: true, route: { legs, length } };
+  }
+
+  /** Cheapest crossings from a start cell to a goal cell in another region (Dijkstra on doors). */
+  #crossingSequence(
+    startRegion: string,
+    startCell: number,
+    goalRegion: string,
+    goalCell: number,
+  ): Crossing[] | undefined {
+    const GOAL = "goal";
+    const cost = new Map<string, number>();
+    const via = new Map<string, { previous?: string; crossing?: Crossing }>();
+    const done = new Set<string>();
+    const relax = (key: string, c: number, link: { previous?: string; crossing?: Crossing }) => {
+      if (c >= (cost.get(key) ?? Infinity)) return;
+      cost.set(key, c);
+      via.set(key, link);
+    };
+
+    // From the start to every door of its region.
+    for (const exit of this.#exits(startRegion)) {
+      const d = this.#field(startRegion, exit.fromCell)[startCell] ?? Infinity;
+      if (Number.isFinite(d)) relax(doorKey(startRegion, exit.fromCell), d, {});
+    }
+
+    for (;;) {
+      // The door graph has a few dozen nodes at most, so a linear scan beats a heap here.
+      let key: string | undefined;
+      let best = Infinity;
+      for (const [k, c] of cost) {
+        if (!done.has(k) && c < best) [key, best] = [k, c];
+      }
+      if (key === undefined) return undefined;
+      if (key === GOAL) break;
+      done.add(key);
+      const split = key.lastIndexOf("#");
+      const region = key.slice(0, split);
+      const cell = Number(key.slice(split + 1));
+      const field = this.#field(region, cell);
+
+      if (region === goalRegion) {
+        const d = field[goalCell] ?? Infinity;
+        if (Number.isFinite(d)) relax(GOAL, best + d, { previous: key });
+      }
+      for (const exit of this.#exits(region)) {
+        if (exit.fromCell === cell) {
+          relax(doorKey(exit.toRegionId, exit.toCell), best + exit.cost, {
+            previous: key,
+            crossing: exit,
+          });
+        } else {
+          const d = field[exit.fromCell] ?? Infinity;
+          if (Number.isFinite(d))
+            relax(doorKey(region, exit.fromCell), best + d, { previous: key });
+        }
+      }
+    }
+
+    const sequence: Crossing[] = [];
+    for (let link = via.get(GOAL); link?.previous !== undefined; link = via.get(link.previous)) {
+      if (link.crossing) sequence.push(link.crossing);
+    }
+    return sequence.reverse();
+  }
+
+  #exits(regionId: string): Crossing[] {
+    return this.world.connections
+      .filter((c) => c.from === regionId || c.to === regionId)
+      .flatMap((c) => this.crossings(c).filter((x) => x.fromRegionId === regionId));
+  }
+
+  #field(regionId: string, cell: number): Float64Array {
+    const key = doorKey(regionId, cell);
+    let field = this.#fields.get(key);
+    if (!field) {
+      const mask = this.navigation.masks.get(regionId);
+      field = mask ? distanceField(mask, cell) : new Float64Array(0);
+      this.#fields.set(key, field);
+    }
+    return field;
+  }
+
+  #buildCrossings(connection: ConnectionModel): Crossing[] {
+    if (!this.navigation.portals.get(connection.id)?.usable) return [];
+    const a = this.navigation.masks.get(connection.from);
+    const b = this.navigation.masks.get(connection.to);
+    if (!a || !b) return [];
+    const { portal } = connection;
+    const portalLength = Math.hypot(portal.b.x - portal.a.x, portal.b.z - portal.a.z);
+    const candidates = candidatePairs(a, b, connection).map((pair) => {
+      const mx = (pair.from.x + pair.to.x) / 2;
+      const mz = (pair.from.z + pair.to.z) / 2;
+      const dx = portal.b.x - portal.a.x;
+      const dz = portal.b.z - portal.a.z;
+      const along =
+        portalLength === 0 ? 0 : ((mx - portal.a.x) * dx + (mz - portal.a.z) * dz) / portalLength;
+      return { ...pair, along };
+    });
+    // Start from the pair nearest the middle of the usable span, then fan out both ways.
+    candidates.sort((p, q) => p.along - q.along || p.fromCell - q.fromCell);
+    const first = candidates[0];
+    const last = candidates[candidates.length - 1];
+    if (!first || !last) return [];
+    const middle = (first.along + last.along) / 2;
+    const byMiddle = [...candidates].sort(
+      (p, q) => Math.abs(p.along - middle) - Math.abs(q.along - middle) || p.along - q.along,
+    );
+    const chosen: typeof candidates = [];
+    for (const candidate of byMiddle) {
+      if (chosen.every((c) => Math.abs(c.along - candidate.along) >= CROSSING_SPACING - 1e-9)) {
+        chosen.push(candidate);
+      }
+    }
+    chosen.sort((p, q) => p.along - q.along);
+
+    const crossings: Crossing[] = [];
+    for (const pair of chosen) {
+      const cost = Math.hypot(pair.to.x - pair.from.x, pair.to.z - pair.from.z) + connection.cost;
+      crossings.push({
+        connectionId: connection.id,
+        fromRegionId: connection.from,
+        toRegionId: connection.to,
+        fromCell: pair.fromCell,
+        toCell: pair.toCell,
+        from: pair.from,
+        to: pair.to,
+        cost,
+      });
+      if (connection.bidirectional) {
+        crossings.push({
+          connectionId: connection.id,
+          fromRegionId: connection.to,
+          toRegionId: connection.from,
+          fromCell: pair.toCell,
+          toCell: pair.fromCell,
+          from: pair.to,
+          to: pair.from,
+          cost,
+        });
+      }
+    }
+    return crossings;
+  }
+}
+
+/**
+ * Edge-adjacent pairs of walkable cells, one in each region, whose shared edge lies on the
+ * portal and whose surfaces meet within the step height. All masks share the world cell grid.
+ */
+function candidatePairs(a: RegionMask, b: RegionMask, connection: ConnectionModel) {
+  const cs = a.cellSize;
+  const { portal } = connection;
+  const minX = Math.min(portal.a.x, portal.b.x) - cs;
+  const maxX = Math.max(portal.a.x, portal.b.x) + cs;
+  const minZ = Math.min(portal.a.z, portal.b.z) - cs;
+  const maxZ = Math.max(portal.a.z, portal.b.z) + cs;
+  const pairs: { fromCell: number; toCell: number; from: Vec2; to: Vec2 }[] = [];
+  const cellIndex = (v: number, origin: number) => Math.floor((v - origin) / cs);
+  for (let j = cellIndex(minZ, a.originZ); j <= cellIndex(maxZ, a.originZ); j++) {
+    for (let i = cellIndex(minX, a.originX); i <= cellIndex(maxX, a.originX); i++) {
+      const x = a.originX + (i + 0.5) * cs;
+      const z = a.originZ + (j + 0.5) * cs;
+      const fromCell = a.cellAt(x, z);
+      if (fromCell === -1 || a.state(fromCell) !== CellState.walkable) continue;
+      for (const [dx, dz] of [
+        [cs, 0],
+        [-cs, 0],
+        [0, cs],
+        [0, -cs],
+      ] as const) {
+        const toCell = b.cellAt(x + dx, z + dz);
+        if (toCell === -1 || b.state(toCell) !== CellState.walkable) continue;
+        if (distanceToPortal(connection, x + dx / 2, z + dz / 2) > cs / 2 + 1e-9) continue;
+        if (Math.abs(a.height(fromCell) - b.height(toCell)) > WORLD_TOLERANCES.maxStepHeight)
+          continue;
+        pairs.push({ fromCell, toCell, from: a.center(fromCell), to: b.center(toCell) });
+      }
+    }
+  }
+  return pairs;
+}
+
+const describe = (p: RegionPosition) => `"${p.regionId}" (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`;
+
+const fail = (reason: RouteFailure, detail: string): RouteResult => ({ ok: false, reason, detail });
+
+/** Waypoints are plain (x, z); the region is on the leg. */
+const point = (p: RegionPosition): Vec2 => ({ x: p.x, z: p.z });
