@@ -4,7 +4,7 @@ Developer tooling: debug world fixtures, the simulation trace viewer and the hea
 
 ## Owns
 
-- Fixtures and scripts used only during development and testing.
+- Fixtures and scripts used only during development and testing, e.g. the `river-crossing` fixture world (a bridge deck stacked over a river).
 
 ## Must not
 

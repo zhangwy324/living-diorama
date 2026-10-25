@@ -1,1 +1,1 @@
-export const packageName = "@living-diorama/development-tools";
+export * from "./fixtures/river-crossing";

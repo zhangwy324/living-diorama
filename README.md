@@ -1,6 +1,6 @@
 # Living Diorama
 
-A desktop companion strip with a small living 3D diorama. Developer docs live in [`docs/`](docs/), including [architecture decision records](docs/adr/). References to the "spec" and "roadmap" (e.g. "roadmap §1.4") point to private design docs.
+A desktop companion strip with a small living 3D diorama. Developer docs live in [`docs/`](docs/), including the [world coordinate spec](docs/world-coordinates.md) and [architecture decision records](docs/adr/). References to the "spec" and "roadmap" (e.g. "roadmap §1.4") point to private design docs.
 
 ## Setup
 
