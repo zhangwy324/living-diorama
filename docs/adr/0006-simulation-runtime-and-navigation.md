@@ -8,7 +8,7 @@
 
 ### Runtime
 
-1. **Clock.** `FixedClock` turns fed-in wall-clock time into fixed ticks (100 ms at 10 Hz). The host passes a monotonic time to `advance(wallMs)`, which returns how many ticks are due; the simulation never reads a clock. One `advance` releases at most `maxCatchUpTicks` (default 10), and time beyond that is dropped, which also covers sleep/resume. The speed multiplier scales elapsed time, not the tick length. Pausing discards accumulated time and resuming re-baselines, so paused time never ticks. The tick counter itself belongs to the simulation state, not the clock, so it is saved and replayed with that state.
+1. **Clock.** `FixedClock` turns fed-in wall-clock time into fixed ticks (100 ms at 10 Hz). The host passes a monotonic time to `advance(wallMs)`, which returns how many ticks are due; the simulation never reads a clock. One `advance` releases at most `maxCatchUpTicks` (default 10), and time beyond that is dropped, which also covers sleep/resume. The speed multiplier scales elapsed time, not the tick length. Pausing discards accumulated time and resuming re-baselines, so paused time never ticks. The tick counter itself belongs to the simulation state (`WorldState.tick`), not the clock, so it is saved and replayed with that state.
 
 2. **Determinism contract.** The same seed and the same log of (tick, command) pairs produce the same trajectory. Commands are queued and applied at tick boundaries only (PR C).
 
@@ -29,30 +29,37 @@
 
 ### Creatures (PR B)
 
-7. **Actions and behaviors are registry entries with code**, like surface providers (ADR 0005): `ActionProvider` and `BehaviorProvider` extend the registered types, and a registered entry without an implementation is a load-time diagnostic.
+7. **Actions and behaviors are registry entries with code**, like surface providers (ADR 0005): `ActionProvider` and `BehaviorProvider` extend the registered types. `Simulation.create` refuses any registered action or behavior without an implementation (`no_action_implementation`, `no_behavior_implementation`).
+   - An action has `start(params, context)`, which checks preconditions and params and returns its initial plain-data state, and `step(state, context)`, which reports `running`, `done` or `failed`. Its state lives on the creature, so it is saved with it.
+   - The context lets an action plan a route (a failure emits `path_failed`) and walk a path; the engine applies every change itself.
+   - An action declares whether it `moves`. The stuck watchdog watches only those: one that gets less than 5 cm further in 5 s is interrupted, `creature_stuck` is emitted and behaviors are evaluated again. An interrupted action's state is dropped; there is no interruption hook until an action needs one.
 
 8. **Behavior contract.** It refines the spec's behavior contract. `evaluate(observation, memory, rng)` returns `{ action, params, utility }` or nothing:
    - `observation` is read-only: the creature's state and read-only world and navigation queries;
    - `memory` is plain data the engine stores per creature and behavior, used for cooldowns and hysteresis;
-   - the engine takes the highest-utility proposal, validates it and plans the path itself. A behavior proposes a destination, never a path;
+   - the engine takes the highest-utility proposal (the first on a tie), validates it and plans the path itself. A behavior proposes a destination, never a path. A behavior may only start actions it lists in its `dependencies`;
+   - a proposal that cannot start, or no proposal at all, makes the creature wait 1 s before deciding again. A failure shows in the next observation's `lastResult`;
    - behaviors are evaluated only on triggers (an action finishing or failing, the watchdog), never every tick.
 
-   v1 has no senses, so the queries see the whole world.
+   v1 has no senses, so the queries see the whole world. Every decision goes to an optional `onTrace` sink: the candidates, the chosen proposal and how starting it went, with the planned route for a walk.
 
-9. **`core:wander`** picks a destination in another reachable region with probability about 0.3 (regions weighted by walkable area), idles 3–12 s between moves, and won't choose a point within about 2 m of where it stands. These are starting values to tune.
+9. **`core:wander`** picks a destination in another reachable region with probability about 0.3 (regions weighted by walkable area), idles 3–12 s between moves, and won't choose a point within about 2 m of where it stands. These are starting values to tune. Its memory alternates rest and walk, so a walk is always followed by a rest; if no destination turns up in 8 tries it rests again.
 
-10. **`first_use_of_structure`** fires once per creature and structure placement.
+   **Locomotion** is kinematic. A creature walks its path at `baseSpeed` times the largest factor among its capabilities whose locomotion rule covers the current region's kind. Its heading follows the direction of travel (`0` faces +Z, world-coordinates.md). Height is never stored; it always comes from the current region's surface. On a crossing the region changes past the shared cell edge.
+
+10. **`first_use_of_structure`** fires once per creature and structure placement, found through the crossed connection's or entered region's `structureId` (ADR 0004 §4).
 
 ### Worker and tooling (PRs B and C)
 
 11. **The worker host lives in `simulation`; the worker entry lives in the app.** `simulation` cannot import `built-in-content`, so it exports a host that takes a minimal message port and injected `loadContent`, `now` and timer functions. Tests then run the host in Node with no DOM or worker types. `apps/desktop` provides the real `worker.ts`.
 
 12. **Tests and traces.**
-    - `pnpm check` runs randomized invariant runs (4 seeds × 100k ticks, kept to about 20 s); `pnpm soak` runs more seeds outside CI.
+    - `pnpm check` runs randomized invariant runs (4 seeds × 100k ticks × 3 creatures on Woodland Hollow, plus the river-crossing fixture); `pnpm soak` runs 32 seeds outside CI. Every tick checks that each creature is on a walkable cell of a non-water region, inside the world bounds, on its region's surface and never under a water surface, and that it changes region only through a connection joining the two.
     - Decision traces are NDJSON. The headless runner prints a summary and can draw trajectories over the worldgen debug map.
 
 ## Consequences
 
-- Speed, determinism and saving all rest on plain-data state: the RNG, creatures and behavior memory serialize as they are.
+- Speed, determinism and saving all rest on plain-data state: the RNG, creatures, action state and behavior memory serialize as they are.
+- A run of 100k ticks with 3 creatures on Woodland Hollow takes about 0.6 s, so the long-run tests cost little.
 - Routing cost on Woodland Hollow: building the world state takes about 50 ms; the first cross-map route about 7 ms while it builds distance fields; later routes about 0.2 ms.
 - On a narrow portal a creature always crosses at the same cell (the summit ramp has a 1.5 m walkable span at its portal, so one crossing). Acceptable for v1 (roadmap risk R6).

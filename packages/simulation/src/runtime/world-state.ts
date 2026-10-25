@@ -5,6 +5,7 @@ import {
   type Result,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
+import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
 import { Pathfinder } from "../navigation/pathfinder";
 import { profileForSpecies } from "../navigation/profile";
 import { checkWorld } from "../world/integrity";
@@ -13,7 +14,7 @@ import { Rng, type RngState } from "./rng";
 
 /**
  * One creature's authoritative state. Plain data only (no classes or closures), so it can be
- * saved and restored later; the M3 actions and behaviors add their own fields.
+ * saved and restored later.
  */
 export interface CreatureState {
   id: string;
@@ -21,9 +22,20 @@ export interface CreatureState {
   /** Exact species version this individual was created from (ADR 0003 §5). */
   speciesVersion: string;
   position: RegionPosition;
-  /** Radians in [-π, π), 0 facing +x (world-coordinates.md). */
+  /** Radians in [-π, π); 0 faces +Z and π/2 faces +X (world-coordinates.md). */
   heading: number;
   rng: RngState;
+  /** The running action and its own plain-data state. */
+  action?: { id: string; state: unknown; startTick: number };
+  lastResult?: ActionResult;
+  /** With no action running, behaviors are evaluated at this tick or later. */
+  decideAtTick: number;
+  /** Per behavior ID. */
+  memory: Record<string, BehaviorMemory>;
+  /** Structure placements already used, so `first_use_of_structure` fires once each. */
+  usedStructures: string[];
+  /** Where the creature last made progress, for the stuck watchdog. */
+  progress: { x: number; z: number; tick: number };
 }
 
 export interface WorldStateOptions {
@@ -44,6 +56,8 @@ export function normalizeHeading(angle: number): number {
  */
 export class WorldState {
   readonly creatures = new Map<string, CreatureState>();
+  /** Ticks simulated so far. Part of the state, so it is saved and replayed with it. */
+  tick = 0;
   readonly #pathfinders: ReadonlyMap<string, Pathfinder>;
   readonly #rng: Rng;
   readonly #root: Rng;
@@ -121,6 +135,10 @@ export class WorldState {
       position: { ...spawn.position },
       heading: normalizeHeading(spawn.heading),
       rng: this.#root.fork(id).state,
+      decideAtTick: this.tick,
+      memory: {},
+      usedStructures: [],
+      progress: { x: spawn.position.x, z: spawn.position.z, tick: this.tick },
     };
     this.creatures.set(id, creature);
     return { ok: true, value: creature };
