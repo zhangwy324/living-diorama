@@ -7,6 +7,7 @@ export * from "./navigation/walkability";
 export * from "./protocol";
 export * from "./world/geometry";
 export * from "./world/integrity";
+export * from "./world/scene";
 export * from "./world/surfaces";
 export * from "./world/terrain";
 export * from "./world/world-model";
