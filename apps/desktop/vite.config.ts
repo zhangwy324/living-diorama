@@ -20,5 +20,8 @@ export default defineConfig({
   build: {
     // WebView2 is Chromium-based and evergreen.
     target: "chrome120",
+    // Tauri loads the bundle from local disk, so the web-oriented 500 kB warning does not apply.
+    // three.js alone is most of the ~1 MB main chunk.
+    chunkSizeWarningLimit: 2000,
   },
 });

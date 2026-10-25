@@ -3,6 +3,7 @@ import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef } from "react";
 import { loadWorld } from "./load-world";
 import { propPlaceholders } from "./prop-placeholders";
+import { startSimulation } from "./simulation-client";
 
 // Content is static for now, so it loads once at startup.
 const { scene, diagnostics } = loadWorld();
@@ -17,6 +18,8 @@ export function App() {
     view.current = created;
     return () => created.dispose();
   }, []);
+
+  useEffect(() => (scene ? startSimulation() : undefined), []);
 
   if (!scene) {
     return (

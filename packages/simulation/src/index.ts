@@ -11,6 +11,7 @@ export * from "./navigation/region-graph";
 export * from "./navigation/walkability";
 export * from "./protocol";
 export * from "./runtime/clock";
+export * from "./runtime/host";
 export * from "./runtime/rng";
 export * from "./runtime/simulation";
 export * from "./runtime/world-state";

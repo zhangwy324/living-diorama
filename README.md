@@ -22,6 +22,7 @@ pnpm install
 | `pnpm format`      | Format with Prettier (`format:check` to verify only).            |
 | `pnpm worldgen`    | Regenerate the built-in world and its debug map.                 |
 | `pnpm soak`        | Long simulation invariant runs over many seeds (not in CI).      |
+| `pnpm sim`         | Headless simulation run: events, NDJSON trace, trajectory map.   |
 | `pnpm check`       | Everything CI runs except the Tauri build.                       |
 | `pnpm tauri build` | Build the Windows executable and installers.                     |
 

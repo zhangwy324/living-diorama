@@ -1,4 +1,4 @@
-import { formatDiagnostic } from "@living-diorama/content-schema";
+import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
 import {
   createRegistries,
   resolveReferences,
@@ -43,15 +43,19 @@ export interface RunReport {
 
 const MAX_VIOLATIONS = 20;
 
-export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures" | "speciesId">) {
+/** The engine plus `register`, with references resolved. */
+export function loadContent(register: RunOptions["register"]): Result<Registries> {
   const registries = createRegistries();
   registerCoreEngine(registries);
-  options.register(registries);
-  const resolution = resolveReferences(registries);
-  if (resolution.diagnostics.length > 0) {
-    throw new Error(resolution.diagnostics.map(formatDiagnostic).join("\n"));
-  }
-  const created = Simulation.create(registries, {
+  register(registries);
+  const { diagnostics } = resolveReferences(registries);
+  return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, value: registries };
+}
+
+export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures" | "speciesId">) {
+  const content = loadContent(options.register);
+  if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
+  const created = Simulation.create(content.value, {
     worldId: options.worldId,
     seed: options.seed,
     ...(options.onTrace ? { onTrace: options.onTrace } : {}),

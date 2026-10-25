@@ -9,7 +9,8 @@ import {
 import { deflateSync } from "node:zlib";
 
 // A top-down debug map of a world: shaded terrain colours, water, walkability for one navigation
-// profile, region outlines, portals, props and spawn points. North is up. Written as a PNG.
+// profile, region outlines, portals, props and spawn points, plus optional creature trajectories.
+// North is up. Written as a PNG.
 
 const PX = 6; // pixels per terrain cell
 
@@ -103,7 +104,21 @@ function chunk(type: string, body: Buffer): Buffer {
   return out;
 }
 
-export function renderDebugMap(world: WorldDefinition, model: WorldModel, nav: Navigation): Buffer {
+const TRAJECTORY_COLORS: Rgb[] = [
+  [20, 20, 20],
+  [0, 90, 255],
+  [255, 255, 255],
+  [150, 0, 200],
+  [0, 170, 120],
+];
+
+/** `trajectories` holds one polyline of world positions per creature, drawn over the map. */
+export function renderDebugMap(
+  world: WorldDefinition,
+  model: WorldModel,
+  nav: Navigation,
+  trajectories: readonly (readonly { x: number; z: number }[])[] = [],
+): Buffer {
   const { terrain, bounds } = model;
   const cells = { x: terrain.columns - 1, z: terrain.rows - 1 };
   const canvas = new Canvas(cells.x * PX, cells.z * PX);
@@ -187,5 +202,15 @@ export function renderDebugMap(world: WorldDefinition, model: WorldModel, nav: N
   for (const spawn of world.spawnPoints) {
     canvas.disc(...toPx(spawn.position.x, spawn.position.z), 5, [230, 30, 180]);
   }
+  trajectories.forEach((points, k) => {
+    const color = TRAJECTORY_COLORS[k % TRAJECTORY_COLORS.length] ?? [0, 0, 0];
+    for (let n = 1; n < points.length; n++) {
+      const p = points[n - 1];
+      const q = points[n];
+      if (p && q) canvas.line(...toPx(p.x, p.z), ...toPx(q.x, q.z), color, 1);
+    }
+    const last = points.at(-1);
+    if (last) canvas.disc(...toPx(last.x, last.z), 3.5, color);
+  });
   return canvas.png();
 }

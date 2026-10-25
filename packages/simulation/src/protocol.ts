@@ -59,7 +59,7 @@ export type SimulationMessage =
   | { type: "ready"; worldId: string }
   /** Sent every tick; `events` are those emitted since the previous snapshot. */
   | { type: "snapshot"; snapshot: SimulationSnapshot; events: SimulationEvent[] }
-  /** Content failed to load or validate; the worker stays idle. */
+  /** A command was rejected. After a failed `init` (e.g. content failed to load) the worker stays idle. */
   | { type: "error"; diagnostics: Diagnostic[] };
 
 // ---- Envelope -------------------------------------------------------------------------------
