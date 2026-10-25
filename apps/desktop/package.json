@@ -1,0 +1,29 @@
+{
+  "name": "@living-diorama/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@living-diorama/built-in-content": "workspace:*",
+    "@living-diorama/content-schema": "workspace:*",
+    "@living-diorama/desktop-integration": "workspace:*",
+    "@living-diorama/extension-api": "workspace:*",
+    "@living-diorama/renderer": "workspace:*",
+    "@living-diorama/simulation": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.5"
+  }
+}

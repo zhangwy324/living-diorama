@@ -1,0 +1,13 @@
+{
+  "name": "@living-diorama/built-in-content",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@living-diorama/content-schema": "workspace:*",
+    "@living-diorama/extension-api": "workspace:*"
+  }
+}

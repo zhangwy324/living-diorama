@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": ".tsbuild",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../../packages/content-schema"
+    },
+    {
+      "path": "../../packages/extension-api"
+    },
+    {
+      "path": "../../packages/simulation"
+    },
+    {
+      "path": "../../packages/built-in-content"
+    }
+  ]
+}

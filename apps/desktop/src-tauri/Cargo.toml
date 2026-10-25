@@ -1,0 +1,23 @@
+[package]
+name = "living-diorama"
+version = "0.0.0"
+description = "Living Diorama desktop shell"
+edition = "2024"
+publish = false
+
+[lib]
+# Distinct from the bin name to avoid a Windows linker clash (rust-lang/cargo#8519).
+name = "living_diorama_lib"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": ".tsbuild",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../../packages/content-schema"
+    },
+    {
+      "path": "../../packages/simulation"
+    }
+  ]
+}

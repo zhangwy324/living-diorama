@@ -1,0 +1,12 @@
+{
+  "name": "@living-diorama/extension-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@living-diorama/content-schema": "workspace:*"
+  }
+}

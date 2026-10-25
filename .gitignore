@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.tsbuild/
+
+# Rust / Tauri
+target/
+**/src-tauri/gen/schemas/
+
+# Private design docs: a checkout of the separate living-diorama-design repo
+docs/design/
+
+# Logs and env
+*.log
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store

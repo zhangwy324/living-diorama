@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": ".tsbuild",
+    "lib": ["ES2023"]
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../../packages/content-schema"
+    },
+    {
+      "path": "../../packages/extension-api"
+    }
+  ]
+}

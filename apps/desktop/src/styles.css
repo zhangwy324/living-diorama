@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  background: #2f3b2f;
+  color: #eef3e8;
+}
+
+body {
+  margin: 0;
+}
+
+.placeholder {
+  padding: 12px 16px;
+}
+
+.placeholder h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.placeholder ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  opacity: 0.8;
+}

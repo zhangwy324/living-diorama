@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+**/src-tauri/target/
+**/src-tauri/gen/
+**/dist/
+**/.tsbuild/
+
+# Private design-docs checkout (its own repo; see .gitignore).
+docs/design/

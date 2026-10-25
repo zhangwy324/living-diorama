@@ -1,0 +1,15 @@
+{
+  "name": "@living-diorama/development-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@living-diorama/content-schema": "workspace:*",
+    "@living-diorama/extension-api": "workspace:*",
+    "@living-diorama/simulation": "workspace:*",
+    "@living-diorama/built-in-content": "workspace:*"
+  }
+}

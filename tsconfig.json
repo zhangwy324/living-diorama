@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/content-schema" },
+    { "path": "packages/extension-api" },
+    { "path": "packages/built-in-content" },
+    { "path": "packages/simulation" },
+    { "path": "packages/renderer" },
+    { "path": "packages/desktop-integration" },
+    { "path": "tools/development" },
+    { "path": "apps/desktop" },
+    { "path": "apps/desktop/tsconfig.node.json" }
+  ]
+}
