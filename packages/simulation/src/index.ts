@@ -1,5 +1,8 @@
 export const packageName = "@living-diorama/simulation";
 
+export * from "./creatures/contracts";
+export * from "./creatures/core-actions";
+export * from "./creatures/wander";
 export * from "./engine";
 export * from "./navigation/grid-path";
 export * from "./navigation/pathfinder";
@@ -9,6 +12,7 @@ export * from "./navigation/walkability";
 export * from "./protocol";
 export * from "./runtime/clock";
 export * from "./runtime/rng";
+export * from "./runtime/simulation";
 export * from "./runtime/world-state";
 export * from "./world/geometry";
 export * from "./world/integrity";

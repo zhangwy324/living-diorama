@@ -10,6 +10,7 @@ Headless simulation: clock, seeded RNG, world state, region graph, navigation, a
 - The fixed-tick clock (wall-clock time is fed in, never read directly) and the seeded, forkable RNG ([ADR 0006](../../docs/adr/0006-simulation-runtime-and-navigation.md)).
 - The world state (`WorldState`): world model, creatures and one pathfinder per navigation profile.
 - Path finding: crossings over portals, region-level search with exact walking costs, grid A* with smoothing inside each region, and the route cache.
+- The tick loop (`Simulation`): action and behavior contracts (`ActionProvider`, `BehaviorProvider`), the core actions `core:idle` and `core:follow_path`, the `core:wander` behavior, kinematic locomotion, the stuck watchdog, simulation events and decision traces.
 - The worker-side host and the versioned snapshot/command message protocol (`protocol.ts`).
 
 ## Must not
