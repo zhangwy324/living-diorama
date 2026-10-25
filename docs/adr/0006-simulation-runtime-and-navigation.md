@@ -51,7 +51,11 @@
 
 ### Worker and tooling (PRs B and C)
 
-11. **The worker host lives in `simulation`; the worker entry lives in the app.** `simulation` cannot import `built-in-content`, so it exports a host that takes a minimal message port and injected `loadContent`, `now` and timer functions. Tests then run the host in Node with no DOM or worker types. `apps/desktop` provides the real `worker.ts`.
+11. **The worker host lives in `simulation`; the worker entry lives in the app.** `simulation` cannot import `built-in-content`, so it exports a host that takes a minimal message port and injected `loadContent`, `now` and timer functions. Tests then run the host in Node with no DOM or worker types. `apps/desktop` provides the real worker entry (`simulation.worker.ts`).
+    - `init` loads content and starts the loop. Every other command is queued and applied before the next tick, so a command never lands mid-tick.
+    - The loop wakes once per tick interval and asks the `FixedClock` how many ticks are due. Each tick sends its own snapshot with its events, also when catching up.
+    - `pause` and `resume` each send a snapshot when they are applied, so the UI sees `paused` change even though no tick runs.
+    - A rejected command (sent before `init`, a second `init`, a failed spawn, an invalid speed, an unknown command or another protocol version) sends `error` and the host keeps running. Only a failed `init` leaves it idle.
 
 12. **Tests and traces.**
     - `pnpm check` runs randomized invariant runs (4 seeds × 100k ticks × 3 creatures on Woodland Hollow, plus the river-crossing fixture); `pnpm soak` runs 32 seeds outside CI. Every tick checks that each creature is on a walkable cell of a non-water region, inside the world bounds, on its region's surface and never under a water surface, and that it changes region only through a connection joining the two.

@@ -6,6 +6,7 @@ The Tauri 2 desktop shell and React UI host. This is the composition root: the o
 
 - The Tauri window configuration, Rust entry point and capabilities (`src-tauri/`).
 - The React controls overlay and app startup sequence.
+- The simulation Web Worker entry (`src/simulation.worker.ts`), which runs `runSimulationHost` from `simulation` on the built-in content, and the main-thread side that starts it (`src/simulation-client.ts`).
 
 ## Must not
 
