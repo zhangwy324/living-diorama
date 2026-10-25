@@ -1,6 +1,6 @@
 # ADR 0003: Content versioning
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Context:** Roadmap M1 task 3, resolving spec §15.1. The illustrative contracts mixed a numeric `schemaVersion` on species, a string `speciesVersion` on instances, and no content version on species at all.
 

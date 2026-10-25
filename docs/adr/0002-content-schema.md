@@ -1,6 +1,6 @@
 # ADR 0002: Content schema
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Context:** Roadmap M1 task 2. Content (worlds, structures, species) is JSON-shaped data that built-in content and future packs provide. It needs one validation layer that gives readable diagnostics.
 

@@ -1,6 +1,6 @@
 # ADR 0004: Capabilities, actions and connections
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Context:** Roadmap M1 task 3, resolving spec §15.2 (actions vs locomotion), §15.5 (connection `type` vs `requiredCapabilities`), and the parts of §15.3 and §15.4 that the v1 contracts touch.
 
