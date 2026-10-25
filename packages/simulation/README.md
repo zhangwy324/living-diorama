@@ -5,6 +5,8 @@ Headless simulation: clock, seeded RNG, world state, region graph, navigation, a
 ## Owns
 
 - All authoritative world and creature state.
+- The world model: surfaces (`core:heightfield`, `core:deck`, `core:flat`), derived walkability masks, the capability-filtered region graph and the semantic world checks ([ADR 0005](../../docs/adr/0005-world-content-and-walkability.md)).
+- The engine's own registry entries (`registerCoreEngine`) and the static scene data handed to the renderer.
 - The fixed-tick clock (wall-clock time is fed in, never read directly).
 - The worker-side host and the versioned snapshot/command message protocol (`protocol.ts`).
 

@@ -5,26 +5,29 @@
   color: #eef3e8;
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
-.placeholder {
+.diorama {
+  width: 100%;
+  height: 100%;
+}
+
+.diorama canvas {
+  display: block;
+}
+
+.diagnostics {
   padding: 12px 16px;
+  font-size: 13px;
 }
 
-.placeholder h1 {
+.diagnostics h1 {
   margin: 0 0 8px;
   font-size: 18px;
-}
-
-.placeholder ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 13px;
-  opacity: 0.8;
 }

@@ -5,6 +5,7 @@ Developer tooling: debug world fixtures, the simulation trace viewer and the hea
 ## Owns
 
 - Fixtures and scripts used only during development and testing, e.g. the `river-crossing` fixture world (a bridge deck stacked over a river).
+- The world generator (`src/worldgen`, run with `pnpm worldgen`): it writes the built-in world and a debug map to `out/woodland-hollow.png`, and its tests cover the M2 exit criteria.
 
 ## Must not
 

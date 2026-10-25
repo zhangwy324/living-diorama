@@ -2,3 +2,8 @@ packages:
   - apps/*
   - packages/*
   - tools/*
+
+# Dependencies whose install scripts may run. esbuild (via tsx) ships its binary as a
+# platform package, so its postinstall check is not needed.
+allowBuilds:
+  esbuild: false

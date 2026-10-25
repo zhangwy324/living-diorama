@@ -4,7 +4,7 @@ Registries, namespaced IDs, content versions and dependency resolution.
 
 ## Owns
 
-- The generic `Registry<T>` and the v1 registries (`worlds`, `structures`, `species`, `surfaces`, `actions`, `behaviors`).
+- The generic `Registry<T>` and the v1 registries (`worlds`, `structures`, `species`, `surfaces`, `actions`, `behaviors`, `capabilities`, `affordances`), including capability locomotion rules ([ADR 0005](../../docs/adr/0005-world-content-and-walkability.md)).
 - Registration (validation, duplicate detection) and reference resolution across entries: existence, semver ranges, surface params and load order ([ADR 0003](../../docs/adr/0003-content-versioning.md)).
 
 ## Must not

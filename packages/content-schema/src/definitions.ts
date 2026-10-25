@@ -71,7 +71,10 @@ export const StructurePlacementSchema = z.strictObject({
 });
 export type StructurePlacement = z.output<typeof StructurePlacementSchema>;
 
-/** Decorative prop: no affordances, but it blocks movement within `blockRadius`. */
+/**
+ * Decorative prop: no affordances, but it blocks movement within `blockRadius` of its position.
+ * `blockRadius` is in world metres; `transform.scale` does not change it.
+ */
 export const PropPlacementSchema = z.strictObject({
   id: LocalIdSchema,
   model: AssetRefSchema,

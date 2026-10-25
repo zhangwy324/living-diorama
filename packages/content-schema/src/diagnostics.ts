@@ -42,6 +42,15 @@ export function error(
     : { severity: "error", code, message, path, source };
 }
 
+export function warning(
+  code: string,
+  message: string,
+  path: DiagnosticPath = [],
+  source?: string,
+): Diagnostic {
+  return { ...error(code, message, path, source), severity: "warning" };
+}
+
 export function fromZodIssues(issues: readonly z.core.$ZodIssue[], source?: string): Diagnostic[] {
   return issues.map((issue) =>
     error(

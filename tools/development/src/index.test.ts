@@ -1,19 +1,15 @@
 import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
 import { createRegistries, resolveReferences } from "@living-diorama/extension-api";
+import { checkWorld, registerCoreEngine } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import {
-  plankBridge,
-  registerEngineStubs,
-  registerRiverCrossing,
-  riverCrossingWorld,
-} from "./index";
+import { plankBridge, registerRiverCrossing, riverCrossingWorld } from "./index";
 
 const failures = (results: Result<unknown>[]): string[] =>
   results.flatMap((r) => (r.ok ? [] : r.diagnostics.map(formatDiagnostic)));
 
 function load() {
   const registries = createRegistries();
-  const registered = [...registerEngineStubs(registries), ...registerRiverCrossing(registries)];
+  const registered = [...registerCoreEngine(registries), ...registerRiverCrossing(registries)];
   return { registries, registered };
 }
 
@@ -49,7 +45,7 @@ describe("river-crossing fixture", () => {
     (bridge.regions[0]!.surface.params as { width: number }).width = 0;
 
     const registries = createRegistries();
-    registerEngineStubs(registries);
+    registerCoreEngine(registries);
     expect(
       failures([registries.structures.register(plankBridge), registries.worlds.register(world)]),
     ).toEqual([]);
@@ -58,5 +54,35 @@ describe("river-crossing fixture", () => {
       'error: worlds/fixture:broken-crossing structures[0].structure: "fixture:rope-bridge" is not registered in structures (unresolved_reference)',
       "error: worlds/fixture:broken-crossing structures[0].regions[0].surface.params.width: Too small: expected number to be >0 (too_small)",
     ]);
+  });
+});
+
+describe("river-crossing world check", () => {
+  it("passes the semantic checks and joins the banks only through the deck", () => {
+    const { registries } = load();
+    const world = registries.worlds.get("fixture:river-crossing")!;
+    const check = checkWorld(world, registries);
+    expect(check.diagnostics.map(formatDiagnostic)).toEqual([]);
+    const [nav] = check.navigations;
+    expect([...nav!.reachableRegions("north-bank")].sort()).toEqual([
+      "bridge-deck",
+      "north-bank",
+      "south-bank",
+    ]);
+
+    const withoutBridge = { ...world, structures: [] };
+    const [bare] = checkWorld(withoutBridge, registries).navigations;
+    expect([...bare!.reachableRegions("north-bank")]).toEqual(["north-bank"]);
+  });
+
+  it("resolves deck positions above the river it overlaps", () => {
+    const { registries } = load();
+    const model = checkWorld(registries.worlds.get("fixture:river-crossing")!, registries).model!;
+    const deck = model.regions.get("bridge-deck")!.surface;
+    const river = model.regions.get("river")!.surface;
+    expect(deck.heightAt(0, 0)).toBeCloseTo(0.7);
+    expect(river.heightAt(0, 0)).toBeCloseTo(0.2);
+    expect(deck.heightAt(0.6, 0)).toBeUndefined();
+    expect(deck.heightAt(0, 1.1)).toBeUndefined();
   });
 });
