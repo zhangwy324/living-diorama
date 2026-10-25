@@ -1,12 +1,14 @@
 import {
   error,
   isContentId,
+  REGION_KINDS,
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
   validate,
   type ContentId,
   type Diagnostic,
+  type RegionKind,
   type Result,
   type Schema,
   type SpeciesDefinition,
@@ -23,6 +25,8 @@ export const REGISTRY_NAMES = [
   "surfaces",
   "actions",
   "behaviors",
+  "capabilities",
+  "affordances",
 ] as const;
 export type RegistryName = (typeof REGISTRY_NAMES)[number];
 
@@ -46,8 +50,24 @@ export interface SurfaceType extends CodeEntry {
 
 export type ActionType = CodeEntry;
 export type BehaviorType = CodeEntry;
+/** An affordance a structure can offer, e.g. `core:crossable` (ADR 0005 §2). */
+export type AffordanceType = CodeEntry;
 
-/** The v1 registries (roadmap M1 task 4). */
+/** Where and how a locomotion capability moves a creature (ADR 0005 §3). */
+export interface LocomotionRule {
+  /** Region kinds this locomotion works in, e.g. `["land", "cave"]` for walking. */
+  readonly regionKinds: readonly RegionKind[];
+  /** Steepest walkable surface in degrees. No limit if omitted. */
+  readonly maxSlopeDeg?: number;
+}
+
+/** A capability species can have and connections can require, e.g. `core:walk`. */
+export interface CapabilityType extends CodeEntry {
+  /** Present when the capability is a way of moving. */
+  readonly locomotion?: LocomotionRule;
+}
+
+/** The v1 registries (roadmap M1 task 4, plus capabilities and affordances from ADR 0005). */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
@@ -55,6 +75,49 @@ export interface Registries {
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
   behaviors: Registry<BehaviorType>;
+  capabilities: Registry<CapabilityType>;
+  affordances: Registry<AffordanceType>;
+}
+
+function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[] {
+  const rule = entry.locomotion;
+  if (rule === undefined) return [];
+  const found: Diagnostic[] = [];
+  if (!Array.isArray(rule.regionKinds) || rule.regionKinds.length === 0) {
+    found.push(
+      error(
+        "invalid_value",
+        "A locomotion rule needs at least one region kind",
+        ["locomotion", "regionKinds"],
+        source,
+      ),
+    );
+  } else {
+    rule.regionKinds.forEach((kind, i) => {
+      if (!REGION_KINDS.includes(kind)) {
+        found.push(
+          error(
+            "invalid_value",
+            `Unknown region kind "${String(kind)}" (expected one of ${REGION_KINDS.join(", ")})`,
+            ["locomotion", "regionKinds", i],
+            source,
+          ),
+        );
+      }
+    });
+  }
+  const slope = rule.maxSlopeDeg;
+  if (slope !== undefined && !(typeof slope === "number" && slope > 0 && slope <= 90)) {
+    found.push(
+      error(
+        "invalid_value",
+        "maxSlopeDeg must be a number in (0, 90]",
+        ["locomotion", "maxSlopeDeg"],
+        source,
+      ),
+    );
+  }
+  return found;
 }
 
 function validateCodeEntry<T extends CodeEntry>(
@@ -153,16 +216,46 @@ function worldReferences(world: WorldDefinition): Reference[] {
       },
     });
   }
+  const connections = [
+    ...world.connections.map((connection, i) => ({ connection, path: ["connections", i] })),
+    ...world.structures.flatMap((s, si) =>
+      s.connections.map((connection, i) => ({
+        connection,
+        path: ["structures", si, "connections", i],
+      })),
+    ),
+  ];
+  for (const { connection, path } of connections) {
+    connection.requiredCapabilities.forEach((id, i) =>
+      refs.push({ registry: "capabilities", id, path: [...path, "requiredCapabilities", i] }),
+    );
+  }
   return refs;
 }
 
-const speciesReferences = (species: SpeciesDefinition): Reference[] =>
-  species.behaviors.map((id, i) => ({ registry: "behaviors", id, path: ["behaviors", i] }));
+const speciesReferences = (species: SpeciesDefinition): Reference[] => [
+  ...species.behaviors.map((id, i) => ({ registry: "behaviors", id, path: ["behaviors", i] })),
+  ...Object.keys(species.capabilities).map((id) => ({
+    registry: "capabilities",
+    id,
+    path: ["capabilities", id],
+  })),
+];
+
+const structureReferences = (structure: StructureDefinition): Reference[] =>
+  structure.affordances.map((id, i) => ({
+    registry: "affordances",
+    id,
+    path: ["affordances", i],
+  }));
 
 export function createRegistries(): Registries {
   return {
     worlds: new Registry("worlds", { validate: parseWorldDefinition, references: worldReferences }),
-    structures: new Registry("structures", { validate: parseStructureDefinition }),
+    structures: new Registry("structures", {
+      validate: parseStructureDefinition,
+      references: structureReferences,
+    }),
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,
@@ -180,6 +273,14 @@ export function createRegistries(): Registries {
       references: dependencyReferences,
     }),
     behaviors: new Registry<BehaviorType>("behaviors", {
+      validate: validateCodeEntry(),
+      references: dependencyReferences,
+    }),
+    capabilities: new Registry<CapabilityType>("capabilities", {
+      validate: validateCodeEntry<CapabilityType>(validateLocomotion),
+      references: dependencyReferences,
+    }),
+    affordances: new Registry<AffordanceType>("affordances", {
       validate: validateCodeEntry(),
       references: dependencyReferences,
     }),

@@ -21,6 +21,13 @@ function expectOk<T>(result: Result<T>) {
 function withActions(registries: Registries) {
   expectOk(registries.actions.register({ id: "core:idle", version: "1.0.0" }));
   expectOk(registries.actions.register({ id: "core:follow_path", version: "1.2.0" }));
+  expectOk(
+    registries.capabilities.register({
+      id: "core:walk",
+      version: "1.0.0",
+      locomotion: { regionKinds: ["land"], maxSlopeDeg: 35 },
+    }),
+  );
 }
 
 describe("Registry", () => {
@@ -90,12 +97,45 @@ describe("resolveReferences", () => {
     expect(resolution.diagnostics).toEqual([]);
     expect(resolution.ok).toBe(true);
     const order = resolution.loadOrder.map((k) => `${k.registry}/${k.id}`);
-    expect(order).toHaveLength(4);
+    expect(order).toHaveLength(5);
     const before = (a: string, b: string) =>
       expect(order.indexOf(a)).toBeLessThan(order.indexOf(b));
     before("actions/core:idle", "behaviors/core:wander");
     before("actions/core:follow_path", "behaviors/core:wander");
     before("behaviors/core:wander", "species/test:pebble");
+    before("capabilities/core:walk", "species/test:pebble");
+  });
+
+  it("reports unregistered capabilities and affordances", () => {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(registries.species.register({ ...species, capabilities: { "core:wlak": 1 } }));
+    expectOk(
+      registries.structures.register({
+        schemaVersion: 1,
+        id: "test:bridge",
+        version: "1.0.0",
+        name: "Bridge",
+        affordances: ["core:crossable"],
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: structures/test:bridge affordances[0]: "core:crossable" is not registered in affordances (unresolved_reference)',
+      'error: species/test:pebble capabilities.core:wlak: "core:wlak" is not registered in capabilities (unresolved_reference)',
+    ]);
+  });
+
+  it("validates locomotion rules on capabilities", () => {
+    const result = createRegistries().capabilities.register({
+      id: "core:hover",
+      version: "1.0.0",
+      locomotion: { regionKinds: ["lava"], maxSlopeDeg: 120 },
+    });
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "locomotion.regionKinds.0",
+      "locomotion.maxSlopeDeg",
+    ]);
   });
 
   it("reports unresolved references and unsatisfied version ranges", () => {

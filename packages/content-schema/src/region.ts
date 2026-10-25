@@ -9,6 +9,7 @@ import {
 
 export const RegionKindSchema = z.enum(["land", "water", "cave", "air"]);
 export type RegionKind = z.output<typeof RegionKindSchema>;
+export const REGION_KINDS: readonly RegionKind[] = RegionKindSchema.options;
 
 /** Params are validated against the registered surface type's own schema. */
 export const SurfaceRefSchema = z.strictObject({
@@ -27,6 +28,10 @@ export const DeckSurfaceParamsSchema = z.strictObject({
   width: z.number().positive(),
 });
 export type DeckSurfaceParams = z.output<typeof DeckSurfaceParamsSchema>;
+
+/** Params of the `flat` surface: a horizontal plane at height `y`, e.g. a water level. */
+export const FlatSurfaceParamsSchema = z.strictObject({ y: z.number() });
+export type FlatSurfaceParams = z.output<typeof FlatSurfaceParamsSchema>;
 
 export const RegionDefinitionSchema = z.strictObject({
   id: LocalIdSchema,
