@@ -5,7 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 // Matches namespaced content IDs such as "core:bridge".
-const CONTENT_ID = "/^[a-z0-9_-]+:[a-z0-9_./-]+$/";
+const CONTENT_ID = "/^[a-z0-9_.-]+:[a-z0-9_./-]+$/";
 
 export default tseslint.config(
   {
@@ -25,6 +25,11 @@ export default tseslint.config(
     files: ["apps/desktop/src/**/*.{ts,tsx}"],
     languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
+  },
+  {
+    // Tests index into fixtures they just built; a wrong assumption fails the test anyway.
+    files: ["**/*.test.{ts,tsx}"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
   },
   {
     // Roadmap §1.4: engine code must not branch on content names; behavior comes from

@@ -1,0 +1,91 @@
+import {
+  error,
+  type Diagnostic,
+  type DiagnosticPath,
+  type Result,
+} from "@living-diorama/content-schema";
+
+export interface RegistryEntry {
+  readonly id: string;
+  readonly version: string;
+}
+
+/** A link from one registry entry to another, found in the entry's data. */
+export interface Reference {
+  registry: string;
+  id: string;
+  /** Semver range the target's version must satisfy. */
+  versionRange?: string;
+  /** Where the reference sits inside the referring entry. */
+  path: DiagnosticPath;
+  /** Extra checks against the resolved target, e.g. surface params against its schema. */
+  check?: (target: RegistryEntry) => Diagnostic[];
+}
+
+export interface RegistryOptions<T extends RegistryEntry> {
+  /** Validates raw input; `source` labels diagnostics, e.g. `species/core:pebble`. */
+  validate: (input: unknown, source: string) => Result<T>;
+  /** Lists what an entry refers to, for dependency resolution. */
+  references?: (entry: T) => Reference[];
+}
+
+/** Holds one version of each namespaced ID. Entries are validated on registration. */
+export class Registry<T extends RegistryEntry> {
+  readonly #entries = new Map<string, T>();
+  readonly #options: RegistryOptions<T>;
+
+  constructor(
+    readonly name: string,
+    options: RegistryOptions<T>,
+  ) {
+    this.#options = options;
+  }
+
+  register(input: unknown): Result<T> {
+    const id =
+      typeof input === "object" && input !== null && "id" in input && typeof input.id === "string"
+        ? input.id
+        : "?";
+    const source = `${this.name}/${id}`;
+    const result = this.#options.validate(input, source);
+    if (!result.ok) return result;
+
+    const entry = result.value;
+    const existing = this.#entries.get(entry.id);
+    if (existing) {
+      return {
+        ok: false,
+        diagnostics: [
+          error(
+            "duplicate_id",
+            `"${entry.id}" is already registered in ${this.name} (version ${existing.version}; this one is ${entry.version})`,
+            ["id"],
+            source,
+          ),
+        ],
+      };
+    }
+    this.#entries.set(entry.id, entry);
+    return result;
+  }
+
+  get(id: string): T | undefined {
+    return this.#entries.get(id);
+  }
+
+  has(id: string): boolean {
+    return this.#entries.has(id);
+  }
+
+  values(): T[] {
+    return [...this.#entries.values()];
+  }
+
+  get size(): number {
+    return this.#entries.size;
+  }
+
+  references(entry: T): Reference[] {
+    return this.#options.references?.(entry) ?? [];
+  }
+}

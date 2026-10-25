@@ -6,7 +6,7 @@ Headless simulation: clock, seeded RNG, world state, region graph, navigation, a
 
 - All authoritative world and creature state.
 - The fixed-tick clock (wall-clock time is fed in, never read directly).
-- The worker-side host and the snapshot/command message protocol.
+- The worker-side host and the versioned snapshot/command message protocol (`protocol.ts`).
 
 ## Must not
 

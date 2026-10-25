@@ -5,7 +5,7 @@ Registries, namespaced IDs, content versions and dependency resolution.
 ## Owns
 
 - The generic `Registry<T>` and the v1 registries (`worlds`, `structures`, `species`, `surfaces`, `actions`, `behaviors`).
-- Namespaced IDs (`core:…`), semver content versions, schema-version checks, duplicate detection and dependency resolution.
+- Registration (validation, duplicate detection) and reference resolution across entries: existence, semver ranges, surface params and load order ([ADR 0003](../../docs/adr/0003-content-versioning.md)).
 
 ## Must not
 
@@ -13,6 +13,6 @@ Registries, namespaced IDs, content versions and dependency resolution.
 
 ## Workspace dependencies
 
-`@living-diorama/content-schema`
+`@living-diorama/content-schema` (external: `semver`)
 
 Boundary rules are enforced by `pnpm boundaries` (dependency-cruiser) and `pnpm lint`; see roadmap §1.4.
