@@ -70,16 +70,17 @@ A **region** is a semantic area with a kind (`land`, `water`, `cave`, `air`), a 
 - World Y is resolved as `region.surface.heightAt(x, z)`. It is never a global "terrain height at (x, z)" lookup. Two regions can therefore give different heights at the same `(x, z)`: deck vs river, or cave floor vs ground later.
 - Snapshots sent to the renderer carry the resolved world position `(x, y, z)`, so the renderer does no surface lookups.
 
-Surface types are registered in the `surfaces` registry. v1 has two:
+Surface types are registered in the `surfaces` registry. v1 has three:
 
-| Type               | Parameters                                      | Height                                                                                                                                                                                                        |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core:heightfield` | none (uses the world terrain)                   | Terrain sampling as above.                                                                                                                                                                                    |
-| `core:deck`        | `centerline` (≥ 2 points, world space), `width` | Project `(x, z)` onto the nearest centerline segment in XZ and interpolate that segment's Y linearly. The deck is flat across its width. Points farther than `width / 2` from the centerline are off-surface. |
+| Type               | Parameters                                      | Height                                                                                                                                                                                                                                              |
+| ------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core:heightfield` | none (uses the world terrain)                   | Terrain sampling as above.                                                                                                                                                                                                                          |
+| `core:deck`        | `centerline` (≥ 2 points, world space), `width` | Project `(x, z)` onto the nearest centerline segment in XZ and interpolate that segment's Y linearly. The deck is flat across its width. Points farther than `width / 2` from the centerline, or beyond its first and last points, are off-surface. |
+| `core:flat`        | `y`                                             | `y` everywhere. Used for water levels: a water region stands on its water surface, and the riverbed is ordinary terrain.                                                                                                                            |
 
 A future `cave-floor` surface type plugs in the same way.
 
-Footprint polygons are simple (not self-intersecting). Their winding may be either way: consumers normalise it.
+Footprint polygons are simple (not self-intersecting). Their winding may be either way: consumers normalise it. Footprints may overlap. Where ground lies below an overlapping water surface it is submerged and unwalkable, so a shoreline comes from the terrain rather than from polygon precision. Walkability rules are in [ADR 0005](adr/0005-world-content-and-walkability.md).
 
 ## Connections and portals
 
@@ -89,7 +90,7 @@ A **connection** links two regions through a **portal**: a segment `a`–`b` in 
 
 | Constant              | Value   | Meaning                                                                                                                                                             |
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxWalkableSlopeDeg` | 35°     | A heightfield triangle steeper than this is unwalkable (a cliff) for `core:walk`.                                                                                   |
+| `maxWalkableSlopeDeg` | 35°     | A surface steeper than this is unwalkable (a cliff) for `core:walk`. The engine reads it from the `core:walk` capability's locomotion rule.                         |
 | `maxStepHeight`       | 0.25 m  | The largest height discontinuity a walker crosses at a portal, e.g. from bank to deck. Across a portal, the two surfaces' heights must differ by no more than this. |
 | `surfaceEpsilon`      | 0.001 m | Tolerance when checking that a creature's height matches its surface.                                                                                               |
 | `positionEpsilon`     | 0.01 m  | Tolerance for "on the portal", "inside the footprint" and "inside the bounds" checks.                                                                               |
