@@ -67,13 +67,26 @@ Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale
 
 Tray, expanded mode and settings (once, at any scale):
 
-- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Monitor ▸, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top check, the current monitor's check).
+- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
 - [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
 - [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
 - [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
 - [ ] Expand covers about 70% of the strip's monitor, centred; the camera keeps its view; Collapse returns the strip to where it was. Expanded mode has no resize handle along the top edge.
-- [ ] With Always on top on, a maximized window does not cover the strip; with it off, it does.
-- [ ] After Quit and relaunch, the height, monitor and always-on-top choice are as they were. Deleting or corrupting `%APPDATA%\com.livingdiorama.desktop\settings.json` starts with the defaults.
+- [ ] With Always on top on, a maximized window does not cover the strip; with it off, it does (Reserve screen space off).
+- [ ] After Quit and relaunch, the height, monitor, always-on-top and reserve-space choices are as they were. Deleting or corrupting `%APPDATA%\com.livingdiorama.desktop\settings.json` starts with the defaults.
+
+Reserved screen space (once, at any scale; two monitors where noted):
+
+- [ ] With Reserve screen space on, a maximized window stops at the strip's top edge, and the strip sits directly above the taskbar, not above its own reserved band.
+- [ ] Dragging the height handle neither flickers nor blanks the strip. Half a second after letting go, the maximized window's bottom edge meets the strip's new top edge; the strip doesn't creep up the screen.
+- [ ] Hiding the strip lets the maximized window grow to the taskbar; showing it shrinks the window again.
+- [ ] Expand and Collapse don't move or resize the maximized window.
+- [ ] Turning Reserve screen space off gives the space back at once; turning it on takes it again.
+- [ ] Two monitors: Monitor ▸ Display 2 moves the reservation with the strip; the first monitor's maximized windows grow back.
+- [ ] Moving the taskbar to the left or top edge keeps the strip at the bottom, spanning the work area's width.
+- [ ] With an auto-hide taskbar, moving the pointer to the very bottom of the screen still reveals the taskbar.
+- [ ] With Always on top on, a full-screen video (F11 in a browser, or a game) covers the strip; leaving full screen puts the strip back on top.
+- [ ] After Quit, the space is given back. After ending the process in Task Manager, note whether maximized windows regain the space and how long it takes.
 
 Controls overlay and lifecycle (once, at any scale):
 
