@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs; **D** a diagnostics log file and an app icon. Decisions for A–C are recorded here, and D's are added when it starts; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs (split into C1, the installer, workflow and README, and C2, the two other docs); **D** a diagnostics log file and an app icon. Decisions for A–C are recorded here, and D's are added when it starts; each PR updates this ADR if it has to deviate.
 
 ## Decisions
 
@@ -44,6 +44,8 @@
 9. **Smoke test in Windows Sandbox.** It starts clean every time and ships with Windows 11 Pro, so it is a clean VM for this purpose.
 
 10. **Version `0.1.0` and a GitHub pre-release.** v1 is a proof of concept, not 1.0. A tag push builds the NSIS bundle in CI and attaches it to a GitHub Release marked as a pre-release, with a note that it is unsigned and SmartScreen will warn.
+
+    The workflow uses plain steps (`pnpm tauri build`, then `gh release create`) rather than a third-party release action, and fails unless the tag matches the version in `tauri.conf.json`, `Cargo.toml` and `package.json`; a release candidate tag such as `v0.1.0-rc.1` matches `0.1.0`. The `v0.1.0` tag waits for PR D, so the first public installer has the real icon; PR C tests the workflow with a release candidate tag that is deleted afterwards.
 
 ### Docs (PR C)
 
