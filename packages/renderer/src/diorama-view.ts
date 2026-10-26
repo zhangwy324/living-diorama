@@ -250,6 +250,8 @@ export function createDioramaView(
 
   return {
     pushSnapshot(snapshot) {
+      // The water animates on render time, so it stops with the simulation.
+      timer.setTimescale(snapshot.paused ? 0 : 1);
       snapshots.push(snapshot, performance.now());
       overlays.routes.setRoutes(snapshot);
       stats.snapshot(snapshot);

@@ -191,6 +191,17 @@ describe("FrameThrottle", () => {
     expect(throttle.due(5000, false)).toBe(true);
     expect(throttle.due(5016, false)).toBe(false);
   });
+
+  it("renders an idle frame within one interval after full rate ends", () => {
+    const throttle = new FrameThrottle();
+    const hovered = frames(600, (n) => n * (1000 / 60));
+    for (const t of hovered) throttle.due(t, true);
+    const last = hovered.at(-1) ?? 0;
+    const idle = frames(10, (n) => last + (n + 1) * (1000 / 60));
+    const first = idle.find((t) => throttle.due(t, false));
+    expect(first).toBeDefined();
+    expect((first ?? Infinity) - last).toBeLessThanOrEqual(throttle.idleIntervalMs + 1);
+  });
 });
 
 it("formats the stats panel", () => {
