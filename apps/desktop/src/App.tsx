@@ -1,13 +1,19 @@
 import { formatDiagnostic } from "@living-diorama/content-schema";
+import { connectDesktopShell } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef } from "react";
 import { loadWorld } from "./load-world";
 import { startSimulation } from "./simulation-client";
+import { StripResizeHandle } from "./StripResizeHandle";
 
 // Content is static for now, so it loads once at startup.
 const { scene, navigation, assets, species, diagnostics } = loadWorld();
+const shell = connectDesktopShell();
 
-/** Toggles the debug overlays. M5's controls overlay will add a button for it. */
+/**
+ * Toggles the debug overlays. The strip never takes keyboard focus (ADR 0008 §6), so this only
+ * works when the frontend runs in a browser; M5 PR C's controls overlay replaces it.
+ */
 const DEBUG_KEY = "d";
 
 export function App() {
@@ -52,6 +58,9 @@ export function App() {
     );
   }
   return (
-    <main className="diorama" ref={container} onDoubleClick={() => view.current?.resetCamera()} />
+    <div className="app">
+      <main className="diorama" ref={container} onDoubleClick={() => view.current?.resetCamera()} />
+      <StripResizeHandle shell={shell} />
+    </div>
   );
 }

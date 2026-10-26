@@ -43,3 +43,5 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
       - run: pnpm tauri build --no-bundle
+      # After the build: the Tauri context needs the built frontend in dist/.
+      - run: pnpm test:rust

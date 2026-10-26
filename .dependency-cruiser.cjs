@@ -37,6 +37,14 @@ module.exports = {
       to: { path: "^packages/simulation/", dependencyTypesNot: ["type-only"] },
     },
     {
+      name: "only-desktop-integration-talks-to-tauri",
+      comment:
+        "OS calls go through desktop-integration's OS-neutral interface (ADR 0008), so other platforms can be added there.",
+      severity: "error",
+      from: { path: "^(apps|packages|tools)/", pathNot: "^packages/desktop-integration/" },
+      to: { path: "(^|/)@tauri-apps/api(/|$)" },
+    },
+    {
       name: "engine-does-not-import-built-in-content",
       comment:
         "built-in-content registers through extension-api like any third-party pack; only apps and dev tools may import it.",
