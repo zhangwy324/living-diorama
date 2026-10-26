@@ -25,6 +25,18 @@ export interface DesktopShell {
    * after one second (ADR 0008 §14). Returns a function that stops listening.
    */
   onQuitRequested(listener: () => Promise<void> | void): () => void;
+  /** Writes the simulation event counts where the measuring script reads them (ADR 0009 §5). */
+  recordEventCounts(counts: EventCounts): Promise<void>;
+}
+
+/** The events the soak test checks (ADR 0009 §6). */
+export interface EventCounts {
+  /** `creature_stuck` events. */
+  stuck: number;
+  /** Stuck events the creature recovered from by moving away again. */
+  recovered: number;
+  /** `path_failed` events. */
+  pathFailed: number;
 }
 
 /** A shell that does nothing and never reports a change, for tests. */
@@ -36,6 +48,7 @@ export const noopShell: DesktopShell = {
   onPausedChanged: () => () => {},
   onExpandedChanged: () => () => {},
   onQuitRequested: () => () => {},
+  recordEventCounts: () => Promise.resolve(),
 };
 
 /** Listens to a shell event; the returned function stops listening even before `listen` resolves. */
@@ -58,6 +71,7 @@ const tauriShell: DesktopShell = {
         .catch((error: unknown) => console.error("Shutdown failed", error))
         .finally(() => void invoke("quit_ready"));
     }),
+  recordEventCounts: (counts) => invoke("record_event_counts", { counts }),
 };
 
 /**

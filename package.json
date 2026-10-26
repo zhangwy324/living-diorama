@@ -21,7 +21,8 @@
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm boundaries && pnpm test",
     "worldgen": "tsx tools/development/src/worldgen/cli.ts",
     "soak": "tsx tools/development/src/soak.ts",
-    "sim": "tsx tools/development/src/sim.ts"
+    "sim": "tsx tools/development/src/sim.ts",
+    "measure": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/development/measure-app.ps1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

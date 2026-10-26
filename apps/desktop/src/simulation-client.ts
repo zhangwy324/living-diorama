@@ -3,6 +3,7 @@ import {
   envelope,
   openEnvelope,
   type SimulationCommand,
+  type SimulationEvent,
   type SimulationMessage,
   type SimulationSnapshot,
 } from "@living-diorama/simulation";
@@ -27,7 +28,7 @@ export interface SimulationClient {
 }
 
 export interface SimulationCallbacks {
-  onSnapshot(snapshot: SimulationSnapshot): void;
+  onSnapshot(snapshot: SimulationSnapshot, events: SimulationEvent[]): void;
   /**
    * The worker rejected a command, crashed or speaks another protocol version. The app only sends
    * valid commands, so every one of these is a bug and fatal (ADR 0009 §2).
@@ -36,8 +37,8 @@ export interface SimulationCallbacks {
 }
 
 /**
- * Starts the simulation worker with a few creatures and hands every snapshot to `onSnapshot`. The
- * seed changes every launch and is logged so a run can be reproduced.
+ * Starts the simulation worker with a few creatures and hands every snapshot and its events to
+ * `onSnapshot`. The seed changes every launch and is logged so a run can be reproduced.
  */
 export function startSimulation({ onSnapshot, onFailure }: SimulationCallbacks): SimulationClient {
   const worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), {
@@ -54,7 +55,7 @@ export function startSimulation({ onSnapshot, onFailure }: SimulationCallbacks):
       console.info(`Simulation ready: ${message.worldId}, seed ${seed}`);
       for (let i = 0; i < CREATURE_COUNT; i++) send({ type: "spawn", speciesId: SPECIES_ID });
     } else if (message.type === "snapshot") {
-      onSnapshot(message.snapshot);
+      onSnapshot(message.snapshot, message.events);
     } else if (message.type === "error") {
       onFailure(message.diagnostics.map(formatDiagnostic));
     }

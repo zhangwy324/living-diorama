@@ -12,6 +12,9 @@ it("falls back to the no-op shell outside Tauri", async () => {
   await expect(shell.setPaused(true)).resolves.toBeUndefined();
   await expect(shell.setExpanded(true)).resolves.toBeUndefined();
   await expect(shell.hide()).resolves.toBeUndefined();
+  await expect(
+    shell.recordEventCounts({ stuck: 0, recovered: 0, pathFailed: 0 }),
+  ).resolves.toBeUndefined();
 });
 
 it("never reports a change from the no-op shell", () => {
