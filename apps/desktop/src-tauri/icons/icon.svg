@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Source of every app icon size (ADR 0009 §16). From apps/desktop, run `pnpm tauri icon src-tauri/icons/icon.svg -o <temp dir>` and copy over only the files already here (it also makes 64x64, Android and iOS icons). -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#27404a"/>
+      <stop offset="1" stop-color="#14222a"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="208" fill="url(#sky)"/>
+  <!-- The ground tile in isometric view: grass on top, soil on the two visible sides. -->
+  <path d="M512 360 L842 525 L512 690 L182 525 Z" fill="#7cbf5a"/>
+  <path d="M182 525 L512 690 L512 840 L182 675 Z" fill="#8a5a36"/>
+  <path d="M512 690 L842 525 L842 675 L512 840 Z" fill="#6b4329"/>
+  <!-- Tree. -->
+  <ellipse cx="610" cy="520" rx="70" ry="26" fill="#4f8a3a"/>
+  <rect x="592" y="400" width="36" height="120" rx="10" fill="#5a3a22"/>
+  <circle cx="610" cy="330" r="130" fill="#2f7a46"/>
+  <circle cx="570" cy="290" r="60" fill="#45995a"/>
+  <!-- Creature. -->
+  <ellipse cx="380" cy="590" rx="66" ry="20" fill="#4f8a3a"/>
+  <ellipse cx="380" cy="545" rx="72" ry="58" fill="#f2c46d"/>
+  <circle cx="408" cy="530" r="13" fill="#1d1d1d"/>
+</svg>

@@ -10,7 +10,7 @@ Living Diorama runs on Windows 11. It is a proof of concept.
 2. Run it. The installer is not code-signed, so SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. It installs for your user only and needs no admin rights.
 3. Start **Living Diorama** from the Start menu. The strip appears along the bottom of the screen and reserves that space, like the taskbar.
 
-You can orbit, pan and zoom the camera inside the strip. Everything else is in the tray icon: left-click it to hide or show the strip, or right-click it for the menu (expand, pause, always on top, reserve screen space, monitor, quit). Uninstall it from **Settings > Apps > Installed apps**.
+You can orbit, pan and zoom the camera inside the strip. Everything else is in the tray icon: left-click it to hide or show the strip, or right-click it for the menu (expand, pause, always on top, reserve screen space, monitor, open log folder, quit). If something goes wrong, the log folder holds what to attach to a bug report; the log never leaves your machine. Uninstall it from **Settings > Apps > Installed apps**.
 
 ## Development setup
 

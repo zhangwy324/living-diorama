@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs (split into C1, the installer, workflow and README, and C2, the two other docs); **D** a diagnostics log file and an app icon. Decisions for A–C are recorded here, and D's are added when it starts; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs (split into C1, the installer, workflow and README, and C2, the two other docs); **D** a diagnostics log file and an app icon. Decisions for all four are recorded here; each PR updates this ADR if it has to deviate.
 
 ## Decisions
 
@@ -29,7 +29,7 @@
 
 ### Soak test and performance baseline (PR B)
 
-5. **One sampling script for both.** A PowerShell script in `tools/development` samples the app's process tree (the Rust host and its WebView2 child processes) at a fixed interval and writes a CSV of working set, private bytes, CPU and GPU use. The frontend counts `creature_stuck` and `path_failed` events, and the count is written where the script can read it at the end of a run: the frontend sends the totals to the shell on each change, and the shell writes them to `event-counts.json` in the app's local data directory. A stuck event counts as recovered once the creature has moved 0.5 m from where it got stuck. The file is written in release builds too, since the soak runs on one; the diagnostics log planned for PR D may replace it.
+5. **One sampling script for both.** A PowerShell script in `tools/development` samples the app's process tree (the Rust host and its WebView2 child processes) at a fixed interval and writes a CSV of working set, private bytes, CPU and GPU use. The frontend counts `creature_stuck` and `path_failed` events, and the count is written where the script can read it at the end of a run: the frontend sends the totals to the shell on each change, and the shell writes them to `event-counts.json` in the app's local data directory. A stuck event counts as recovered once the creature has moved 0.5 m from where it got stuck. The file is written in release builds too, since the soak runs on one; it stays alongside the diagnostics log (§14).
 
 6. **Soak pass criteria.** An 8-hour run with the default 3 creatures, on the developer's machine. Memory is flat after warm-up (less than 10% growth from hour 1 to hour 8) and every stuck event is recovered (the creature moves again).
 
@@ -57,6 +57,22 @@
 ### Roadmap assumptions
 
 12. **No world persistence, an opaque window and a 10 Hz tick** (roadmap §1.9 Q5–Q7) match the code and are confirmed for v1.
+
+### Diagnostics log and icon (PR D)
+
+13. **A log file through `tauri-plugin-log`.** The official plugin gives the shell the `log` macros, a JavaScript binding and rotation, so none of that is written by hand. Only `desktop-integration` imports the binding. The file lives in the app's log directory (`%LOCALAPPDATA%\com.livingdiorama.desktop\logs`), stays on the machine and is never uploaded. It rotates at 1 MB and keeps the 5 newest files, so the log never exceeds about 6 MB. Timestamps use local time, since a person reads them, and lines from the frontend are tagged `webview` without the plugin's caller location, which would always be the forwarder.
+
+14. **What is logged, at info level and up.**
+    - At startup: the app version, the Windows build and the connected monitors.
+    - Every shell problem that went to stderr before, now at warn or error.
+    - Every failure the error screen shows, with its details, and the frontend's `console.warn` and `console.error` calls (for example a missing asset). `desktop-integration` forwards them, so engine packages stay unaware of the log.
+    - The event totals each time they change. `event-counts.json` stays: the measuring script reads it as structured data and should not depend on the log's format or rotation.
+
+    Nothing is logged per tick or per frame.
+
+15. **"Open log folder" in the tray.** It sits above Quit and opens the log directory in the file manager, through a `Platform` method so the rest of the shell stays OS-neutral.
+
+16. **An original app icon.** A raised square of ground in isometric view, with a tree and a small creature, on a dark rounded square. One SVG in `apps/desktop/src-tauri/icons/` is the source, and `pnpm tauri icon` generates every size from it. The 16 and 32 px output is checked by eye; a simpler drawing for those sizes is added only if the detailed one does not read.
 
 ## Consequences
 

@@ -69,7 +69,7 @@ Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale
 
 Tray, expanded mode and settings (once, at any scale):
 
-- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
+- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Open log folder, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
 - [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
 - [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
 - [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
@@ -117,5 +117,7 @@ Run in [Windows Sandbox](https://learn.microsoft.com/windows/security/applicatio
 - [ ] SmartScreen warns about an unknown publisher; **More info → Run anyway** starts the installer.
 - [ ] The installer asks for no admin rights and installs under `%LOCALAPPDATA%\Living Diorama`.
 - [ ] Start menu → **Living Diorama** shows the strip at the bottom of the screen with creatures moving, and a tray icon.
+- [ ] Tray → Open log folder opens `%LOCALAPPDATA%\com.livingdiorama.desktop\logs` in Explorer, and `Living Diorama.log` starts with the version, the Windows build and the monitors.
+- [ ] The tray icon, Start menu entry and installer show the diorama icon, not the Tauri logo.
 - [ ] Tray → Quit exits; no `living-diorama.exe` process is left in Task Manager.
 - [ ] **Settings → Apps → Installed apps** lists Living Diorama with the right version, and uninstalling removes it and its Start menu entry.

@@ -27,6 +27,11 @@ export function App() {
   const [debug, setDebug] = useState(false);
   const [failure, setFailure] = useState(contentFailure);
 
+  // Every failure reaches the diagnostics log too (ADR 0009 §14).
+  useEffect(() => {
+    if (failure) console.error([failure.summary, ...failure.details].join("\n  "));
+  }, [failure]);
+
   // Shell events matter on the error screen too: expanding shows the details, and Quit must answer.
   useEffect(() => {
     const stopListening = [

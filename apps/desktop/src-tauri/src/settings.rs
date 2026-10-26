@@ -53,12 +53,12 @@ pub fn parse(json: &str) -> Result<Settings, String> {
 pub fn load(path: &Path) -> Settings {
     match fs::read_to_string(path) {
         Ok(json) => parse(&json).unwrap_or_else(|error| {
-            eprintln!("Ignoring {}: {error}", path.display());
+            log::warn!("Ignoring {}: {error}", path.display());
             Settings::default()
         }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Settings::default(),
         Err(error) => {
-            eprintln!("Could not read {}: {error}", path.display());
+            log::warn!("Could not read {}: {error}", path.display());
             Settings::default()
         }
     }
