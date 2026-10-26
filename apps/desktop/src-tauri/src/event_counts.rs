@@ -17,18 +17,19 @@ pub struct EventCounts {
     pub path_failed: u64,
 }
 
-/// Replaces the file with these totals. Errors are logged: the counts only matter to measurements.
+/// Logs these totals and replaces the file with them. Errors are logged: the counts only matter to measurements.
 #[tauri::command]
 pub fn record_event_counts(app: AppHandle, counts: EventCounts) {
+    log::info!("Event counts {counts:?}");
     let path = match app.path().app_local_data_dir() {
         Ok(dir) => dir.join(FILE_NAME),
         Err(error) => {
-            eprintln!("No local data directory, event counts will not be saved: {error}");
+            log::warn!("No local data directory, event counts will not be saved: {error}");
             return;
         }
     };
     if let Err(error) = settings::write_json(&path, &counts) {
-        eprintln!("Could not save {}: {error}", path.display());
+        log::warn!("Could not save {}: {error}", path.display());
     }
 }
 

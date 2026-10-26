@@ -5,6 +5,7 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
+use crate::diagnostics;
 use crate::placement::choose_monitor;
 use crate::shell::{self, ShellState};
 
@@ -13,6 +14,7 @@ const EXPAND: &str = "expand";
 const PAUSE: &str = "pause";
 const ALWAYS_ON_TOP: &str = "always-on-top";
 const RESERVE_SPACE: &str = "reserve-space";
+const OPEN_LOG_FOLDER: &str = "open-log-folder";
 const QUIT: &str = "quit";
 /// Monitor entries' ids are this prefix plus the monitor's device name.
 const MONITOR_PREFIX: &str = "monitor:";
@@ -60,6 +62,7 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &tray.reserve_space,
             &tray.monitors,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, OPEN_LOG_FOLDER, "Open log folder", true, None::<&str>)?,
             &MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?,
         ],
     )?;
@@ -95,6 +98,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         PAUSE => shell::toggle_paused(app),
         ALWAYS_ON_TOP => shell::toggle_always_on_top(app),
         RESERVE_SPACE => shell::toggle_reserve_space(app),
+        OPEN_LOG_FOLDER => diagnostics::open_log_folder(app),
         QUIT => shell::quit(app),
         _ => {
             if let Some(name) = id.strip_prefix(MONITOR_PREFIX) {
@@ -107,7 +111,7 @@ fn on_menu(app: &AppHandle, id: &str) {
 /// Brings the menu in line with the shell state and the connected monitors.
 pub fn refresh(app: &AppHandle) {
     if let Err(error) = try_refresh(app) {
-        eprintln!("Could not update the tray menu: {error}");
+        log::warn!("Could not update the tray menu: {error}");
     }
 }
 

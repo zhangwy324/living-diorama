@@ -2,6 +2,8 @@
 //! written against Tauri's cross-platform API and this trait, so another OS adds an implementation
 //! here and nothing else changes.
 
+use std::path::Path;
+
 use tauri::WebviewWindow;
 
 use crate::placement::Rect;
@@ -53,6 +55,12 @@ pub trait Platform: Send + Sync {
     /// Tells the web view whether it can be seen. Hiding the window alone leaves the page visible
     /// to itself, so it would keep rendering (ADR 0009 §7).
     fn set_webview_visible(&self, window: &WebviewWindow, visible: bool) -> tauri::Result<()>;
+
+    /// The OS name and build, for the diagnostics log (ADR 0009 §14).
+    fn os_version(&self) -> String;
+
+    /// Opens `path` in the file manager (ADR 0009 §15).
+    fn open_folder(&self, path: &Path) -> std::io::Result<()>;
 }
 
 /// The platform this build runs on.
@@ -100,5 +108,13 @@ impl Platform for Unsupported {
 
     fn set_webview_visible(&self, _window: &WebviewWindow, _visible: bool) -> tauri::Result<()> {
         Ok(())
+    }
+
+    fn os_version(&self) -> String {
+        std::env::consts::OS.to_string()
+    }
+
+    fn open_folder(&self, _path: &Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
     }
 }

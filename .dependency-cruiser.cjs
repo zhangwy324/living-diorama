@@ -42,7 +42,7 @@ module.exports = {
         "OS calls go through desktop-integration's OS-neutral interface (ADR 0008), so other platforms can be added there.",
       severity: "error",
       from: { path: "^(apps|packages|tools)/", pathNot: "^packages/desktop-integration/" },
-      to: { path: "(^|/)@tauri-apps/api(/|$)" },
+      to: { path: "(^|/)@tauri-apps/(api|plugin-[^/]+)(/|$)" },
     },
     {
       name: "engine-does-not-import-built-in-content",

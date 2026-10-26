@@ -4,10 +4,14 @@
 //! itself uses, so the shell shrinks other windows' work area.
 
 use std::cell::Cell;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 use tauri::WebviewWindow;
+use windows::Wdk::System::SystemServices::RtlGetVersion;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 use windows::Win32::UI::Shell::{
     ABE_BOTTOM, ABM_ACTIVATE, ABM_GETAUTOHIDEBAREX, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
     ABM_WINDOWPOSCHANGED, ABN_FULLSCREENAPP, ABN_POSCHANGED, APPBARDATA, DefSubclassProc,
@@ -145,9 +149,28 @@ impl Platform for Windows {
     fn set_webview_visible(&self, window: &WebviewWindow, visible: bool) -> tauri::Result<()> {
         window.with_webview(move |webview| {
             if let Err(error) = unsafe { webview.controller().SetIsVisible(visible) } {
-                eprintln!("Could not change the web view's visibility: {error}");
+                log::warn!("Could not change the web view's visibility: {error}");
             }
         })
+    }
+
+    fn os_version(&self) -> String {
+        // `GetVersionEx` reports the version the app's manifest claims to support, so ask ntdll.
+        let mut info = OSVERSIONINFOW {
+            dwOSVersionInfoSize: size_of::<OSVERSIONINFOW>() as u32,
+            ..Default::default()
+        };
+        if unsafe { RtlGetVersion(&mut info) }.is_err() {
+            return "Windows (unknown version)".to_string();
+        }
+        format!(
+            "Windows {}.{}.{}",
+            info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber
+        )
+    }
+
+    fn open_folder(&self, path: &Path) -> std::io::Result<()> {
+        Command::new("explorer").arg(path).spawn().map(drop)
     }
 }
 

@@ -1,3 +1,4 @@
+mod diagnostics;
 mod event_counts;
 mod placement;
 mod platform;
@@ -7,6 +8,7 @@ mod tray;
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(diagnostics::plugin())
         .setup(|app| shell::setup(app))
         .invoke_handler(tauri::generate_handler![
             shell::set_strip_height,

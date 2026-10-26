@@ -12,6 +12,7 @@ use tauri::{
     AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewWindow,
 };
 
+use crate::diagnostics;
 use crate::placement::{
     MonitorInfo, Rect, choose_monitor, clamp_strip_height, expanded_rect, strip_rect,
 };
@@ -67,7 +68,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let path = match app.path().app_config_dir() {
         Ok(dir) => Some(dir.join("settings.json")),
         Err(error) => {
-            eprintln!("No config directory, settings will not be saved: {error}");
+            log::warn!("No config directory, settings will not be saved: {error}");
             None
         }
     };
@@ -84,6 +85,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     app.manage(PlatformState(platform::current()));
 
+    diagnostics::log_startup(&window);
     let platform = &app.state::<PlatformState>().0;
     platform.prepare_strip(&window)?;
     place(&window);
@@ -138,11 +140,11 @@ pub fn release_space(app: &AppHandle) {
         return;
     };
     if let Err(error) = platform.0.release(&window) {
-        eprintln!("Could not give the reserved space back: {error}");
+        log::warn!("Could not give the reserved space back: {error}");
     }
 }
 
-fn platform_of(window: &WebviewWindow) -> &dyn Platform {
+pub fn platform_of(window: &WebviewWindow) -> &dyn Platform {
     window
         .app_handle()
         .state::<PlatformState>()
@@ -208,7 +210,7 @@ enum Reservation {
 
 fn place_with(window: &WebviewWindow, reservation: Reservation) {
     if let Err(error) = try_place(window, reservation) {
-        eprintln!("Could not place the window: {error}");
+        log::warn!("Could not place the window: {error}");
     }
 }
 
@@ -225,7 +227,7 @@ fn try_place(window: &WebviewWindow, reservation: Reservation) -> tauri::Result<
         platform
             .reservable_area(window, monitor.bounds, monitor.work_area)
             .unwrap_or_else(|error| {
-                eprintln!("Could not reserve space for the strip: {error}");
+                log::warn!("Could not reserve space for the strip: {error}");
                 None
             })
     } else {
@@ -271,7 +273,7 @@ pub fn toggle_visible(app: &AppHandle) {
         show(&window)
     };
     if let Err(error) = result {
-        eprintln!("Could not show or hide the window: {error}");
+        log::warn!("Could not show or hide the window: {error}");
     }
     tray::refresh(app);
 }
@@ -282,7 +284,7 @@ pub fn hide(app: &AppHandle) {
         return;
     };
     if let Err(error) = hide_window(&window) {
-        eprintln!("Could not hide the window: {error}");
+        log::warn!("Could not hide the window: {error}");
     }
     tray::refresh(app);
 }
@@ -300,7 +302,7 @@ pub fn set_expanded(app: &AppHandle, expanded: bool) {
     app.state::<ShellState>().lock().unwrap().expanded = expanded;
     place(&window);
     if let Err(error) = show(&window) {
-        eprintln!("Could not show the window: {error}");
+        log::warn!("Could not show the window: {error}");
     }
     emit(app, EXPANDED_CHANGED, expanded);
     tray::refresh(app);
@@ -320,7 +322,7 @@ pub fn set_paused(app: &AppHandle, paused: bool) {
 /// Tells the frontend about a change; it applies the new state.
 fn emit(app: &AppHandle, event: &str, payload: bool) {
     if let Err(error) = app.emit(event, payload) {
-        eprintln!("Could not send {event} to the frontend: {error}");
+        log::warn!("Could not send {event} to the frontend: {error}");
     }
 }
 
@@ -343,7 +345,7 @@ fn apply_always_on_top(window: &WebviewWindow) {
     let shell = state(window.app_handle());
     let on_top = shell.settings.always_on_top && !shell.full_screen;
     if let Err(error) = window.set_always_on_top(on_top) {
-        eprintln!("Could not change always-on-top: {error}");
+        log::warn!("Could not change always-on-top: {error}");
     }
 }
 
@@ -385,14 +387,14 @@ pub fn quit(app: &AppHandle) {
     }
     save_now(app);
     if let Err(error) = app.emit(QUIT_REQUESTED, ()) {
-        eprintln!("Could not ask the frontend to shut down: {error}");
+        log::warn!("Could not ask the frontend to shut down: {error}");
         app.exit(0);
         return;
     }
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(QUIT_TIMEOUT);
-        eprintln!("The frontend did not shut down in time, exiting anyway");
+        log::warn!("The frontend did not shut down in time, exiting anyway");
         app.exit(0);
     });
 }
@@ -451,7 +453,7 @@ pub fn set_strip_height(
         if state(&app).height_changes == change {
             let result = app.run_on_main_thread(move || place(&window));
             if let Err(error) = result {
-                eprintln!("Could not reserve the strip's new height: {error}");
+                log::warn!("Could not reserve the strip's new height: {error}");
             }
         }
     });
@@ -485,6 +487,6 @@ fn write_settings(app: &AppHandle, file: &SettingsFile) {
     let Some(path) = path.as_deref() else { return };
     let settings = state(app).settings;
     if let Err(error) = settings::save(path, &settings) {
-        eprintln!("Could not save {}: {error}", path.display());
+        log::warn!("Could not save {}: {error}", path.display());
     }
 }
