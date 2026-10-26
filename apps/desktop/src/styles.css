@@ -39,6 +39,53 @@ body,
   touch-action: none;
 }
 
+.controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.app:hover .controls {
+  opacity: 1;
+}
+
+.controls button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #f4f7ee;
+  background: rgb(0 0 0 / 45%);
+  cursor: pointer;
+}
+
+.controls button:hover {
+  background: rgb(0 0 0 / 65%);
+}
+
+.controls button[aria-pressed="true"] {
+  background: rgb(110 160 90 / 80%);
+}
+
+.controls svg {
+  fill: currentColor;
+}
+
+.controls svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .diagnostics {
   padding: 12px 16px;
   font-size: 13px;

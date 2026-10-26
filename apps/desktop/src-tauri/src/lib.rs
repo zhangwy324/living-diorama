@@ -7,7 +7,13 @@ mod tray;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| shell::setup(app))
-        .invoke_handler(tauri::generate_handler![shell::set_strip_height])
+        .invoke_handler(tauri::generate_handler![
+            shell::set_strip_height,
+            shell::commands::set_paused,
+            shell::commands::set_expanded,
+            shell::commands::hide,
+            shell::commands::quit_ready,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

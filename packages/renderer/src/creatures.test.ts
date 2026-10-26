@@ -74,6 +74,19 @@ describe("SnapshotInterpolator", () => {
     // Snapshot 39 arrived at 1950; halfway to the next one is 25 ms later.
     expect(interpolator.sample(1975)[0]!.world.x).toBeCloseTo(38.5, 1);
   });
+
+  it("treats a wait of over a second as a break, e.g. after sleep", () => {
+    const interpolator = new SnapshotInterpolator(100);
+    for (let tick = 0; tick < 10; tick++)
+      interpolator.push(snapshot(tick, [at(tick * 0.1)]), tick * 100);
+    // An hour later the clock catches up a second at once; that snapshot is drawn as it is...
+    const resumed = 3_600_000;
+    interpolator.push(snapshot(20, [at(2)]), resumed);
+    expect(interpolator.sample(resumed)[0]!.world.x).toBe(2);
+    // ...and the interval is still 100 ms, so the next snapshot blends at the usual pace.
+    interpolator.push(snapshot(21, [at(2.1)]), resumed + 100);
+    expect(interpolator.sample(resumed + 150)[0]!.world.x).toBeCloseTo(2.05);
+  });
 });
 
 /** 10 × 10 m terrain sloping up to the east: height = x + 5 at x ∈ [-5, 5]. */

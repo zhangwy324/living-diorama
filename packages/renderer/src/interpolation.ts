@@ -8,6 +8,10 @@ import type { SimulationSnapshot } from "@living-diorama/simulation";
 /** Moving further than this between two snapshots is a teleport, drawn without sliding. */
 export const SNAP_DISTANCE = 3;
 const MIN_INTERVAL_MS = 1000 / 120;
+/**
+ * A longer wait between snapshots is a break (a pause, a hidden window, the PC sleeping), not
+ * the pace of the simulation: the next snapshot is drawn as it is and the wait is not learnt.
+ */
 const MAX_INTERVAL_MS = 1000;
 /** Weight of the newest gap in the running estimate of the snapshot interval. */
 const INTERVAL_SMOOTHING = 0.2;
@@ -41,15 +45,20 @@ export class SnapshotInterpolator {
 
   /** Adds a snapshot received at `now` (milliseconds). Snapshots of an older or the same tick are ignored. */
   push(snapshot: SimulationSnapshot, now: number): void {
+    let previous = this.#latest;
     if (this.#latest) {
       if (snapshot.tick <= this.#latest.tick) return;
       const gap = now - this.#receivedAt;
-      this.#intervalMs = Math.min(
-        MAX_INTERVAL_MS,
-        Math.max(MIN_INTERVAL_MS, this.#intervalMs + (gap - this.#intervalMs) * INTERVAL_SMOOTHING),
-      );
+      if (gap > MAX_INTERVAL_MS) {
+        previous = undefined;
+      } else {
+        this.#intervalMs = Math.max(
+          MIN_INTERVAL_MS,
+          this.#intervalMs + (gap - this.#intervalMs) * INTERVAL_SMOOTHING,
+        );
+      }
     }
-    this.#previous = this.#latest;
+    this.#previous = previous;
     this.#latest = snapshot;
     this.#receivedAt = now;
   }
