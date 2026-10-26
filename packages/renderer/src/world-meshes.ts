@@ -1,13 +1,11 @@
-import type { PropPlacement } from "@living-diorama/content-schema";
+import type { Vec3 } from "@living-diorama/content-schema";
 import type { SceneData, SurfaceMesh } from "@living-diorama/simulation";
 import * as THREE from "three";
 
-// Static world geometry. A first pass pulled forward from roadmap M4 so the M2 layout can be
-// judged in 3D; materials and props are placeholders.
+// Static world geometry, built from the simulation's SceneData (ADR 0005 §9, ADR 0007 §3).
 
 const SOIL_TOP = new THREE.Color("#5c4130");
 const SOIL_BOTTOM = new THREE.Color("#3b2a1e");
-const WATER = "#4f8fc9";
 const WOOD = "#9a6b3f";
 
 /** Terrain triangles use the same fixed diagonal as the simulation (world-coordinates.md). */
@@ -50,13 +48,19 @@ export function terrainMesh(scene: SceneData): THREE.Mesh {
   return mesh;
 }
 
-/** The diorama's sides and bottom: soil walls under the terrain edge, and water cross-sections. */
-export function baseMeshes(scene: SceneData): THREE.Object3D {
+/**
+ * The diorama's base: soil walls under the terrain edge and a bottom (`soil`), plus the water's
+ * cross-sections where the river meets an edge (`water`, if any).
+ */
+export function baseMeshes(
+  scene: SceneData,
+  waterMaterial: THREE.Material,
+): { soil: THREE.Object3D; water?: THREE.Mesh } {
   const { columns, rows, cellSize, heights } = scene.terrain;
   const { min, max } = scene.bounds;
   const h = (i: number, j: number) => heights[j * columns + i] ?? 0;
   const soil = { positions: [] as number[], colors: [] as number[] };
-  const water: number[] = [];
+  const waterSides: number[] = [];
   const span = Math.max(1e-6, max.y - min.y);
 
   // Each side as (x, z, groundY, waterY) samples, ordered so quads face outward.
@@ -108,7 +112,7 @@ export function baseMeshes(scene: SceneData): THREE.Object3D {
       if (Number.isFinite(a.w) || Number.isFinite(b.w)) {
         const aw = Number.isFinite(a.w) ? a.w : a.y;
         const bw = Number.isFinite(b.w) ? b.w : b.y;
-        water.push(
+        waterSides.push(
           a.x,
           aw,
           a.z,
@@ -151,23 +155,11 @@ export function baseMeshes(scene: SceneData): THREE.Object3D {
   bottom.position.set((min.x + max.x) / 2, min.y, (min.z + max.z) / 2);
   group.add(bottom);
 
-  if (water.length > 0) {
-    const waterGeometry = new THREE.BufferGeometry();
-    waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(water, 3));
-    waterGeometry.computeVertexNormals();
-    group.add(new THREE.Mesh(waterGeometry, waterMaterial()));
-  }
-  return group;
-}
-
-function waterMaterial() {
-  return new THREE.MeshStandardMaterial({
-    color: WATER,
-    transparent: true,
-    opacity: 0.78,
-    roughness: 0.25,
-    side: THREE.DoubleSide,
-  });
+  if (waterSides.length === 0) return { soil: group };
+  const waterGeometry = new THREE.BufferGeometry();
+  waterGeometry.setAttribute("position", new THREE.Float32BufferAttribute(waterSides, 3));
+  waterGeometry.computeVertexNormals();
+  return { soil: group, water: new THREE.Mesh(waterGeometry, waterMaterial) };
 }
 
 function meshGeometry(mesh: SurfaceMesh): THREE.BufferGeometry {
@@ -212,89 +204,91 @@ function slabGeometry(mesh: SurfaceMesh, thickness: number): THREE.BufferGeometr
   return geometry;
 }
 
-/** Region surfaces the terrain doesn't show: water planes and structure decks. */
-export function surfaceMeshes(scene: SceneData): THREE.Object3D {
+/** Water region surfaces, all sharing the one water material. */
+export function waterSurfaceMeshes(scene: SceneData, waterMaterial: THREE.Material): THREE.Mesh[] {
+  return scene.surfaces
+    .filter((s) => s.kind === "water")
+    .map((s) => new THREE.Mesh(meshGeometry(s.mesh), waterMaterial));
+}
+
+const DECK_THICKNESS = 0.15;
+const RAIL_HEIGHTS = [0.35, 0.65];
+const POST_HEIGHT = 0.72;
+const POST_SPACING = 1.2;
+
+/**
+ * Structure surfaces: each a slab drawn from its walkable surface mesh, so the visuals cannot drift
+ * from it (roadmap risk R2), with posts and rails along its open edges.
+ */
+export function structureMeshes(scene: SceneData): THREE.Object3D {
   const group = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({
+    color: WOOD,
+    roughness: 0.8,
+    side: THREE.DoubleSide,
+  });
+  const edges: [Vec3, Vec3][] = [];
   for (const surface of scene.surfaces) {
-    if (surface.kind === "water") {
-      group.add(new THREE.Mesh(meshGeometry(surface.mesh), waterMaterial()));
-      continue;
-    }
-    const slab = new THREE.Mesh(
-      slabGeometry(surface.mesh, 0.15),
-      new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.8, side: THREE.DoubleSide }),
-    );
+    if (surface.structureId === undefined) continue;
+    const slab = new THREE.Mesh(slabGeometry(surface.mesh, DECK_THICKNESS), wood);
     slab.castShadow = true;
     slab.receiveShadow = true;
     group.add(slab);
+    edges.push(...(surface.openEdges ?? []));
   }
+  if (edges.length > 0) group.add(...railingMeshes(edges, wood));
   return group;
 }
 
-/** Placeholder look for a prop model until real assets exist (M4). */
-export interface PropPlaceholder {
-  shape: "conifer" | "broadleaf" | "rock" | "bush" | "mushroom";
-  color: string;
-}
-
-function placeholderShape({ shape, color }: PropPlaceholder): THREE.Object3D {
-  const group = new THREE.Group();
-  const material = new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9 });
-  const trunk = new THREE.MeshStandardMaterial({ color: "#6e4b2e", flatShading: true });
-  const add = (geometry: THREE.BufferGeometry, mat: THREE.Material, y: number, sy = 1) => {
-    const mesh = new THREE.Mesh(geometry, mat);
-    mesh.position.y = y;
-    mesh.scale.y = sy;
+/** Posts at each open edge's ends and at most POST_SPACING apart, joined by rails. */
+export function railingMeshes(
+  edges: readonly [Vec3, Vec3][],
+  material: THREE.Material,
+): THREE.InstancedMesh[] {
+  const v = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
+  const posts = new Map<string, THREE.Vector3>();
+  const addPost = (p: THREE.Vector3) =>
+    posts.set(
+      p
+        .toArray()
+        .map((c) => c.toFixed(3))
+        .join(),
+      p,
+    );
+  const rails: THREE.Matrix4[] = [];
+  const unitX = new THREE.Vector3(1, 0, 0);
+  for (const [a, b] of edges) {
+    const from = v(a);
+    const to = v(b);
+    const span = to.clone().sub(from);
+    const length = span.length();
+    if (length === 0) continue;
+    const count = Math.ceil(length / POST_SPACING);
+    for (let k = 0; k <= count; k++) addPost(from.clone().lerp(to, k / count));
+    const rotation = new THREE.Quaternion().setFromUnitVectors(unitX, span.clone().normalize());
+    for (const height of RAIL_HEIGHTS) {
+      const middle = from
+        .clone()
+        .lerp(to, 0.5)
+        .add(new THREE.Vector3(0, height, 0));
+      rails.push(new THREE.Matrix4().compose(middle, rotation, new THREE.Vector3(length, 1, 1)));
+    }
+  }
+  const postMatrices = [...posts.values()].map((p) =>
+    // From the slab's underside to POST_HEIGHT above the deck.
+    new THREE.Matrix4().makeTranslation(p.x, p.y + (POST_HEIGHT - DECK_THICKNESS) / 2, p.z),
+  );
+  const instanced = (geometry: THREE.BufferGeometry, matrices: THREE.Matrix4[]) => {
+    const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
+    matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+    mesh.computeBoundingSphere();
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    group.add(mesh);
+    return mesh;
   };
-  switch (shape) {
-    case "conifer":
-      add(new THREE.CylinderGeometry(0.1, 0.14, 0.8, 6), trunk, 0.4);
-      add(new THREE.ConeGeometry(0.95, 1.7, 7), material, 1.35);
-      add(new THREE.ConeGeometry(0.7, 1.4, 7), material, 2.2);
-      break;
-    case "broadleaf":
-      add(new THREE.CylinderGeometry(0.13, 0.18, 1.2, 6), trunk, 0.6);
-      add(new THREE.IcosahedronGeometry(1.15, 0), material, 2, 0.85);
-      break;
-    case "rock":
-      add(new THREE.DodecahedronGeometry(0.55, 0), material, 0.2, 0.65);
-      break;
-    case "bush":
-      add(new THREE.IcosahedronGeometry(0.55, 0), material, 0.3, 0.7);
-      break;
-    case "mushroom":
-      add(
-        new THREE.CylinderGeometry(0.04, 0.05, 0.18, 6),
-        new THREE.MeshStandardMaterial({ color: "#efe6d2" }),
-        0.09,
-      );
-      add(new THREE.SphereGeometry(0.13, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), material, 0.17);
-      break;
-  }
-  return group;
-}
-
-export function propMeshes(
-  props: readonly PropPlacement[],
-  placeholders: Readonly<Record<string, PropPlaceholder>>,
-): THREE.Object3D {
-  const group = new THREE.Group();
-  const templates = new Map<string, THREE.Object3D>();
-  for (const prop of props) {
-    let template = templates.get(prop.model);
-    if (!template) {
-      template = placeholderShape(placeholders[prop.model] ?? { shape: "rock", color: "#ff00ff" });
-      templates.set(prop.model, template);
-    }
-    const instance = template.clone();
-    const { position, rotationY, scale } = prop.transform;
-    instance.position.set(position.x, position.y, position.z);
-    instance.rotation.y = rotationY;
-    instance.scale.setScalar(scale);
-    group.add(instance);
-  }
-  return group;
+  return [
+    instanced(new THREE.BoxGeometry(0.09, POST_HEIGHT + DECK_THICKNESS, 0.09), postMatrices),
+    // Slightly longer than the edge so rails meet where edges turn.
+    instanced(new THREE.BoxGeometry(1.03, 0.05, 0.05), rails),
+  ];
 }

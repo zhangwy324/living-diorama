@@ -18,7 +18,45 @@ function expectOk<T>(result: Result<T>) {
   expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([]);
 }
 
+/** 2 × 2 m flat world with one land region. */
+const world = {
+  schemaVersion: 1,
+  id: "test:flat",
+  version: "1.0.0",
+  name: "Flat",
+  bounds: { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } },
+  terrain: {
+    heightfield: { source: "inline", columns: 3, rows: 3, cellSize: 1, heights: Array(9).fill(0) },
+    materials: {
+      palette: [{ name: "grass", color: "#7fae5a" }],
+      indices: { source: "inline", values: Array(9).fill(0) },
+    },
+  },
+  spawnPoints: [{ id: "middle", position: { regionId: "ground", x: 0, z: 0 } }],
+  regions: [
+    {
+      id: "ground",
+      kind: "land",
+      surface: { type: "core:heightfield" },
+      footprint: [
+        { x: -1, z: -1 },
+        { x: 1, z: -1 },
+        { x: 1, z: 1 },
+        { x: -1, z: 1 },
+      ],
+    },
+  ],
+};
+
+const sprite = {
+  id: species.appearance,
+  version: "1.0.0",
+  kind: "image",
+  url: "https://example.test/pebble.png",
+};
+
 function withActions(registries: Registries) {
+  expectOk(registries.assets.register(sprite));
   expectOk(registries.actions.register({ id: "core:idle", version: "1.0.0" }));
   expectOk(registries.actions.register({ id: "core:follow_path", version: "1.2.0" }));
   expectOk(
@@ -97,13 +135,53 @@ describe("resolveReferences", () => {
     expect(resolution.diagnostics).toEqual([]);
     expect(resolution.ok).toBe(true);
     const order = resolution.loadOrder.map((k) => `${k.registry}/${k.id}`);
-    expect(order).toHaveLength(5);
+    expect(order).toHaveLength(6);
     const before = (a: string, b: string) =>
       expect(order.indexOf(a)).toBeLessThan(order.indexOf(b));
     before("actions/core:idle", "behaviors/core:wander");
     before("actions/core:follow_path", "behaviors/core:wander");
     before("behaviors/core:wander", "species/test:pebble");
     before("capabilities/core:walk", "species/test:pebble");
+    before(`assets/${sprite.id}`, "species/test:pebble");
+  });
+
+  it("validates assets and checks that a prop refers to a model", () => {
+    const registries = createRegistries();
+    const bad = registries.assets.register({ ...sprite, kind: "sound", url: "", scale: 0 });
+    expect(bad.ok ? [] : bad.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "kind",
+      "url",
+      "scale",
+    ]);
+
+    expectOk(registries.assets.register(sprite));
+    expectOk(
+      registries.worlds.register({
+        ...world,
+        props: [
+          {
+            id: "a",
+            model: sprite.id,
+            transform: { position: { x: 0, y: 0, z: 0 } },
+            blockRadius: 0,
+          },
+          {
+            id: "b",
+            model: "test:models/gone.glb",
+            transform: { position: { x: 0, y: 0, z: 0 } },
+            blockRadius: 0,
+          },
+        ],
+      }),
+    );
+    expect(
+      resolveReferences(registries)
+        .diagnostics.filter((d) => d.path[0] === "props")
+        .map(formatDiagnostic),
+    ).toEqual([
+      'error: worlds/test:flat props[0].model: "test:sprites/pebble.png" is an asset of kind image, expected model (invalid_value)',
+      'error: worlds/test:flat props[1].model: "test:models/gone.glb" is not registered in assets (unresolved_reference)',
+    ]);
   });
 
   it("reports unregistered capabilities and affordances", () => {

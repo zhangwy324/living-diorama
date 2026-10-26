@@ -2,7 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": ".tsbuild"
+    "outDir": ".tsbuild",
+    // For `new URL(…, import.meta.url)` asset URLs; Vite and Node both provide them.
+    "lib": ["ES2023", "DOM"]
   },
   "include": ["src", "src/**/*.json"],
   "references": [

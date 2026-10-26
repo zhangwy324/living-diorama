@@ -1,27 +1,37 @@
 import type { SceneData } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import {
-  baseMeshes,
-  propMeshes,
-  surfaceMeshes,
-  terrainMesh,
-  type PropPlaceholder,
-} from "./world-meshes";
+import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
+import { loadGltf, loadProps, type AssetResolver, type ModelLoader } from "./props";
+import { createWaterMaterial, type WaterMaterial } from "./water-material";
+import { baseMeshes, structureMeshes, terrainMesh, waterSurfaceMeshes } from "./world-meshes";
 
 /** Horizontal field of view kept constant, so the default view always spans the world's width. */
 const HORIZONTAL_FOV = (40 * Math.PI) / 180;
 const PITCH = (16 * Math.PI) / 180;
+/** The default view looks this fraction of the world's depth behind its centre. */
+const TARGET_DEPTH_OFFSET = 0.1;
+/** Direction the sunlight comes from: high, from the front left. */
+const SUN_DIRECTION = new THREE.Vector3(-30, 45, 28).normalize();
 
 export interface DioramaViewOptions {
-  propPlaceholders?: Readonly<Record<string, PropPlaceholder>>;
+  /** Looks up asset refs (prop models). Without it every prop is drawn as a fallback. */
+  resolveAsset?: AssetResolver;
+  loadModel?: ModelLoader;
 }
 
 export interface DioramaView {
   /** Animates back to the art-directed default framing. */
   resetCamera(): void;
+  /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
+  setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
+  /** Resolves once every prop model is placed (or replaced by its fallback). */
+  readonly ready: Promise<void>;
   dispose(): void;
 }
+
+const meanHeight = (scene: SceneData) =>
+  scene.terrain.heights.reduce((sum, h) => sum + h, 0) / Math.max(1, scene.terrain.heights.length);
 
 /** Default framing for a viewport aspect ratio: the full world width, seen slightly from above. */
 export function defaultFraming(scene: SceneData, aspect: number) {
@@ -29,11 +39,78 @@ export function defaultFraming(scene: SceneData, aspect: number) {
   const halfWidth = ((max.x - min.x) / 2) * 1.02;
   const vertical = 2 * Math.atan(Math.tan(HORIZONTAL_FOV / 2) / aspect);
   const distance = halfWidth / Math.tan(HORIZONTAL_FOV / 2);
-  const target = new THREE.Vector3(0, 2.2, (min.z + max.z) / 2 - 4);
+  const target = new THREE.Vector3(
+    (min.x + max.x) / 2,
+    meanHeight(scene),
+    (min.z + max.z) / 2 - (max.z - min.z) * TARGET_DEPTH_OFFSET,
+  );
   const position = target
     .clone()
     .add(new THREE.Vector3(0, Math.sin(PITCH), Math.cos(PITCH)).multiplyScalar(distance));
   return { fov: THREE.MathUtils.radToDeg(vertical), position, target };
+}
+
+/** A sun whose shadow camera just covers the world's bounding box. */
+export function createSun(scene: SceneData): THREE.DirectionalLight {
+  const { min, max } = scene.bounds;
+  const box = new THREE.Box3(
+    new THREE.Vector3(min.x, min.y, min.z),
+    new THREE.Vector3(max.x, max.y, max.z),
+  );
+  const { center, radius } = box.getBoundingSphere(new THREE.Sphere());
+  const sun = new THREE.DirectionalLight("#fff3dc", 2.2);
+  sun.position.copy(center).addScaledVector(SUN_DIRECTION, radius * 2);
+  sun.target.position.copy(center);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, {
+    left: -radius,
+    right: radius,
+    top: radius,
+    bottom: -radius,
+    near: radius,
+    far: radius * 3,
+  });
+  sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.02;
+  return sun;
+}
+
+export interface DioramaScene {
+  world: THREE.Scene;
+  layers: SceneLayers;
+  water: WaterMaterial;
+  /** Resolves once every prop model is placed. */
+  ready: Promise<void>;
+}
+
+/** Builds the whole scene graph. Needs no WebGL, so it runs in tests. */
+export function buildDioramaScene(
+  scene: SceneData,
+  options: DioramaViewOptions = {},
+): DioramaScene {
+  const world = new THREE.Scene();
+  world.background = new THREE.Color("#cfe3ea");
+  world.add(new THREE.HemisphereLight("#f4f7ff", "#5b6b3a", 1.1));
+  const sun = createSun(scene);
+  world.add(sun, sun.target);
+
+  const layers = createLayers(world);
+  const water = createWaterMaterial();
+  const base = baseMeshes(scene, water.material);
+  layers.terrain.add(terrainMesh(scene), base.soil);
+  layers.water.add(
+    ...waterSurfaceMeshes(scene, water.material),
+    ...(base.water ? [base.water] : []),
+  );
+  layers.structures.add(structureMeshes(scene));
+  const ready = loadProps(
+    scene.props,
+    options.resolveAsset ?? (() => undefined),
+    (objects) => layers.props.add(...objects),
+    options.loadModel ?? loadGltf,
+  );
+  return { world, layers, water, ready };
 }
 
 export function createDioramaView(
@@ -45,30 +122,12 @@ export function createDioramaView(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const world = new THREE.Scene();
-  world.background = new THREE.Color("#cfe3ea");
-  world.add(new THREE.HemisphereLight("#f4f7ff", "#5b6b3a", 1.1));
-  const sun = new THREE.DirectionalLight("#fff3dc", 2.2);
-  sun.position.set(-30, 45, 28);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const { world, layers, water, ready } = buildDioramaScene(scene, options);
   const { min, max } = scene.bounds;
-  Object.assign(sun.shadow.camera, {
-    left: -40,
-    right: 40,
-    top: 30,
-    bottom: -30,
-    near: 1,
-    far: 140,
-  });
-  sun.shadow.bias = -0.0005;
-  world.add(sun);
-
-  world.add(terrainMesh(scene), baseMeshes(scene), surfaceMeshes(scene));
-  world.add(propMeshes(scene.props, options.propPlaceholders ?? {}));
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 400);
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -122,9 +181,12 @@ export function createDioramaView(
     }
   });
 
+  const timer = new THREE.Timer();
   let raf = 0;
-  const loop = () => {
+  const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
+    timer.update(now);
+    water.update(timer.getElapsed());
     if (reset) {
       reset.t = Math.min(1, reset.t + 0.04);
       const e = 1 - (1 - reset.t) ** 3;
@@ -135,7 +197,7 @@ export function createDioramaView(
     controls.update();
     renderer.render(world, camera);
   };
-  loop();
+  raf = requestAnimationFrame(loop);
 
   return {
     resetCamera() {
@@ -148,10 +210,15 @@ export function createDioramaView(
         t: 0,
       };
     },
+    setClipping(layer, planes) {
+      layers[layer].setClipping(planes);
+    },
+    ready,
     dispose() {
       cancelAnimationFrame(raf);
       observer.disconnect();
       controls.dispose();
+      timer.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },

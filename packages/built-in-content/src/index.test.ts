@@ -11,4 +11,7 @@ it("registers its world, species and structure under its own namespace", () => {
   );
   expect(ids).toHaveLength(3);
   for (const id of ids) expect(id.startsWith(`${BUILT_IN_NAMESPACE}:`)).toBe(true);
+  for (const asset of registries.assets.values()) {
+    expect(asset.id.startsWith(`${BUILT_IN_NAMESPACE}:`)).toBe(true);
+  }
 });

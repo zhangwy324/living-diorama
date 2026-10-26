@@ -1,8 +1,13 @@
 import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
 import { createRegistries, resolveReferences } from "@living-diorama/extension-api";
-import { checkWorld, registerCoreEngine } from "@living-diorama/simulation";
+import { checkWorld, describeScene, registerCoreEngine } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { plankBridge, registerRiverCrossing, riverCrossingWorld } from "./index";
+import {
+  plankBridge,
+  registerFixtureAssets,
+  registerRiverCrossing,
+  riverCrossingWorld,
+} from "./index";
 
 const failures = (results: Result<unknown>[]): string[] =>
   results.flatMap((r) => (r.ok ? [] : r.diagnostics.map(formatDiagnostic)));
@@ -47,7 +52,11 @@ describe("river-crossing fixture", () => {
     const registries = createRegistries();
     registerCoreEngine(registries);
     expect(
-      failures([registries.structures.register(plankBridge), registries.worlds.register(world)]),
+      failures([
+        ...registerFixtureAssets(registries),
+        registries.structures.register(plankBridge),
+        registries.worlds.register(world),
+      ]),
     ).toEqual([]);
     const messages = resolveReferences(registries).diagnostics.map(formatDiagnostic);
     expect(messages).toEqual([
@@ -84,5 +93,21 @@ describe("river-crossing world check", () => {
     expect(river.heightAt(0, 0)).toBeCloseTo(0.2);
     expect(deck.heightAt(0.6, 0)).toBeUndefined();
     expect(deck.heightAt(0, 1.1)).toBeUndefined();
+  });
+
+  it("gives the deck open edges along its sides but not across its portal ends", () => {
+    const { registries } = load();
+    const model = checkWorld(registries.worlds.get("fixture:river-crossing")!, registries).model!;
+    const surfaces = describeScene(model).surfaces;
+    expect(surfaces.find((s) => s.kind === "water")?.openEdges).toBeUndefined();
+    const edges = surfaces.find((s) => s.regionId === "bridge-deck")!.openEdges!;
+    // The deck runs north–south, 1 m wide: every open edge lies on one of its two sides.
+    for (const [a, b] of edges) {
+      expect(Math.abs(a.x)).toBeCloseTo(0.5);
+      expect(b.x).toBeCloseTo(a.x);
+    }
+    const length = edges.reduce((sum, [a, b]) => sum + Math.hypot(b.x - a.x, b.z - a.z), 0);
+    const zs = edges.flatMap(([a, b]) => [a.z, b.z]);
+    expect(length).toBeCloseTo(2 * (Math.max(...zs) - Math.min(...zs)));
   });
 });

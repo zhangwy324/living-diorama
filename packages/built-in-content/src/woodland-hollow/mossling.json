@@ -3,7 +3,7 @@
   "id": "hollow:mossling",
   "version": "1.0.0",
   "name": "Mossling",
-  "appearance": "hollow:sprites/mossling.png",
+  "appearance": "hollow:sprites/mossling.svg",
   "sizeClass": "medium",
   "capabilities": { "core:walk": 1 },
   "baseSpeed": 0.6,

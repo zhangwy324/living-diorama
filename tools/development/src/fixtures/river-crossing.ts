@@ -144,9 +144,26 @@ export const pebble = {
   behaviors: ["core:wander"],
 };
 
+/** Registers the files the fixture refers to. They are never loaded: the fixture is only simulated. */
+export function registerFixtureAssets(registries: Registries) {
+  const models = new Set(riverCrossingWorld.props.map((p) => p.model));
+  return [
+    registries.assets.register({
+      id: pebble.appearance,
+      version: "1.0.0",
+      kind: "image",
+      url: "-",
+    }),
+    ...[...models].map((id) =>
+      registries.assets.register({ id, version: "1.0.0", kind: "model", url: "-" }),
+    ),
+  ];
+}
+
 /** Registers the fixture content as a pack would. Returns each registration result. */
 export function registerRiverCrossing(registries: Registries) {
   return [
+    ...registerFixtureAssets(registries),
     registries.structures.register(plankBridge),
     registries.species.register(pebble),
     registries.worlds.register(riverCrossingWorld),
