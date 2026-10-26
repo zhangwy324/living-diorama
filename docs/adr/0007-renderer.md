@@ -26,9 +26,9 @@
 
 ### Creatures, interpolation and camera (PR B)
 
-6. **Creature look:** a sprite from the species `appearance` image on a plane that turns only about the vertical axis, so it stays upright when the camera looks down. It is mirrored when its heading points left on screen, and a soft shadow blob sits under it on the surface. The mossling's sprite is a hand-made SVG placeholder until creature drawing exists.
+6. **Creature look:** a sprite from the species `appearance` image on a plane that turns only about the vertical axis, so it stays upright when the camera looks down. It is mirrored when its heading points left on screen, and a soft shadow blob sits under it, tilted to the terrain or deck it stands on (found by a short downward ray, so slopes and arched decks do not cut into it). The mossling's sprite is a hand-made SVG placeholder until creature drawing exists.
 
-7. **Minimum on-screen size.** The sprite is scaled up so it is never shorter than about 24 px. This is visual only: the simulation's footprint (size class) does not change.
+7. **No minimum on-screen size.** Sprites are drawn true to scale, at their size class's height. A minimum of about 24 px was tried in PR B and dropped: it only took effect when zooming out past the default framing, where it made creatures taller than the trees. Legibility in the strip is a matter of the sprite art (contrast, outline), not of scaling.
 
 8. **Interpolation:** the renderer draws one tick behind the newest snapshot, interpolating world positions between the last two. Headings blend the short way round. A creature that spawns, or moves more than a few metres between two snapshots, snaps instead of sliding.
 

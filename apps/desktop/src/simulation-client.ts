@@ -4,16 +4,20 @@ import {
   openEnvelope,
   type SimulationCommand,
   type SimulationMessage,
+  type SimulationSnapshot,
 } from "@living-diorama/simulation";
 import { SPECIES_ID, WORLD_ID } from "./load-world";
 
 const TICK_RATE_HZ = 10;
+/** Default creature count (roadmap §1.9 Q3). */
+const CREATURE_COUNT = 3;
 
 /**
- * Starts the simulation worker with one creature. Nothing draws its snapshots yet (M4); the seed
- * changes every launch and is logged so a run can be reproduced. Returns a function that stops it.
+ * Starts the simulation worker with a few creatures and hands every snapshot to `onSnapshot`. The
+ * seed changes every launch and is logged so a run can be reproduced. Returns a function that
+ * stops it.
  */
-export function startSimulation(): () => void {
+export function startSimulation(onSnapshot: (snapshot: SimulationSnapshot) => void): () => void {
   const worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), {
     type: "module",
   });
@@ -26,7 +30,9 @@ export function startSimulation(): () => void {
       console.error("Simulation worker uses another protocol version");
     } else if (message.type === "ready") {
       console.info(`Simulation ready: ${message.worldId}, seed ${seed}`);
-      send({ type: "spawn", speciesId: SPECIES_ID });
+      for (let i = 0; i < CREATURE_COUNT; i++) send({ type: "spawn", speciesId: SPECIES_ID });
+    } else if (message.type === "snapshot") {
+      onSnapshot(message.snapshot);
     } else if (message.type === "error") {
       console.error(message.diagnostics.map(formatDiagnostic).join("\n"));
     }

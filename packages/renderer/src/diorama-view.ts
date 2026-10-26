@@ -1,6 +1,9 @@
-import type { SceneData } from "@living-diorama/simulation";
+import type { SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { limitCamera } from "./camera";
+import { CreatureSprites, type ImageLoader, type SpeciesResolver } from "./creatures";
+import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
 import { loadGltf, loadProps, type AssetResolver, type ModelLoader } from "./props";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
@@ -18,9 +21,14 @@ export interface DioramaViewOptions {
   /** Looks up asset refs (prop models). Without it every prop is drawn as a fallback. */
   resolveAsset?: AssetResolver;
   loadModel?: ModelLoader;
+  /** Looks up species to draw creatures. Without it no creature is drawn. */
+  resolveSpecies?: SpeciesResolver;
+  loadImage?: ImageLoader;
 }
 
 export interface DioramaView {
+  /** Hands the view the newest simulation snapshot; creatures are drawn interpolated (ADR 0007 §8). */
+  pushSnapshot(snapshot: SimulationSnapshot): void;
   /** Animates back to the art-directed default framing. */
   resetCamera(): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
@@ -80,6 +88,7 @@ export interface DioramaScene {
   world: THREE.Scene;
   layers: SceneLayers;
   water: WaterMaterial;
+  creatures: CreatureSprites;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
 }
@@ -104,13 +113,20 @@ export function buildDioramaScene(
     ...(base.water ? [base.water] : []),
   );
   layers.structures.add(structureMeshes(scene));
+  const resolveAsset = options.resolveAsset ?? (() => undefined);
+  const creatures = new CreatureSprites(layers.creatures, {
+    resolveSpecies: options.resolveSpecies ?? (() => undefined),
+    resolveAsset,
+    loadImage: options.loadImage,
+    ground: [layers.terrain.group, layers.structures.group],
+  });
   const ready = loadProps(
     scene.props,
-    options.resolveAsset ?? (() => undefined),
+    resolveAsset,
     (objects) => layers.props.add(...objects),
     options.loadModel ?? loadGltf,
   );
-  return { world, layers, water, ready };
+  return { world, layers, water, creatures, ready };
 }
 
 export function createDioramaView(
@@ -126,8 +142,8 @@ export function createDioramaView(
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const { world, layers, water, ready } = buildDioramaScene(scene, options);
-  const { min, max } = scene.bounds;
+  const { world, layers, water, creatures, ready } = buildDioramaScene(scene, options);
+  const snapshots = new SnapshotInterpolator();
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 400);
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -165,21 +181,7 @@ export function createDioramaView(
   const observer = new ResizeObserver(resize);
   observer.observe(container);
 
-  // Keep panning inside the world's footprint.
-  controls.addEventListener("change", () => {
-    const t = controls.target;
-    const clamped = t
-      .clone()
-      .set(
-        THREE.MathUtils.clamp(t.x, min.x, max.x),
-        THREE.MathUtils.clamp(t.y, min.y, max.y),
-        THREE.MathUtils.clamp(t.z, min.z, max.z),
-      );
-    if (!clamped.equals(t)) {
-      camera.position.add(clamped.clone().sub(t));
-      t.copy(clamped);
-    }
-  });
+  controls.addEventListener("change", () => limitCamera(scene, camera.position, controls.target));
 
   const timer = new THREE.Timer();
   let raf = 0;
@@ -195,11 +197,15 @@ export function createDioramaView(
       if (reset.t >= 1) reset = undefined;
     }
     controls.update();
+    creatures.update(snapshots.sample(now), camera);
     renderer.render(world, camera);
   };
   raf = requestAnimationFrame(loop);
 
   return {
+    pushSnapshot(snapshot) {
+      snapshots.push(snapshot, performance.now());
+    },
     resetCamera() {
       const f = defaultFraming(scene, camera.aspect);
       reset = {
@@ -219,6 +225,7 @@ export function createDioramaView(
       observer.disconnect();
       controls.dispose();
       timer.dispose();
+      creatures.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },
