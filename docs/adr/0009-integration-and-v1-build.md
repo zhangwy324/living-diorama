@@ -35,6 +35,8 @@
 
 7. **Performance baseline.** The same script, about 5 minutes in each of four states: strip idle, strip hovered, expanded, hidden. The numbers and the reference machine (CPU, GPU, displays) are recorded in `docs/performance.md` as the starting budget. Only obviously wasteful costs are fixed in M6; the first candidate is the idle render rate (about 30 fps, ADR 0007), which could drop when only creatures move.
 
+   **Outcome (PR B).** The idle rate stays at 30 fps: it costs about a tenth of one core and under 1% GPU. The measurement found one waste instead: a hidden window kept rendering, because hiding a Tauri window does not hide its WebView2. The shell now sets the WebView2's visibility with the window's, so the page's existing `visibilitychange` handling stops the render loop; the simulation worker keeps ticking.
+
 ### Installer and release (PR C)
 
 8. **NSIS only, per user.** No admin rights are needed, and MSI would add WiX and per-machine installs without a v1 benefit. WebView2 uses the download bootstrapper, since Windows 11 already includes it. The installer is unsigned (signing is post-MVP).

@@ -139,6 +139,16 @@ impl Platform for Windows {
         }
         Ok(())
     }
+
+    /// WebView2's `IsVisible`: while false the page is hidden (`document.hidden`), so the renderer
+    /// stops, and Chromium throttles it. The closure runs later on the main thread.
+    fn set_webview_visible(&self, window: &WebviewWindow, visible: bool) -> tauri::Result<()> {
+        window.with_webview(move |webview| {
+            if let Err(error) = unsafe { webview.controller().SetIsVisible(visible) } {
+                eprintln!("Could not change the web view's visibility: {error}");
+            }
+        })
+    }
 }
 
 /// A tool window has no taskbar button and no Alt+Tab entry; `WS_EX_APPWINDOW` would force both.
