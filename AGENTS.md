@@ -30,7 +30,7 @@ Living Diorama is a Windows 11 desktop companion strip showing a small living 3D
    ```
 
 3. **Open a pull request** to `main` when the work is ready (`gh pr create`).
-4. **CI must pass before merging.** Run `pnpm check` locally first. CI also runs the Windows Tauri build.
+4. **CI must pass before merging.** Run `pnpm check` locally first, plus `pnpm test:rust` when `apps/desktop/src-tauri` changed. CI also runs the Windows Tauri build and the Rust tests.
 
 ### Worktree caveats
 
@@ -42,6 +42,7 @@ Living Diorama is a Windows 11 desktop companion strip showing a small living 3D
 | Command            | Purpose                                         |
 | ------------------ | ----------------------------------------------- |
 | `pnpm check`       | Lint, format check, typecheck, boundaries, test |
+| `pnpm test:rust`   | Rust unit tests of the desktop shell            |
 | `pnpm dev`         | Run the desktop app with hot reload             |
 | `pnpm build`       | Typecheck and build the web frontend            |
 | `pnpm tauri build` | Build the Windows executable                    |

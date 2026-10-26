@@ -49,3 +49,18 @@ node --version && pnpm --version && cargo --version
 ```
 
 A throwaway `create-tauri-app` project builds with `pnpm tauri build --debug --no-bundle`, confirming MSVC, the Windows SDK and WebView2 are wired up.
+
+## Desktop shell checks (manual)
+
+The strip's window behavior depends on real displays, so it is checked by hand (ADR 0008 §15) before a release and after changing `apps/desktop/src-tauri`. Run `pnpm tauri build --no-bundle` and launch `apps/desktop/src-tauri/target/release/living-diorama.exe`; debug builds open a console window that takes focus at launch.
+
+Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale), with one monitor and with two.
+
+- [ ] Launched while another app is in front, the strip appears without taking focus: the other app's title bar stays active and typing still goes to it.
+- [ ] The strip spans the full width of its monitor's work area, its bottom edge on the taskbar's top edge, with no gap and no overlap.
+- [ ] It has no taskbar button and no Alt+Tab entry.
+- [ ] Clicking, orbiting, panning and zooming in the strip work and never take focus from the other app.
+- [ ] Dragging the top edge resizes the strip between 180 and 260 logical pixels; the bottom edge stays put.
+- [ ] Moving or resizing the taskbar, or toggling auto-hide, re-places the strip.
+- [ ] Changing the scale or the resolution of the strip's monitor re-places it at the same logical height.
+- [ ] Two monitors: disconnecting the strip's monitor moves the strip to the primary.

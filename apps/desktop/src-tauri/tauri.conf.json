@@ -15,7 +15,15 @@
         "label": "main",
         "title": "Living Diorama",
         "width": 1280,
-        "height": 260
+        "height": 220,
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "resizable": false,
+        "focus": false,
+        "focusable": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": false
       }
     ],
     "security": {

@@ -18,11 +18,13 @@
 
 3. **Strip placement.** Borderless, no taskbar button, spanning the full work-area width of its monitor, bottom edge on the work area's bottom edge (above the taskbar wherever it is). Height defaults to 220 px and is limited to 180–260 px in compact mode. These are logical pixels, so the strip is the same apparent size at every scale factor.
 
-4. **Height resize** uses a thin handle along the top edge that starts a native north-edge resize. Rust clamps the height and keeps the bottom edge pinned while resizing.
+4. **Height resize** uses a thin handle along the top edge of the page. Dragging it calls the shell's `setStripHeight` with the height the pointer asks for, and Rust clamps it and places the window, so the bottom edge stays where it is. Native resizing is off. PR A tried Tauri's native top-edge resize first: it works on a non-activating window, but a drag past the maximum height moved the whole window up the screen, and the native frame's invisible shadow insets would have to be accounted for at every scale factor.
 
-5. **Monitors.** The strip lives on one monitor: the primary by default. A monitor is remembered by its device name (e.g. `\\.\DISPLAY2`); if that monitor is gone at launch or disconnects, the strip moves to the primary. The window is re-placed on DPI change, display change (resolution, monitors added or removed) and work-area change (taskbar moved, resized or auto-hide toggled).
+5. **Monitors.** The strip lives on one monitor: the primary by default. A monitor is remembered by its device name (e.g. `\\.\DISPLAY2`); if that monitor is gone at launch or disconnects, the strip moves to the primary. The choice is kept, so the strip goes back when that monitor returns. Device names can be renumbered by Windows after hardware changes; then the strip falls back to the primary and the user picks again. The window is re-placed on DPI change, display change (resolution, monitors added or removed) and work-area change (taskbar moved, resized or auto-hide toggled). On Windows a window subclass watches `WM_DPICHANGED`, `WM_DISPLAYCHANGE` and `WM_SETTINGCHANGE` with `SPI_SETWORKAREA`, and posts itself one message per burst, so placement runs from the message loop rather than inside the handling of those messages (Tauri runs window calls made on the main thread synchronously).
 
-6. **Focus: the strip never activates.** The window is created non-focusable (Tauri's `focusable: false`, which sets `WS_EX_NOACTIVATE` on Windows) and shown without activation. Clicks, drags and the wheel reach the webview, so the camera works, but keyboard focus stays in the user's foreground app. Consequently the strip has no keyboard shortcuts; the controls overlay replaces the M4 `D` key. Expanded mode is non-focusable too. See _Experiment_ below.
+6. **Focus: the strip never activates.** The window is created non-focusable (Tauri's `focusable: false`, which sets `WS_EX_NOACTIVATE` on Windows) and shown without activation. Clicks, drags and the wheel reach the webview, so the camera works, but keyboard focus stays in the user's foreground app. Consequently the strip has no keyboard shortcuts; the controls overlay replaces the M4 `D` key, which until PR C only works when the frontend runs in a browser. Expanded mode is non-focusable too. See _Experiment_ below.
+
+   The window is also a tool window (`WS_EX_TOOLWINDOW`, without `WS_EX_APPWINDOW`), which keeps it out of the taskbar and Alt+Tab; Tauri's `skipTaskbar` only removes the taskbar tab (`ITaskbarList::DeleteTab`) and says nothing about Alt+Tab. A second subclass keeps that style if Tauri rewrites the extended style later.
 
 ### Tray, settings and expanded mode (PR B)
 
@@ -50,7 +52,7 @@
 
 ## Experiment: does a non-activating WebView2 window still take input?
 
-Before committing to §6, a throwaway build (a local branch, not pushed) set `focusable: false` and `focus: false` on a borderless window and mirrored pointer, wheel, key and focus event counts into the window title. A PowerShell probe opened Notepad as the foreground window, launched the app, then clicked, dragged, scrolled and pressed a key over the strip with synthetic input, reading the foreground window after each step.
+Before committing to §6, a throwaway build (a local branch, not pushed) set `focusable: false` and `focus: false` on a borderless window and mirrored pointer, wheel, key and focus event counts into the window title. A PowerShell probe opened a small WinForms window and made it the foreground window, launched the app, then clicked, dragged, scrolled and pressed a key over the strip with synthetic input, reading the foreground window after each step.
 
 | Step              | Non-focusable (`WS_EX_NOACTIVATE` set)           | Control (default, focusable)            |
 | ----------------- | ------------------------------------------------ | --------------------------------------- |
@@ -62,10 +64,13 @@ Before committing to §6, a throwaway build (a local branch, not pushed) set `fo
 
 So the camera works with no activation, and the control shows the probe does detect a stolen focus. Two side notes: the webview still fires a DOM `focus` event on the first click without the OS window activating, so DOM focus and blur are not a usable signal for "the strip is active"; and Tauri's `focusable: false` is enough, no raw Win32 style call is needed.
 
-Not covered, and checked in PR A: native edge resizing (§4) and the tray menu on a non-activating window, real (not synthetic) mouse and touchpad input, and scale factors other than the one the probe ran at.
+The same probe, run against PR A's release build on a two-monitor setup at 100%, found the strip at the full width of the primary's work area and 220 px tall, directly above the taskbar; foreground focus unchanged through launch, click, orbit and three handle drags; and the height clamped to 260 and 180 with the bottom edge fixed.
+
+Not covered by the probe: the tray menu on a non-activating window (PR B), real (not synthetic) mouse and touchpad input, and other scale factors and display changes, which the manual checklist in `docs/development.md` covers.
 
 ## Consequences
 
 - The strip has no keyboard input at all. Anything that needs typing (a later Creation Studio, search) belongs in a separate, normal window.
-- `apps/desktop` gains Rust code for the first time. `pnpm check` does not run `cargo test`; PR A adds it.
+- `apps/desktop` gains Rust code for the first time. Its tests run with `pnpm test:rust`, in CI after the Windows build; `pnpm check` stays Rust-free so it remains fast.
+- A boundary rule makes `desktop-integration` the only workspace package that imports `@tauri-apps/api`.
 - The Tauri capability file grows to exactly the commands and events the shell uses.
