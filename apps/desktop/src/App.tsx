@@ -5,7 +5,7 @@ import { loadWorld } from "./load-world";
 import { startSimulation } from "./simulation-client";
 
 // Content is static for now, so it loads once at startup.
-const { scene, assets, diagnostics } = loadWorld();
+const { scene, assets, species, diagnostics } = loadWorld();
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
@@ -15,12 +15,15 @@ export function App() {
     if (!scene || !container.current) return;
     const created = createDioramaView(container.current, scene, {
       resolveAsset: (ref) => assets?.get(ref),
+      resolveSpecies: (id) => species?.get(id),
     });
     view.current = created;
-    return () => created.dispose();
+    const stop = startSimulation((snapshot) => created.pushSnapshot(snapshot));
+    return () => {
+      stop();
+      created.dispose();
+    };
   }, []);
-
-  useEffect(() => (scene ? startSimulation() : undefined), []);
 
   if (!scene) {
     return (

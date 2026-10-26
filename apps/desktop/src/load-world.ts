@@ -40,12 +40,13 @@ export function loadContent(): Result<Registries> {
 }
 
 /**
- * Loads content and runs the world checks. Returns scene data and the registered assets for the
- * renderer, or the diagnostics.
+ * Loads content and runs the world checks. Returns scene data and the registered assets and
+ * species for the renderer, or the diagnostics.
  */
 export function loadWorld(): {
   scene?: SceneData;
   assets?: Registries["assets"];
+  species?: Registries["species"];
   diagnostics: Diagnostic[];
 } {
   const { registries, diagnostics } = register();
@@ -57,5 +58,10 @@ export function loadWorld(): {
   const check = checkWorld(world, registries);
   diagnostics.push(...check.diagnostics);
   if (!check.model || hasErrors(diagnostics)) return { diagnostics };
-  return { scene: describeScene(check.model), assets: registries.assets, diagnostics };
+  return {
+    scene: describeScene(check.model),
+    assets: registries.assets,
+    species: registries.species,
+    diagnostics,
+  };
 }
