@@ -4,7 +4,7 @@ The frontend's OS-neutral view of the desktop shell (ADR 0008 §1). The OS work 
 
 ## Owns
 
-- The `DesktopShell` interface, its Tauri implementation and a no-op implementation for tests and for running the frontend in a plain browser.
+- The `DesktopShell` interface, its Tauri implementation and a no-op implementation for tests (the frontend is not supported in a plain browser; ADR 0008 §1).
 
 ## Must not
 

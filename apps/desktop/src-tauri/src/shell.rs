@@ -20,6 +20,12 @@ use crate::{platform, tray};
 
 /// Event telling the frontend to pause or resume the simulation; the payload is the new state.
 const PAUSED_CHANGED: &str = "paused-changed";
+/// Event telling the frontend the window was expanded or collapsed; the payload is the new state.
+const EXPANDED_CHANGED: &str = "expanded-changed";
+/// Event asking the frontend to shut down; it answers with the `quit_ready` command.
+const QUIT_REQUESTED: &str = "quit-requested";
+/// How long quitting waits for the frontend to shut down before exiting anyway (ADR 0008 §14).
+const QUIT_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long the height must stay put before it is saved, so a handle drag is one write.
 const HEIGHT_SAVE_DELAY: Duration = Duration::from_millis(500);
 
@@ -30,6 +36,8 @@ pub struct Shell {
     pub expanded: bool,
     /// Rust owns the flag so the tray and the controls overlay agree; the frontend applies it.
     pub paused: bool,
+    /// Set once Quit has asked the frontend to shut down, so a second Quit doesn't ask again.
+    pub quitting: bool,
 }
 
 pub type ShellState = Mutex<Shell>;
@@ -160,34 +168,52 @@ pub fn toggle_visible(app: &AppHandle) {
     tray::refresh(app);
 }
 
-/// Switches between the strip and expanded mode, showing the window if it was hidden.
-pub fn toggle_expanded(app: &AppHandle) {
+/// Hides the window. Hiding does not pause (ADR 0008 §12).
+pub fn hide(app: &AppHandle) {
     let Some(window) = main_window(app) else {
         return;
     };
-    {
-        let state = app.state::<ShellState>();
-        let mut shell = state.lock().unwrap();
-        shell.expanded = !shell.expanded;
-    }
-    place(&window);
-    if let Err(error) = window.show() {
-        eprintln!("Could not show the window: {error}");
+    if let Err(error) = window.hide() {
+        eprintln!("Could not hide the window: {error}");
     }
     tray::refresh(app);
 }
 
-pub fn toggle_paused(app: &AppHandle) {
-    let paused = {
-        let state = app.state::<ShellState>();
-        let mut shell = state.lock().unwrap();
-        shell.paused = !shell.paused;
-        shell.paused
+pub fn toggle_expanded(app: &AppHandle) {
+    let expanded = state(app).expanded;
+    set_expanded(app, !expanded);
+}
+
+/// Switches between the strip and expanded mode, showing the window if it was hidden.
+pub fn set_expanded(app: &AppHandle, expanded: bool) {
+    let Some(window) = main_window(app) else {
+        return;
     };
-    if let Err(error) = app.emit(PAUSED_CHANGED, paused) {
-        eprintln!("Could not tell the frontend to pause: {error}");
+    app.state::<ShellState>().lock().unwrap().expanded = expanded;
+    place(&window);
+    if let Err(error) = window.show() {
+        eprintln!("Could not show the window: {error}");
     }
+    emit(app, EXPANDED_CHANGED, expanded);
     tray::refresh(app);
+}
+
+pub fn toggle_paused(app: &AppHandle) {
+    let paused = state(app).paused;
+    set_paused(app, !paused);
+}
+
+pub fn set_paused(app: &AppHandle, paused: bool) {
+    app.state::<ShellState>().lock().unwrap().paused = paused;
+    emit(app, PAUSED_CHANGED, paused);
+    tray::refresh(app);
+}
+
+/// Tells the frontend about a change; it applies the new state.
+fn emit(app: &AppHandle, event: &str, payload: bool) {
+    if let Err(error) = app.emit(event, payload) {
+        eprintln!("Could not send {event} to the frontend: {error}");
+    }
 }
 
 pub fn toggle_always_on_top(app: &AppHandle) {
@@ -218,10 +244,56 @@ pub fn use_monitor(app: &AppHandle, name: &str) {
     tray::refresh(app);
 }
 
-/// Quits at once. M5 PR C replaces this with a clean shutdown of the frontend (ADR 0008 §14).
+/// Saves the settings and asks the frontend to shut down, exiting when it answers with
+/// `quit_ready` or after `QUIT_TIMEOUT`, whichever comes first (ADR 0008 §14).
 pub fn quit(app: &AppHandle) {
+    {
+        let state = app.state::<ShellState>();
+        let mut shell = state.lock().unwrap();
+        if shell.quitting {
+            return;
+        }
+        shell.quitting = true;
+    }
     save_now(app);
-    app.exit(0);
+    if let Err(error) = app.emit(QUIT_REQUESTED, ()) {
+        eprintln!("Could not ask the frontend to shut down: {error}");
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(QUIT_TIMEOUT);
+        eprintln!("The frontend did not shut down in time, exiting anyway");
+        app.exit(0);
+    });
+}
+
+/// The frontend's commands that share a name with an action above; a command is named after its
+/// function.
+pub mod commands {
+    use tauri::AppHandle;
+
+    #[tauri::command]
+    pub fn set_paused(app: AppHandle, paused: bool) {
+        super::set_paused(&app, paused);
+    }
+
+    #[tauri::command]
+    pub fn set_expanded(app: AppHandle, expanded: bool) {
+        super::set_expanded(&app, expanded);
+    }
+
+    #[tauri::command]
+    pub fn hide(app: AppHandle) {
+        super::hide(&app);
+    }
+
+    /// The frontend's answer to `quit-requested`: it has shut down, so the app exits.
+    #[tauri::command]
+    pub fn quit_ready(app: AppHandle) {
+        app.exit(0);
+    }
 }
 
 /// Sets the compact height in logical pixels; it is clamped to the limits. Ignored while expanded,

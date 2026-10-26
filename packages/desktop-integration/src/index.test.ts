@@ -9,12 +9,21 @@ it("falls back to the no-op shell outside Tauri", async () => {
   const shell = connectDesktopShell();
   expect(shell).toBe(noopShell);
   await expect(shell.setStripHeight(200)).resolves.toBeUndefined();
+  await expect(shell.setPaused(true)).resolves.toBeUndefined();
+  await expect(shell.setExpanded(true)).resolves.toBeUndefined();
+  await expect(shell.hide()).resolves.toBeUndefined();
 });
 
-it("never reports a pause from the no-op shell", () => {
-  const stop = noopShell.onPausedChanged(() => {
-    throw new Error("unexpected pause");
-  });
-  expect(stop).toBeTypeOf("function");
-  stop();
+it("never reports a change from the no-op shell", () => {
+  const unexpected = () => {
+    throw new Error("unexpected event");
+  };
+  for (const stop of [
+    noopShell.onPausedChanged(unexpected),
+    noopShell.onExpandedChanged(unexpected),
+    noopShell.onQuitRequested(unexpected),
+  ]) {
+    expect(stop).toBeTypeOf("function");
+    stop();
+  }
 });

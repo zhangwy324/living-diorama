@@ -71,6 +71,14 @@ Tray, expanded mode and settings (once, at any scale):
 - [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
 - [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
 - [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
-- [ ] Expand covers about 70% of the strip's monitor, centred; the camera keeps its view; Collapse returns the strip to where it was. Dragging the top edge while expanded changes nothing.
+- [ ] Expand covers about 70% of the strip's monitor, centred; the camera keeps its view; Collapse returns the strip to where it was. Expanded mode has no resize handle along the top edge.
 - [ ] With Always on top on, a maximized window does not cover the strip; with it off, it does.
 - [ ] After Quit and relaunch, the height, monitor and always-on-top choice are as they were. Deleting or corrupting `%APPDATA%\com.livingdiorama.desktop\settings.json` starts with the defaults.
+
+Controls overlay and lifecycle (once, at any scale):
+
+- [ ] Moving the pointer over the strip fades in the buttons in the top-right corner; moving it away fades them out. Clicking them never takes focus from the other app.
+- [ ] Pause/Resume, Expand/Collapse, Reset camera, debug overlays and Hide each work, and the overlay and the tray menu always agree (e.g. pause from the tray, resume from the overlay).
+- [ ] Hide from the overlay hides the strip; the tray icon brings it back with the creatures having moved on.
+- [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
+- [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
