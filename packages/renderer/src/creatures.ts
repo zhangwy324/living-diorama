@@ -4,7 +4,7 @@ import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import type { AssetResolver } from "./props";
 
-// Creatures as upright sprites with a shadow blob (ADR 0007 §6–§7).
+// Creatures as upright sprites with a shadow blob (ADR 0007 §6–§7), drawn true to scale.
 
 /** What the renderer needs to know about a species. `SpeciesDefinition` fits. */
 export interface RenderSpecies {
@@ -22,14 +22,27 @@ export const loadTexture: ImageLoader = async (url) => {
   return texture;
 };
 
-/** Sprites are never drawn shorter than this many CSS pixels; the footprint is unchanged. */
-export const MIN_SPRITE_PX = 24;
 /** Below this share of the camera's right vector the heading is "towards or away", so the sprite keeps its facing. */
 const FACING_DEAD_ZONE = 0.15;
 const FALLBACK_COLOR = "#8f8a82";
 const FALLBACK_ASPECT = 0.75;
 /** Lifts the shadow blob off the surface so it does not z-fight. */
 const SHADOW_LIFT = 0.02;
+/** The ground is looked for from this far above a creature's feet: below deck railings, above slopes. */
+const GROUND_PROBE_HEIGHT = 0.25;
+const GROUND_PROBE_DEPTH = 1;
+/** A creature that moved less than this keeps its last ground contact. */
+const GROUND_RECHECK_DISTANCE = 0.01;
+const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+export interface CreatureSpritesOptions {
+  resolveSpecies: SpeciesResolver;
+  resolveAsset: AssetResolver;
+  loadImage?: ImageLoader;
+  /** Surfaces creatures stand on (terrain, structures); shadows lie along them. */
+  ground?: readonly THREE.Object3D[];
+}
 
 interface SpeciesLook {
   material: THREE.MeshBasicMaterial;
@@ -42,6 +55,9 @@ interface SpeciesLook {
 interface CreatureObject {
   root: THREE.Group;
   sprite: THREE.Mesh;
+  shadow: THREE.Mesh;
+  /** Where the ground was last probed for this creature. */
+  probedAt?: THREE.Vector3;
   look: SpeciesLook;
   facingRight: boolean;
 }
@@ -74,17 +90,16 @@ export class CreatureSprites {
   readonly #resolveSpecies: SpeciesResolver;
   readonly #resolveAsset: AssetResolver;
   readonly #loadImage: ImageLoader;
+  readonly #ground: readonly THREE.Object3D[];
+  readonly #raycaster = new THREE.Raycaster();
 
-  constructor(
-    layer: SceneLayer,
-    resolveSpecies: SpeciesResolver,
-    resolveAsset: AssetResolver,
-    loadImage: ImageLoader = loadTexture,
-  ) {
+  constructor(layer: SceneLayer, options: CreatureSpritesOptions) {
     this.#layer = layer;
-    this.#resolveSpecies = resolveSpecies;
-    this.#resolveAsset = resolveAsset;
-    this.#loadImage = loadImage;
+    this.#resolveSpecies = options.resolveSpecies;
+    this.#resolveAsset = options.resolveAsset;
+    this.#loadImage = options.loadImage ?? loadTexture;
+    this.#ground = options.ground ?? [];
+    this.#raycaster.far = GROUND_PROBE_HEIGHT + GROUND_PROBE_DEPTH;
     const alphaMap = shadowTexture();
     this.#textures.push(alphaMap);
     this.#shadowMaterial = new THREE.MeshBasicMaterial({
@@ -93,6 +108,9 @@ export class CreatureSprites {
       opacity: 0.45,
       alphaMap,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
   }
 
@@ -102,16 +120,9 @@ export class CreatureSprites {
   }
 
   /** Places each creature for this frame; creatures not in `poses` are removed. */
-  update(
-    poses: readonly CreaturePose[],
-    camera: THREE.PerspectiveCamera,
-    viewportHeightPx: number,
-  ) {
+  update(poses: readonly CreaturePose[], camera: THREE.PerspectiveCamera) {
     camera.updateMatrixWorld();
     const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-    const forward = camera.getWorldDirection(new THREE.Vector3());
-    const pixelsPerMetreAtUnitDepth =
-      viewportHeightPx / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
 
     const seen = new Set<string>();
     for (const pose of poses) {
@@ -120,6 +131,12 @@ export class CreatureSprites {
       seen.add(pose.id);
       const { root, sprite, look } = creature;
       root.position.set(pose.world.x, pose.world.y, pose.world.z);
+      if (
+        !creature.probedAt ||
+        creature.probedAt.distanceTo(root.position) > GROUND_RECHECK_DISTANCE
+      ) {
+        this.#layShadow(creature);
+      }
 
       // Upright: turn about the vertical axis only, towards the camera.
       sprite.rotation.y = Math.atan2(
@@ -130,14 +147,7 @@ export class CreatureSprites {
       const sideways = Math.sin(pose.heading) * right.x + Math.cos(pose.heading) * right.z;
       if (Math.abs(sideways) > FACING_DEAD_ZONE) creature.facingRight = sideways > 0;
 
-      const depth = Math.max(0.01, root.position.clone().sub(camera.position).dot(forward));
-      const heightPx = (look.height * pixelsPerMetreAtUnitDepth) / depth;
-      const boost = Math.max(1, MIN_SPRITE_PX / heightPx);
-      sprite.scale.set(
-        look.height * look.aspect * boost * (creature.facingRight ? 1 : -1),
-        look.height * boost,
-        1,
-      );
+      sprite.scale.set(look.height * look.aspect * (creature.facingRight ? 1 : -1), look.height, 1);
     }
     for (const [id, creature] of this.#creatures) {
       if (seen.has(id)) continue;
@@ -163,16 +173,30 @@ export class CreatureSprites {
     if (!look) return undefined;
     const sprite = new THREE.Mesh(this.#spriteGeometry, look.material);
     const shadow = new THREE.Mesh(this.#shadowGeometry, this.#shadowMaterial);
-    shadow.position.y = SHADOW_LIFT;
     shadow.scale.setScalar(look.radius * 1.1);
     shadow.renderOrder = -1;
     const root = new THREE.Group();
     root.name = pose.id;
     root.add(shadow, sprite);
     this.#layer.add(root);
-    const creature = { root, sprite, look, facingRight: true };
+    const creature: CreatureObject = { root, sprite, shadow, look, facingRight: true };
     this.#creatures.set(pose.id, creature);
     return creature;
+  }
+
+  /** Lays the shadow on the ground under the creature, tilted to the surface (flat if none is found). */
+  #layShadow(creature: CreatureObject): void {
+    const { root, shadow } = creature;
+    creature.probedAt = root.position.clone();
+    this.#raycaster.set(root.position.clone().addScaledVector(UP, GROUND_PROBE_HEIGHT), DOWN);
+    const hit = this.#raycaster.intersectObjects([...this.#ground], true).find((h) => h.face);
+    const normal = hit?.face
+      ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+      : UP.clone();
+    if (normal.y < 0) normal.negate();
+    const contact = hit ? hit.point.clone().sub(root.position) : new THREE.Vector3();
+    shadow.position.copy(contact).addScaledVector(normal, SHADOW_LIFT);
+    shadow.quaternion.setFromUnitVectors(UP, normal);
   }
 
   #look(speciesId: string): SpeciesLook | undefined {

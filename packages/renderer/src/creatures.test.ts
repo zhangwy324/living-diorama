@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { CreatureSprites } from "./creatures";
 import {
   MIN_CAMERA_CLEARANCE,
-  MIN_SPRITE_PX,
   SnapshotInterpolator,
   lerpHeading,
   limitCamera,
@@ -114,14 +113,19 @@ describe("CreatureSprites", () => {
     c.lookAt(0, 0, 0);
     return c;
   };
-  const make = (loadImage = vi.fn(async () => new THREE.Texture({ width: 50, height: 100 }))) => {
+  const make = (
+    loadImage = vi.fn(async () => new THREE.Texture({ width: 50, height: 100 })),
+    ground: THREE.Object3D[] = [],
+  ) => {
     const layer = new SceneLayer("creatures");
-    const sprites = new CreatureSprites(
-      layer,
-      (id) => (id === "test:critter" ? { appearance: "test:img", sizeClass: "medium" } : undefined),
-      (ref) => (ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined),
+    const sprites = new CreatureSprites(layer, {
+      resolveSpecies: (id) =>
+        id === "test:critter" ? { appearance: "test:img", sizeClass: "medium" } : undefined,
+      resolveAsset: (ref) =>
+        ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined,
       loadImage,
-    );
+      ground,
+    });
     return { layer, sprites, loadImage };
   };
   const spriteOf = (layer: SceneLayer, id: string) =>
@@ -130,9 +134,9 @@ describe("CreatureSprites", () => {
   it("loads each species image once and sizes sprites from it", async () => {
     const { layer, sprites, loadImage } = make();
     const poses = [creature("a", { x: 0, y: 0, z: 0 }), creature("b", { x: 1, y: 0, z: 0 })];
-    sprites.update(poses, camera(), 2000);
+    sprites.update(poses, camera());
     await sprites.ready;
-    sprites.update(poses, camera(), 2000);
+    sprites.update(poses, camera());
     expect(loadImage).toHaveBeenCalledTimes(1);
     expect(sprites.count).toBe(2);
     const sprite = spriteOf(layer, "a");
@@ -144,7 +148,7 @@ describe("CreatureSprites", () => {
   it("mirrors the sprite when the creature heads left on screen", () => {
     const { layer, sprites } = make();
     const facing = (heading: number) => {
-      sprites.update([creature("a", { x: 0, y: 0, z: 0 }, heading)], camera(), 2000);
+      sprites.update([creature("a", { x: 0, y: 0, z: 0 }, heading)], camera());
       return Math.sign(spriteOf(layer, "a").scale.x);
     };
     expect(facing(Math.PI / 2)).toBe(1); // +X, screen right
@@ -152,27 +156,42 @@ describe("CreatureSprites", () => {
     expect(facing(0)).toBe(-1); // straight at the camera: keeps its last facing
   });
 
-  it("scales sprites up to the minimum on-screen height, and removes departed creatures", () => {
+  it("draws sprites true to scale however far away, and removes departed creatures", () => {
     const { layer, sprites } = make();
-    const viewport = 200;
-    sprites.update([creature("a", { x: 0, y: 0, z: 0 })], camera(), viewport);
-    const pxPerMetre = viewport / (2 * 20 * Math.tan(THREE.MathUtils.degToRad(15)));
-    expect(spriteOf(layer, "a").scale.y * pxPerMetre).toBeCloseTo(MIN_SPRITE_PX);
-    sprites.update([], camera(), viewport);
+    const far = camera();
+    far.position.set(0, 0, 500);
+    sprites.update([creature("a", { x: 0, y: 0, z: 0 })], far);
+    expect(spriteOf(layer, "a").scale.y).toBeCloseTo(0.8);
+    sprites.update([], far);
     expect(sprites.count).toBe(0);
     expect(layer.group.children).toHaveLength(0);
+  });
+
+  it("lays the shadow along the ground under the creature, tilted to its slope", () => {
+    // A 30° ramp rising towards -Z, through the origin.
+    const ramp = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 10).rotateX(-Math.PI / 2 + Math.PI / 6),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    const { layer, sprites } = make(undefined, [ramp]);
+    sprites.update([creature("a", { x: 1, y: 0, z: 0 })], camera());
+    const shadow = layer.group.getObjectByName("a")!.children[0] as THREE.Mesh;
+    const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(shadow.quaternion);
+    expect(normal.angleTo(new THREE.Vector3(0, 1, 0))).toBeCloseTo(Math.PI / 6);
+    expect(normal.z).toBeGreaterThan(0); // leans towards the downhill side
+    expect(shadow.position.length()).toBeCloseTo(0.02); // lifted off the ramp along its normal
+
+    // Off the ramp it lies flat at the creature's feet.
+    sprites.update([creature("a", { x: 20, y: 0, z: 0 })], camera());
+    expect(shadow.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
   });
 
   it("draws nothing for an unknown species and a plain sprite for a missing image", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { sprites } = make(vi.fn(() => Promise.reject(new Error("missing"))));
-    sprites.update(
-      [{ ...creature("a", { x: 0, y: 0, z: 0 }), speciesId: "test:other" }],
-      camera(),
-      2000,
-    );
+    sprites.update([{ ...creature("a", { x: 0, y: 0, z: 0 }), speciesId: "test:other" }], camera());
     expect(sprites.count).toBe(0);
-    sprites.update([creature("b", { x: 0, y: 0, z: 0 })], camera(), 2000);
+    sprites.update([creature("b", { x: 0, y: 0, z: 0 })], camera());
     expect(sprites.count).toBe(1);
     expect(warn).toHaveBeenCalledWith("No species test:other to draw");
   });

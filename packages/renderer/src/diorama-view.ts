@@ -114,12 +114,12 @@ export function buildDioramaScene(
   );
   layers.structures.add(structureMeshes(scene));
   const resolveAsset = options.resolveAsset ?? (() => undefined);
-  const creatures = new CreatureSprites(
-    layers.creatures,
-    options.resolveSpecies ?? (() => undefined),
+  const creatures = new CreatureSprites(layers.creatures, {
+    resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
-    options.loadImage,
-  );
+    loadImage: options.loadImage,
+    ground: [layers.terrain.group, layers.structures.group],
+  });
   const ready = loadProps(
     scene.props,
     resolveAsset,
@@ -197,7 +197,7 @@ export function createDioramaView(
       if (reset.t >= 1) reset = undefined;
     }
     controls.update();
-    creatures.update(snapshots.sample(now), camera, container.clientHeight);
+    creatures.update(snapshots.sample(now), camera);
     renderer.render(world, camera);
   };
   raf = requestAnimationFrame(loop);
