@@ -97,3 +97,25 @@ Controls overlay and lifecycle (once, at any scale):
 - [ ] Hide from the overlay hides the strip; the tray icon brings it back with the creatures having moved on.
 - [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
 - [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
+
+## Releasing
+
+1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`, and merge it.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```bash
+   git tag v0.1.0 && git push origin v0.1.0
+   ```
+
+3. The `Release` workflow checks that the tag matches all three versions, builds the NSIS installer and publishes it as a GitHub pre-release (ADR 0009 §10).
+4. Run the installer smoke test below on the published installer, along with the desktop shell checks above.
+
+### Installer smoke test (manual)
+
+Run in [Windows Sandbox](https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/) (ADR 0009 §9), which starts clean every time. Copy the installer in, then:
+
+- [ ] SmartScreen warns about an unknown publisher; **More info → Run anyway** starts the installer.
+- [ ] The installer asks for no admin rights and installs under `%LOCALAPPDATA%\Living Diorama`.
+- [ ] Start menu → **Living Diorama** shows the strip at the bottom of the screen with creatures moving, and a tray icon.
+- [ ] Tray → Quit exits; no `living-diorama.exe` process is left in Task Manager.
+- [ ] **Settings → Apps → Installed apps** lists Living Diorama with the right version, and uninstalling removes it and its Start menu entry.
