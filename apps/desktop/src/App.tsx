@@ -3,50 +3,82 @@ import { connectDesktopShell } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
+import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { loadWorld } from "./load-world";
 import { startSimulation, type SimulationClient } from "./simulation-client";
 import { StripResizeHandle } from "./StripResizeHandle";
 
 // Content is static for now, so it loads once at startup.
 const { scene, navigation, assets, species, diagnostics } = loadWorld();
+const contentFailure: Failure | undefined = scene
+  ? undefined
+  : { summary: "The world failed to load", details: diagnostics.map(formatDiagnostic) };
 const shell = connectDesktopShell();
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
+  // Set while the diorama runs; cleared when it stops, so nothing is torn down twice.
   const view = useRef<DioramaView>(undefined);
   const simulation = useRef<SimulationClient>(undefined);
   // The shell owns paused and expanded; these mirror its change events.
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [debug, setDebug] = useState(false);
+  const [failure, setFailure] = useState(contentFailure);
 
+  // Shell events matter on the error screen too: expanding shows the details, and Quit must answer.
   useEffect(() => {
-    if (!scene || !container.current) return;
-    const created = createDioramaView(container.current, scene, {
-      resolveAsset: (ref) => assets?.get(ref),
-      resolveSpecies: (id) => species?.get(id),
-      ...(navigation ? { navigation } : {}),
-    });
-    view.current = created;
-    const client = startSimulation((snapshot) => created.pushSnapshot(snapshot));
-    simulation.current = client;
     const stopListening = [
       shell.onPausedChanged((value) => {
-        client.setPaused(value);
+        simulation.current?.setPaused(value);
         setPaused(value);
       }),
       shell.onExpandedChanged(setExpanded),
-      // Clean shutdown (ADR 0008 §14); the process exits next, so nothing is torn down twice.
+      // Clean shutdown (ADR 0008 §14); the process exits next.
       shell.onQuitRequested(() => {
-        client.shutdown();
-        created.dispose();
+        simulation.current?.shutdown();
+        view.current?.dispose();
       }),
     ];
     return () => {
       for (const stop of stopListening) stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!scene || !container.current) return;
+    let created: DioramaView;
+    try {
+      created = createDioramaView(container.current, scene, {
+        resolveAsset: (ref) => assets?.get(ref),
+        resolveSpecies: (id) => species?.get(id),
+        ...(navigation ? { navigation } : {}),
+      });
+    } catch (error) {
+      // The view needs the mounted container, so its failure is only known inside this effect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFailure({ summary: "The 3D view could not start", details: [describeError(error)] });
+      return;
+    }
+    const client = startSimulation({
+      onSnapshot: (snapshot) => created.pushSnapshot(snapshot),
+      onFailure: (details) => {
+        stop();
+        setFailure((current) => current ?? { summary: "The simulation stopped", details });
+      },
+    });
+    view.current = created;
+    simulation.current = client;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      view.current = undefined;
+      simulation.current = undefined;
       client.stop();
       created.dispose();
     };
+    return stop;
   }, []);
 
   const toggleDebug = () => {
@@ -55,16 +87,13 @@ export function App() {
     setDebug(!debug);
   };
 
-  if (!scene) {
+  if (failure) {
     return (
-      <main className="diagnostics">
-        <h1>The world failed to load</h1>
-        <ul>
-          {diagnostics.map((d, i) => (
-            <li key={i}>{formatDiagnostic(d)}</li>
-          ))}
-        </ul>
-      </main>
+      <ErrorScreen
+        failure={failure}
+        expanded={expanded}
+        onShowDetails={() => void shell.setExpanded(true)}
+      />
     );
   }
   return (
@@ -85,3 +114,5 @@ export function App() {
     </div>
   );
 }
+
+const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error));
