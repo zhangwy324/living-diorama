@@ -64,3 +64,13 @@ Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale
 - [ ] Moving or resizing the taskbar, or toggling auto-hide, re-places the strip.
 - [ ] Changing the scale or the resolution of the strip's monitor re-places it at the same logical height.
 - [ ] Two monitors: disconnecting the strip's monitor moves the strip to the primary.
+
+Tray, expanded mode and settings (once, at any scale):
+
+- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Monitor ▸, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top check, the current monitor's check).
+- [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
+- [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
+- [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
+- [ ] Expand covers about 70% of the strip's monitor, centred; the camera keeps its view; Collapse returns the strip to where it was. Dragging the top edge while expanded changes nothing.
+- [ ] With Always on top on, a maximized window does not cover the strip; with it off, it does.
+- [ ] After Quit and relaunch, the height, monitor and always-on-top choice are as they were. Deleting or corrupting `%APPDATA%\com.livingdiorama.desktop\settings.json` starts with the defaults.

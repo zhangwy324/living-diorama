@@ -6,6 +6,8 @@ pub const DEFAULT_STRIP_HEIGHT: f64 = 220.0;
 /// Compact strip height limits in logical pixels.
 pub const MIN_STRIP_HEIGHT: f64 = 180.0;
 pub const MAX_STRIP_HEIGHT: f64 = 260.0;
+/// Share of the work area, in each dimension, that expanded mode covers.
+const EXPANDED_FRACTION: f64 = 0.7;
 
 /// A rectangle in physical (device) pixels on the virtual desktop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +66,19 @@ pub fn strip_rect(work_area: Rect, scale_factor: f64, height: f64) -> Rect {
         x: work_area.x,
         y: work_area.bottom() - height as i32,
         width: work_area.width,
+        height,
+    }
+}
+
+/// The expanded window rectangle (ADR 0008 §8): 70% of the work area in each dimension, centred
+/// on it.
+pub fn expanded_rect(work_area: Rect) -> Rect {
+    let width = (f64::from(work_area.width) * EXPANDED_FRACTION).round() as u32;
+    let height = (f64::from(work_area.height) * EXPANDED_FRACTION).round() as u32;
+    Rect {
+        x: work_area.x + ((work_area.width - width) / 2) as i32,
+        y: work_area.y + ((work_area.height - height) / 2) as i32,
+        width,
         height,
     }
 }
@@ -180,5 +195,26 @@ mod tests {
             Some("A")
         );
         assert!(choose_monitor(&[], None).is_none());
+    }
+
+    #[test]
+    fn expanded_covers_the_middle_of_the_work_area() {
+        assert_eq!(
+            expanded_rect(FULL_HD_WORK_AREA),
+            Rect {
+                x: 288,
+                y: 155,
+                width: 1344,
+                height: 722
+            }
+        );
+        let offset = Rect {
+            x: -1860,
+            y: -200,
+            width: 1860,
+            height: 1080,
+        };
+        let rect = expanded_rect(offset);
+        assert_eq!((rect.x, rect.y), (-1860 + 279, -200 + 162));
     }
 }

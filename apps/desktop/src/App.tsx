@@ -29,6 +29,7 @@ export function App() {
     });
     view.current = created;
     const simulation = startSimulation((snapshot) => created.pushSnapshot(snapshot));
+    const stopListening = shell.onPausedChanged((paused) => simulation.setPaused(paused));
     let debug = false;
     const onKeyDown = (event: KeyboardEvent) => {
       const modified = event.ctrlKey || event.altKey || event.metaKey || event.shiftKey;
@@ -40,6 +41,7 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      stopListening();
       simulation.stop();
       created.dispose();
     };
