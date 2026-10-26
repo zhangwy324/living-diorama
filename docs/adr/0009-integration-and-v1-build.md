@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs; **D** a diagnostics log file and an app icon. Decisions for A–C are recorded here, and D's are added when it starts; each PR updates this ADR if it has to deviate.
 
 ## Decisions
 
