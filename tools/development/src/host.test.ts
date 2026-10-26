@@ -112,6 +112,32 @@ describe("simulation host", () => {
     expect(resumed.slice(1).map((m) => m.snapshot.tick)).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
+  it("adds routes to snapshots while debug is on", () => {
+    const host = startHost();
+    host.init(3);
+    host.send({ type: "spawn", speciesId: SPECIES_ID });
+    host.advance(30_000);
+    const walking = (on: boolean) =>
+      host
+        .snapshots()
+        .some((m) =>
+          m.snapshot.creatures.some(
+            (c) => (c.route !== undefined) === on && c.currentAction === "core:follow_path",
+          ),
+        );
+    expect(walking(false)).toBe(true);
+    host.send({ type: "set_debug", enabled: true });
+    host.advance(30_000);
+    const snapshots = host.snapshots();
+    const routed = snapshots.flatMap((m) => m.snapshot.creatures).filter((c) => c.route);
+    expect(routed.length).toBeGreaterThan(0);
+    expect(
+      snapshots
+        .flatMap((m) => m.snapshot.creatures)
+        .filter((c) => c.currentAction === "core:follow_path" && !c.route),
+    ).toEqual([]);
+  });
+
   it("scales ticks by the speed multiplier", () => {
     const host = startHost();
     host.init();

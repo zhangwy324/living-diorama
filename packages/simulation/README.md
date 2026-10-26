@@ -11,7 +11,8 @@ Headless simulation: clock, seeded RNG, world state, region graph, navigation, a
 - The world state (`WorldState`): world model, creatures and one pathfinder per navigation profile.
 - Path finding: crossings over portals, region-level search with exact walking costs, grid A* with smoothing inside each region, and the route cache.
 - The tick loop (`Simulation`): action and behavior contracts (`ActionProvider`, `BehaviorProvider`), the core actions `core:idle` and `core:follow_path`, the `core:wander` behavior, kinematic locomotion, the stuck watchdog, simulation events and decision traces.
-- The worker-side host (`runSimulationHost`), which takes an injected message port, content loader and timer, and the versioned snapshot/command message protocol (`protocol.ts`).
+- The worker-side host (`runSimulationHost`), which takes an injected message port, content loader and timer, and the versioned snapshot/command message protocol (`protocol.ts`). With `set_debug` on, snapshots carry each walking creature's remaining route.
+- Static debug overlay data (`describeNavigation`): walkability cells, region graph anchors and portals of one navigation profile, as plain data for the renderer.
 
 ## Must not
 

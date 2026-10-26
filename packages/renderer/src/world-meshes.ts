@@ -162,7 +162,7 @@ export function baseMeshes(
   return { soil: group, water: new THREE.Mesh(waterGeometry, waterMaterial) };
 }
 
-function meshGeometry(mesh: SurfaceMesh): THREE.BufferGeometry {
+export function meshGeometry(mesh: SurfaceMesh): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.positions, 3));
   geometry.setIndex(mesh.indices);

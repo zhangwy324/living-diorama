@@ -36,9 +36,9 @@
 
 ### Overlays and throttling (PR C)
 
-10. **Debug data.** A `set_debug` command makes the worker add each creature's remaining route (waypoints per leg) to its snapshots; `PROTOCOL_VERSION` becomes 2. The walkability masks, region graph and portals are static, so the app computes them on the main thread from the world model and hands them to the renderer as plain data, keeping the renderer's import of `simulation` type-only.
+10. **Debug data.** A `set_debug` command makes the worker add each creature's remaining route (waypoints per leg) to its snapshots; `PROTOCOL_VERSION` becomes 2. The walkability masks, region graph and portals are static, so the app computes them on the main thread from the world model and hands them to the renderer as plain data, keeping the renderer's import of `simulation` type-only. The overlay shows the profile of the species the app spawns. Until M5's controls overlay, the D key toggles every overlay at once; it reaches the view and the worker together. Cells of a region with no locomotion (the river, for a walker) have no surface height in its mask and are not drawn.
 
-11. **Render throttling.** The strip never takes focus (M5), so focus is the wrong signal. The renderer runs at the display rate while the pointer is over it, during camera interaction and during the reset animation; at about 30 fps otherwise; and not at all while the page is hidden. The simulation is not throttled.
+11. **Render throttling.** The strip never takes focus (M5), so focus is the wrong signal. The renderer runs at the display rate while the pointer is over it, during camera interaction and during the reset animation; at about 30 fps otherwise; and not at all while the page is hidden. The frame after any camera change also runs at the display rate, so damping settles smoothly. The idle schedule advances by a fixed interval rather than restarting at each frame, because some browsers round frame timestamps to 10 ms. The simulation is not throttled.
 
 12. **Testing.** WebGL does not run in Vitest, so tests cover what can run without it: scene building (three.js objects work in Node), framing, camera limits, interpolation, open edges and overlay data. Legibility at 180, 220 and 260 px strip height is checked by screenshots of the dev app.
 

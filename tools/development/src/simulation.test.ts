@@ -263,6 +263,33 @@ describe("actions, locomotion and events", () => {
     const surface = simulation.state.model.regions.get(c!.position.regionId)!.surface;
     expect(c!.world.y).toBe(surface.heightAt(c!.position.x, c!.position.z));
     expect(c!.currentAction).toBe("core:follow_path");
+    expect(c!.route).toBeUndefined();
+  });
+
+  it("adds the remaining route per region to snapshots on request", () => {
+    const { simulation, run, creature } = puppet([
+      walkTo("south-bank", 1.5, 2.2),
+      { action: "core:idle", params: { seconds: 60 }, utility: 1 },
+    ]);
+    run(2);
+    const route = simulation.snapshot({ routes: true }).creatures[0]!.route!;
+    expect(route.map((leg) => leg.regionId)).toEqual(["north-bank", "bridge-deck", "south-bank"]);
+    const { model } = simulation.state;
+    for (const leg of route) {
+      const surface = model.regions.get(leg.regionId)!.surface;
+      for (const p of leg.points) expect(p.y).toBe(surface.heightAt(p.x, p.z));
+    }
+    expect(route.at(-1)!.points.at(-1)).toMatchObject({ x: 1.5, z: 2.2 });
+
+    // Reached waypoints drop off; the route goes once the walk ends.
+    const count = (r: typeof route) => r.flatMap((leg) => leg.points).length;
+    run(40);
+    expect(count(simulation.snapshot({ routes: true }).creatures[0]!.route!)).toBeLessThan(
+      count(route),
+    );
+    for (let t = 0; t < 1_000 && !creature().lastResult; t++) run(1);
+    run(1);
+    expect(simulation.snapshot({ routes: true }).creatures[0]!.route).toBeUndefined();
   });
 });
 

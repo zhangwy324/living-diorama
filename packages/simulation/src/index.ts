@@ -5,6 +5,7 @@ export * from "./creatures/core-actions";
 export * from "./creatures/wander";
 export * from "./engine";
 export * from "./navigation/grid-path";
+export * from "./navigation/overlay";
 export * from "./navigation/pathfinder";
 export * from "./navigation/profile";
 export * from "./navigation/region-graph";

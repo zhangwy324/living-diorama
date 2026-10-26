@@ -21,7 +21,7 @@ import {
 } from "../creatures/contracts";
 import type { Pathfinder } from "../navigation/pathfinder";
 import { CellState, type RegionMask } from "../navigation/walkability";
-import type { SimulationEvent, SimulationSnapshot } from "../protocol";
+import type { RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
 import { Rng } from "./rng";
 import {
@@ -53,6 +53,11 @@ export interface DecisionTrace {
   result: "started" | "rejected" | "no_proposal";
   reason?: string;
   detail?: Record<string, unknown>;
+}
+
+export interface SnapshotOptions {
+  paused?: boolean;
+  routes?: boolean;
 }
 
 export interface SimulationOptions extends WorldStateOptions {
@@ -101,6 +106,8 @@ export class Simulation {
   readonly #pathfinders = new Map<string, Pathfinder>();
   readonly #walkableCells = new Map<RegionMask, number[]>();
   readonly #speeds = new Map<string, number>();
+  /** The path each creature last walked, kept until its action ends; for debug routes only. */
+  readonly #paths = new Map<string, PathState>();
   #events: SimulationEvent[] = [];
 
   private constructor(
@@ -163,7 +170,8 @@ export class Simulation {
     return events;
   }
 
-  snapshot(paused = false): SimulationSnapshot {
+  /** `routes` adds each walking creature's remaining route, for debug overlays (ADR 0007 §10). */
+  snapshot({ paused = false, routes = false }: SnapshotOptions = {}): SimulationSnapshot {
     const { model } = this.state;
     return {
       tick: this.tick,
@@ -179,9 +187,22 @@ export class Simulation {
           world: { x, y, z },
           heading: c.heading,
           ...(c.action ? { currentAction: c.action.id } : {}),
+          ...(routes && this.#paths.has(c.id) ? { route: this.#route(c.id) } : {}),
         };
       }),
     };
+  }
+
+  #route(creatureId: string): RouteLegSnapshot[] {
+    const path = this.#paths.get(creatureId);
+    const legs: RouteLegSnapshot[] = [];
+    for (const { regionId, x, z } of path?.points.slice(path.next) ?? []) {
+      const y = this.state.model.regions.get(regionId)?.surface.heightAt(x, z) ?? NaN;
+      const leg = legs.at(-1);
+      if (leg?.regionId === regionId) leg.points.push({ x, y, z });
+      else legs.push({ regionId, points: [{ x, y, z }] });
+    }
+    return legs;
   }
 
   #emit(event: SimulationEvent) {
@@ -212,6 +233,7 @@ export class Simulation {
   #finish(creature: CreatureState, result: ActionResult) {
     creature.lastResult = result;
     delete creature.action;
+    this.#paths.delete(creature.id);
     creature.decideAtTick = this.tick;
   }
 
@@ -401,6 +423,7 @@ export class Simulation {
    * current region's surface. On a portal crossing the region changes on the shared cell edge.
    */
   #walk(creature: CreatureState, path: PathState): "moving" | "arrived" {
+    this.#paths.set(creature.id, path);
     const kind = this.state.model.regions.get(creature.position.regionId)?.kind;
     let budget = kind ? this.#speed(creature.speciesId, kind) * this.tickSeconds : 0;
     while (budget > 0) {

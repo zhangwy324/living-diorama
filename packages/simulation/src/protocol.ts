@@ -3,7 +3,7 @@ import type { Diagnostic, RegionPosition, Vec3 } from "@living-diorama/content-s
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -14,9 +14,17 @@ export type SimulationCommand =
   | { type: "resume" }
   | { type: "set_speed"; multiplier: number }
   | { type: "spawn"; speciesId: string; spawnPointId?: string }
+  /** Adds debug data (routes) to snapshots while enabled (ADR 0007 §10). */
+  | { type: "set_debug"; enabled: boolean }
   | { type: "shutdown" };
 
 // ---- Worker → main thread -------------------------------------------------------------------
+
+/** The part of a remaining route inside one region, with world positions of its waypoints. */
+export interface RouteLegSnapshot {
+  regionId: string;
+  points: Vec3[];
+}
 
 export interface CreatureSnapshot {
   id: string;
@@ -27,6 +35,8 @@ export interface CreatureSnapshot {
   world: Vec3;
   heading: number;
   currentAction?: string;
+  /** Waypoints still to reach, per region, from where the creature stands. Only with debug on. */
+  route?: RouteLegSnapshot[];
 }
 
 export interface SimulationSnapshot {
