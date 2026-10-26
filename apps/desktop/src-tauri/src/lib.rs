@@ -1,3 +1,4 @@
+mod event_counts;
 mod placement;
 mod platform;
 mod settings;
@@ -13,6 +14,7 @@ pub fn run() {
             shell::commands::set_expanded,
             shell::commands::hide,
             shell::commands::quit_ready,
+            event_counts::record_event_counts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

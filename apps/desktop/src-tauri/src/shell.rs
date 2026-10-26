@@ -113,15 +113,18 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Shows the window, then places it, which reserves its space now that it is visible.
+/// Shows the window and its page, then places it, which reserves its space now that it is visible.
 fn show(window: &WebviewWindow) -> tauri::Result<()> {
     window.show()?;
+    platform_of(window).set_webview_visible(window, true)?;
     place(window);
     Ok(())
 }
 
-/// Hides the window, then places it, which gives its reserved space back.
+/// Hides the window and its page, so the page stops rendering, then places it, which gives its
+/// reserved space back.
 fn hide_window(window: &WebviewWindow) -> tauri::Result<()> {
+    platform_of(window).set_webview_visible(window, false)?;
     window.hide()?;
     place(window);
     Ok(())
@@ -137,6 +140,15 @@ pub fn release_space(app: &AppHandle) {
     if let Err(error) = platform.0.release(&window) {
         eprintln!("Could not give the reserved space back: {error}");
     }
+}
+
+fn platform_of(window: &WebviewWindow) -> &dyn Platform {
+    window
+        .app_handle()
+        .state::<PlatformState>()
+        .inner()
+        .0
+        .as_ref()
 }
 
 pub fn main_window(app: &AppHandle) -> Option<WebviewWindow> {

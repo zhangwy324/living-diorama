@@ -49,6 +49,10 @@ pub trait Platform: Send + Sync {
 
     /// Gives any reserved space back. Does nothing when nothing is reserved.
     fn release(&self, window: &WebviewWindow) -> tauri::Result<()>;
+
+    /// Tells the web view whether it can be seen. Hiding the window alone leaves the page visible
+    /// to itself, so it would keep rendering (ADR 0009 §7).
+    fn set_webview_visible(&self, window: &WebviewWindow, visible: bool) -> tauri::Result<()>;
 }
 
 /// The platform this build runs on.
@@ -91,6 +95,10 @@ impl Platform for Unsupported {
     }
 
     fn release(&self, _window: &WebviewWindow) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn set_webview_visible(&self, _window: &WebviewWindow, _visible: bool) -> tauri::Result<()> {
         Ok(())
     }
 }

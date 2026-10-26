@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as three PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M6 (integration, hardening and v1 build). The composition root already loads the built-in content through the registries, validates it and starts the simulation worker and the renderer (M2–M4), and the app spawns 3 creatures (M4). M6 makes failures visible, measures the app over long runs, builds an installer and documents the result. It ships as four PRs: **A** error screen and many-creature checks; **B** soak and performance tooling, the measured baseline and any throttling fixes; **C** installer, version, release workflow and docs; **D** a diagnostics log file and an app icon. Decisions for A–C are recorded here, and D's are added when it starts; each PR updates this ADR if it has to deviate.
 
 ## Decisions
 
@@ -29,11 +29,13 @@
 
 ### Soak test and performance baseline (PR B)
 
-5. **One sampling script for both.** A PowerShell script in `tools/development` samples the app's process tree (the Rust host and its WebView2 child processes) at a fixed interval and writes a CSV of working set, private bytes, CPU and GPU use. The frontend counts `creature_stuck` and `path_failed` events, and the count is written where the script can read it at the end of a run.
+5. **One sampling script for both.** A PowerShell script in `tools/development` samples the app's process tree (the Rust host and its WebView2 child processes) at a fixed interval and writes a CSV of working set, private bytes, CPU and GPU use. The frontend counts `creature_stuck` and `path_failed` events, and the count is written where the script can read it at the end of a run: the frontend sends the totals to the shell on each change, and the shell writes them to `event-counts.json` in the app's local data directory. A stuck event counts as recovered once the creature has moved 0.5 m from where it got stuck. The file is written in release builds too, since the soak runs on one; the diagnostics log planned for PR D may replace it.
 
 6. **Soak pass criteria.** An 8-hour run with the default 3 creatures, on the developer's machine. Memory is flat after warm-up (less than 10% growth from hour 1 to hour 8) and every stuck event is recovered (the creature moves again).
 
 7. **Performance baseline.** The same script, about 5 minutes in each of four states: strip idle, strip hovered, expanded, hidden. The numbers and the reference machine (CPU, GPU, displays) are recorded in `docs/performance.md` as the starting budget. Only obviously wasteful costs are fixed in M6; the first candidate is the idle render rate (about 30 fps, ADR 0007), which could drop when only creatures move.
+
+   **Outcome (PR B).** The idle rate stays at 30 fps: it costs about a tenth of one core and under 1% GPU. The measurement found one waste instead: a hidden window kept rendering, because hiding a Tauri window does not hide its WebView2. The shell now sets the WebView2's visibility with the window's, so the page's existing `visibilitychange` handling stops the render loop; the simulation worker keeps ticking.
 
 ### Installer and release (PR C)
 

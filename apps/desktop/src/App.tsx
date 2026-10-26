@@ -4,6 +4,7 @@ import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
+import { EventCounter } from "./event-counts";
 import { loadWorld } from "./load-world";
 import { startSimulation, type SimulationClient } from "./simulation-client";
 import { StripResizeHandle } from "./StripResizeHandle";
@@ -60,8 +61,18 @@ export function App() {
       setFailure({ summary: "The 3D view could not start", details: [describeError(error)] });
       return;
     }
+    // Recorded at start too, so the measuring script never reads a previous run's counts.
+    const counter = new EventCounter();
+    const recordCounts = () =>
+      void shell
+        .recordEventCounts(counter.counts)
+        .catch((error: unknown) => console.warn("Could not record the event counts", error));
+    recordCounts();
     const client = startSimulation({
-      onSnapshot: (snapshot) => created.pushSnapshot(snapshot),
+      onSnapshot: (snapshot, events) => {
+        created.pushSnapshot(snapshot);
+        if (counter.observe(snapshot, events)) recordCounts();
+      },
       onFailure: (details) => {
         stop();
         setFailure((current) => current ?? { summary: "The simulation stopped", details });

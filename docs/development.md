@@ -28,6 +28,7 @@ gh repo clone zhangwy324/living-diorama-design docs/design
 - Keep the repo on a local NTFS path (not a network or WSL path) for fast file watching and Rust builds.
 - Rust build output (`target/`) can grow to several GB; exclude it from antivirus real-time scanning if builds are slow.
 - To run `pnpm dev` with more creatures than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). Production builds ignore it (ADR 0009 §4).
+- `pnpm measure` samples the running app's CPU, GPU and memory into a CSV under `tools/development/out/measurements/` (ADR 0009 §5–7). Start a release build first (`pnpm tauri build --no-bundle`, then `apps\desktop\src-tauri\target\release\living-diorama.exe`). With no arguments it measures the four baseline states, 5 minutes each, and says how to put the app in each one. For the soak test run `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`; it ends with the stuck and path-failed counts the app writes to `%LOCALAPPDATA%\com.livingdiorama.desktop\event-counts.json`. Results go in [performance.md](performance.md).
 
 ## Troubleshooting
 
