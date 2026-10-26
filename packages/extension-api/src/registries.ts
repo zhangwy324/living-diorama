@@ -8,6 +8,7 @@ import {
   validate,
   type ContentId,
   type Diagnostic,
+  type DiagnosticPath,
   type RegionKind,
   type Result,
   type Schema,
@@ -27,6 +28,7 @@ export const REGISTRY_NAMES = [
   "behaviors",
   "capabilities",
   "affordances",
+  "assets",
 ] as const;
 export type RegistryName = (typeof REGISTRY_NAMES)[number];
 
@@ -67,7 +69,22 @@ export interface CapabilityType extends CodeEntry {
   readonly locomotion?: LocomotionRule;
 }
 
-/** The v1 registries (roadmap M1 task 4, plus capabilities and affordances from ADR 0005). */
+export const ASSET_KINDS = ["image", "model"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
+
+/**
+ * A file content refers to, e.g. `hollow:models/pine.glb` (ADR 0007 §1). The ID is the asset ref
+ * itself; the pack decides where the file is served from.
+ */
+export interface AssetEntry extends CodeEntry {
+  readonly kind: AssetKind;
+  /** Where the file is served from, e.g. `new URL("./pine.glb", import.meta.url).href`. */
+  readonly url: string;
+  /** Metres per model unit, for models authored in another unit. 1 if omitted. */
+  readonly scale?: number;
+}
+
+/** The v1 registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007). */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
@@ -77,6 +94,7 @@ export interface Registries {
   behaviors: Registry<BehaviorType>;
   capabilities: Registry<CapabilityType>;
   affordances: Registry<AffordanceType>;
+  assets: Registry<AssetEntry>;
 }
 
 function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[] {
@@ -116,6 +134,27 @@ function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[]
         source,
       ),
     );
+  }
+  return found;
+}
+
+function validateAsset(entry: AssetEntry, source: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  if (!ASSET_KINDS.includes(entry.kind)) {
+    found.push(
+      error(
+        "invalid_value",
+        `Unknown asset kind "${String(entry.kind)}" (expected one of ${ASSET_KINDS.join(", ")})`,
+        ["kind"],
+        source,
+      ),
+    );
+  }
+  if (typeof entry.url !== "string" || entry.url.length === 0) {
+    found.push(error("invalid_type", "Expected the asset's URL", ["url"], source));
+  }
+  if (entry.scale !== undefined && !(typeof entry.scale === "number" && entry.scale > 0)) {
+    found.push(error("invalid_value", "scale must be a positive number", ["scale"], source));
   }
   return found;
 }
@@ -189,12 +228,31 @@ const dependencyReferences = (entry: CodeEntry): Reference[] =>
     path: ["dependencies", i],
   }));
 
+/** A reference to an asset, optionally of one kind (a prop needs a model). */
+function assetReference(id: string, path: DiagnosticPath, kind?: AssetKind): Reference {
+  if (kind === undefined) return { registry: "assets", id, path };
+  return {
+    registry: "assets",
+    id,
+    path,
+    check: (target) => {
+      const actual = (target as AssetEntry).kind;
+      return actual === kind
+        ? []
+        : [error("invalid_value", `"${id}" is an asset of kind ${actual}, expected ${kind}`, path)];
+    },
+  };
+}
+
 function worldReferences(world: WorldDefinition): Reference[] {
   const refs: Reference[] = world.structures.map((s, i) => ({
     registry: "structures",
     id: s.structure,
     path: ["structures", i, "structure"],
   }));
+  world.props.forEach((prop, i) =>
+    refs.push(assetReference(prop.model, ["props", i, "model"], "model")),
+  );
   const regions = [
     ...world.regions.map((region, i) => ({ region, regionPath: ["regions", i] })),
     ...world.structures.flatMap((s, si) =>
@@ -234,6 +292,7 @@ function worldReferences(world: WorldDefinition): Reference[] {
 }
 
 const speciesReferences = (species: SpeciesDefinition): Reference[] => [
+  assetReference(species.appearance, ["appearance"]),
   ...species.behaviors.map((id, i) => ({ registry: "behaviors", id, path: ["behaviors", i] })),
   ...Object.keys(species.capabilities).map((id) => ({
     registry: "capabilities",
@@ -242,12 +301,14 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
   })),
 ];
 
-const structureReferences = (structure: StructureDefinition): Reference[] =>
-  structure.affordances.map((id, i) => ({
+const structureReferences = (structure: StructureDefinition): Reference[] => [
+  ...structure.affordances.map((id, i) => ({
     registry: "affordances",
     id,
     path: ["affordances", i],
-  }));
+  })),
+  ...structure.visualAssets.map((id, i) => assetReference(id, ["visualAssets", i])),
+];
 
 export function createRegistries(): Registries {
   return {
@@ -282,6 +343,10 @@ export function createRegistries(): Registries {
     }),
     affordances: new Registry<AffordanceType>("affordances", {
       validate: validateCodeEntry(),
+      references: dependencyReferences,
+    }),
+    assets: new Registry<AssetEntry>("assets", {
+      validate: validateCodeEntry<AssetEntry>(validateAsset),
       references: dependencyReferences,
     }),
   };

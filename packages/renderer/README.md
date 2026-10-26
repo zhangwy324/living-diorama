@@ -6,7 +6,7 @@ Three.js scene: terrain, water, structures, props, creatures, camera and debug o
 
 - Everything drawn on screen, including camera state (which never reaches the simulation).
 - Interpolation between simulation snapshots.
-- The world preview: terrain, diorama base, water, decks and placeholder props, built from the simulation's `SceneData`.
+- The scene built from the simulation's `SceneData`: terrain, diorama base, animated water, structure decks with railings, and props instanced from their model assets, in layers with clipping-plane support ([ADR 0007](../../docs/adr/0007-renderer.md)).
 
 ## Must not
 

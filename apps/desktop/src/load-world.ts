@@ -39,8 +39,15 @@ export function loadContent(): Result<Registries> {
   return hasErrors(diagnostics) ? { ok: false, diagnostics } : { ok: true, value: registries };
 }
 
-/** Loads content and runs the world checks. Returns scene data for the renderer, or the diagnostics. */
-export function loadWorld(): { scene?: SceneData; diagnostics: Diagnostic[] } {
+/**
+ * Loads content and runs the world checks. Returns scene data and the registered assets for the
+ * renderer, or the diagnostics.
+ */
+export function loadWorld(): {
+  scene?: SceneData;
+  assets?: Registries["assets"];
+  diagnostics: Diagnostic[];
+} {
   const { registries, diagnostics } = register();
   if (hasErrors(diagnostics)) return { diagnostics };
   const world = registries.worlds.get(WORLD_ID) as WorldDefinition | undefined;
@@ -50,5 +57,5 @@ export function loadWorld(): { scene?: SceneData; diagnostics: Diagnostic[] } {
   const check = checkWorld(world, registries);
   diagnostics.push(...check.diagnostics);
   if (!check.model || hasErrors(diagnostics)) return { diagnostics };
-  return { scene: describeScene(check.model), diagnostics };
+  return { scene: describeScene(check.model), assets: registries.assets, diagnostics };
 }

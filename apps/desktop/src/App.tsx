@@ -2,11 +2,10 @@ import { formatDiagnostic } from "@living-diorama/content-schema";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef } from "react";
 import { loadWorld } from "./load-world";
-import { propPlaceholders } from "./prop-placeholders";
 import { startSimulation } from "./simulation-client";
 
 // Content is static for now, so it loads once at startup.
-const { scene, diagnostics } = loadWorld();
+const { scene, assets, diagnostics } = loadWorld();
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
@@ -14,7 +13,9 @@ export function App() {
 
   useEffect(() => {
     if (!scene || !container.current) return;
-    const created = createDioramaView(container.current, scene, { propPlaceholders });
+    const created = createDioramaView(container.current, scene, {
+      resolveAsset: (ref) => assets?.get(ref),
+    });
     view.current = created;
     return () => created.dispose();
   }, []);

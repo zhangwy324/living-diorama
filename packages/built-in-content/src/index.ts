@@ -1,5 +1,5 @@
 import type { Result } from "@living-diorama/content-schema";
-import type { Registries } from "@living-diorama/extension-api";
+import type { AssetEntry, Registries } from "@living-diorama/extension-api";
 import mossling from "./woodland-hollow/mossling.json";
 import woodenBridge from "./woodland-hollow/wooden-bridge.json";
 import woodlandHollow from "./woodland-hollow/world.json";
@@ -19,12 +19,65 @@ export const builtInDefinitions = {
   worlds: [woodlandHollow],
 } as const satisfies Record<"structures" | "species" | "worlds", readonly unknown[]>;
 
+const asset = (id: string, kind: AssetEntry["kind"], url: URL, scale?: number): AssetEntry => ({
+  id,
+  version: "1.0.0",
+  kind,
+  url: url.href,
+  ...(scale === undefined ? {} : { scale }),
+});
+
+/**
+ * The files the pack's content refers to (ADR 0007 §1). Each URL is a literal `new URL(…,
+ * import.meta.url)` so Vite bundles the file; Node resolves it to a file URL. The models are
+ * Kenney's Nature Kit (CC0, see `assets/models/LICENSE-kenney.txt`); each scale sets the
+ * model's size in metres (a pine about 3 m tall, a rock about 0.9 m across).
+ */
+export const builtInAssets: readonly AssetEntry[] = [
+  asset(
+    "hollow:sprites/mossling.svg",
+    "image",
+    new URL("./woodland-hollow/assets/sprites/mossling.svg", import.meta.url),
+  ),
+  asset(
+    "hollow:models/pine.glb",
+    "model",
+    new URL("./woodland-hollow/assets/models/pine.glb", import.meta.url),
+    2.2,
+  ),
+  asset(
+    "hollow:models/round-tree.glb",
+    "model",
+    new URL("./woodland-hollow/assets/models/round-tree.glb", import.meta.url),
+    1.8,
+  ),
+  asset(
+    "hollow:models/rock.glb",
+    "model",
+    new URL("./woodland-hollow/assets/models/rock.glb", import.meta.url),
+    0.85,
+  ),
+  asset(
+    "hollow:models/bush.glb",
+    "model",
+    new URL("./woodland-hollow/assets/models/bush.glb", import.meta.url),
+    1.4,
+  ),
+  asset(
+    "hollow:models/mushroom.glb",
+    "model",
+    new URL("./woodland-hollow/assets/models/mushroom.glb", import.meta.url),
+    1.5,
+  ),
+];
+
 /**
  * Registers the built-in pack exactly as a third-party pack would. Register the engine's entries
  * first (`registerCoreEngine` in simulation), then call `resolveReferences`.
  */
 export function registerBuiltInContent(registries: Registries): Result<unknown>[] {
   return [
+    ...builtInAssets.map((a) => registries.assets.register(a)),
     ...builtInDefinitions.structures.map((d) => registries.structures.register(d)),
     ...builtInDefinitions.species.map((d) => registries.species.register(d)),
     ...builtInDefinitions.worlds.map((d) => registries.worlds.register(d)),

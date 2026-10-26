@@ -1,11 +1,12 @@
 import type {
   MaterialZones,
+  Portal,
   PropPlacement,
   RegionKind,
   Vec3,
   WorldBounds,
 } from "@living-diorama/content-schema";
-import { pointInPolygon } from "./geometry";
+import { pointInPolygon, projectOnSegment } from "./geometry";
 import type { SurfaceMesh } from "./surfaces";
 import type { WorldModel } from "./world-model";
 
@@ -30,6 +31,11 @@ export interface SceneData {
     /** Placement ID when a structure contributed the region. */
     structureId?: string;
     mesh: SurfaceMesh;
+    /**
+     * For structure surfaces: the mesh's rim edges that no portal of the region covers, i.e.
+     * where a creature could step off. The renderer draws railings along them (ADR 0007 §3).
+     */
+    openEdges?: [Vec3, Vec3][];
   }[];
   /**
    * Height of the water standing above the terrain at each edge sample of the world, for drawing
@@ -39,6 +45,37 @@ export interface SceneData {
   edgeWater: { north: number[]; south: number[]; west: number[]; east: number[] };
   props: PropPlacement[];
   spawnPoints: Vec3[];
+}
+
+/** How far a rim vertex may lie from a portal and still count as on it, in metres. */
+const PORTAL_TOLERANCE = 0.05;
+
+/** Rim edges of a surface mesh (edges of only one triangle) that do not lie along any portal. */
+export function openEdges(mesh: SurfaceMesh, portals: readonly Portal[]): [Vec3, Vec3][] {
+  const vertex = (i: number): Vec3 => ({
+    x: mesh.positions[i * 3] ?? 0,
+    y: mesh.positions[i * 3 + 1] ?? 0,
+    z: mesh.positions[i * 3 + 2] ?? 0,
+  });
+  const uses = new Map<string, { a: number; b: number; count: number }>();
+  for (let t = 0; t < mesh.indices.length; t += 3) {
+    for (let n = 0; n < 3; n++) {
+      const a = mesh.indices[t + n] ?? 0;
+      const b = mesh.indices[t + ((n + 1) % 3)] ?? 0;
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      const edge = uses.get(key) ?? { a, b, count: 0 };
+      edge.count++;
+      uses.set(key, edge);
+    }
+  }
+  const onPortal = (p: Vec3) =>
+    portals.some(
+      (portal) => projectOnSegment(p.x, p.z, portal.a, portal.b).distance <= PORTAL_TOLERANCE,
+    );
+  return [...uses.values()]
+    .filter((e) => e.count === 1)
+    .map((e): [Vec3, Vec3] => [vertex(e.a), vertex(e.b)])
+    .filter(([a, b]) => !(onPortal(a) && onPortal(b)));
 }
 
 function sampleColors(materials: MaterialZones, count: number): string[] {
@@ -93,12 +130,18 @@ export function describeScene(model: WorldModel): SceneData {
     surfaces: regions.flatMap((region) => {
       const mesh = region.surface.mesh(region.footprint);
       if (!mesh) return [];
+      if (region.structureId === undefined)
+        return [{ regionId: region.id, kind: region.kind, mesh }];
+      const portals = model.connections
+        .filter((c) => c.from === region.id || c.to === region.id)
+        .map((c) => c.portal);
       return [
         {
           regionId: region.id,
           kind: region.kind,
-          ...(region.structureId === undefined ? {} : { structureId: region.structureId }),
+          structureId: region.structureId,
           mesh,
+          openEdges: openEdges(mesh, portals),
         },
       ];
     }),
