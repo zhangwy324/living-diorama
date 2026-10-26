@@ -28,11 +28,11 @@
 
 ### Tray, settings and expanded mode (PR B)
 
-7. **Tray icon.** Left-click toggles show/hide. The menu: Show/Hide, Expand/Collapse, Pause/Resume, Always on top (checkbox), Monitor ▸ (one entry per monitor), Quit. Always-on-top defaults to off.
+7. **Tray icon.** Left-click toggles show/hide. The menu: Show/Hide, Expand/Collapse, Pause/Resume, Always on top (checkbox), Monitor ▸ (one entry per monitor), Quit. Always-on-top defaults to off. Rust owns the paused flag, so the tray and the controls overlay agree, and tells the frontend with a `paused-changed` event, which `DesktopShell.onPausedChanged` forwards to the simulation worker. This event arrived in PR B, ahead of the rest of the event API in PR C, so the tray Pause works from the start. Quit exits at once until PR C adds the clean shutdown (§14).
 
-8. **Expanded mode** is about 70% of the work area in each dimension, centred on the strip's monitor. The camera keeps its state across the switch (roadmap §1.9 Q1).
+8. **Expanded mode** is about 70% of the work area in each dimension, centred on the strip's monitor. The camera keeps its state across the switch (roadmap §1.9 Q1). Height changes from the resize handle are ignored while expanded; PR C hides the handle in that mode. Expanded mode is not persisted: the app always starts as the strip.
 
-9. **Settings file.** `settings.json` in the app config directory, read and written by Rust with serde (no store plugin). It holds the monitor name, compact height and always-on-top, plus a `version` field. Writes go to a temporary file then rename, so a crash never leaves a torn file. A missing or unreadable file means defaults, and an unreadable one is logged, not fatal. This is window settings only; worlds are not saved in v1 (roadmap §1.9 Q5).
+9. **Settings file.** `settings.json` in the app config directory, read and written by Rust with serde (no store plugin). It holds the monitor name, compact height and always-on-top, plus a `version` field. Writes go to a temporary file then rename, so a crash never leaves a torn file. A missing or unreadable file, or one with another `version`, means defaults, and an unreadable one is logged, not fatal. Monitor and always-on-top changes are saved at once; height changes once the height has been still for 500 ms, so a handle drag is one write. This is window settings only; worlds are not saved in v1 (roadmap §1.9 Q5).
 
 10. **No screen-space reservation in v1.** The strip is a plain window, so with always-on-top off a maximized window covers it. Registering as a Windows AppBar, which shrinks the work area for other windows, is a post-v1 option.
 
@@ -66,7 +66,9 @@ So the camera works with no activation, and the control shows the probe does det
 
 The same probe, run against PR A's release build on a two-monitor setup at 100%, found the strip at the full width of the primary's work area and 220 px tall, directly above the taskbar; foreground focus unchanged through launch, click, orbit and three handle drags; and the height clamped to 260 and 180 with the bottom edge fixed.
 
-Not covered by the probe: the tray menu on a non-activating window (PR B), real (not synthetic) mouse and touchpad input, and other scale factors and display changes, which the manual checklist in `docs/development.md` covers.
+A third probe, against PR B's release build, drove the tray icon in the notification-area overflow. Dragging the handle wrote `settings.json` once, after the debounce; a left-click hid the strip; Expand gave 1792×974 centred on the 2560×1392 work area and 1344×722 on the 1920×1032 second monitor; Collapse restored the strip; Always on top set `WS_EX_TOPMOST` and saved it; Monitor ▸ Display 2 moved the strip and saved `\.DISPLAY2`, which a relaunch restored; Quit exited. The menu is owner-drawn, so UI Automation cannot see its items, and synthetic keyboard navigation of it dropped keys; Pause/Resume and long sequences of menu actions are left to the manual checklist. The probe did catch the menu reading "Show" at launch because it was refreshed before the window was shown.
+
+Not covered by the probes: real (not synthetic) mouse and touchpad input, and other scale factors and display changes, which the manual checklist in `docs/development.md` covers.
 
 ## Consequences
 

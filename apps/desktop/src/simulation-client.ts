@@ -15,6 +15,8 @@ const CREATURE_COUNT = 3;
 export interface SimulationClient {
   /** Turns debug data (routes) in snapshots on or off. */
   setDebug(enabled: boolean): void;
+  /** Stops or restarts the simulation clock. */
+  setPaused(paused: boolean): void;
   stop(): void;
 }
 
@@ -48,6 +50,7 @@ export function startSimulation(
 
   return {
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
+    setPaused: (paused) => send({ type: paused ? "pause" : "resume" }),
     stop: () => worker.terminate(),
   };
 }
