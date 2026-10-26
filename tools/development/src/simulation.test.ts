@@ -68,6 +68,15 @@ describe("long randomized runs keep every invariant", () => {
     expectWanderShape(traces);
   });
 
+  // Nothing may assume a single creature (roadmap M6 task 4, ADR 0009 §4).
+  it("Woodland Hollow with 20 creatures, 20k ticks", () => {
+    const report = runWithInvariants({ ...hollow, seed: 5, ticks: 20_000, creatures: 20 });
+    expect(report.violations).toEqual([]);
+    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+    expect(report.eventCounts.path_failed ?? 0).toBe(0);
+    expect(report.eventCounts.first_use_of_structure).toBe(20);
+  });
+
   it.each([1, 2])("river-crossing fixture, seed %i, 50k ticks", (seed) => {
     const report = runWithInvariants({ ...river, seed, ticks: 50_000, creatures: 2 });
     expect(report.violations).toEqual([]);

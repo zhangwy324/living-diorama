@@ -86,12 +86,38 @@ body,
   stroke-linejoin: round;
 }
 
-.diagnostics {
+.error-screen {
+  box-sizing: border-box;
+  height: 100%;
   padding: 12px 16px;
+  overflow: auto;
   font-size: 13px;
 }
 
-.diagnostics h1 {
+.error-screen h1 {
+  display: flex;
+  gap: 12px;
+  align-items: center;
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 16px;
+}
+
+.error-screen button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  background: rgb(0 0 0 / 35%);
+  cursor: pointer;
+}
+
+.error-screen button:hover {
+  background: rgb(0 0 0 / 55%);
+}
+
+.error-screen li {
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
 }
