@@ -33,4 +33,16 @@ Version 0.0.0 with 3 creatures, 5 minutes per state, sampled once a second. Mean
 
 ## Soak test
 
-Pending: 8 hours with 3 creatures (ADR 0009 §6), run with `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`.
+**Passed** (ADR 0009 §6). An 8-hour run on 26 October 2026: release build of `main` at bcd1156, 3 creatures, the strip shown with the cursor off it, sampled every 10 seconds on the reference machine.
+
+| Hour | CPU % | GPU % | Private MB | Working set MB | GPU memory MB |
+| ---: | ----: | ----: | ---------: | -------------: | ------------: |
+|    1 |  0.62 |  1.52 |        319 |            483 |            99 |
+|    2 |  0.61 |  1.68 |        339 |            504 |            99 |
+|    4 |  0.62 |  1.77 |        339 |            504 |            99 |
+|    6 |  0.64 |  2.18 |        339 |            504 |            99 |
+|    8 |  0.65 |  2.11 |        339 |            504 |            99 |
+
+- **Memory is flat after warm-up.** Private bytes rose from 282 MB to 338 MB in the first 30 minutes, then held at 339 MB to the end: 0.0% growth from hour 1 (minutes 60–70) to the last 10 minutes, against a limit of 10%. GPU memory never moved.
+- **No stuck creatures and no failed paths:** 0 `creature_stuck`, 0 `path_failed`. The process count stayed at 7.
+- **GPU use stepped up after 20 minutes**, from 0.53% (as in the baseline) to between 1.5% and 2.5% for the rest of the run, while CPU stayed at the idle level. The renderer's work did not change, so the likely cause is the GPU dropping to a lower clock once the machine was left alone, which makes the same work a larger share. This is a hypothesis, not checked; compare GPU clocks during a run if it matters.
