@@ -29,7 +29,9 @@ impl Rect {
 pub struct MonitorInfo {
     /// OS device name, e.g. `\\.\DISPLAY2` on Windows. Used to remember the user's choice.
     pub name: Option<String>,
-    /// The monitor minus the taskbar and other reserved areas.
+    /// The whole monitor.
+    pub bounds: Rect,
+    /// The monitor minus the taskbar and other reserved areas, the strip's own included.
     pub work_area: Rect,
     pub scale_factor: f64,
     pub primary: bool,
@@ -97,6 +99,7 @@ mod tests {
     fn monitor(name: &str, primary: bool) -> MonitorInfo {
         MonitorInfo {
             name: Some(name.to_owned()),
+            bounds: FULL_HD_WORK_AREA,
             work_area: FULL_HD_WORK_AREA,
             scale_factor: 1.0,
             primary,

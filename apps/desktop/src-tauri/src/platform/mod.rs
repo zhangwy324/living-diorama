@@ -4,27 +4,57 @@
 
 use tauri::WebviewWindow;
 
+use crate::placement::Rect;
+
 #[cfg(windows)]
 mod windows;
 
-pub trait Platform {
+/// What `Platform::watch_displays` reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayEvent {
+    /// Displays, scale factors, work areas or other apps' reserved space changed.
+    Changed,
+    /// A full-screen app opened (`true`) or the last one closed (`false`). Reported only while the
+    /// strip reserves space.
+    FullScreen(bool),
+}
+
+pub trait Platform: Send + Sync {
     /// Applies the strip's OS window style before it is first shown: no taskbar button and no
     /// task-switcher entry. Focus policy itself is Tauri's `focusable: false`.
     fn prepare_strip(&self, window: &WebviewWindow) -> tauri::Result<()>;
 
-    /// Calls `on_change` on the main thread, outside any window message handling, after displays,
-    /// scale factors or work areas changed. Bursts of changes may be coalesced into one call.
+    /// Calls `on_event` on the main thread, outside any window message handling. Bursts of
+    /// `Changed` may be coalesced into one call.
     fn watch_displays(
         &self,
         window: &WebviewWindow,
-        on_change: Box<dyn Fn() + 'static>,
+        on_event: Box<dyn Fn(DisplayEvent) + 'static>,
     ) -> tauri::Result<()>;
+
+    /// The area along the bottom of a monitor that the strip may reserve, left by the taskbar and
+    /// other apps' reservations but not counting the strip's own (ADR 0008 §10). `bounds` is the
+    /// whole monitor and `work_area` its current work area. Registers the window for reserving
+    /// space if needed. `None` when the platform can't reserve space.
+    fn reservable_area(
+        &self,
+        window: &WebviewWindow,
+        bounds: Rect,
+        work_area: Rect,
+    ) -> tauri::Result<Option<Rect>>;
+
+    /// Reserves `rect`, which lies at the bottom of `reservable_area`, so that other windows'
+    /// work area excludes it, and returns the rectangle actually granted.
+    fn reserve(&self, window: &WebviewWindow, rect: Rect) -> tauri::Result<Rect>;
+
+    /// Gives any reserved space back. Does nothing when nothing is reserved.
+    fn release(&self, window: &WebviewWindow) -> tauri::Result<()>;
 }
 
 /// The platform this build runs on.
 pub fn current() -> Box<dyn Platform> {
     #[cfg(windows)]
-    return Box::new(windows::Windows);
+    return Box::new(windows::Windows::default());
     #[cfg(not(windows))]
     return Box::new(Unsupported);
 }
@@ -42,8 +72,25 @@ impl Platform for Unsupported {
     fn watch_displays(
         &self,
         _window: &WebviewWindow,
-        _on_change: Box<dyn Fn() + 'static>,
+        _on_event: Box<dyn Fn(DisplayEvent) + 'static>,
     ) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn reservable_area(
+        &self,
+        _window: &WebviewWindow,
+        _bounds: Rect,
+        _work_area: Rect,
+    ) -> tauri::Result<Option<Rect>> {
+        Ok(None)
+    }
+
+    fn reserve(&self, _window: &WebviewWindow, rect: Rect) -> tauri::Result<Rect> {
+        Ok(rect)
+    }
+
+    fn release(&self, _window: &WebviewWindow) -> tauri::Result<()> {
         Ok(())
     }
 }

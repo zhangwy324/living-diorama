@@ -193,7 +193,12 @@ export function createDioramaView(
   };
   resize();
   frame();
-  const observer = new ResizeObserver(resize);
+  // Resizing clears the canvas. Draw again before the browser paints, or a throttled loop would
+  // leave it blank until its next frame, e.g. throughout a drag of the strip's height handle.
+  const observer = new ResizeObserver(() => {
+    resize();
+    renderer.render(world, camera);
+  });
   observer.observe(container);
 
   // Full frame rate while the pointer is over the view or the camera moves (ADR 0007 §11).

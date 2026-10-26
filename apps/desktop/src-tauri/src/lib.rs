@@ -14,6 +14,11 @@ pub fn run() {
             shell::commands::hide,
             shell::commands::quit_ready,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                shell::release_space(app);
+            }
+        });
 }

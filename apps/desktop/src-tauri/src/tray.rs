@@ -12,6 +12,7 @@ const SHOW_HIDE: &str = "show-hide";
 const EXPAND: &str = "expand";
 const PAUSE: &str = "pause";
 const ALWAYS_ON_TOP: &str = "always-on-top";
+const RESERVE_SPACE: &str = "reserve-space";
 const QUIT: &str = "quit";
 /// Monitor entries' ids are this prefix plus the monitor's device name.
 const MONITOR_PREFIX: &str = "monitor:";
@@ -22,6 +23,7 @@ struct Tray {
     expand: MenuItem<tauri::Wry>,
     pause: MenuItem<tauri::Wry>,
     always_on_top: CheckMenuItem<tauri::Wry>,
+    reserve_space: CheckMenuItem<tauri::Wry>,
     monitors: Submenu<tauri::Wry>,
 }
 
@@ -38,6 +40,14 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             false,
             None::<&str>,
         )?,
+        reserve_space: CheckMenuItem::with_id(
+            app,
+            RESERVE_SPACE,
+            "Reserve screen space",
+            true,
+            true,
+            None::<&str>,
+        )?,
         monitors: Submenu::new(app, "Monitor", true)?,
     };
     let menu = Menu::with_items(
@@ -47,6 +57,7 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &tray.expand,
             &tray.pause,
             &tray.always_on_top,
+            &tray.reserve_space,
             &tray.monitors,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?,
@@ -83,6 +94,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         EXPAND => shell::toggle_expanded(app),
         PAUSE => shell::toggle_paused(app),
         ALWAYS_ON_TOP => shell::toggle_always_on_top(app),
+        RESERVE_SPACE => shell::toggle_reserve_space(app),
         QUIT => shell::quit(app),
         _ => {
             if let Some(name) = id.strip_prefix(MONITOR_PREFIX) {
@@ -113,6 +125,8 @@ fn try_refresh(app: &AppHandle) -> tauri::Result<()> {
         .set_text(if shell.paused { "Resume" } else { "Pause" })?;
     tray.always_on_top
         .set_checked(shell.settings.always_on_top)?;
+    tray.reserve_space
+        .set_checked(shell.settings.reserve_space)?;
 
     for item in tray.monitors.items()? {
         tray.monitors.remove(&item)?;

@@ -21,6 +21,8 @@ pub struct Settings {
     /// Compact height in logical pixels, always within the limits once loaded.
     pub height: f64,
     pub always_on_top: bool,
+    /// Whether the strip reserves its space, so maximized windows stop above it (ADR 0008 §10).
+    pub reserve_space: bool,
 }
 
 impl Default for Settings {
@@ -30,6 +32,7 @@ impl Default for Settings {
             monitor: None,
             height: DEFAULT_STRIP_HEIGHT,
             always_on_top: false,
+            reserve_space: true,
         }
     }
 }
@@ -104,6 +107,7 @@ mod tests {
             monitor: Some(r"\\.\DISPLAY2".to_owned()),
             height: 240.0,
             always_on_top: true,
+            reserve_space: false,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
