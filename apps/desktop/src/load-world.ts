@@ -12,8 +12,11 @@ import {
 } from "@living-diorama/extension-api";
 import {
   checkWorld,
+  describeNavigation,
   describeScene,
+  profileForSpecies,
   registerCoreEngine,
+  type NavigationOverlay,
   type SceneData,
 } from "@living-diorama/simulation";
 
@@ -40,11 +43,12 @@ export function loadContent(): Result<Registries> {
 }
 
 /**
- * Loads content and runs the world checks. Returns scene data and the registered assets and
- * species for the renderer, or the diagnostics.
+ * Loads content and runs the world checks. Returns scene data, the spawned species' navigation
+ * overlay and the registered assets and species for the renderer, or the diagnostics.
  */
 export function loadWorld(): {
   scene?: SceneData;
+  navigation?: NavigationOverlay;
   assets?: Registries["assets"];
   species?: Registries["species"];
   diagnostics: Diagnostic[];
@@ -58,8 +62,12 @@ export function loadWorld(): {
   const check = checkWorld(world, registries);
   diagnostics.push(...check.diagnostics);
   if (!check.model || hasErrors(diagnostics)) return { diagnostics };
+  const spawned = registries.species.get(SPECIES_ID);
+  const profile = spawned && profileForSpecies(spawned, registries);
+  const navigation = check.navigations.find((n) => n.profile.key === profile?.key);
   return {
     scene: describeScene(check.model),
+    ...(navigation ? { navigation: describeNavigation(check.model, navigation) } : {}),
     assets: registries.assets,
     species: registries.species,
     diagnostics,

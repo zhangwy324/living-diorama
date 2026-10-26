@@ -12,12 +12,19 @@ const TICK_RATE_HZ = 10;
 /** Default creature count (roadmap §1.9 Q3). */
 const CREATURE_COUNT = 3;
 
+export interface SimulationClient {
+  /** Turns debug data (routes) in snapshots on or off. */
+  setDebug(enabled: boolean): void;
+  stop(): void;
+}
+
 /**
  * Starts the simulation worker with a few creatures and hands every snapshot to `onSnapshot`. The
- * seed changes every launch and is logged so a run can be reproduced. Returns a function that
- * stops it.
+ * seed changes every launch and is logged so a run can be reproduced.
  */
-export function startSimulation(onSnapshot: (snapshot: SimulationSnapshot) => void): () => void {
+export function startSimulation(
+  onSnapshot: (snapshot: SimulationSnapshot) => void,
+): SimulationClient {
   const worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), {
     type: "module",
   });
@@ -39,5 +46,8 @@ export function startSimulation(onSnapshot: (snapshot: SimulationSnapshot) => vo
   };
   send({ type: "init", worldId: WORLD_ID, seed, tickRateHz: TICK_RATE_HZ });
 
-  return () => worker.terminate();
+  return {
+    setDebug: (enabled) => send({ type: "set_debug", enabled }),
+    stop: () => worker.terminate(),
+  };
 }

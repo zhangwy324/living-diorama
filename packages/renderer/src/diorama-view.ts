@@ -1,11 +1,14 @@
-import type { SceneData, SimulationSnapshot } from "@living-diorama/simulation";
+import type { NavigationOverlay, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
 import { CreatureSprites, type ImageLoader, type SpeciesResolver } from "./creatures";
+import { DebugStats } from "./debug-stats";
 import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
+import { createDebugOverlays, type DebugOverlays } from "./overlays";
 import { loadGltf, loadProps, type AssetResolver, type ModelLoader } from "./props";
+import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
 import { baseMeshes, structureMeshes, terrainMesh, waterSurfaceMeshes } from "./world-meshes";
 
@@ -24,11 +27,18 @@ export interface DioramaViewOptions {
   /** Looks up species to draw creatures. Without it no creature is drawn. */
   resolveSpecies?: SpeciesResolver;
   loadImage?: ImageLoader;
+  /** Walkability, region graph and portals for the debug overlays (ADR 0007 §10). */
+  navigation?: NavigationOverlay;
 }
 
 export interface DioramaView {
   /** Hands the view the newest simulation snapshot; creatures are drawn interpolated (ADR 0007 §8). */
   pushSnapshot(snapshot: SimulationSnapshot): void;
+  /**
+   * Shows or hides the debug overlays and stats. Routes appear only once the simulation sends
+   * them, which its own `set_debug` command turns on.
+   */
+  setDebug(enabled: boolean): void;
   /** Animates back to the art-directed default framing. */
   resetCamera(): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
@@ -89,6 +99,7 @@ export interface DioramaScene {
   layers: SceneLayers;
   water: WaterMaterial;
   creatures: CreatureSprites;
+  overlays: DebugOverlays;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
 }
@@ -120,13 +131,15 @@ export function buildDioramaScene(
     loadImage: options.loadImage,
     ground: [layers.terrain.group, layers.structures.group],
   });
+  const overlays = createDebugOverlays(scene, options.navigation);
+  world.add(overlays.group);
   const ready = loadProps(
     scene.props,
     resolveAsset,
     (objects) => layers.props.add(...objects),
     options.loadModel ?? loadGltf,
   );
-  return { world, layers, water, creatures, ready };
+  return { world, layers, water, creatures, overlays, ready };
 }
 
 export function createDioramaView(
@@ -142,8 +155,10 @@ export function createDioramaView(
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const { world, layers, water, creatures, ready } = buildDioramaScene(scene, options);
+  const { world, layers, water, creatures, overlays, ready } = buildDioramaScene(scene, options);
   const snapshots = new SnapshotInterpolator();
+  const stats = new DebugStats(container.ownerDocument);
+  container.appendChild(stats.element);
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 400);
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -181,12 +196,31 @@ export function createDioramaView(
   const observer = new ResizeObserver(resize);
   observer.observe(container);
 
-  controls.addEventListener("change", () => limitCamera(scene, camera.position, controls.target));
+  // Full frame rate while the pointer is over the view or the camera moves (ADR 0007 §11).
+  let hovered = false;
+  let interacting = false;
+  let moved = false;
+  const canvas = renderer.domElement;
+  const onPointerEnter = () => (hovered = true);
+  const onPointerLeave = () => (hovered = false);
+  canvas.addEventListener("pointerenter", onPointerEnter);
+  canvas.addEventListener("pointerleave", onPointerLeave);
+  controls.addEventListener("start", () => (interacting = true));
+  controls.addEventListener("end", () => (interacting = false));
+  controls.addEventListener("change", () => {
+    moved = true;
+    limitCamera(scene, camera.position, controls.target);
+  });
 
   const timer = new THREE.Timer();
+  const throttle = new FrameThrottle();
   let raf = 0;
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
+    // Damping keeps moving the camera after a drag ends, so the frame after a change is full rate.
+    const fullRate = hovered || interacting || moved || reset !== undefined;
+    if (!throttle.due(now, fullRate)) return;
+    moved = false;
     timer.update(now);
     water.update(timer.getElapsed());
     if (reset) {
@@ -197,14 +231,32 @@ export function createDioramaView(
       if (reset.t >= 1) reset = undefined;
     }
     controls.update();
-    creatures.update(snapshots.sample(now), camera);
+    const poses = snapshots.sample(now);
+    creatures.update(poses, camera);
+    if (overlays.group.visible) {
+      overlays.routes.update(poses);
+      stats.frame(now, fullRate);
+    }
     renderer.render(world, camera);
   };
   raf = requestAnimationFrame(loop);
 
+  // Hidden pages are not rendered at all; the simulation keeps running in its worker.
+  const onVisibilityChange = () => {
+    cancelAnimationFrame(raf);
+    if (!container.ownerDocument.hidden) raf = requestAnimationFrame(loop);
+  };
+  container.ownerDocument.addEventListener("visibilitychange", onVisibilityChange);
+
   return {
     pushSnapshot(snapshot) {
       snapshots.push(snapshot, performance.now());
+      overlays.routes.setRoutes(snapshot);
+      stats.snapshot(snapshot);
+    },
+    setDebug(enabled) {
+      overlays.group.visible = enabled;
+      stats.element.hidden = !enabled;
     },
     resetCamera() {
       const f = defaultFraming(scene, camera.aspect);
@@ -222,12 +274,16 @@ export function createDioramaView(
     ready,
     dispose() {
       cancelAnimationFrame(raf);
+      container.ownerDocument.removeEventListener("visibilitychange", onVisibilityChange);
+      canvas.removeEventListener("pointerenter", onPointerEnter);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       observer.disconnect();
       controls.dispose();
       timer.dispose();
       creatures.dispose();
       renderer.dispose();
       renderer.domElement.remove();
+      stats.element.remove();
     },
   };
 }

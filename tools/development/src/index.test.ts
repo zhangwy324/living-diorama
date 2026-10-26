@@ -1,6 +1,11 @@
 import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
 import { createRegistries, resolveReferences } from "@living-diorama/extension-api";
-import { checkWorld, describeScene, registerCoreEngine } from "@living-diorama/simulation";
+import {
+  checkWorld,
+  describeNavigation,
+  describeScene,
+  registerCoreEngine,
+} from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import {
   plankBridge,
@@ -82,6 +87,31 @@ describe("river-crossing world check", () => {
     const withoutBridge = { ...world, structures: [] };
     const [bare] = checkWorld(withoutBridge, registries).navigations;
     expect([...bare!.reachableRegions("north-bank")]).toEqual(["north-bank"]);
+  });
+
+  it("describes walkability, graph nodes and portals for the overlays", () => {
+    const { registries } = load();
+    const check = checkWorld(registries.worlds.get("fixture:river-crossing")!, registries);
+    const nav = check.navigations[0]!;
+    const overlay = describeNavigation(check.model!, nav);
+    expect(overlay.profileKey).toBe(nav.profile.key);
+    for (const region of overlay.regions) {
+      const mask = nav.masks.get(region.regionId)!;
+      expect(region.cells.filter((c) => c.walkable)).toHaveLength(mask.walkableCount);
+      if (mask.walkableCount > 0)
+        expect(mask.isWalkableAt(region.anchor.x, region.anchor.z)).toBe(true);
+      for (const cell of region.cells) {
+        const [a, , c] = cell.corners;
+        expect(c.x - a.x).toBeCloseTo(mask.cellSize);
+        expect(c.z - a.z).toBeCloseTo(mask.cellSize);
+      }
+    }
+    const deck = overlay.regions.find((r) => r.regionId === "bridge-deck")!;
+    const deckSurface = check.model!.regions.get("bridge-deck")!.surface;
+    expect(deck.anchor.y).toBeCloseTo(deckSurface.heightAt(deck.anchor.x, deck.anchor.z)!);
+    expect(overlay.portals.map((p) => [p.connectionId, p.usable])).toEqual(
+      check.model!.connections.map((c) => [c.id, true]),
+    );
   });
 
   it("resolves deck positions above the river it overlaps", () => {

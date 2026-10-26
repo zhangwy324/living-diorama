@@ -9,6 +9,8 @@ Three.js scene: terrain, water, structures, props, creatures, camera and debug o
 - The scene built from the simulation's `SceneData`: terrain, diorama base, animated water, structure decks with railings, and props instanced from their model assets, in layers with clipping-plane support ([ADR 0007](../../docs/adr/0007-renderer.md)).
 - Creatures: upright sprites from the species `appearance` image, mirrored to their heading, true to scale, with a shadow blob lying along the ground, drawn one tick behind the newest snapshot.
 - Camera limits: the orbit target stays over the world and the camera above the terrain.
+- Debug overlays, hidden until `setDebug(true)`: walkability cells, the region graph and portals, creature routes, structure surfaces as wireframes, and an FPS and tick panel. Walkability and the graph come from the app as `NavigationOverlay` data; routes come in snapshots.
+- Render throttling: the display rate while hovered or while the camera moves, about 30 fps otherwise, nothing while the page is hidden.
 
 ## Must not
 

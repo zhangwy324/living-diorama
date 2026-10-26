@@ -5,7 +5,10 @@ import { loadWorld } from "./load-world";
 import { startSimulation } from "./simulation-client";
 
 // Content is static for now, so it loads once at startup.
-const { scene, assets, species, diagnostics } = loadWorld();
+const { scene, navigation, assets, species, diagnostics } = loadWorld();
+
+/** Toggles the debug overlays. M5's controls overlay will add a button for it. */
+const DEBUG_KEY = "d";
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
@@ -16,11 +19,22 @@ export function App() {
     const created = createDioramaView(container.current, scene, {
       resolveAsset: (ref) => assets?.get(ref),
       resolveSpecies: (id) => species?.get(id),
+      ...(navigation ? { navigation } : {}),
     });
     view.current = created;
-    const stop = startSimulation((snapshot) => created.pushSnapshot(snapshot));
+    const simulation = startSimulation((snapshot) => created.pushSnapshot(snapshot));
+    let debug = false;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const modified = event.ctrlKey || event.altKey || event.metaKey || event.shiftKey;
+      if (event.key.toLowerCase() !== DEBUG_KEY || modified || event.repeat) return;
+      debug = !debug;
+      created.setDebug(debug);
+      simulation.setDebug(debug);
+    };
+    window.addEventListener("keydown", onKeyDown);
     return () => {
-      stop();
+      window.removeEventListener("keydown", onKeyDown);
+      simulation.stop();
       created.dispose();
     };
   }, []);

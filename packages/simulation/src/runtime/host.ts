@@ -40,12 +40,13 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
   let simulation: Simulation | undefined;
   let clock: FixedClock | undefined;
   let stopped = false;
+  let debug = false;
   const queue: QueuedCommand[] = [];
 
   const send = (message: SimulationMessage) => port.postMessage(envelope(message));
   const reject = (diagnostics: Diagnostic[]) => send({ type: "error", diagnostics });
   const sendSnapshot = (sim: Simulation, paused: boolean) =>
-    send({ type: "snapshot", snapshot: sim.snapshot(paused), events: [] });
+    send({ type: "snapshot", snapshot: sim.snapshot({ paused, routes: debug }), events: [] });
 
   const init = (command: Extract<SimulationCommand, { type: "init" }>) => {
     if (simulation) {
@@ -97,6 +98,9 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           ]);
         }
         break;
+      case "set_debug":
+        debug = command.enabled === true;
+        break;
       case "spawn": {
         const spawned = sim.spawn(command.speciesId, command.spawnPointId);
         if (!spawned.ok) reject(spawned.diagnostics);
@@ -122,7 +126,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
     const due = clock.advance(options.now());
     for (let n = 0; n < due; n++) {
       const events = simulation.step();
-      send({ type: "snapshot", snapshot: simulation.snapshot(false), events });
+      send({ type: "snapshot", snapshot: simulation.snapshot({ routes: debug }), events });
     }
     options.schedule(loop, clock.tickMs);
   };
