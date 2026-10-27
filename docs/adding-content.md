@@ -140,18 +140,20 @@ const diagnostics = [
 expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
 ```
 
-Diagnostics say what is wrong and where (`error: worlds/meadow:meadow regions[2].footprint[0]: … (code)`). The world checks run per navigation profile (each distinct set of capabilities among the registered species):
+Diagnostics say what is wrong and where (`error: worlds/meadow:meadow regions[2].footprint[0]: … (code)`). The world checks run per navigation profile (each distinct size class and set of capabilities among the registered species). A creature only goes where it fits, so a size that doesn't fit somewhere is a warning, not an error: a large creature can't cross a narrow bridge and never tries ([ADR 0013](adr/0013-size-limits.md)). If your species should go everywhere, check that it gets no warnings either.
 
-| Code                       | Severity | Meaning                                                                                    |
-| -------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `no_walkable_area`         | warning  | A region has nowhere this profile can stand.                                               |
-| `disconnected_region`      | error    | A region's walkable area is split in pieces with no way between them.                      |
-| `portal_unusable`          | error    | A connection's portal can't be crossed, for example it has no walkable ground on one side. |
-| `spawn_not_walkable`       | error    | A spawn point isn't on walkable ground.                                                    |
-| `ambiguous_overlap`        | error    | Two regions are walkable at the same place and height.                                     |
-| `region_seam`              | warning  | Two regions touch away from any portal, so creatures meet an invisible wall.               |
-| `unsatisfiable_connection` | warning  | No registered species has every capability a connection requires.                          |
-| `spawn_unusable`           | warning  | No registered species can move in a spawn point's region.                                  |
+| Code                       | Severity | Meaning                                                                       |
+| -------------------------- | -------- | ----------------------------------------------------------------------------- |
+| `no_walkable_area`         | warning  | A region has nowhere this profile can stand.                                  |
+| `disconnected_region`      | warning  | A region's walkable area splits into pieces this profile can't cross between. |
+| `portal_unusable`          | warning  | A portal has no room for this profile on one side.                            |
+| `portal_unusable`          | error    | A portal's surfaces don't meet within the step height.                        |
+| `spawn_not_walkable`       | warning  | A spawn point has no room for this profile.                                   |
+| `no_spawn_point`           | error    | This profile can't stand on any spawn point, so its creatures can't appear.   |
+| `ambiguous_overlap`        | error    | Two regions are walkable at the same place and height.                        |
+| `region_seam`              | warning  | Two regions touch away from any portal, so creatures meet an invisible wall.  |
+| `unsatisfiable_connection` | warning  | No registered species has every capability a connection requires.             |
+| `spawn_unusable`           | warning  | No registered species can move in a spawn point's region.                     |
 
 In the running app, the debug overlays (**Show debug overlays** in the strip's controls) show walkability cells, the region graph, portals and each creature's route.
 

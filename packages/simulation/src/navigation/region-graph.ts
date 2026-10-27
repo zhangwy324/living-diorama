@@ -17,7 +17,10 @@ export interface Navigation {
   profile: NavProfile;
   masks: ReadonlyMap<string, RegionMask>;
   portals: ReadonlyMap<string, PortalCheck>;
-  /** Regions reachable from `regionId` through usable connections, including itself. */
+  /**
+   * Regions linked to `regionId` through usable connections, including itself. Region-level only:
+   * a region may split into areas a creature can't cross (`Pathfinder.reachableCells`).
+   */
   reachableRegions(regionId: string): Set<string>;
 }
 
