@@ -10,6 +10,8 @@
 
 1. **The M5 manual checklist runs during M6.** The desktop-shell checks in `docs/development.md` (scaling, monitors, sleep, focus) and the installer smoke test both need hands-on sessions on a release build, so they run together. M6 is not done until both have passed.
 
+   **Outcome.** Both ran on the published v0.1.0 installer: the smoke test in Windows Sandbox and the desktop-shell checks on the developer's machine. They found two problems, neither blocking v0.1.0, which are filed for later: a creature's shadow is partly hidden where two surfaces meet (#29), and expanded mode can't be resized and keeps the strip's reserved space, which calls for rethinking what it is for (#30).
+
 ### Failures (PR A)
 
 2. **Every startup or runtime failure reaches the error screen.** Before M6 only content validation did; a simulation `error` message went to the console, and a worker crash or a WebGL failure left a blank strip. Now three more sources feed the same screen:
