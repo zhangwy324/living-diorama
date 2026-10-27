@@ -8,7 +8,7 @@
 
 ### The window (PR 2)
 
-1. **A separate, normal window.** Label `studio`: framed, resizable, focusable, with a taskbar entry and an Alt+Tab entry. Rust creates it on demand with `WebviewWindowBuilder` when the controls overlay or the tray asks for it (an `open_studio` command and a tray menu item). There is one at a time: opening it again shows and focuses the existing window. Closing it destroys it, which frees its WebGL context (§6), and never touches the simulation. The strip keeps every ADR 0008 behaviour, non-focusable included. Expanded mode (issue #30) is a separate question and out of scope.
+1. **A separate, normal window.** Label `studio`: framed, resizable, focusable, with a taskbar entry and an Alt+Tab entry. Rust creates it on demand with `WebviewWindowBuilder` when the controls overlay or the tray asks for it (an `open_studio` command and a tray menu item). There is one at a time: opening it again shows and focuses the existing window. Closing it destroys it, which frees its WebGL context (§7), and never touches the simulation. The strip keeps every ADR 0008 behaviour, non-focusable included. Expanded mode (issue #30) is a separate question and out of scope.
 
 2. **A second Vite entry.** `apps/desktop` builds two pages, `index.html` (the strip) and `studio.html` (the Studio), as a multi-page Vite build, sharing the workspace packages. The Studio page never starts a simulation worker.
 
@@ -32,7 +32,7 @@
    - `quit_ready` also takes the calling window and ignores any caller but `main`, since app commands are callable from every window regardless of capabilities;
    - shell events meant for the strip move to `emit_to("main", …)`, so the Studio doesn't receive them at all.
 
-   Quitting closes the Studio with the app. A drawing that wasn't released is lost then; the close dialog (§10) only covers closing the Studio itself, until drafts arrive.
+   Quitting closes the Studio with the app, and a drawing that wasn't released is lost. This is a known gap, accepted for M11: the close dialog (§10) only covers closing the Studio itself, and saving drafts closes the gap later.
 
 ### Preview and limits (PR 3)
 
@@ -42,52 +42,49 @@
 
 ### The drawing (PRs 2 and 4)
 
-9. **Strokes on a square 256-unit canvas.** The canvas is 256 × 256 units, the body image's size (ADR 0011 §1), shown scaled up to fit the window. Strokes keep the ADR 0014 format: tool (`pen` or `eraser`), colour, width at full pressure and flat `[x, y, pressure, …]` points in canvas units. The Studio rasterises them to the PNG it releases, with the same stroke-drawing code as the editor: `rasterize` moves out of `dev-library.ts` into a module both use, and the console hook keeps using it.
+9. **Strokes on a square 256-unit canvas, drawn as perfect-freehand outlines.** The canvas is 256 × 256 units, the body image's size (ADR 0011 §1), shown scaled up to fit the window. Strokes keep the ADR 0014 format unchanged: tool (`pen` or `eraser`), colour, width at full pressure and flat `[x, y, pressure, …]` points in canvas units.
+
+   A stroke is drawn by turning its points and pressures into an outline polygon with [perfect-freehand](https://github.com/steveruizok/perfect-freehand) (MIT, 1.2.x) and filling it as a `Path2D`: a pen stroke with its colour, an eraser stroke with `destination-out`. The options are fixed: `size` is half the stroke's width and `thinning` is 1, so the stroke is `width × pressure` wide, as ADR 0014 defines; `simulatePressure` is off, since the pressure is in the points (§11); a finished stroke is drawn with `last: true`. One function does this for the editor and for `rasterize`, which moves out of `dev-library.ts` into a module both use (the console hook keeps using it), so the 256 px PNG the body is built from matches what the player saw. Species saved before this change keep their stored PNG; only the sample drawing renders slightly differently from now on.
 
 10. **Closing with an unreleased drawing asks first.** Closing the window while the canvas has strokes that weren't released shows a dialog: **Discard** closes, **Save draft** is shown but disabled ("coming later"), **Cancel** keeps the Studio open. An empty or released drawing closes without asking.
 
 11. **The editor is a plain `<canvas>`, not React Konva.** The roadmap proposed React Konva; the spike below showed it doesn't fit this editor. React renders the toolbar and panels only. The canvas is driven imperatively:
-    - finished strokes are already on the canvas; a pointer move draws only its new segments (with `getCoalescedEvents`, so a pen's extra samples count). Live points are never React state;
-    - the eraser draws with `destination-out` on the same canvas, so its result is exact while drawing;
-    - undo clears and replays all strokes; redo draws one stroke more;
-    - the backing store follows `devicePixelRatio`, and the guide ("facing right, feet on this line") is a separate element over the canvas, so it is never part of the drawing.
+    - **Finished strokes are baked into a bitmap.** A frame with a live stroke draws the bitmap, then the live stroke's outline, so only the live stroke is redrawn. A live eraser stroke fills its outline with `destination-out` over the bitmap, so the result is exact while erasing. When a stroke ends it is baked in.
+    - **Undo and redo replay the stroke list.** The bitmap is rebuilt from the strokes left (undo) or drawn one stroke further (redo). The stroke list is the only state.
+    - **Live points are not React state.** Pointer handlers append to the live stroke and request a frame.
+    - **Every sample counts.** Moves read `getCoalescedEvents()`, so a pen's samples between frames aren't lost. The context is created with `desynchronized: true` for lower latency if PR 2 confirms that it helps and renders correctly in WebView2; otherwise it is left off.
+    - **Pressure.** A pen (`pointerType` `pen`) stores the pressure it reports. A mouse reports a constant 0.5 and touch varies by device, so for every other pointer the Studio stores a pressure derived from speed instead: it eases towards a target that falls from 1 when the pointer moves slowly to a floor of about 0.35 when it moves fast, so quick flicks taper like a brush. PR 2 tunes the constants. Because the derived pressure is stored, replaying a stroke never needs to know which pointer drew it.
+    - **The backing store follows `devicePixelRatio`.** The guide ("facing right, feet on this line") is a separate element over the canvas, so it is never part of the drawing.
 
 ## Spike: React Konva or a plain canvas
 
-A throwaway harness (not committed) drew strokes in the ADR 0014 format on a 256-unit canvas shown at 640 CSS px, at a device pixel ratio of 1.5, with `react-konva` 19.3.2 (React 19), `konva` 10.9.0 and React 19.3.1. It ran in Microsoft Edge (the engine WebView2 uses) with the GPU, driven by synthetic pen pointer events with varying pressure through `puppeteer-core`. The display ran at 100 Hz, so 10 ms is a full-rate frame. Each case seeded 50 strokes of 750 points (and 10 × 500, 50 × 1000), then drew a new stroke with 2 and 4 pointer moves per frame, then undid and redid a stroke 10 times. Six editors:
+A throwaway harness (not committed) drew ADR 0014 strokes, each segment at `width × pressure`, on a 256-unit canvas shown at 640 CSS px (device pixel ratio 1.5), with `react-konva` 19.3.2, `konva` 10.9.0 and React 19.3.1. It ran in Microsoft Edge (WebView2's engine) with the GPU, driven by synthetic pen events with varying pressure through `puppeteer-core`, on a 100 Hz display, where 10 ms is a full-rate frame. It seeded 50 strokes of 750 points, drew a new stroke at 2 pointer moves per frame, and undid and redid a stroke. Undo times include waiting for the next frame (at least 20 ms).
 
-- **canvas:** a plain `<canvas>` drawn incrementally (§11);
-- **konva-react:** one Konva `Shape` per stroke whose `sceneFunc` draws each segment at `width × pressure`, the live stroke in React state;
-- **konva-imperative:** the same shapes, but the live stroke mutated in place with `layer.batchDraw()`;
-- **konva-cached:** like imperative, with the finished strokes in a `Group` cached to a bitmap, re-cached on every change;
-- **konva-line:** one Konva `Line` per stroke, which has a single `strokeWidth`, so pressure is ignored;
-- **konva-segments:** one Konva `Line` per segment, so each has its own width.
+| Editor (50 × 750)                                             | Frame while drawing, mean / p95 | JS per frame | Undo    |
+| ------------------------------------------------------------- | ------------------------------- | ------------ | ------- |
+| Plain canvas: finished strokes kept, new segments drawn       | 10 / 10 ms                      | 0.05 ms      | ~38 ms  |
+| Konva `Shape` per stroke, custom `sceneFunc` for pressure     | 32 / 40 ms                      | 0.2 ms       | ~53 ms  |
+| The same, with the live stroke in React state                 | 33 / 40 ms                      | 5.5 ms       | ~46 ms  |
+| Konva `Line` per stroke (one `strokeWidth`, pressure ignored) | 31 / 40 ms                      | 8.1 ms       | ~60 ms  |
+| Konva `Line` per segment (a width each)                       | 302 / 430 ms                    | 258 ms       | ~240 ms |
+| Konva `Shape` per stroke, finished strokes cached to a bitmap | 10 / 10 ms                      | 0.3 ms       | ~38 ms  |
 
-| Editor (50 × 750) | Frame while drawing, mean / p95 | JS per frame (2 moves) | Undo, to the next frame |
-| ----------------- | ------------------------------- | ---------------------- | ----------------------- |
-| canvas            | 10 / 10 ms                      | 0.05 ms                | ~38 ms                  |
-| konva-react       | 33 / 40 ms                      | 5.5 ms                 | ~46 ms                  |
-| konva-imperative  | 32 / 40 ms                      | 0.2 ms                 | ~53 ms                  |
-| konva-cached      | 10 / 10 ms                      | 0.3 ms                 | ~38 ms                  |
-| konva-line        | 31 / 40 ms                      | 8.1 ms                 | ~60 ms                  |
-| konva-segments    | 302 / 430 ms                    | 258 ms                 | ~240 ms                 |
-
-At 10 × 500, canvas, konva-imperative and konva-cached all kept full rate. At 50 × 1000, konva-imperative fell to 42 ms frames while canvas and konva-cached stayed at 10 ms, with undo at ~55 ms for both. Undo times include waiting for the next frame (at least 20 ms here).
+With 10 strokes of 500 points every variant tried kept full rate. With 50 × 1000, uncached Konva fell to 42 ms frames, while the plain canvas and cached Konva stayed at 10 ms.
 
 What it shows:
 
-- **Konva redraws the whole layer every frame.** That replays every segment of every stroke, so a drawing that grows makes every new stroke slower, from full rate at 5,000 points to 30 fps at 37,500. The cost is in rasterising, not in JavaScript, and it doesn't depend on React: the imperative variant spends 0.2 ms in JavaScript per frame and is as slow.
-- **Pressure needs a custom `sceneFunc`.** A Konva `Line` has one `strokeWidth`. One `Line` per segment gives each its own width but means tens of thousands of nodes, and is unusable. A `Shape` with a `sceneFunc` that draws the segments itself works, which is the plain canvas code inside Konva.
-- **Live points in React state cost 5–16 ms of JavaScript per frame** (copying the points and reconciling), on top of the redraw. They have to stay out of React whichever way is chosen.
-- **Konva can be made fast,** by caching the finished strokes to a bitmap and drawing only the live stroke, which is what the plain canvas does by itself. Then Konva contributes no shapes, hit testing or transforms the editor uses, only a dependency and a cache to keep in step.
+- **Konva redraws the whole layer every frame,** replaying every stroke, so each new stroke gets slower as the drawing grows. The cost is in rasterising, not in JavaScript or React.
+- **Pressure needs custom drawing in Konva.** A `Line` has one `strokeWidth`, a `Line` per segment is unusable, and a `Shape` with its own `sceneFunc` is plain canvas code inside Konva.
+- **Live points in React state cost 5–16 ms of JavaScript per frame.** They stay out of React whatever draws them.
+- **Konva is fast only with the finished strokes cached to a bitmap,** which is what the plain canvas does by itself. Konva then contributes no shapes, hit testing or transforms that the editor uses.
 
-So the plain canvas (§11), the fallback roadmap risk R1 named, with the stroke format unchanged.
+So a plain canvas, the fallback roadmap risk R1 named. The spike drew strokes segment by segment; perfect-freehand was chosen afterwards for the look: smooth, tapered, pressure-shaped strokes from the same points, in a small library without dependencies, the one Excalidraw uses for freehand drawing. With it the live stroke's whole outline is rebuilt each frame rather than only its new segments; PR 2 checks that this stays well inside a frame for long strokes.
 
 ## Consequences
 
 - The app has a second window and a second page. The manual checks in `docs/development.md` gain a Studio section with PR 2: focus, one instance, closing, scaling and two monitors.
 - `desktop-integration` grows the window channel and stays the only package that imports `@tauri-apps/api`. Rust's shell events go to `main` only.
-- No new runtime dependency for drawing. Shapes, selection or transforms in later drawing releases would be a reason to look at a scene-graph library again; the stroke format doesn't depend on the choice.
-- The editor and `rasterize` share one stroke-drawing function, so the released image matches what the player saw.
-- A drawing that isn't released is lost when the Studio closes (after asking) or the app quits, until drafts are saved.
+- One new runtime dependency, `perfect-freehand`, for the Studio and `rasterize`. No scene-graph library: shapes, selection or transforms in later drawing releases would be a reason to look at one again, and the stroke format doesn't depend on the choice.
+- The editor and `rasterize` share one stroke-to-outline function, so the released image matches what the player saw.
+- A drawing that isn't released is lost when the Studio closes (after asking) or, without asking, when the app quits. This is accepted for M11; saving drafts fixes it.
 - A limits query for a new size class builds that profile's navigation, which stays in the worker even if nothing of that size is ever released, like a deleted species (ADR 0014 §9).
