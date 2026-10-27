@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
-- **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs, the mossling art and screenshots. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs and the mossling art. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
 
 This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still holds.
 
@@ -42,7 +42,7 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 12. **Mossling art:** the placeholder gets more contrast with the grass, if it stays a small change to the SVG. Done by turning its greens blue-green (body `#3f9470` against grass `#86b45a`). Two dark strokes along the top of its head are removed and the moss dots moved inward: they lay deeper than the outline band, so the top of the body's sides took their colour.
 
-13. **Checks:** screenshots of the mossling in the strip at 180–260 px, in expanded mode and from straight above. Measuring with 3 and with 20 creatures against `docs/performance.md` moves to the v0.2 build (roadmap M12), together with that milestone's measurements of drawn species, rather than measuring twice.
+13. **Checks move to the v0.2 build** (roadmap M12), so the release build is checked once rather than twice: screenshots of the mossling in the strip at 180–260 px, in expanded mode and from straight above, and measurements with 3 and with 20 creatures against `docs/performance.md`, together with that milestone's checks of drawn species.
 
 ## Consequences
 
