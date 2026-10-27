@@ -106,7 +106,7 @@ Defined by `DesktopShell` in [`packages/desktop-integration/src/shell.ts`](../pa
 
 - Commands from the page: set the strip height, pause, expand, hide, confirm it is ready to quit, and record event counts.
 - Events from the host: paused changed, expanded changed, quit requested.
-- Log lines from the page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%com.livingdiorama.desktoplogs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
+- Log lines from the page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%\com.livingdiorama.desktop\logs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
 
 The tray and the page's controls both go through the host, so the host's state is the only one and both views of it stay in sync.
 
