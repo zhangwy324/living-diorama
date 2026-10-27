@@ -1,14 +1,17 @@
-import { connectDesktopShell } from "@living-diorama/desktop-integration";
+import { connectDesktopShell, connectLibraryStore } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
-import type { AssetSummary, SpeciesSummary } from "@living-diorama/simulation";
+import type { AssetSummary, SimulationSnapshot, SpeciesSummary } from "@living-diorama/simulation";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
+import { installLibraryDevHook } from "./dev-library";
 import { EventCounter } from "./event-counts";
 import { startSimulation, type SimulationClient } from "./simulation-client";
+import { openSpeciesLibrary } from "./species-library";
 import { StripResizeHandle } from "./StripResizeHandle";
 
 const shell = connectDesktopShell();
+const libraryStore = connectLibraryStore();
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
@@ -64,6 +67,18 @@ export function App() {
     // What the renderer resolves; species registered while the world runs are added (ADR 0012).
     const assets = new Map<string, AssetSummary>();
     const species = new Map<string, SpeciesSummary>();
+    let latest: SimulationSnapshot | undefined;
+    // The library registers its species once the world is ready (ADR 0014 §8). Until the Studio
+    // gives it a UI, development builds reach it from the console.
+    const openLibrary = () =>
+      void openSpeciesLibrary(libraryStore, {
+        registerSpecies: client.registerSpecies,
+        spawn: client.spawn,
+        despawn: client.despawn,
+        creatures: () => latest?.creatures ?? [],
+      }).then((library) => {
+        if (import.meta.env.DEV && !stopped) installLibraryDevHook(library);
+      });
     const client = startSimulation({
       onReady: ({ scene, navigations, ...content }) => {
         for (const [id, asset] of Object.entries(content.assets)) assets.set(id, asset);
@@ -80,12 +95,14 @@ export function App() {
           return;
         }
         view.current = created;
+        openLibrary();
       },
       onSpeciesRegistered: (id, summary, asset) => {
         species.set(id, summary);
         assets.set(summary.appearance, asset);
       },
       onSnapshot: (snapshot, events) => {
+        latest = snapshot;
         created?.pushSnapshot(snapshot);
         if (counter.observe(snapshot, events)) recordCounts();
       },

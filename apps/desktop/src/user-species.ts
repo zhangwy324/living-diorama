@@ -2,14 +2,16 @@
 // by convention only: the engine registers and runs them like any pack's species.
 
 export interface UserSpeciesIds {
+  /** The lowercase UUID the species is stored under in the library (ADR 0014 §1). */
+  uuid: string;
   /** The species ID, e.g. `user:3f9c2a1e-…`. */
   speciesId: string;
   /** The ID of its appearance image, e.g. `user:3f9c2a1e-…/appearance.png`. */
   appearanceId: string;
 }
 
-/** Fresh IDs for a new drawn species. */
-export function newUserSpeciesIds(uuid: () => string = () => crypto.randomUUID()): UserSpeciesIds {
-  const speciesId = `user:${uuid()}`;
-  return { speciesId, appearanceId: `${speciesId}/appearance.png` };
+/** The IDs of the drawn species stored under `uuid`; a fresh one by default. */
+export function userSpeciesIds(uuid: string = crypto.randomUUID()): UserSpeciesIds {
+  const speciesId = `user:${uuid}`;
+  return { uuid, speciesId, appearanceId: `${speciesId}/appearance.png` };
 }
