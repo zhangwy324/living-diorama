@@ -1,16 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Placeholder mossling, facing right. Feet touch the bottom edge (ADR 0007 §6). -->
+  <!-- Placeholder mossling, facing right. Feet touch the bottom edge (ADR 0011). -->
   <g stroke="#2f3b1d" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">
     <ellipse cx="92" cy="236" rx="20" ry="14" fill="#6b4a2e"/>
     <ellipse cx="160" cy="236" rx="20" ry="14" fill="#6b4a2e"/>
-    <path d="M40 200 C 24 120, 70 52, 132 50 C 196 48, 236 112, 222 196 C 214 232, 60 236, 40 200 Z" fill="#7aa64a"/>
-    <path d="M70 76 C 84 52, 110 40, 132 44 M150 46 C 176 48, 198 62, 210 84" fill="none"/>
+    <path d="M40 200 C 24 120, 70 52, 132 50 C 196 48, 236 112, 222 196 C 214 232, 60 236, 40 200 Z" fill="#3f9470"/>
   </g>
-  <path d="M64 196 C 56 150, 84 104, 120 92" fill="none" stroke="#9cc764" stroke-width="10" stroke-linecap="round"/>
-  <g fill="#5e8a34">
-    <circle cx="100" cy="74" r="9"/>
-    <circle cx="140" cy="64" r="7"/>
-    <circle cx="186" cy="80" r="8"/>
+  <path d="M64 196 C 56 150, 84 104, 120 92" fill="none" stroke="#7cc7a0" stroke-width="10" stroke-linecap="round"/>
+  <g fill="#2e7556">
+    <circle cx="112" cy="86" r="8"/>
+    <circle cx="150" cy="78" r="6"/>
+    <circle cx="182" cy="96" r="7"/>
     <circle cx="74" cy="138" r="6"/>
   </g>
   <g>

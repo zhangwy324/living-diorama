@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
-- **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs, the mossling art, screenshots and performance numbers. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs, the mossling art and screenshots. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
 
 This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still holds.
 
@@ -20,7 +20,7 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 5. **One projection, two textures.** Every vertex takes its texture coordinates from its position in the drawing's plane, so front, back, sides and rounded edges all line up with the drawing.
    - The **front and back** use the drawing. Its transparent pixels take the colour of the nearest opaque pixel, so the slight overreach of a simplified outline never shows the background. The back shows the drawing mirrored, which reads as the creature facing the other way.
-   - The **sides and rounded edges** use the drawing's interior colours: the opaque area shrunk by a band of 3% of the image's longer side, which removes a drawn outline, spread outward to fill the rest of the image, then blurred (radius 1.5%). If the band would remove everything, the opaque pixels are used as they are.
+   - The **sides and rounded edges** use the drawing's interior colours: the opaque area shrunk by a band of 3% of the image's longer side, which removes a drawn outline (depth is counted in 8-connected steps; PR C found that 4-connected steps kept outline pixels where the outline runs diagonally, and the spread gave whole stretches of side their dark colour), spread outward to fill the rest of the image, then blurred (radius 1.5%). If the band would remove everything, the opaque pixels are used as they are.
 
 6. **Lit, with some of its own colour as emission.** `MeshStandardMaterial` (roughness 0.9, like props), with the texture also as the emissive map at intensity 0.35, so a body in shade keeps the drawing's brightness. Geometry, textures and materials are built once per species and shared by its creatures.
 
@@ -40,9 +40,9 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 11. **Docs:** `docs/adding-content.md` explains how to draw an appearance image for a body (facing right, a clear outline, no holes that matter, no hair-thin parts); the renderer README describes bodies.
 
-12. **Mossling art:** the placeholder gets more contrast with the grass, if it stays a small change to the SVG.
+12. **Mossling art:** the placeholder gets more contrast with the grass, if it stays a small change to the SVG. Done by turning its greens blue-green (body `#3f9470` against grass `#86b45a`). Two dark strokes along the top of its head are removed and the moss dots moved inward: they lay deeper than the outline band, so the top of the body's sides took their colour.
 
-13. **Checks:** screenshots of the mossling in the strip at 180–260 px, in expanded mode and from straight above; `pnpm measure` with 3 and with 20 creatures against `docs/performance.md`.
+13. **Checks:** screenshots of the mossling in the strip at 180–260 px, in expanded mode and from straight above. Measuring with 3 and with 20 creatures against `docs/performance.md` moves to the v0.2 build (roadmap M12), together with that milestone's measurements of drawn species, rather than measuring twice.
 
 ## Consequences
 
