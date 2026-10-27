@@ -1,11 +1,14 @@
 import { error, type Diagnostic, type Result } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
+import { describeNavigation } from "../navigation/overlay";
 import {
   envelope,
   openEnvelope,
   type SimulationCommand,
   type SimulationMessage,
+  type WorldContent,
 } from "../protocol";
+import { describeScene } from "../world/scene";
 import { FixedClock } from "./clock";
 import { Simulation } from "./simulation";
 
@@ -30,6 +33,28 @@ export interface HostOptions {
 }
 
 type QueuedCommand = Exclude<SimulationCommand, { type: "init" }>;
+
+/** The world as the main thread draws it, as plain data so it survives `postMessage`. */
+export function describeContent({ state }: Simulation): WorldContent {
+  const { model, registries } = state;
+  return {
+    scene: describeScene(model),
+    navigations: state.navigations.map((navigation) => describeNavigation(model, navigation)),
+    assets: Object.fromEntries(
+      registries.assets
+        .values()
+        .map(({ id, kind, url, scale }) => [
+          id,
+          { kind, url, ...(scale === undefined ? {} : { scale }) },
+        ]),
+    ),
+    species: Object.fromEntries(
+      registries.species
+        .values()
+        .map(({ id, appearance, sizeClass }) => [id, { appearance, sizeClass }]),
+    ),
+  };
+}
 
 /**
  * Starts listening on `port`. `init` loads content and starts the tick loop; every other command
@@ -75,7 +100,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
     simulation = created.value;
     clock = new FixedClock({ tickRateHz });
     clock.advance(options.now());
-    send({ type: "ready", worldId: command.worldId });
+    send({ type: "ready", worldId: command.worldId, ...describeContent(simulation) });
     options.schedule(loop, clock.tickMs);
   };
 

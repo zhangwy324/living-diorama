@@ -1,19 +1,12 @@
-import { formatDiagnostic } from "@living-diorama/content-schema";
 import { connectDesktopShell } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { EventCounter } from "./event-counts";
-import { loadWorld } from "./load-world";
 import { startSimulation, type SimulationClient } from "./simulation-client";
 import { StripResizeHandle } from "./StripResizeHandle";
 
-// Content is static for now, so it loads once at startup.
-const { scene, navigation, assets, species, diagnostics } = loadWorld();
-const contentFailure: Failure | undefined = scene
-  ? undefined
-  : { summary: "The world failed to load", details: diagnostics.map(formatDiagnostic) };
 const shell = connectDesktopShell();
 
 export function App() {
@@ -25,7 +18,7 @@ export function App() {
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [debug, setDebug] = useState(false);
-  const [failure, setFailure] = useState(contentFailure);
+  const [failure, setFailure] = useState<Failure>();
 
   // Every failure reaches the diagnostics log too (ADR 0009 §14).
   useEffect(() => {
@@ -51,21 +44,11 @@ export function App() {
     };
   }, []);
 
+  // The worker loads and checks the content; the view starts once the worker describes the world.
   useEffect(() => {
-    if (!scene || !container.current) return;
-    let created: DioramaView;
-    try {
-      created = createDioramaView(container.current, scene, {
-        resolveAsset: (ref) => assets?.get(ref),
-        resolveSpecies: (id) => species?.get(id),
-        ...(navigation ? { navigation } : {}),
-      });
-    } catch (error) {
-      // The view needs the mounted container, so its failure is only known inside this effect.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFailure({ summary: "The 3D view could not start", details: [describeError(error)] });
-      return;
-    }
+    const element = container.current;
+    if (!element) return;
+    let created: DioramaView | undefined;
     // Recorded at start too, so the measuring script never reads a previous run's counts.
     const counter = new EventCounter();
     const recordCounts = () =>
@@ -73,17 +56,31 @@ export function App() {
         .recordEventCounts(counter.counts)
         .catch((error: unknown) => console.warn("Could not record the event counts", error));
     recordCounts();
+    const fail = (next: Failure) => {
+      stop();
+      setFailure((current) => current ?? next);
+    };
     const client = startSimulation({
+      onReady: ({ scene, navigations, assets, species }) => {
+        const [navigation] = navigations;
+        try {
+          created = createDioramaView(element, scene, {
+            resolveAsset: (ref) => assets[ref],
+            resolveSpecies: (id) => species[id],
+            ...(navigation ? { navigation } : {}),
+          });
+        } catch (error) {
+          fail({ summary: "The 3D view could not start", details: [describeError(error)] });
+          return;
+        }
+        view.current = created;
+      },
       onSnapshot: (snapshot, events) => {
-        created.pushSnapshot(snapshot);
+        created?.pushSnapshot(snapshot);
         if (counter.observe(snapshot, events)) recordCounts();
       },
-      onFailure: (details) => {
-        stop();
-        setFailure((current) => current ?? { summary: "The simulation stopped", details });
-      },
+      onFailure: (summary, details) => fail({ summary, details }),
     });
-    view.current = created;
     simulation.current = client;
     let stopped = false;
     const stop = () => {
@@ -92,12 +89,14 @@ export function App() {
       view.current = undefined;
       simulation.current = undefined;
       client.stop();
-      created.dispose();
+      created?.dispose();
     };
     return stop;
   }, []);
 
   const toggleDebug = () => {
+    // The view starts when the world is ready; until then there is nothing to debug.
+    if (!view.current) return;
     view.current?.setDebug(!debug);
     simulation.current?.setDebug(!debug);
     setDebug(!debug);
