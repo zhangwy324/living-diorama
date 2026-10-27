@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // Set by `tauri dev` when targeting a remote device; unused on Windows desktop.
@@ -23,5 +24,12 @@ export default defineConfig({
     // Tauri loads the bundle from local disk, so the web-oriented 500 kB warning does not apply.
     // three.js alone is most of the ~1 MB main chunk.
     chunkSizeWarningLimit: 2000,
+    // Two pages sharing the workspace packages: the strip and the Creation Studio (ADR 0015 §2).
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL("index.html", import.meta.url)),
+        studio: fileURLToPath(new URL("studio.html", import.meta.url)),
+      },
+    },
   },
 });

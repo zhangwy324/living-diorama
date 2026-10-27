@@ -20,6 +20,10 @@ use crate::platform::{self, DisplayEvent, Platform};
 use crate::settings::{self, Settings};
 use crate::tray;
 
+/// The strip's window label. Shell events go to it only, so the Studio never hears them
+/// (ADR 0015 §6).
+pub const MAIN: &str = "main";
+
 /// Event telling the frontend to pause or resume the simulation; the payload is the new state.
 const PAUSED_CHANGED: &str = "paused-changed";
 /// Event telling the frontend the window was expanded or collapsed; the payload is the new state.
@@ -63,7 +67,7 @@ struct SettingsFile {
 /// window, without activating it, once it is in place.
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let window = app
-        .get_webview_window("main")
+        .get_webview_window(MAIN)
         .ok_or("the main window is missing")?;
     let path = match app.path().app_config_dir() {
         Ok(dir) => Some(dir.join("settings.json")),
@@ -154,7 +158,7 @@ pub fn platform_of(window: &WebviewWindow) -> &dyn Platform {
 }
 
 pub fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
-    app.get_webview_window("main")
+    app.get_webview_window(MAIN)
 }
 
 fn state(app: &AppHandle) -> Shell {
@@ -319,9 +323,9 @@ pub fn set_paused(app: &AppHandle, paused: bool) {
     tray::refresh(app);
 }
 
-/// Tells the frontend about a change; it applies the new state.
+/// Tells the strip about a change; it applies the new state.
 fn emit(app: &AppHandle, event: &str, payload: bool) {
-    if let Err(error) = app.emit(event, payload) {
+    if let Err(error) = app.emit_to(MAIN, event, payload) {
         log::warn!("Could not send {event} to the frontend: {error}");
     }
 }
@@ -386,7 +390,7 @@ pub fn quit(app: &AppHandle) {
         shell.quitting = true;
     }
     save_now(app);
-    if let Err(error) = app.emit(QUIT_REQUESTED, ()) {
+    if let Err(error) = app.emit_to(MAIN, QUIT_REQUESTED, ()) {
         log::warn!("Could not ask the frontend to shut down: {error}");
         app.exit(0);
         return;
@@ -402,7 +406,7 @@ pub fn quit(app: &AppHandle) {
 /// The frontend's commands that share a name with an action above; a command is named after its
 /// function.
 pub mod commands {
-    use tauri::AppHandle;
+    use tauri::{AppHandle, WebviewWindow};
 
     #[tauri::command]
     pub fn set_paused(app: AppHandle, paused: bool) {
@@ -419,10 +423,14 @@ pub mod commands {
         super::hide(&app);
     }
 
-    /// The frontend's answer to `quit-requested`: it has shut down, so the app exits.
+    /// The strip's answer to `quit-requested`: it has shut down, so the app exits.
     #[tauri::command]
-    pub fn quit_ready(app: AppHandle) {
-        app.exit(0);
+    pub fn quit_ready(app: AppHandle, window: WebviewWindow) {
+        if super::accepts_quit_ready(window.label()) {
+            app.exit(0);
+        } else {
+            log::warn!("Ignored quit_ready from the {} window", window.label());
+        }
     }
 }
 
@@ -488,5 +496,22 @@ fn write_settings(app: &AppHandle, file: &SettingsFile) {
     let settings = state(app).settings;
     if let Err(error) = settings::save(path, &settings) {
         log::warn!("Could not save {}: {error}", path.display());
+    }
+}
+
+/// Whether a `quit_ready` call comes from the strip. App commands can be called from every window,
+/// so another window's answer must not end the strip's shutdown early (ADR 0015 §6).
+fn accepts_quit_ready(label: &str) -> bool {
+    label == MAIN
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accepts_quit_ready;
+
+    #[test]
+    fn only_the_strip_answers_quit() {
+        assert!(accepts_quit_ready("main"));
+        assert!(!accepts_quit_ready("studio"));
     }
 }

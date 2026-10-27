@@ -11,13 +11,15 @@ const labels = (state: Pick<ControlsOverlayProps, "paused" | "expanded" | "debug
       onResetCamera={() => {}}
       onToggleDebug={() => {}}
       onHide={() => {}}
+      onOpenStudio={() => {}}
     />,
   );
   return [...html.matchAll(/aria-label="([^"]+)"/g)].map((match) => match[1]);
 };
 
-it("offers pause, expand, reset camera, debug overlays and hide", () => {
+it("offers the Studio, pause, expand, reset camera, debug overlays and hide", () => {
   expect(labels({ paused: false, expanded: false, debug: false })).toEqual([
+    "Creation Studio",
     "Pause",
     "Expand",
     "Reset camera",
@@ -28,6 +30,7 @@ it("offers pause, expand, reset camera, debug overlays and hide", () => {
 
 it("offers the opposite of the current state", () => {
   expect(labels({ paused: true, expanded: true, debug: true })).toEqual([
+    "Creation Studio",
     "Resume",
     "Collapse",
     "Reset camera",

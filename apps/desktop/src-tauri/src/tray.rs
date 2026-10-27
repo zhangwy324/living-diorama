@@ -1,4 +1,4 @@
-//! The tray icon and its menu (ADR 0008 §7). Left-click toggles the window; the menu's labels and
+//! The tray icon and its menu (ADR 0008 §7, plus the Creation Studio of ADR 0015 §1). Left-click toggles the window; the menu's labels and
 //! checks are refreshed from the shell state after every change.
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -8,7 +8,9 @@ use tauri::{AppHandle, Manager};
 use crate::diagnostics;
 use crate::placement::choose_monitor;
 use crate::shell::{self, ShellState};
+use crate::studio;
 
+const STUDIO: &str = "studio";
 const SHOW_HIDE: &str = "show-hide";
 const EXPAND: &str = "expand";
 const PAUSE: &str = "pause";
@@ -55,6 +57,8 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(
         app,
         &[
+            &MenuItem::with_id(app, STUDIO, "Creation Studio", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
             &tray.show_hide,
             &tray.expand,
             &tray.pause,
@@ -93,6 +97,7 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
+        STUDIO => studio::open(app),
         SHOW_HIDE => shell::toggle_visible(app),
         EXPAND => shell::toggle_expanded(app),
         PAUSE => shell::toggle_paused(app),

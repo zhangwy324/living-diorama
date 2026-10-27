@@ -69,7 +69,7 @@ Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale
 
 Tray, expanded mode and settings (once, at any scale):
 
-- [ ] The tray menu reads Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Open log folder, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
+- [ ] The tray menu reads Creation Studio, Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Open log folder, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
 - [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
 - [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
 - [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
@@ -97,6 +97,17 @@ Controls overlay and lifecycle (once, at any scale):
 - [ ] Hide from the overlay hides the strip; the tray icon brings it back with the creatures having moved on.
 - [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
 - [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
+
+Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015):
+
+- [ ] The pencil button in the controls overlay and the tray's Creation Studio each open the Studio in front, focused, with a taskbar button and an Alt+Tab entry.
+- [ ] Opening it again, from either, focuses the open Studio instead of opening a second one; a minimized Studio is restored.
+- [ ] With the Studio open, clicking, orbiting and zooming in the strip still works. Launched while another app is in front, and with the Studio closed, the strip still never takes focus.
+- [ ] Known gap: with the Studio in front, clicking the strip makes the strip the active window, so keyboard focus leaves the Studio until it is clicked again. Note whether this still happens.
+- [ ] Pen, eraser, colours, brush sizes, Undo, Redo and Clear work from the toolbar; Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, and Clear can be undone. With a pen, pressing harder draws wider; with a mouse, quick flicks taper.
+- [ ] The drawing stays sharp when the window is resized and when it is moved to a monitor with another scale. The guide line is never part of the drawing.
+- [ ] Closing an empty Studio closes it at once. Closing it with something drawn asks: Cancel (or Escape) keeps the drawing, Save draft is disabled, Discard closes it.
+- [ ] Quit from the tray with the Studio open closes both within a second, with no "did not shut down in time" line.
 
 ## Releasing
 

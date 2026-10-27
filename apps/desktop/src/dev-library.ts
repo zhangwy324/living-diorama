@@ -1,4 +1,5 @@
-import { STROKE_POINT_STRIDE, type Drawing, type SizeClass } from "@living-diorama/content-schema";
+import type { Drawing, SizeClass } from "@living-diorama/content-schema";
+import { rasterize } from "./drawing";
 import type { SpeciesLibrary } from "./species-library";
 
 // A development-only console hook to the species library (ADR 0014), until the Studio (M11)
@@ -20,34 +21,9 @@ export const SAMPLE_DRAWING: Drawing = {
   ],
 };
 
-/** Draws `drawing` to PNG bytes: each segment as wide as its pressure, the eraser cutting out. */
-export async function rasterize(drawing: Drawing): Promise<Uint8Array> {
-  const canvas = new OffscreenCanvas(drawing.canvas.width, drawing.canvas.height);
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("No 2D canvas");
-  context.lineCap = "round";
-  for (const { tool, color, width, points } of drawing.strokes) {
-    context.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
-    context.strokeStyle = color;
-    const at = (i: number) => points.slice(i, i + STROKE_POINT_STRIDE) as [number, number, number];
-    for (let i = 0; i < points.length; i += STROKE_POINT_STRIDE) {
-      const [x, y, pressure] = at(i);
-      // A lone point is a dot: a zero-length segment with round caps.
-      const [fromX, fromY] = i === 0 ? [x, y] : at(i - STROKE_POINT_STRIDE);
-      context.lineWidth = width * pressure;
-      context.beginPath();
-      context.moveTo(fromX, fromY);
-      context.lineTo(x, y);
-      context.stroke();
-    }
-  }
-  const blob = await canvas.convertToBlob({ type: "image/png" });
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
 declare global {
   interface Window {
-    livingDiorama?: { library?: unknown };
+    livingDiorama?: { library?: unknown; studio?: unknown };
   }
 }
 

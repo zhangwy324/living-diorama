@@ -30,7 +30,7 @@
 6. **The Studio ignores shell broadcasts.** Rust sends `quit-requested`, `paused-changed` and `expanded-changed` with `app.emit`, which reaches every window, and exits on the first `quit_ready`. So:
    - the Studio page never creates a `DesktopShell` and never subscribes to these events, so it can't answer `quit-requested`;
    - `quit_ready` also takes the calling window and ignores any caller but `main`, since app commands are callable from every window regardless of capabilities;
-   - shell events meant for the strip move to `emit_to("main", …)`, so the Studio doesn't receive them at all.
+   - shell events meant for the strip move to `emit_to("main", …)`, so a listener that names the Studio's label doesn't receive them. PR 2 found that a listener with no target (`listen`'s default) still hears events emitted to any window, so this holds because the Studio never subscribes to them and every channel listener names its own label.
 
    Quitting closes the Studio with the app, and a drawing that wasn't released is lost. This is a known gap, accepted for M11: the close dialog (§10) only covers closing the Studio itself, and saving drafts closes the gap later.
 
@@ -52,7 +52,7 @@
     - **Finished strokes are baked into a bitmap.** A frame with a live stroke draws the bitmap, then the live stroke's outline, so only the live stroke is redrawn. A live eraser stroke fills its outline with `destination-out` over the bitmap, so the result is exact while erasing. When a stroke ends it is baked in.
     - **Undo and redo replay the stroke list.** The bitmap is rebuilt from the strokes left (undo) or drawn one stroke further (redo). The stroke list is the only state.
     - **Live points are not React state.** Pointer handlers append to the live stroke and request a frame.
-    - **Every sample counts.** Moves read `getCoalescedEvents()`, so a pen's samples between frames aren't lost. The context is created with `desynchronized: true` for lower latency if PR 2 confirms that it helps and renders correctly in WebView2; otherwise it is left off.
+    - **Every sample counts.** Moves read `getCoalescedEvents()`, so a pen's samples between frames aren't lost. The context is created with `desynchronized: true` for lower latency if PR 2 confirms that it helps and renders correctly in WebView2; otherwise it is left off. PR 2 found that WebView2 takes it (input stops waiting for frames) but then shows the canvas's transparent pixels as black rather than the page behind them, so it is left off.
     - **Pressure.** A pen (`pointerType` `pen`) stores the pressure it reports. A mouse reports a constant 0.5 and touch varies by device, so for every other pointer the Studio stores a pressure derived from speed instead: it eases towards a target that falls from 1 when the pointer moves slowly to a floor of about 0.35 when it moves fast, so quick flicks taper like a brush. PR 2 tunes the constants. Because the derived pressure is stored, replaying a stroke never needs to know which pointer drew it.
     - **The backing store follows `devicePixelRatio`.** The guide ("facing right, feet on this line") is a separate element over the canvas, so it is never part of the drawing.
 
@@ -78,7 +78,7 @@ What it shows:
 - **Live points in React state cost 5–16 ms of JavaScript per frame.** They stay out of React whatever draws them.
 - **Konva is fast only with the finished strokes cached to a bitmap,** which is what the plain canvas does by itself. Konva then contributes no shapes, hit testing or transforms that the editor uses.
 
-So a plain canvas, the fallback roadmap risk R1 named. The spike drew strokes segment by segment; perfect-freehand was chosen afterwards for the look: smooth, tapered, pressure-shaped strokes from the same points, in a small library without dependencies, the one Excalidraw uses for freehand drawing. With it the live stroke's whole outline is rebuilt each frame rather than only its new segments; PR 2 checks that this stays well inside a frame for long strokes.
+So a plain canvas, the fallback roadmap risk R1 named. The spike drew strokes segment by segment; perfect-freehand was chosen afterwards for the look: smooth, tapered, pressure-shaped strokes from the same points, in a small library without dependencies, the one Excalidraw uses for freehand drawing. With it the live stroke's whole outline is rebuilt each frame rather than only its new segments; PR 2 checks that this stays well inside a frame for long strokes. It does: in the app (WebView2, 100 Hz display, device pixel ratio 1, canvas 640 px), a synthetic pen stroke growing to 2000 points at one move per frame kept every frame at 10 ms (mean 10.0, p95 10.1, max 10.3 ms), and rebuilding and filling a 2000-point live stroke takes about 1.1 ms, of which perfect-freehand's outline is 0.2 ms.
 
 ## Consequences
 

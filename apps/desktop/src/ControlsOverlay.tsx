@@ -9,15 +9,20 @@ export interface ControlsOverlayProps {
   onResetCamera(): void;
   onToggleDebug(): void;
   onHide(): void;
+  onOpenStudio(): void;
 }
 
 /**
  * Icon buttons in the top-right corner that fade in while the pointer is over the window (ADR 0008
- * §11). The strip never takes keyboard focus, so these are its only controls besides the tray.
+ * §11), and the Creation Studio (ADR 0015 §1). The strip never takes keyboard focus, so these are
+ * its only controls besides the tray.
  */
 export function ControlsOverlay(props: ControlsOverlayProps) {
   return (
     <div className="controls">
+      <ControlButton label="Creation Studio" onClick={props.onOpenStudio}>
+        <path className="stroke" d="M3 13l1-3.5 7-7 2.5 2.5-7 7zM9.5 4l2.5 2.5" />
+      </ControlButton>
       <ControlButton label={props.paused ? "Resume" : "Pause"} onClick={props.onTogglePaused}>
         {props.paused ? (
           <path d="M5 3.5v9l7-4.5z" />
