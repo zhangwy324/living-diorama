@@ -21,7 +21,8 @@ v1 has no runtime pack loading. A pack is a workspace package, wired into the ap
    ```
 
 4. Call it from `register()` in [`apps/desktop/src/load-world.ts`](../apps/desktop/src/load-world.ts), after `registerBuiltInContent`. That function runs on the main thread and in the simulation worker, so both see the pack.
-5. Add a dependency-cruiser rule like `engine-does-not-import-built-in-content` so engine packages can't import the pack.
+
+`pnpm boundaries` treats every package under `packages/` that isn't an engine package as a content pack, so engine packages can't import yours.
 
 Registration order doesn't matter within the pack: references are resolved once everything is registered. Registering an ID twice is an error, whichever version each has.
 

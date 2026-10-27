@@ -51,7 +51,7 @@ Living Diorama is a Windows 11 desktop companion strip showing a small living 3D
 
 - `simulation` is headless. It must not import `three`, `react`, `@tauri-apps/*`, Node built-ins or DOM APIs.
 - `renderer` may import only **types** from `simulation`. It never mutates simulation state.
-- Only `apps/desktop` and `tools/development` may import `built-in-content`. It registers through `extension-api` like any third-party pack.
+- Only `apps/desktop` and `tools/development` may import content packs such as `built-in-content`. A pack registers through `extension-api` like any third-party pack.
 - Engine code must not branch on content IDs (`id === "core:bridge"`). Use affordances and capabilities instead.
 - Import other workspace packages through their public `index.ts` only.
 

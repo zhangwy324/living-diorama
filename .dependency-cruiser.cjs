@@ -4,6 +4,10 @@
 
 const UI_OR_HOST_LIBS = "(^|/)(three|react|react-dom|@tauri-apps/[^/]+)(/|$)";
 
+// Every other package under packages/ is a content pack. Add new engine packages here.
+const ENGINE_PACKAGES =
+  "^packages/(simulation|renderer|desktop-integration|extension-api|content-schema)/";
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
@@ -45,12 +49,12 @@ module.exports = {
       to: { path: "(^|/)@tauri-apps/(api|plugin-[^/]+)(/|$)" },
     },
     {
-      name: "engine-does-not-import-built-in-content",
+      name: "engine-does-not-import-content-packs",
       comment:
-        "built-in-content registers through extension-api like any third-party pack; only apps and dev tools may import it.",
+        "Content packs, built-in-content included, register through extension-api; only apps and dev tools may import them.",
       severity: "error",
-      from: { path: "^packages/", pathNot: "^packages/built-in-content/" },
-      to: { path: "^packages/built-in-content/" },
+      from: { path: ENGINE_PACKAGES },
+      to: { path: "^packages/", pathNot: ENGINE_PACKAGES },
     },
     {
       name: "packages-do-not-import-apps-or-tools",
