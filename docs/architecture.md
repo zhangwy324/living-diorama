@@ -44,7 +44,7 @@ The installed app is one Windows process tree: the Rust host and the WebView2 pr
 ```mermaid
 flowchart LR
   subgraph host["Rust host (src-tauri)"]
-    shell["shell: window, AppBar,<br/>tray, settings"]
+    shell["shell: window, AppBar,<br/>tray, settings, log"]
   end
   subgraph webview["WebView2 page"]
     subgraph main["Main thread"]
@@ -62,14 +62,14 @@ flowchart LR
   app -- "pushSnapshot" --> view
 ```
 
-- **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode and the settings file. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
+- **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode, the settings file and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
 - **Main thread.** `App.tsx` is the composition root. At startup it loads and checks the content (`load-world.ts`), creates the `DioramaView`, starts the worker and passes each snapshot to the view. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
 - **Simulation worker.** Registers the same content again in its own scope, builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
 - **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)).
 
 ### Startup
 
-1. The Rust host restores the settings, creates the hidden window, places it and starts the tray.
+1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it and starts the tray.
 2. The page loads. `loadWorld()` registers the engine's entries, then the built-in pack, resolves references and runs the world checks. Any error goes to the error screen.
 3. `createDioramaView()` builds the scene from the checked world (`SceneData`) and starts loading the prop models.
 4. The app starts the worker and sends `init`. The worker loads the content itself and answers `ready`; the app then sends one `spawn` per creature.
@@ -106,6 +106,7 @@ Defined by `DesktopShell` in [`packages/desktop-integration/src/shell.ts`](../pa
 
 - Commands from the page: set the strip height, pause, expand, hide, confirm it is ready to quit, and record event counts.
 - Events from the host: paused changed, expanded changed, quit requested.
+- Log lines from the page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%com.livingdiorama.desktoplogs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
 
 The tray and the page's controls both go through the host, so the host's state is the only one and both views of it stay in sync.
 
