@@ -32,7 +32,7 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 9. **Bodies cast real shadows** from the sun. The shadow blob stays, as the contact shadow under the feet.
 
-10. **The blob follows creases** (issue #29). The ground is probed at the centre and at four points around the blob's rim. The blob tilts to the average normal of the hits and sits at the highest hit, so its far side no longer sinks under a neighbouring surface at a bridge end or the ramp foot. Before the fix the cause is confirmed with the debug overlay.
+10. **The blob follows creases** (issue #29). The ground is probed at the centre and at four points around the blob's rim. The blob tilts to the average normal of the hits and sits at the highest hit, measured along that normal, so on an even slope it still lies on the surface and its far side no longer sinks under a neighbouring surface at a bridge end or the ramp foot. The cause was confirmed by measurement in the built-in world rather than by eye with the debug overlay. With the single probe, at both bridge ends and the ramp foot up to 44% of the blob lay 2–5 cm under the neighbouring surface, more than its 2 cm lift. With five probes none of it does, at the cost of the blob floating up to about 7–10 cm over the lower surface where it straddles a step or a concave crease.
 
 ### Docs and checks (PR C)
 

@@ -200,6 +200,27 @@ describe("CreatureBodies", () => {
     // Off the ramp it lies flat at the creature's feet.
     bodies.update([creature("a", { x: 20, y: 0, z: 0 })]);
     expect(shadow.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
+    expect(shadow.position.y).toBeCloseTo(0.02);
+  });
+
+  it("rises over a step next to the creature rather than going under it (issue #29)", () => {
+    // Flat ground at y = 0 and, from x = 0.1 on, a deck 0.05 m higher: the end of a bridge.
+    const plane = (width: number, x: number, y: number) =>
+      new THREE.Mesh(
+        new THREE.PlaneGeometry(width, 10).rotateX(-Math.PI / 2).translate(x, y, 0),
+        new THREE.MeshBasicMaterial(),
+      );
+    const { layer, bodies } = make(undefined, [plane(10, -5, 0), plane(10, 5.1, 0.05)]);
+    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    const shadow = layer.group.getObjectByName("a")!.children[0] as THREE.Mesh;
+    expect(shadow.position.y).toBeCloseTo(0.07); // on the deck's height, lifted
+    expect(shadow.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
+  });
+
+  it("makes bodies cast shadows", () => {
+    const { layer, bodies } = make();
+    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    expect(bodyOf(layer, "a").castShadow).toBe(true);
   });
 
   it("draws nothing for an unknown species and keeps the block if the drawing fails", async () => {
