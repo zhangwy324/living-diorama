@@ -77,7 +77,7 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
 }
 ```
 
-- `appearance` is an image asset the renderer builds a solid body from ([ADR 0011](adr/0011-extruded-creature-bodies.md)). Draw it facing right, feet at the bottom of the drawing; transparent padding around it is ignored.
+- `appearance` is an image asset the renderer builds a solid body from; see [Drawing an appearance](#drawing-an-appearance).
 - `sizeClass` sets the creature's size, and the body's height matches it:
 
   | Size class | Radius (m) | Height (m) |
@@ -91,6 +91,19 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
 - `behaviors` lists what decides the creature's next action. v1 has `core:wander`. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
 
 The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](../apps/desktop/src/startup.ts). To see a new species, add it there with a count.
+
+### Drawing an appearance
+
+The renderer traces the drawing's outline and extrudes it into a slab with rounded edges, 40% of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md)). The front shows the drawing, the back shows it mirrored, and the sides take the colours just inside its outline.
+
+- **Draw the creature facing right, side on,** with its feet at the bottom. The body turns to the creature's heading, so the drawing is what you see from the side.
+- **Use a transparent background.** A pixel counts as part of the body at 50% opacity or more. Padding around the drawing is ignored: the body is sized to what is drawn.
+- **Give it a clear outline,** a few pixels wide. The sides skip a band about 3% of the image's longer side inside the outline, so they show the creature's colours rather than the outline's. A much thicker outline still shows on the sides.
+- **Holes are filled.** A gap between an arm and the body becomes solid, with the colour of the hole. Draw shapes that read without them.
+- **Avoid hair-thin parts.** The image is read at 256 px on its longer side, and a part under a few pixels wide is lost or comes out much thicker than drawn. Whiskers and antennae work better as solid strokes.
+- **Parts that don't touch become separate slabs,** floating where they were drawn. Touching only at a corner doesn't count; tiny specks are dropped.
+
+Until the image loads, or if it fails or has nothing opaque, the creature is a grey block.
 
 ## Worlds
 

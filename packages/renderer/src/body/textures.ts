@@ -35,7 +35,11 @@ export function sideColours(pixels: Pixels): Uint8Array {
   );
 }
 
-/** Each pixel's 4-connected distance to the nearest transparent pixel or the image's edge. */
+/**
+ * Each pixel's 8-connected distance to the nearest transparent pixel or the image's edge. Steps
+ * along rows and columns would overstate it by up to √2 where the outline runs diagonally, keeping
+ * outline pixels there as side colours.
+ */
 function depthInside(pixels: Pixels): Int32Array {
   const { width, height } = pixels;
   const depth = new Int32Array(width * height).fill(-1);
@@ -51,7 +55,7 @@ function depthInside(pixels: Pixels): Int32Array {
   }
   for (let head = 0; head < tail; head++) {
     const i = queue[head] ?? 0;
-    for (const n of neighbours(i, width, height)) {
+    for (const n of neighbours(i, width, height, true)) {
       if (depth[n] !== -1) continue;
       depth[n] = (depth[i] ?? 0) + 1;
       queue[tail++] = n;
@@ -85,12 +89,26 @@ function spread(pixels: Pixels, seeds: Uint8Array): Uint8Array {
   return out;
 }
 
-function* neighbours(i: number, width: number, height: number): Generator<number> {
+function* neighbours(
+  i: number,
+  width: number,
+  height: number,
+  diagonals = false,
+): Generator<number> {
   const x = i % width;
-  if (x > 0) yield i - 1;
-  if (x < width - 1) yield i + 1;
-  if (i >= width) yield i - width;
-  if (i < width * (height - 1)) yield i + width;
+  const left = x > 0;
+  const right = x < width - 1;
+  const up = i >= width;
+  const down = i < width * (height - 1);
+  if (left) yield i - 1;
+  if (right) yield i + 1;
+  if (up) yield i - width;
+  if (down) yield i + width;
+  if (!diagonals) return;
+  if (up && left) yield i - width - 1;
+  if (up && right) yield i - width + 1;
+  if (down && left) yield i + width - 1;
+  if (down && right) yield i + width + 1;
 }
 
 /** Separable box blur of the colour channels, clamped at the edges. */

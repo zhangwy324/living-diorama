@@ -125,6 +125,24 @@ describe("body textures", () => {
     }
   });
 
+  it("removes an outline running diagonally too", () => {
+    // A square turned 45°, outlined 3 px deep measured square to its edges: 4–5 px steps inwards.
+    const rows = Array.from({ length: 100 }, (_, y) =>
+      Array.from({ length: 100 }, (_, x) => {
+        const inside = 40 - Math.abs(x - 50) - Math.abs(y - 50);
+        return inside <= 0 ? "." : inside < 3 * Math.SQRT2 ? "k" : "g";
+      }).join(""),
+    );
+    const colours = sideColours(art(...rows));
+    for (const [x, y] of [
+      [30, 30], // on the outline
+      [5, 5],
+      [95, 50],
+    ] as const) {
+      expect(colourAt(colours, 100, x, y)).toEqual(COLOURS.g);
+    }
+  });
+
   it("keeps the colours of a drawing thinner than the outline band", () => {
     const pixels = square(100, 10, 14, 1); // 4 px wide: no pixel is deeper than the band
     expect(colourAt(sideColours(pixels), 100, 50, 50)).toEqual([20, 20, 20]);
