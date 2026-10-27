@@ -29,6 +29,6 @@
 ## Consequences
 
 - A headless test registers a species mid-run in the Woodland Hollow, spawns and despawns its creatures, and every M3 invariant still holds. The invariant runner now checks each creature against its own species' navigation.
-- **The Woodland Hollow only supports medium creatures.** With decision 4 the world checks run for other size classes, and they fail. For tiny and small, a few cells between props form walkable islands (`disconnected_region`). For large, the walkable areas also split, and the bridge ends are too narrow (`portal_unusable`). Pack species with those size classes would fail startup in the same way. Drawn species of other sizes need the world (or the checks) to change before M11 offers a size choice.
+- **The Woodland Hollow only supports medium creatures.** With decision 4 the world checks run for other size classes, and they fail. For tiny and small, a few dry cells in the outermost row, where the river meets the world's edge, form walkable islands (`disconnected_region`); medium never stands in that row. For large, the walkable areas also split, and the bridge ends are too narrow (`portal_unusable`). Pack species with those size classes would fail startup in the same way. Drawn species of other sizes need the world (or the checks) to change before M11 offers a size choice.
 - Registered species can't be removed yet: registries have no unregister. Deleting a species comes with the library (M10).
 - The protocol and architecture docs list the new messages and events.
