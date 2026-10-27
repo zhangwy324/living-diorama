@@ -30,6 +30,11 @@ export const SemverSchema = z
   .string()
   .regex(SEMVER, { error: 'Expected a semantic version like "1.0.0"' });
 
+/** A colour like `#7fae5a`. */
+export const HexColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, { error: 'Expected a colour like "#7fae5a"' });
+
 export function isContentId(value: string): boolean {
   return CONTENT_ID.test(value);
 }

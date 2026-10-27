@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import { parseDrawing, parseLibraryEntry, type Result } from "./index";
+import { migrate } from "./migrate";
+
+const codes = (result: Result<unknown>) => (result.ok ? [] : result.diagnostics.map((d) => d.code));
+
+function validDrawing() {
+  return {
+    schemaVersion: 1,
+    canvas: { width: 512, height: 512 },
+    strokes: [
+      { tool: "pen", color: "#3a7d5c", width: 12, points: [10, 20, 0.5, 30, 40, 1] },
+      { tool: "eraser", color: "#000000", width: 20, points: [15, 25, 0] },
+    ],
+  };
+}
+
+function validEntry() {
+  return {
+    schemaVersion: 1,
+    species: {
+      schemaVersion: 1,
+      id: "user:3f9c2a1e-0000-4000-8000-000000000000",
+      version: "1.0.0",
+      name: "Blob",
+      appearance: "user:3f9c2a1e-0000-4000-8000-000000000000/appearance.png",
+      sizeClass: "small",
+      capabilities: { "core:walk": 1 },
+      baseSpeed: 0.6,
+      behaviors: ["core:wander"],
+    },
+    createdAt: "2026-10-27T12:00:00.000Z",
+  };
+}
+
+describe("parseDrawing", () => {
+  it("accepts a valid drawing", () => {
+    expect(parseDrawing(validDrawing())).toEqual({ ok: true, value: validDrawing() });
+  });
+
+  it("accepts a drawing with no strokes", () => {
+    expect(parseDrawing({ ...validDrawing(), strokes: [] }).ok).toBe(true);
+  });
+
+  it.each([
+    ["points not in threes", [1, 2]],
+    ["pressure above 1", [1, 2, 1.5]],
+    ["negative pressure", [1, 2, -0.1]],
+  ])("rejects %s", (_, points) => {
+    const drawing = validDrawing();
+    drawing.strokes[0]!.points = points;
+    expect(parseDrawing(drawing).ok).toBe(false);
+  });
+
+  it("rejects a bad colour and an unknown tool", () => {
+    const drawing = validDrawing();
+    drawing.strokes[0]!.color = "green";
+    drawing.strokes[1]!.tool = "spray";
+    expect(parseDrawing(drawing).ok).toBe(false);
+  });
+
+  it("rejects a newer version with one clear diagnostic", () => {
+    const result = parseDrawing({ ...validDrawing(), schemaVersion: 2 });
+    expect(codes(result)).toEqual(["unsupported_schema_version"]);
+  });
+});
+
+describe("parseLibraryEntry", () => {
+  it("accepts a valid entry", () => {
+    expect(parseLibraryEntry(validEntry())).toEqual({ ok: true, value: validEntry() });
+  });
+
+  it("checks the species like pack content", () => {
+    const entry = validEntry();
+    entry.species.behaviors = [];
+    const result = parseLibraryEntry(entry, "library/blob");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.diagnostics[0]?.source).toBe("library/blob");
+  });
+
+  it("rejects a bad created time", () => {
+    expect(parseLibraryEntry({ ...validEntry(), createdAt: "yesterday" }).ok).toBe(false);
+  });
+
+  it.each([[null], [[]], ["entry"], [{ species: {} }]])("rejects %j", (input) => {
+    expect(parseLibraryEntry(input).ok).toBe(false);
+  });
+});
+
+describe("migrate", () => {
+  const migrations = {
+    1: (data: Record<string, unknown>) => ({ ...data, legs: 2 }),
+    2: ({ legs, ...data }: Record<string, unknown>) => ({ ...data, limbs: { legs } }),
+  };
+
+  it("runs every step from the file's version to the current one", () => {
+    expect(migrate("thing", { schemaVersion: 1, name: "a" }, 3, migrations)).toEqual({
+      ok: true,
+      value: { schemaVersion: 3, name: "a", limbs: { legs: 2 } },
+    });
+    expect(migrate("thing", { schemaVersion: 2, legs: 4 }, 3, migrations)).toEqual({
+      ok: true,
+      value: { schemaVersion: 3, limbs: { legs: 4 } },
+    });
+  });
+
+  it("leaves the current version alone", () => {
+    const input = { schemaVersion: 3 };
+    expect(migrate("thing", input, 3, migrations)).toEqual({ ok: true, value: input });
+  });
+
+  it("reports a missing step", () => {
+    expect(codes(migrate("thing", { schemaVersion: 1 }, 3, { 2: migrations[2] }))).toEqual([
+      "missing_migration",
+    ]);
+  });
+
+  it.each([[{}], [{ schemaVersion: "1" }], [{ schemaVersion: 0 }], [{ schemaVersion: 4 }]])(
+    "rejects schema version of %j",
+    (input) => {
+      expect(codes(migrate("thing", input, 3, migrations))).toEqual(["unsupported_schema_version"]);
+    },
+  );
+});

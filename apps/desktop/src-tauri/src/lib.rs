@@ -1,5 +1,6 @@
 mod diagnostics;
 mod event_counts;
+mod library;
 mod placement;
 mod platform;
 mod settings;
@@ -17,6 +18,11 @@ pub fn run() {
             shell::commands::hide,
             shell::commands::quit_ready,
             event_counts::record_event_counts,
+            library::commands::list_library,
+            library::commands::load_library_drawing,
+            library::commands::load_library_image,
+            library::commands::save_library_entry,
+            library::commands::delete_library_entry,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
