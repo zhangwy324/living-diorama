@@ -20,7 +20,7 @@ v1 has no runtime pack loading. A pack is a workspace package, wired into the ap
    }
    ```
 
-4. Call it from `register()` in [`apps/desktop/src/load-world.ts`](../apps/desktop/src/load-world.ts), after `registerBuiltInContent`. That function runs on the main thread and in the simulation worker, so both see the pack.
+4. Call it from `loadContent()` in [`apps/desktop/src/content.ts`](../apps/desktop/src/content.ts), after `registerBuiltInContent`. Only the simulation worker runs it; the main thread draws what the worker describes ([ADR 0010](adr/0010-content-startup.md)).
 
 `pnpm boundaries` treats every package under `packages/` that isn't an engine package as a content pack, so engine packages can't import yours.
 
@@ -90,7 +90,7 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
 - `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. v1 has one locomotion capability, `core:walk` (land and cave regions, slopes up to 35°). A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
 - `behaviors` lists what decides the creature's next action. v1 has `core:wander`. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
 
-The app spawns creatures of one species, `SPECIES_ID` in `load-world.ts`. To see a new species, change it there.
+The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](../apps/desktop/src/startup.ts). To see a new species, add it there with a count.
 
 ## Worlds
 
@@ -110,7 +110,7 @@ All local IDs (regions, connections, structures, props, spawn points) share one 
 
 The built-in world isn't written by hand: `pnpm worldgen` generates `world.json` from a layout in [`tools/development/src/worldgen`](../tools/development/src/worldgen/) and writes a debug map to `tools/development/out/woodland-hollow.png`. For anything bigger than a test fixture, a generator is easier than editing heightfield arrays.
 
-The app runs one world, `WORLD_ID` in `load-world.ts`. To see a new world, change it there.
+The app runs one world, `worldId` in [`apps/desktop/src/startup.ts`](../apps/desktop/src/startup.ts). To see a new world, change it there.
 
 ## Checking a pack
 

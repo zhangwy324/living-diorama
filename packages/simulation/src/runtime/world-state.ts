@@ -8,6 +8,7 @@ import type { Registries } from "@living-diorama/extension-api";
 import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
 import { Pathfinder } from "../navigation/pathfinder";
 import { profileForSpecies } from "../navigation/profile";
+import type { Navigation } from "../navigation/region-graph";
 import { checkWorld } from "../world/integrity";
 import type { WorldModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
@@ -91,6 +92,11 @@ export class WorldState {
       check.navigations.map((nav) => [nav.profile.key, new Pathfinder(model, nav)]),
     );
     return { ok: true, value: new WorldState(registries, model, pathfinders, seed) };
+  }
+
+  /** The navigation of every profile the world was checked for. */
+  get navigations(): Navigation[] {
+    return [...this.#pathfinders.values()].map((p) => p.navigation);
   }
 
   /** The pathfinder for a registered species' navigation profile. */

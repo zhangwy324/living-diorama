@@ -1,5 +1,5 @@
 import { runSimulationHost } from "@living-diorama/simulation";
-import { loadContent } from "./load-world";
+import { loadContent } from "./content";
 
 // The simulation Web Worker (ADR 0006 §11). The app's tsconfig uses the DOM lib, not WebWorker,
 // so the worker scope is typed by the little it needs here.

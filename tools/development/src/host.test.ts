@@ -71,10 +71,25 @@ describe("simulation host", () => {
   it("answers init with ready and then sends a snapshot every tick", () => {
     const host = startHost();
     host.init();
-    expect(host.take()).toEqual([{ type: "ready", worldId: WORLD_ID }]);
+    expect(host.take()).toMatchObject([{ type: "ready", worldId: WORLD_ID }]);
     host.advance(1000);
     const ticks = host.snapshots().map((m) => m.snapshot.tick);
     expect(ticks).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("describes the world in ready, as plain data the main thread can draw", () => {
+    const host = startHost();
+    host.init();
+    const [ready] = host.take();
+    if (ready?.type !== "ready") throw new Error("Expected ready");
+    // Exactly what postMessage would deliver: no classes, functions or shared references lost.
+    expect(structuredClone(ready)).toEqual(ready);
+    expect(ready.scene.terrain.heights.length).toBeGreaterThan(0);
+    expect(ready.navigations).toHaveLength(1);
+    const mossling = ready.species[SPECIES_ID];
+    expect(mossling).toEqual({ appearance: expect.any(String), sizeClass: expect.any(String) });
+    expect(ready.assets[mossling!.appearance]).toMatchObject({ kind: "image" });
+    for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
   });
 
   it("sends one snapshot per tick when it catches up", () => {

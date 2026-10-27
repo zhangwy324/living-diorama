@@ -1,9 +1,12 @@
-import type { Diagnostic, RegionPosition, Vec3 } from "@living-diorama/content-schema";
+import type { Diagnostic, RegionPosition, SizeClass, Vec3 } from "@living-diorama/content-schema";
+import type { AssetKind } from "@living-diorama/extension-api";
+import type { NavigationOverlay } from "./navigation/overlay";
+import type { SceneData } from "./world/scene";
 
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -19,6 +22,33 @@ export type SimulationCommand =
   | { type: "shutdown" };
 
 // ---- Worker → main thread -------------------------------------------------------------------
+
+/** What the renderer needs of a registered asset. */
+export interface AssetSummary {
+  kind: AssetKind;
+  url: string;
+  scale?: number;
+}
+
+/** What the renderer needs of a registered species. */
+export interface SpeciesSummary {
+  /** Asset ref of the appearance image. */
+  appearance: string;
+  sizeClass: SizeClass;
+}
+
+/**
+ * Everything the main thread needs to draw the world, resolved by the worker, which is the only
+ * place content is registered and checked (ADR 0010).
+ */
+export interface WorldContent {
+  scene: SceneData;
+  /** Debug overlay per navigation profile. */
+  navigations: NavigationOverlay[];
+  /** Every registered asset and species, by ID. */
+  assets: Record<string, AssetSummary>;
+  species: Record<string, SpeciesSummary>;
+}
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */
 export interface RouteLegSnapshot {
@@ -66,7 +96,7 @@ export type SimulationEvent =
   | (EventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number });
 
 export type SimulationMessage =
-  | { type: "ready"; worldId: string }
+  | ({ type: "ready"; worldId: string } & WorldContent)
   /** Sent every tick; `events` are those emitted since the previous snapshot. */
   | { type: "snapshot"; snapshot: SimulationSnapshot; events: SimulationEvent[] }
   /** A command was rejected. After a failed `init` (e.g. content failed to load) the worker stays idle. */
