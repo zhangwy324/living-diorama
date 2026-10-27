@@ -2,7 +2,8 @@ import type { NavigationOverlay, SceneData, SimulationSnapshot } from "@living-d
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
-import { CreatureSprites, type ImageLoader, type SpeciesResolver } from "./creatures";
+import type { ImageReader } from "./body/pixels";
+import { CreatureBodies, type SpeciesResolver } from "./creatures";
 import { DebugStats } from "./debug-stats";
 import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
@@ -26,7 +27,7 @@ export interface DioramaViewOptions {
   loadModel?: ModelLoader;
   /** Looks up species to draw creatures. Without it no creature is drawn. */
   resolveSpecies?: SpeciesResolver;
-  loadImage?: ImageLoader;
+  readImage?: ImageReader;
   /** Walkability, region graph and portals for the debug overlays (ADR 0007 §10). */
   navigation?: NavigationOverlay;
 }
@@ -98,7 +99,7 @@ export interface DioramaScene {
   world: THREE.Scene;
   layers: SceneLayers;
   water: WaterMaterial;
-  creatures: CreatureSprites;
+  creatures: CreatureBodies;
   overlays: DebugOverlays;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
@@ -125,10 +126,10 @@ export function buildDioramaScene(
   );
   layers.structures.add(structureMeshes(scene));
   const resolveAsset = options.resolveAsset ?? (() => undefined);
-  const creatures = new CreatureSprites(layers.creatures, {
+  const creatures = new CreatureBodies(layers.creatures, {
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
-    loadImage: options.loadImage,
+    readImage: options.readImage,
     ground: [layers.terrain.group, layers.structures.group],
   });
   const overlays = createDebugOverlays(scene, options.navigation);
@@ -237,7 +238,7 @@ export function createDioramaView(
     }
     controls.update();
     const poses = snapshots.sample(now);
-    creatures.update(poses, camera);
+    creatures.update(poses);
     if (overlays.group.visible) {
       overlays.routes.update(poses);
       stats.frame(now, fullRate);

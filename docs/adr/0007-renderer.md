@@ -26,7 +26,7 @@
 
 ### Creatures, interpolation and camera (PR B)
 
-6. **Creature look:** a sprite from the species `appearance` image on a plane that turns only about the vertical axis, so it stays upright when the camera looks down. It is mirrored when its heading points left on screen, and a soft shadow blob sits under it, tilted to the terrain or deck it stands on (found by a short downward ray, so slopes and arched decks do not cut into it). The mossling's sprite is a hand-made SVG placeholder until creature drawing exists.
+6. **Creature look** (superseded by [ADR 0011](0011-extruded-creature-bodies.md), which replaces the sprite with an extruded body): a sprite from the species `appearance` image on a plane that turns only about the vertical axis, so it stays upright when the camera looks down. It is mirrored when its heading points left on screen, and a soft shadow blob sits under it, tilted to the terrain or deck it stands on (found by a short downward ray, so slopes and arched decks do not cut into it). The mossling's sprite is a hand-made SVG placeholder until creature drawing exists.
 
 7. **No minimum on-screen size.** Sprites are drawn true to scale, at their size class's height. A minimum of about 24 px was tried in PR B and dropped: it only took effect when zooming out past the default framing, where it made creatures taller than the trees. Legibility in the strip is a matter of the sprite art (contrast, outline), not of scaling.
 

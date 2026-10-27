@@ -30,7 +30,7 @@ Definitions are plain JSON-compatible objects. Keep them in `.json` files (as th
 
 ## Assets
 
-Every file content refers to (a prop model, a creature sprite) is registered in `assets`. The asset's ID is the reference other content uses:
+Every file content refers to (a prop model, a creature drawing) is registered in `assets`. The asset's ID is the reference other content uses:
 
 ```ts
 registries.assets.register({
@@ -77,8 +77,8 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
 }
 ```
 
-- `appearance` is an image asset drawn as an upright sprite. Draw it facing right with its feet on the bottom edge; the renderer mirrors it when the creature walks left.
-- `sizeClass` sets the creature's size, and the sprite's height matches it:
+- `appearance` is an image asset the renderer builds a solid body from ([ADR 0011](adr/0011-extruded-creature-bodies.md)). Draw it facing right, feet at the bottom of the drawing; transparent padding around it is ignored.
+- `sizeClass` sets the creature's size, and the body's height matches it:
 
   | Size class | Radius (m) | Height (m) |
   | ---------- | ---------: | ---------: |

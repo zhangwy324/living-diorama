@@ -1,31 +1,22 @@
 import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
 import * as THREE from "three";
+import { buildBody, fallbackBody, type Body } from "./body/body";
+import { readImage, type ImageReader } from "./body/pixels";
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import type { AssetResolver } from "./props";
 
-// Creatures as upright sprites with a shadow blob (ADR 0007 §6–§7), drawn true to scale.
+// Creatures as solid bodies extruded from their drawings, with a shadow blob (ADR 0011), true to scale.
 
 /** What the renderer needs to know about a species. `SpeciesDefinition` fits. */
 export interface RenderSpecies {
-  /** Asset ref of an image drawn facing right, feet on its bottom edge. */
+  /** Asset ref of an image drawn facing right, feet at the bottom of the drawing. */
   appearance: string;
   sizeClass: SizeClass;
 }
 
 export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;
-export type ImageLoader = (url: string) => Promise<THREE.Texture>;
 
-export const loadTexture: ImageLoader = async (url) => {
-  const texture = await new THREE.TextureLoader().loadAsync(url);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-};
-
-/** Below this share of the camera's right vector the heading is "towards or away", so the sprite keeps its facing. */
-const FACING_DEAD_ZONE = 0.15;
-const FALLBACK_COLOR = "#8f8a82";
-const FALLBACK_ASPECT = 0.75;
 /** Lifts the shadow blob off the surface so it does not z-fight. */
 const SHADOW_LIFT = 0.02;
 /** The ground is looked for from this far above a creature's feet: below deck railings, above slopes. */
@@ -36,30 +27,27 @@ const GROUND_RECHECK_DISTANCE = 0.01;
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
 
-export interface CreatureSpritesOptions {
+export interface CreatureBodiesOptions {
   resolveSpecies: SpeciesResolver;
   resolveAsset: AssetResolver;
-  loadImage?: ImageLoader;
+  readImage?: ImageReader;
   /** Surfaces creatures stand on (terrain, structures); shadows lie along them. */
   ground?: readonly THREE.Object3D[];
 }
 
 interface SpeciesLook {
-  material: THREE.MeshBasicMaterial;
-  /** Sprite width over height, from the image once it loads. */
-  aspect: number;
-  height: number;
+  /** The fallback block until the drawing's body is built. */
+  body: Body;
   radius: number;
 }
 
 interface CreatureObject {
   root: THREE.Group;
-  sprite: THREE.Mesh;
+  body: THREE.Mesh;
   shadow: THREE.Mesh;
   /** Where the ground was last probed for this creature. */
   probedAt?: THREE.Vector3;
   look: SpeciesLook;
-  facingRight: boolean;
 }
 
 /** Soft round shadow: alpha falls off from the centre. */
@@ -78,35 +66,34 @@ function shadowTexture(): THREE.DataTexture {
   return texture;
 }
 
-export class CreatureSprites {
+export class CreatureBodies {
   readonly #creatures = new Map<string, CreatureObject>();
   readonly #looks = new Map<string, SpeciesLook>();
-  readonly #textures: THREE.Texture[] = [];
-  readonly #spriteGeometry = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+  /** Every body built, fallbacks included, for `dispose`. */
+  readonly #bodies: Body[] = [];
+  readonly #shadowTexture = shadowTexture();
   readonly #shadowGeometry = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
   readonly #shadowMaterial: THREE.MeshBasicMaterial;
   readonly #loads: Promise<void>[] = [];
   readonly #layer: SceneLayer;
   readonly #resolveSpecies: SpeciesResolver;
   readonly #resolveAsset: AssetResolver;
-  readonly #loadImage: ImageLoader;
+  readonly #readImage: ImageReader;
   readonly #ground: readonly THREE.Object3D[];
   readonly #raycaster = new THREE.Raycaster();
 
-  constructor(layer: SceneLayer, options: CreatureSpritesOptions) {
+  constructor(layer: SceneLayer, options: CreatureBodiesOptions) {
     this.#layer = layer;
     this.#resolveSpecies = options.resolveSpecies;
     this.#resolveAsset = options.resolveAsset;
-    this.#loadImage = options.loadImage ?? loadTexture;
+    this.#readImage = options.readImage ?? readImage;
     this.#ground = options.ground ?? [];
     this.#raycaster.far = GROUND_PROBE_HEIGHT + GROUND_PROBE_DEPTH;
-    const alphaMap = shadowTexture();
-    this.#textures.push(alphaMap);
     this.#shadowMaterial = new THREE.MeshBasicMaterial({
       color: "#1d2414",
       transparent: true,
       opacity: 0.45,
-      alphaMap,
+      alphaMap: this.#shadowTexture,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -2,
@@ -114,22 +101,19 @@ export class CreatureSprites {
     });
   }
 
-  /** Resolves once every sprite image requested so far has loaded or failed. */
+  /** Resolves once every drawing requested so far has been built into a body or failed. */
   get ready(): Promise<void> {
     return Promise.all(this.#loads).then(() => undefined);
   }
 
   /** Places each creature for this frame; creatures not in `poses` are removed. */
-  update(poses: readonly CreaturePose[], camera: THREE.PerspectiveCamera) {
-    camera.updateMatrixWorld();
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-
+  update(poses: readonly CreaturePose[]) {
     const seen = new Set<string>();
     for (const pose of poses) {
       const creature = this.#creatures.get(pose.id) ?? this.#add(pose);
       if (!creature) continue;
       seen.add(pose.id);
-      const { root, sprite, look } = creature;
+      const { root, body, look } = creature;
       root.position.set(pose.world.x, pose.world.y, pose.world.z);
       if (
         !creature.probedAt ||
@@ -137,17 +121,10 @@ export class CreatureSprites {
       ) {
         this.#layShadow(creature);
       }
-
-      // Upright: turn about the vertical axis only, towards the camera.
-      sprite.rotation.y = Math.atan2(
-        camera.position.x - pose.world.x,
-        camera.position.z - pose.world.z,
-      );
-      // Heading 0 is +Z; the image faces right, so mirror it when the creature heads left on screen.
-      const sideways = Math.sin(pose.heading) * right.x + Math.cos(pose.heading) * right.z;
-      if (Math.abs(sideways) > FACING_DEAD_ZONE) creature.facingRight = sideways > 0;
-
-      sprite.scale.set(look.height * look.aspect * (creature.facingRight ? 1 : -1), look.height, 1);
+      // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h).
+      body.rotation.y = pose.heading - Math.PI / 2;
+      body.geometry = look.body.geometry;
+      body.material = look.body.material;
     }
     for (const [id, creature] of this.#creatures) {
       if (seen.has(id)) continue;
@@ -161,25 +138,24 @@ export class CreatureSprites {
   }
 
   dispose(): void {
-    this.#spriteGeometry.dispose();
     this.#shadowGeometry.dispose();
     this.#shadowMaterial.dispose();
-    for (const look of this.#looks.values()) look.material.dispose();
-    for (const texture of this.#textures) texture.dispose();
+    this.#shadowTexture.dispose();
+    for (const body of this.#bodies) body.dispose();
   }
 
   #add(pose: CreaturePose): CreatureObject | undefined {
     const look = this.#look(pose.speciesId);
     if (!look) return undefined;
-    const sprite = new THREE.Mesh(this.#spriteGeometry, look.material);
+    const body = new THREE.Mesh(look.body.geometry, look.body.material);
     const shadow = new THREE.Mesh(this.#shadowGeometry, this.#shadowMaterial);
     shadow.scale.setScalar(look.radius * 1.1);
     shadow.renderOrder = -1;
     const root = new THREE.Group();
     root.name = pose.id;
-    root.add(shadow, sprite);
+    root.add(shadow, body);
     this.#layer.add(root);
-    const creature: CreatureObject = { root, sprite, shadow, look, facingRight: true };
+    const creature: CreatureObject = { root, body, shadow, look };
     this.#creatures.set(pose.id, creature);
     return creature;
   }
@@ -208,16 +184,8 @@ export class CreatureSprites {
       return undefined;
     }
     const { height, radius } = SIZE_CLASSES[species.sizeClass];
-    const look: SpeciesLook = {
-      material: new THREE.MeshBasicMaterial({
-        color: FALLBACK_COLOR,
-        alphaTest: 0.5,
-        side: THREE.DoubleSide,
-      }),
-      aspect: FALLBACK_ASPECT,
-      height,
-      radius,
-    };
+    const look: SpeciesLook = { body: fallbackBody(height), radius };
+    this.#bodies.push(look.body);
     this.#looks.set(speciesId, look);
 
     const asset = this.#resolveAsset(species.appearance);
@@ -226,14 +194,15 @@ export class CreatureSprites {
       return look;
     }
     this.#loads.push(
-      this.#loadImage(asset.url).then(
-        (texture) => {
-          this.#textures.push(texture);
-          const image = texture.image as { width?: number; height?: number } | undefined;
-          if (image?.width && image.height) look.aspect = image.width / image.height;
-          look.material.map = texture;
-          look.material.color.set("#ffffff");
-          look.material.needsUpdate = true;
+      this.#readImage(asset.url).then(
+        (pixels) => {
+          const body = buildBody(pixels, height);
+          if (!body) {
+            console.warn(`No opaque shape in ${species.appearance}`);
+            return;
+          }
+          this.#bodies.push(body);
+          look.body = body;
         },
         (error: unknown) => console.warn(`Could not load ${species.appearance}`, error),
       ),
