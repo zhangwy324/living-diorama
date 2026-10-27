@@ -5,6 +5,7 @@ The frontend's OS-neutral view of the desktop shell (ADR 0008 §1). The OS work 
 ## Owns
 
 - The `DesktopShell` interface, its Tauri implementation and a no-op implementation for tests (the frontend is not supported in a plain browser; ADR 0008 §1).
+- The `LibraryStore` interface to the species library's files, its Tauri implementation and one in memory for tests and the browser (ADR 0014).
 - Forwarding the frontend's console warnings and errors to the diagnostics log (ADR 0009 §14).
 
 ## Must not

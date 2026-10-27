@@ -13,7 +13,7 @@
 
 2. **Saves are atomic and entries never change.** A save writes the three files to `<uuid>.tmp/`, then renames the folder into place, so an entry appears complete or not at all. A delete renames the folder to `<uuid>.tmp/` before removing it. Listing removes `.tmp` folders left by a crash. Saving over an existing ID is an error: a redraw is a new species, and editing comes later.
 
-3. **Rust stores, TypeScript checks.** `apps/desktop/src-tauri/src/library.rs` lists, saves, loads and deletes entries, and doesn't interpret their contents. It skips, with a warning in the log, folders that aren't entries and entries it can't read: a missing file, JSON that doesn't parse, a file over its size limit. The schemas and migrations live in `content-schema`, so they exist once. An entry that fails them, or comes from a newer version, is skipped with a diagnostic, and its files are left alone, so a newer build can still read them. A bad entry never stops the app.
+3. **Rust stores, TypeScript checks.** `apps/desktop/src-tauri/src/library.rs` lists, saves, loads and deletes entries, and doesn't interpret their contents. It skips, with a warning in the log, folders that aren't entries and entries it can't read: a missing file, JSON that doesn't parse, a file over its size limit. The schemas and migrations live in `content-schema`, so they exist once. An entry that fails them, comes from a newer version, or holds a species other than `user:<its folder>` with the image `user:<its folder>/appearance.png`, is skipped with a diagnostic, and its files are left alone, so a newer build can still read them. A bad entry never stops the app.
 
 4. **Rust guards the paths and sizes.** IDs must be lowercase UUIDs before any path is built from them, so the frontend can't reach outside the library. Each file has a size limit, well above what the Studio produces: 64 KB for the entry, 16 MB for the drawing, 4 MB for the image.
 
@@ -27,7 +27,7 @@
 
 7. **Images reach the renderer as `blob:` URLs.** `load_library_image` returns the PNG's bytes as raw binary (`ipc::Response`), and the frontend makes a `blob:` URL from them for `register_species`. The CSP already allows `blob:` images, so the asset protocol isn't needed. The URL is revoked when the species is deleted.
 
-8. **Startup registers the library.** Once the world is ready, the app registers every library species, one at a time, and spawns none of them. A species the world rejects stays in the list as unavailable, with the reason, and can't be added.
+8. **Startup registers the library.** Once the world is ready, the app registers every library species, one at a time, and spawns none of them. Saving registers the new species before storing it, so a species the world rejects never reaches the disk. A species the world rejects stays in the list as unavailable, with the reason, and can't be added.
 
 9. **Deleting a species doesn't unregister it.** Its creatures leave the world and its files are deleted. The species stays registered, unseen, until the next launch: registries have no unregister, and nothing can reach a species that isn't in the library.
 
@@ -35,9 +35,11 @@
 
 11. **Drawn species defaults** (`core:walk`, `core:wander`, base speed 0.6, the mossling's) are app configuration, next to the startup config.
 
+12. **A console hook until the Studio.** Development builds put the library on `window.livingDiorama.library`, with `saveSample()` to save a sample drawing, so saving and relaunching can be checked by hand before M11 gives it a UI.
+
 ## Consequences
 
 - An unreadable or newer library entry is skipped, not lost: its files stay until the player deletes it or a newer build reads it.
 - Images and drawings cross the IPC boundary as bytes and JSON. A save sends the image as a JSON array of numbers, which is fine for a 256 px PNG.
 - The registry keeps deleted species until relaunch. Each costs a few kilobytes and, for a new size class, its navigation.
-- Rust unit tests cover saving, loading, deleting, unreadable entries, size limits, rejected IDs and interrupted saves; Vitest covers the schemas and migrations.
+- Rust unit tests cover saving, loading, deleting, unreadable entries, size limits, rejected IDs and interrupted saves; Vitest covers the schemas and migrations, and the library's startup, saving, creatures and deletes against an in-memory store.

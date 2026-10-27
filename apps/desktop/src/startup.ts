@@ -22,3 +22,10 @@ export const STARTUP: StartupConfig = {
   maxCreatures: 20,
   creatures: [{ speciesId: "hollow:mossling", count: 3 }],
 };
+
+/** What a drawn species is given besides its name, size and image (ADR 0014 §11): the mossling's. */
+export const DRAWN_SPECIES_DEFAULTS = {
+  capabilities: { "core:walk": 1 },
+  baseSpeed: 0.6,
+  behaviors: ["core:wander"],
+};

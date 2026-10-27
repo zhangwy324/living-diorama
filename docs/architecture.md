@@ -63,7 +63,7 @@ flowchart LR
 ```
 
 - **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode, the settings file, the species library's files and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
-- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
+- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). `species-library.ts` keeps the drawn species: it checks the stored entries, registers them and adds, removes and deletes them. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
 - **Simulation worker.** The only place content is registered and checked (`content.ts`). Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
 - **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)).
 
@@ -72,7 +72,7 @@ flowchart LR
 1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it and starts the tray.
 2. The page loads, starts the worker and sends `init` with the world from `startup.ts`.
 3. The worker registers the engine's entries, then the built-in pack, resolves references and runs the world checks. Any error comes back as `error` and reaches the error screen as "The world failed to load".
-4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the app sends one `spawn` per starting creature.
+4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the app sends one `spawn` per starting creature. The app then opens the species library and registers its species one at a time, spawning none ([ADR 0014](adr/0014-species-library.md)); development builds expose it as `window.livingDiorama.library`.
 5. The worker sends a snapshot every tick, and the view draws it.
 
 ### Shutdown
