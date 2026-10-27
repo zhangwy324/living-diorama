@@ -20,6 +20,8 @@ export interface WorldCheck {
   model?: WorldModel;
   /** One per distinct navigation profile among the registered species. */
   navigations: Navigation[];
+  /** Per profile key, where that profile's creatures don't fit (ADR 0013). */
+  limits: ReadonlyMap<string, Diagnostic[]>;
 }
 
 const at = (x: number, z: number) => `(${x.toFixed(2)}, ${z.toFixed(2)})`;
@@ -54,8 +56,11 @@ function reporter(world: WorldDefinition) {
     diagnostics,
     err: (code: string, message: string, path: DiagnosticPath) =>
       diagnostics.push(error(code, message, path, source)),
-    warn: (code: string, message: string, path: DiagnosticPath) =>
-      diagnostics.push(warning(code, message, path, source)),
+    warn: (code: string, message: string, path: DiagnosticPath) => {
+      const d = warning(code, message, path, source);
+      diagnostics.push(d);
+      return d;
+    },
     regionPath: (id: string) => regionPaths.get(id) ?? [],
     connectionPath: (id: string) => connectionPaths.get(id) ?? [],
   };
@@ -64,7 +69,7 @@ type Reporter = ReturnType<typeof reporter>;
 
 export function checkWorld(world: WorldDefinition, registries: Registries): WorldCheck {
   const built = buildWorldModel(world, registries);
-  if (!built.ok) return { diagnostics: built.diagnostics, navigations: [] };
+  if (!built.ok) return { diagnostics: built.diagnostics, navigations: [], limits: new Map() };
   const model = built.value;
   const report = reporter(world);
   const { warn, connectionPath } = report;
@@ -86,7 +91,12 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
     }
   }
 
-  const navigations = profiles.map((profile) => navigate(world, model, profile, report));
+  const limits = new Map<string, Diagnostic[]>();
+  const navigations = profiles.map((profile) => {
+    const { navigation, limits: found } = navigate(world, model, profile, report);
+    limits.set(profile.key, found);
+    return navigation;
+  });
 
   world.spawnPoints.forEach((spawn, i) => {
     const region = model.regions.get(spawn.position.regionId);
@@ -100,12 +110,14 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
     }
   });
 
-  return { diagnostics: report.diagnostics, model, navigations };
+  return { diagnostics: report.diagnostics, model, navigations, limits };
 }
 
 export interface NavigationCheck {
   diagnostics: Diagnostic[];
   navigation: Navigation;
+  /** The warnings about where this profile's creatures don't fit, also in `diagnostics`. */
+  limits: Diagnostic[];
 }
 
 /**
@@ -118,25 +130,33 @@ export function checkNavigation(
   profile: NavProfile,
 ): NavigationCheck {
   const report = reporter(world);
-  const navigation = navigate(world, model, profile, report);
-  return { diagnostics: report.diagnostics, navigation };
+  const { navigation, limits } = navigate(world, model, profile, report);
+  return { diagnostics: report.diagnostics, navigation, limits };
 }
 
-/** Builds one profile's navigation and checks that the world works for it. */
+/**
+ * Builds one profile's navigation and checks that the world works for it. Where its creatures
+ * don't fit (a region that splits, a portal or spawn point without room) is a warning and a limit,
+ * not an error: they only go where they fit (ADR 0013). A profile that fits no spawn point at all
+ * can't appear, which is an error.
+ */
 function navigate(
   world: WorldDefinition,
   model: WorldModel,
   profile: NavProfile,
   { err, warn, regionPath, connectionPath }: Reporter,
-): Navigation {
+): { navigation: Navigation; limits: Diagnostic[] } {
   const nav = buildNavigation(model, profile);
   const label = `size class ${nav.profile.sizeClass}`;
+  const limits: Diagnostic[] = [];
+  const limit = (code: string, message: string, path: DiagnosticPath) =>
+    limits.push(warn(code, message, path));
 
   for (const [regionId, mask] of nav.masks) {
     if (!nav.profile.maxSlopeByKind.has(mask.region.kind)) continue;
     const components = mask.components();
     if (components.length === 0) {
-      warn(
+      limit(
         "no_walkable_area",
         `Region "${regionId}" has no walkable area for ${label}`,
         regionPath(regionId),
@@ -144,7 +164,7 @@ function navigate(
     } else if (components.length > 1) {
       const [largest = [], ...islands] = components;
       const first = mask.center(islands[0]?.[0] ?? 0);
-      err(
+      limit(
         "disconnected_region",
         `Region "${regionId}" splits into ${components.length} walkable areas for ${label} ` +
           `(largest ${largest.length} cells; ${islands.map((c) => c.length).join(", ")} more, first near ${at(first.x, first.z)})`,
@@ -156,31 +176,41 @@ function navigate(
   for (const connection of model.connections) {
     const check = nav.portals.get(connection.id);
     if (!check || check.usable || check.reason === "missing_capability") continue;
-    err(
+    const where = connection.structureId === undefined ? "" : ` of "${connection.structureId}"`;
+    // Too little room is a fit limit; surfaces that don't meet are a geometry error for anyone.
+    (check.reason === "no_walkable_side" ? limit : err)(
       "portal_unusable",
-      `Connection "${connection.id}" is unusable for ${label}: ${check.detail}`,
+      `Connection "${connection.id}"${where} is unusable for ${label}: ${check.detail}`,
       [...connectionPath(connection.id), "portal"],
     );
   }
 
   checkSeams(model, nav, label, err, warn, regionPath);
 
+  let standable = 0;
   world.spawnPoints.forEach((spawn, i) => {
     const mask = nav.masks.get(spawn.position.regionId);
     if (!mask || !nav.profile.maxSlopeByKind.has(mask.region.kind)) return;
     const { x, z } = spawn.position;
-    if (!mask.isWalkableAt(x, z)) {
-      const cell = mask.cellAt(x, z);
-      const state = mask.state(cell);
-      const reason = Object.entries(CellState).find(([, v]) => v === state)?.[0] ?? "unknown";
-      err(
-        "spawn_not_walkable",
-        `Spawn point "${spawn.id}" at ${at(x, z)} is not walkable for ${label} (${reason})`,
-        ["spawnPoints", i, "position"],
-      );
+    if (mask.isWalkableAt(x, z)) {
+      standable++;
+      return;
     }
+    const cell = mask.cellAt(x, z);
+    const state = mask.state(cell);
+    const reason = Object.entries(CellState).find(([, v]) => v === state)?.[0] ?? "unknown";
+    limit(
+      "spawn_not_walkable",
+      `Spawn point "${spawn.id}" at ${at(x, z)} is not walkable for ${label} (${reason})`,
+      ["spawnPoints", i, "position"],
+    );
   });
-  return nav;
+  if (standable === 0) {
+    err("no_spawn_point", `No spawn point is walkable for ${label}, so it can't appear`, [
+      "spawnPoints",
+    ]);
+  }
+  return { navigation: nav, limits };
 }
 
 /**

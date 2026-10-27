@@ -173,7 +173,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           diagnostics = registered.diagnostics;
           break;
         }
-        const species = registered.value;
+        const { species, limits } = registered.value;
         const asset = sim.state.registries.assets.get(species.appearance);
         if (!asset) throw new Error(`"${species.id}" was registered without its appearance`);
         send({
@@ -182,6 +182,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           speciesId: species.id,
           species: summarizeSpecies(species),
           asset: summarizeAsset(asset),
+          limits,
         });
         return;
       }

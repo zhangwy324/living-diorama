@@ -69,15 +69,21 @@ export function isActionProvider(entry: ActionType): entry is ActionProvider {
 /** A region the creature can get to from where it stands. */
 export interface ReachableRegion {
   regionId: string;
-  /** Walkable area for this creature, in square metres. */
+  /** Walkable area the creature can reach in this region, in square metres. */
   walkableArea: number;
 }
 
 /** Read-only world queries for behaviors. v1 has no senses, so they see the whole world. */
 export interface WorldQueries {
-  /** Regions with walkable area reachable from the creature's region, its own included. */
+  /**
+   * Regions with walkable area the creature can reach from where it stands, its own included. A
+   * creature too big for a bridge or a gap never sees what lies beyond it (ADR 0013).
+   */
   reachableRegions(): readonly ReachableRegion[];
-  /** A uniformly random point on a walkable cell of the region, or undefined if it has none. */
+  /**
+   * A uniformly random point on a cell of the region the creature can reach, or undefined if it
+   * can reach none.
+   */
   randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
 }
 

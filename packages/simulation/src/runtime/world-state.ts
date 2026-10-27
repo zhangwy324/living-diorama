@@ -47,6 +47,12 @@ export interface WorldStateOptions {
   maxCreatures?: number;
 }
 
+/** A profile's pathfinder and where its creatures don't fit, as warnings. */
+export interface PlannedNavigation {
+  pathfinder: Pathfinder;
+  limits: Diagnostic[];
+}
+
 /** Wraps an angle into [-π, π). */
 export function normalizeHeading(angle: number): number {
   const turn = 2 * Math.PI;
@@ -66,6 +72,8 @@ export class WorldState {
   tick = 0;
   readonly maxCreatures: number;
   readonly #pathfinders: Map<string, Pathfinder>;
+  /** Per profile key, where its creatures don't fit (ADR 0013). */
+  readonly #limits: Map<string, Diagnostic[]>;
   readonly #rng: Rng;
   readonly #root: Rng;
   #nextCreature = 1;
@@ -74,10 +82,12 @@ export class WorldState {
     readonly registries: Registries,
     readonly model: WorldModel,
     pathfinders: Map<string, Pathfinder>,
+    limits: Map<string, Diagnostic[]>,
     seed: number,
     maxCreatures: number,
   ) {
     this.#pathfinders = pathfinders;
+    this.#limits = limits;
     this.maxCreatures = maxCreatures;
     this.#root = Rng.fromSeed(seed);
     this.#rng = this.#root.fork("world");
@@ -104,7 +114,14 @@ export class WorldState {
     );
     return {
       ok: true,
-      value: new WorldState(registries, model, pathfinders, seed, maxCreatures),
+      value: new WorldState(
+        registries,
+        model,
+        pathfinders,
+        new Map(check.limits),
+        seed,
+        maxCreatures,
+      ),
     };
   }
 
@@ -120,25 +137,35 @@ export class WorldState {
   }
 
   /**
-   * The pathfinder for a species' navigation profile, registered or not. If the world has no
-   * navigation for the profile yet, it is built and checked like the profiles of the species
-   * registered when the world was created (ADR 0012), and errors are returned. A new pathfinder is
-   * only used once passed to `addPathfinder`.
+   * The navigation for a species' profile, registered or not, and where its creatures don't fit.
+   * If the world has none for the profile yet, it is built and checked like the profiles of the
+   * species registered when the world was created (ADR 0012), and errors are returned. New
+   * navigation is only used once passed to `addNavigation`.
    */
-  planNavigation(species: SpeciesDefinition): Result<Pathfinder> {
+  planNavigation(species: SpeciesDefinition): Result<PlannedNavigation> {
     const profile = profileForSpecies(species, this.registries);
     const existing = this.#pathfinders.get(profile.key);
-    if (existing) return { ok: true, value: existing };
+    if (existing) {
+      return {
+        ok: true,
+        value: { pathfinder: existing, limits: this.#limits.get(profile.key) ?? [] },
+      };
+    }
     const check = checkNavigation(this.model.definition, this.model, profile);
     const errors = check.diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) return { ok: false, diagnostics: errors };
-    return { ok: true, value: new Pathfinder(this.model, check.navigation) };
+    return {
+      ok: true,
+      value: { pathfinder: new Pathfinder(this.model, check.navigation), limits: check.limits },
+    };
   }
 
-  /** Makes a pathfinder from `planNavigation` available to species of its profile. */
-  addPathfinder(pathfinder: Pathfinder): void {
+  /** Makes navigation from `planNavigation` available to species of its profile. */
+  addNavigation({ pathfinder, limits }: PlannedNavigation): void {
     const { key } = pathfinder.navigation.profile;
-    if (!this.#pathfinders.has(key)) this.#pathfinders.set(key, pathfinder);
+    if (this.#pathfinders.has(key)) return;
+    this.#pathfinders.set(key, pathfinder);
+    this.#limits.set(key, limits);
   }
 
   /**

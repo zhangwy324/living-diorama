@@ -9,6 +9,10 @@ import { CellState, type RegionMask } from "./walkability";
 // of a small graph whose in-region edge costs come from exact walking-distance fields, so the
 // region-level search picks the truly shortest sequence of regions. Grid A* then fills in each
 // region's leg.
+//
+// A region can split into several walkable areas for one profile, e.g. a rock that a large
+// creature can't pass (ADR 0013). Areas are linked by the same crossings routes use, so what
+// `reachableCells` returns is exactly what `findRoute` can reach.
 
 /** Crossings on one portal are at least this far apart, in metres. */
 const CROSSING_SPACING = 1;
@@ -49,10 +53,19 @@ export type RouteResult =
 
 const doorKey = (regionId: string, cell: number) => `${regionId}#${cell}`;
 
+/** Walkable cells per region, in cell order. */
+export type ReachableCells = ReadonlyMap<string, readonly number[]>;
+
+const NO_CELLS: ReachableCells = new Map();
+
 /** Route planning for one navigation profile. Derived data is built lazily and cached. */
 export class Pathfinder {
   readonly #crossings = new Map<string, Crossing[]>();
   readonly #fields = new Map<string, Float64Array>();
+  /** Per region, the area (index into `components()`) of each cell, or -1. */
+  readonly #areas = new Map<string, { ofCell: Int32Array; cells: number[][] }>();
+  /** Per area key, the cells reachable from it. */
+  readonly #reachable = new Map<string, ReachableCells>();
 
   constructor(
     readonly world: WorldModel,
@@ -70,6 +83,68 @@ export class Pathfinder {
   }
 
   /**
+   * The walkable cells a creature standing at `from` can reach, per region: its own area and
+   * every area that crossings lead to. Empty if `from` is not walkable.
+   */
+  reachableCells(from: RegionPosition): ReachableCells {
+    const start = this.#areaAt(from.regionId, from.x, from.z);
+    if (start === undefined) return NO_CELLS;
+    const key = areaKey(from.regionId, start);
+    let found = this.#reachable.get(key);
+    if (!found) {
+      found = this.#flood(from.regionId, start);
+      this.#reachable.set(key, found);
+    }
+    return found;
+  }
+
+  #regionAreas(regionId: string) {
+    let areas = this.#areas.get(regionId);
+    if (!areas) {
+      const mask = this.navigation.masks.get(regionId);
+      const cells = mask?.components() ?? [];
+      const ofCell = new Int32Array(mask?.states.length ?? 0).fill(-1);
+      cells.forEach((area, index) => {
+        for (const cell of area) ofCell[cell] = index;
+      });
+      areas = { ofCell, cells };
+      this.#areas.set(regionId, areas);
+    }
+    return areas;
+  }
+
+  #areaAt(regionId: string, x: number, z: number): number | undefined {
+    const cell = this.navigation.masks.get(regionId)?.cellAt(x, z) ?? -1;
+    const area = cell === -1 ? -1 : (this.#regionAreas(regionId).ofCell[cell] ?? -1);
+    return area === -1 ? undefined : area;
+  }
+
+  #flood(regionId: string, start: number): ReachableCells {
+    const seen = new Set([areaKey(regionId, start)]);
+    const queue = [{ regionId, area: start }];
+    // Iterating while pushing visits the appended areas too.
+    for (const current of queue) {
+      for (const exit of this.#exits(current.regionId)) {
+        const { ofCell } = this.#regionAreas(current.regionId);
+        if (ofCell[exit.fromCell] !== current.area) continue;
+        const area = this.#regionAreas(exit.toRegionId).ofCell[exit.toCell] ?? -1;
+        const key = areaKey(exit.toRegionId, area);
+        if (area === -1 || seen.has(key)) continue;
+        seen.add(key);
+        queue.push({ regionId: exit.toRegionId, area });
+      }
+    }
+    const reachable = new Map<string, number[]>();
+    for (const { regionId: id, area } of queue) {
+      const cells = this.#regionAreas(id).cells[area] ?? [];
+      reachable.set(id, [...(reachable.get(id) ?? []), ...cells]);
+    }
+    // Cell order, so random picks don't depend on the order areas were found in.
+    for (const cells of reachable.values()) cells.sort((a, b) => a - b);
+    return reachable;
+  }
+
+  /**
    * Drops cached routing data for these regions and every connection touching them. For future
    * world edits (unused in v1); the walkability masks themselves come from `navigation`.
    */
@@ -81,6 +156,8 @@ export class Pathfinder {
     for (const key of [...this.#fields.keys()]) {
       if (ids.has(key.slice(0, key.lastIndexOf("#")))) this.#fields.delete(key);
     }
+    for (const id of ids) this.#areas.delete(id);
+    this.#reachable.clear();
   }
 
   findRoute(from: RegionPosition, to: RegionPosition): RouteResult {
@@ -316,6 +393,8 @@ function candidatePairs(a: RegionMask, b: RegionMask, connection: ConnectionMode
   }
   return pairs;
 }
+
+const areaKey = (regionId: string, area: number) => `${regionId}#${area}`;
 
 const describe = (p: RegionPosition) => `"${p.regionId}" (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`;
 

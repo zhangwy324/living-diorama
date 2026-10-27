@@ -79,7 +79,10 @@ describe("simulation client", () => {
     const { client, callbacks, tick } = start();
     const registering = client.registerSpecies(drawn, "blob:http://localhost/puddle");
     tick();
-    await expect(registering).resolves.toEqual({ ok: true, value: "user:puddle" });
+    await expect(registering).resolves.toEqual({
+      ok: true,
+      value: { speciesId: "user:puddle", limits: [] },
+    });
     expect(callbacks.onSpeciesRegistered).toHaveBeenCalledWith(
       "user:puddle",
       { appearance: drawn.appearance, sizeClass: "medium" },

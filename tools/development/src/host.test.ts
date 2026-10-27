@@ -208,6 +208,7 @@ describe("simulation host", () => {
         speciesId: "user:puddle",
         species: { appearance: species.appearance, sizeClass: "medium" },
         asset: { kind: "image", url: appearanceUrl },
+        limits: [],
       },
       { type: "spawned", requestId: "r2", creatureId: "creature-1" },
     ]);

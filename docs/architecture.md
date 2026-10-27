@@ -95,7 +95,7 @@ Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/pr
 |               | `shutdown`                     | Stop the clock and close the worker.                                                      |
 | worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.        |
 |               | `snapshot`                     | Every tick: creature positions and headings, plus the events since the previous snapshot. |
-|               | `species_registered`           | A species was registered: its summary and its appearance asset, for the renderer.         |
+|               | `species_registered`           | A species was registered: its summary, its appearance asset and where it doesn't fit.     |
 |               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                              |
 |               | `rejected`                     | A request failed, with diagnostics. Not fatal: the world keeps running.                   |
 |               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                      |
