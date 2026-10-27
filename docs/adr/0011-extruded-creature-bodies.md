@@ -30,9 +30,11 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 ### Shadows (PR B)
 
-9. **Bodies cast real shadows** from the sun. The shadow blob stays, as the contact shadow under the feet.
+9. **Bodies cast real shadows from the sun, and nothing else.** The shadow blob is gone. PR B first kept it as a contact shadow, but with the sun's shadow beside it a creature looked as if it had two shadows. A smaller oval patch under the body, turned with it, was tried and looked worse. Without the blob, no ground probing is needed.
 
-10. **The blob follows creases** (issue #29). The ground is probed at the centre and at four points around the blob's rim. The blob tilts to the average normal of the hits and sits at the highest hit, measured along that normal, so on an even slope it still lies on the surface and its far side no longer sinks under a neighbouring surface at a bridge end or the ramp foot. The cause was confirmed by measurement in the built-in world rather than by eye with the debug overlay. With the single probe, at both bridge ends and the ramp foot up to 44% of the blob lay 2–5 cm under the neighbouring surface, more than its 2 cm lift. With five probes none of it does, at the cost of the blob floating up to about 7–10 cm over the lower surface where it straddles a step or a concave crease.
+10. **Bodies draw their faces towards the sun into the shadow map** (`shadowSide` front), not three's default of the far side. With the far side, the light ray leaves the body only a centimetre or two above the ground next to the feet and under a low belly. That is within the sun's shadow bias (−0.0005 of a 77 m depth range, about 4 cm) and normal bias (2 cm), so a lit strip showed between the feet and the shadow. Rays cast towards the sun showed that ground is in shadow. Changing either bias alone didn't close the gap, and lowering both would risk shadow acne on terrain and props. With the near side the shadow starts at the feet. Bodies receive no shadows, so they can't shadow themselves this way.
+
+    Issue #29, the blob hidden where two surfaces meet, went away with the blob. PR B had fixed it by probing the ground at five points; the measurement that confirmed the cause is in that PR.
 
 ### Docs and checks (PR C)
 

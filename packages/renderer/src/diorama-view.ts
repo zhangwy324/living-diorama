@@ -130,7 +130,6 @@ export function buildDioramaScene(
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
     readImage: options.readImage,
-    ground: [layers.terrain.group, layers.structures.group],
   });
   const overlays = createDebugOverlays(scene, options.navigation);
   world.add(overlays.group);

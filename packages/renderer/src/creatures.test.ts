@@ -126,7 +126,7 @@ describe("CreatureBodies", () => {
     height: 40,
     data: new Uint8Array(20 * 40 * 4).fill(255),
   };
-  const make = (readImage = vi.fn(async () => drawing), ground: THREE.Object3D[] = []) => {
+  const make = (readImage = vi.fn(async () => drawing)) => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
       resolveSpecies: (id) =>
@@ -134,12 +134,10 @@ describe("CreatureBodies", () => {
       resolveAsset: (ref) =>
         ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined,
       readImage,
-      ground,
     });
     return { layer, bodies, readImage };
   };
-  const bodyOf = (layer: SceneLayer, id: string) =>
-    layer.group.getObjectByName(id)!.children[1] as THREE.Mesh;
+  const bodyOf = (layer: SceneLayer, id: string) => layer.group.getObjectByName(id) as THREE.Mesh;
   const boxOf = (mesh: THREE.Mesh) => {
     mesh.geometry.computeBoundingBox();
     return mesh.geometry.boundingBox!;
@@ -158,6 +156,7 @@ describe("CreatureBodies", () => {
     const body = bodyOf(layer, "a");
     expect(body.geometry.type).toBe("ExtrudeGeometry");
     expect(bodyOf(layer, "b").geometry).toBe(body.geometry);
+    expect(bodyOf(layer, "b").position.toArray()).toEqual([1, 0, 0]);
     expect(boxOf(body).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
     expect(body.material).toHaveLength(2);
   });
@@ -183,44 +182,16 @@ describe("CreatureBodies", () => {
     expect(layer.group.children).toHaveLength(0);
   });
 
-  it("lays the shadow along the ground under the creature, tilted to its slope", () => {
-    // A 30° ramp rising towards -Z, through the origin.
-    const ramp = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 10).rotateX(-Math.PI / 2 + Math.PI / 6),
-      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
-    );
-    const { layer, bodies } = make(undefined, [ramp]);
-    bodies.update([creature("a", { x: 1, y: 0, z: 0 })]);
-    const shadow = layer.group.getObjectByName("a")!.children[0] as THREE.Mesh;
-    const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(shadow.quaternion);
-    expect(normal.angleTo(new THREE.Vector3(0, 1, 0))).toBeCloseTo(Math.PI / 6);
-    expect(normal.z).toBeGreaterThan(0); // leans towards the downhill side
-    expect(shadow.position.length()).toBeCloseTo(0.02); // lifted off the ramp along its normal
-
-    // Off the ramp it lies flat at the creature's feet.
-    bodies.update([creature("a", { x: 20, y: 0, z: 0 })]);
-    expect(shadow.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
-    expect(shadow.position.y).toBeCloseTo(0.02);
-  });
-
-  it("rises over a step next to the creature rather than going under it (issue #29)", () => {
-    // Flat ground at y = 0 and, from x = 0.1 on, a deck 0.05 m higher: the end of a bridge.
-    const plane = (width: number, x: number, y: number) =>
-      new THREE.Mesh(
-        new THREE.PlaneGeometry(width, 10).rotateX(-Math.PI / 2).translate(x, y, 0),
-        new THREE.MeshBasicMaterial(),
-      );
-    const { layer, bodies } = make(undefined, [plane(10, -5, 0), plane(10, 5.1, 0.05)]);
-    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    const shadow = layer.group.getObjectByName("a")!.children[0] as THREE.Mesh;
-    expect(shadow.position.y).toBeCloseTo(0.07); // on the deck's height, lifted
-    expect(shadow.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0);
-  });
-
-  it("makes bodies cast shadows", () => {
+  it("makes bodies cast shadows from their faces towards the sun", async () => {
     const { layer, bodies } = make();
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    const sides = (mesh: THREE.Mesh) =>
+      [mesh.material].flat().map((material) => material.shadowSide);
     expect(bodyOf(layer, "a").castShadow).toBe(true);
+    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide]); // the block
+    await bodies.ready;
+    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide, THREE.FrontSide]);
   });
 
   it("draws nothing for an unknown species and keeps the block if the drawing fails", async () => {

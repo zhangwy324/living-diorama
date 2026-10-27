@@ -13,6 +13,12 @@ const BEVEL = 0.04;
 const BEVEL_SEGMENTS = 3;
 const EMISSIVE_INTENSITY = 0.35;
 const ROUGHNESS = 0.9;
+/**
+ * Bodies are drawn into the shadow map by their faces towards the sun. By default the far side is,
+ * and next to the feet it is so close to the ground that the sun's bias leaves a lit gap there
+ * (ADR 0011 §10). Bodies receive no shadows, so they can't shadow themselves with this.
+ */
+const SHADOW_SIDE = THREE.FrontSide;
 const FALLBACK_COLOR = "#8f8a82";
 const FALLBACK_ASPECT = 0.75;
 
@@ -39,6 +45,7 @@ export function buildBody(pixels: Pixels, height: number): Body | undefined {
         emissiveMap: map,
         emissiveIntensity: EMISSIVE_INTENSITY,
         roughness: ROUGHNESS,
+        shadowSide: SHADOW_SIDE,
       }),
   );
   return {
@@ -99,7 +106,11 @@ export function fallbackBody(height: number): Body {
     2,
     height * BEVEL,
   ).translate(0, height / 2, 0);
-  const material = new THREE.MeshStandardMaterial({ color: FALLBACK_COLOR, roughness: ROUGHNESS });
+  const material = new THREE.MeshStandardMaterial({
+    color: FALLBACK_COLOR,
+    roughness: ROUGHNESS,
+    shadowSide: SHADOW_SIDE,
+  });
   return {
     geometry,
     material,
