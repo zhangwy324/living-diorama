@@ -1,5 +1,6 @@
 import { connectDesktopShell } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
+import type { AssetSummary, SpeciesSummary } from "@living-diorama/simulation";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
@@ -60,13 +61,18 @@ export function App() {
       stop();
       setFailure((current) => current ?? next);
     };
+    // What the renderer resolves; species registered while the world runs are added (ADR 0012).
+    const assets = new Map<string, AssetSummary>();
+    const species = new Map<string, SpeciesSummary>();
     const client = startSimulation({
-      onReady: ({ scene, navigations, assets, species }) => {
+      onReady: ({ scene, navigations, ...content }) => {
+        for (const [id, asset] of Object.entries(content.assets)) assets.set(id, asset);
+        for (const [id, summary] of Object.entries(content.species)) species.set(id, summary);
         const [navigation] = navigations;
         try {
           created = createDioramaView(element, scene, {
-            resolveAsset: (ref) => assets[ref],
-            resolveSpecies: (id) => species[id],
+            resolveAsset: (ref) => assets.get(ref),
+            resolveSpecies: (id) => species.get(id),
             ...(navigation ? { navigation } : {}),
           });
         } catch (error) {
@@ -74,6 +80,10 @@ export function App() {
           return;
         }
         view.current = created;
+      },
+      onSpeciesRegistered: (id, summary, asset) => {
+        species.set(id, summary);
+        assets.set(summary.appearance, asset);
       },
       onSnapshot: (snapshot, events) => {
         created?.pushSnapshot(snapshot);

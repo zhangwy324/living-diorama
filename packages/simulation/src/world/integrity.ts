@@ -34,31 +34,40 @@ export function speciesProfiles(registries: Registries): NavProfile[] {
   return [...profiles.values()];
 }
 
-export function checkWorld(world: WorldDefinition, registries: Registries): WorldCheck {
+/** Collects diagnostics about a world, with paths into its definition. */
+function reporter(world: WorldDefinition) {
   const source = `worlds/${world.id}`;
-  const built = buildWorldModel(world, registries);
-  if (!built.ok) return { diagnostics: built.diagnostics, navigations: [] };
-  const model = built.value;
   const diagnostics: Diagnostic[] = [];
-  const err = (code: string, message: string, path: DiagnosticPath) =>
-    diagnostics.push(error(code, message, path, source));
-  const warn = (code: string, message: string, path: DiagnosticPath) =>
-    diagnostics.push(warning(code, message, path, source));
-
   const regionPaths = new Map<string, DiagnosticPath>();
-  const regionPath = (id: string) => regionPaths.get(id) ?? [];
   world.regions.forEach((r, i) => regionPaths.set(r.id, ["regions", i]));
   world.structures.forEach((s, si) =>
     s.regions.forEach((r, i) => regionPaths.set(r.id, ["structures", si, "regions", i])),
   );
   const connectionPaths = new Map<string, DiagnosticPath>();
-  const connectionPath = (id: string) => connectionPaths.get(id) ?? [];
   world.connections.forEach((c, i) => connectionPaths.set(c.id, ["connections", i]));
   world.structures.forEach((s, si) =>
     s.connections.forEach((c, i) =>
       connectionPaths.set(c.id, ["structures", si, "connections", i]),
     ),
   );
+  return {
+    diagnostics,
+    err: (code: string, message: string, path: DiagnosticPath) =>
+      diagnostics.push(error(code, message, path, source)),
+    warn: (code: string, message: string, path: DiagnosticPath) =>
+      diagnostics.push(warning(code, message, path, source)),
+    regionPath: (id: string) => regionPaths.get(id) ?? [],
+    connectionPath: (id: string) => connectionPaths.get(id) ?? [],
+  };
+}
+type Reporter = ReturnType<typeof reporter>;
+
+export function checkWorld(world: WorldDefinition, registries: Registries): WorldCheck {
+  const built = buildWorldModel(world, registries);
+  if (!built.ok) return { diagnostics: built.diagnostics, navigations: [] };
+  const model = built.value;
+  const report = reporter(world);
+  const { warn, connectionPath } = report;
 
   const profiles = speciesProfiles(registries);
   if (profiles.length === 0) {
@@ -77,59 +86,7 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
     }
   }
 
-  const navigations = profiles.map((profile) => buildNavigation(model, profile));
-  for (const nav of navigations) {
-    const label = `size class ${nav.profile.sizeClass}`;
-
-    for (const [regionId, mask] of nav.masks) {
-      if (!nav.profile.maxSlopeByKind.has(mask.region.kind)) continue;
-      const components = mask.components();
-      if (components.length === 0) {
-        warn(
-          "no_walkable_area",
-          `Region "${regionId}" has no walkable area for ${label}`,
-          regionPath(regionId),
-        );
-      } else if (components.length > 1) {
-        const [largest = [], ...islands] = components;
-        const first = mask.center(islands[0]?.[0] ?? 0);
-        err(
-          "disconnected_region",
-          `Region "${regionId}" splits into ${components.length} walkable areas for ${label} ` +
-            `(largest ${largest.length} cells; ${islands.map((c) => c.length).join(", ")} more, first near ${at(first.x, first.z)})`,
-          regionPath(regionId),
-        );
-      }
-    }
-
-    for (const connection of model.connections) {
-      const check = nav.portals.get(connection.id);
-      if (!check || check.usable || check.reason === "missing_capability") continue;
-      err(
-        "portal_unusable",
-        `Connection "${connection.id}" is unusable for ${label}: ${check.detail}`,
-        [...connectionPath(connection.id), "portal"],
-      );
-    }
-
-    checkSeams(model, nav, label, err, warn, regionPath);
-
-    world.spawnPoints.forEach((spawn, i) => {
-      const mask = nav.masks.get(spawn.position.regionId);
-      if (!mask || !nav.profile.maxSlopeByKind.has(mask.region.kind)) return;
-      const { x, z } = spawn.position;
-      if (!mask.isWalkableAt(x, z)) {
-        const cell = mask.cellAt(x, z);
-        const state = mask.state(cell);
-        const reason = Object.entries(CellState).find(([, v]) => v === state)?.[0] ?? "unknown";
-        err(
-          "spawn_not_walkable",
-          `Spawn point "${spawn.id}" at ${at(x, z)} is not walkable for ${label} (${reason})`,
-          ["spawnPoints", i, "position"],
-        );
-      }
-    });
-  }
+  const navigations = profiles.map((profile) => navigate(world, model, profile, report));
 
   world.spawnPoints.forEach((spawn, i) => {
     const region = model.regions.get(spawn.position.regionId);
@@ -143,7 +100,87 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
     }
   });
 
-  return { diagnostics, model, navigations };
+  return { diagnostics: report.diagnostics, model, navigations };
+}
+
+export interface NavigationCheck {
+  diagnostics: Diagnostic[];
+  navigation: Navigation;
+}
+
+/**
+ * Builds the navigation of one profile in a checked world and runs the per-profile checks of
+ * `checkWorld`, e.g. for a species registered while the world runs (ADR 0012).
+ */
+export function checkNavigation(
+  world: WorldDefinition,
+  model: WorldModel,
+  profile: NavProfile,
+): NavigationCheck {
+  const report = reporter(world);
+  const navigation = navigate(world, model, profile, report);
+  return { diagnostics: report.diagnostics, navigation };
+}
+
+/** Builds one profile's navigation and checks that the world works for it. */
+function navigate(
+  world: WorldDefinition,
+  model: WorldModel,
+  profile: NavProfile,
+  { err, warn, regionPath, connectionPath }: Reporter,
+): Navigation {
+  const nav = buildNavigation(model, profile);
+  const label = `size class ${nav.profile.sizeClass}`;
+
+  for (const [regionId, mask] of nav.masks) {
+    if (!nav.profile.maxSlopeByKind.has(mask.region.kind)) continue;
+    const components = mask.components();
+    if (components.length === 0) {
+      warn(
+        "no_walkable_area",
+        `Region "${regionId}" has no walkable area for ${label}`,
+        regionPath(regionId),
+      );
+    } else if (components.length > 1) {
+      const [largest = [], ...islands] = components;
+      const first = mask.center(islands[0]?.[0] ?? 0);
+      err(
+        "disconnected_region",
+        `Region "${regionId}" splits into ${components.length} walkable areas for ${label} ` +
+          `(largest ${largest.length} cells; ${islands.map((c) => c.length).join(", ")} more, first near ${at(first.x, first.z)})`,
+        regionPath(regionId),
+      );
+    }
+  }
+
+  for (const connection of model.connections) {
+    const check = nav.portals.get(connection.id);
+    if (!check || check.usable || check.reason === "missing_capability") continue;
+    err(
+      "portal_unusable",
+      `Connection "${connection.id}" is unusable for ${label}: ${check.detail}`,
+      [...connectionPath(connection.id), "portal"],
+    );
+  }
+
+  checkSeams(model, nav, label, err, warn, regionPath);
+
+  world.spawnPoints.forEach((spawn, i) => {
+    const mask = nav.masks.get(spawn.position.regionId);
+    if (!mask || !nav.profile.maxSlopeByKind.has(mask.region.kind)) return;
+    const { x, z } = spawn.position;
+    if (!mask.isWalkableAt(x, z)) {
+      const cell = mask.cellAt(x, z);
+      const state = mask.state(cell);
+      const reason = Object.entries(CellState).find(([, v]) => v === state)?.[0] ?? "unknown";
+      err(
+        "spawn_not_walkable",
+        `Spawn point "${spawn.id}" at ${at(x, z)} is not walkable for ${label} (${reason})`,
+        ["spawnPoints", i, "position"],
+      );
+    }
+  });
+  return nav;
 }
 
 /**

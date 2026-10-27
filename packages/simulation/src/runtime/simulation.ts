@@ -4,8 +4,9 @@ import {
   type RegionKind,
   type RegionPosition,
   type Result,
+  type SpeciesDefinition,
 } from "@living-diorama/content-schema";
-import type { Registries } from "@living-diorama/extension-api";
+import { addEntries, type Registries } from "@living-diorama/extension-api";
 import {
   isActionProvider,
   isBehaviorProvider,
@@ -145,16 +146,64 @@ export class Simulation {
     return this.state.tick;
   }
 
+  /**
+   * Registers a species and its appearance image while the world runs (ADR 0012), validated and
+   * resolved like pack content. The image asset has the ID `species.appearance` and the species'
+   * version. A species with a new navigation profile gets its navigation built and checked like
+   * the world's at creation. Nothing is registered if anything fails.
+   */
+  registerSpecies(input: unknown, appearanceUrl: string): Result<SpeciesDefinition> {
+    const { registries } = this.state;
+    const checked = registries.species.validate(input);
+    if (!checked.ok) return checked;
+    const species = checked.value;
+    // A profile is only meaningful once the capabilities resolve; `addEntries` reports them.
+    const known = Object.keys(species.capabilities).every((id) => registries.capabilities.has(id));
+    const navigation = known ? this.state.planNavigation(species) : undefined;
+    if (navigation && !navigation.ok) return navigation;
+    const added = addEntries(registries, [
+      { registry: "species", input },
+      {
+        registry: "assets",
+        input: {
+          id: species.appearance,
+          version: species.version,
+          kind: "image",
+          url: appearanceUrl,
+        },
+      },
+    ]);
+    if (!added.ok) return added;
+    if (navigation) this.state.addPathfinder(navigation.value);
+    return { ok: true, value: species };
+  }
+
   /** Adds a creature; it makes its first decision on the next step. */
   spawn(speciesId: string, spawnPointId?: string): Result<CreatureState> {
     const result = this.state.spawn(speciesId, spawnPointId);
     if (result.ok) {
       const creature = result.value;
+      const base = { tick: this.tick, creatureId: creature.id, speciesId };
+      this.#emit({ ...base, type: "creature_spawned", regionId: creature.position.regionId });
+      if (!this.state.introducedSpecies.has(speciesId)) {
+        this.state.introducedSpecies.add(speciesId);
+        this.#emit({ ...base, type: "species_introduced" });
+      }
+    }
+    return result;
+  }
+
+  /** Takes a creature out of the world, ending whatever it was doing. */
+  despawn(creatureId: string): Result<CreatureState> {
+    const result = this.state.despawn(creatureId);
+    if (result.ok) {
+      const creature = result.value;
+      this.#paths.delete(creatureId);
       this.#emit({
-        type: "creature_spawned",
+        type: "creature_despawned",
         tick: this.tick,
-        creatureId: creature.id,
-        speciesId,
+        creatureId,
+        speciesId: creature.speciesId,
         regionId: creature.position.regionId,
       });
     }

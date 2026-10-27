@@ -53,6 +53,10 @@ function describe(e: SimulationEvent): string {
   switch (e.type) {
     case "creature_spawned":
       return `spawned in ${e.regionId}`;
+    case "species_introduced":
+      return `first of ${e.speciesId}`;
+    case "creature_despawned":
+      return `despawned in ${e.regionId}`;
     case "entered_region":
       return `${e.fromRegionId} → ${e.toRegionId} via ${e.connectionId}`;
     case "first_use_of_structure":

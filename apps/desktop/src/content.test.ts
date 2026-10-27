@@ -11,6 +11,7 @@ it("loads content the startup world and creatures can run on", () => {
     worldId: STARTUP.worldId,
     seed: 1,
     tickRateHz: STARTUP.tickRateHz,
+    maxCreatures: STARTUP.maxCreatures,
   });
   if (!created.ok) throw new Error(created.diagnostics.map(formatDiagnostic).join("\n"));
   for (const { speciesId, count } of STARTUP.creatures) {

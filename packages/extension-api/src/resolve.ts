@@ -1,7 +1,7 @@
-import { error, type Diagnostic } from "@living-diorama/content-schema";
+import { error, type Diagnostic, type Result } from "@living-diorama/content-schema";
 import semver from "semver";
 import { REGISTRY_NAMES, type RegistryName, type Registries } from "./registries";
-import type { Registry, RegistryEntry } from "./registry";
+import type { Reference, Registry, RegistryEntry } from "./registry";
 
 export interface EntryKey {
   registry: RegistryName;
@@ -35,32 +35,7 @@ export function resolveReferences(registries: Registries): Resolution {
       edges.set(source, targets);
 
       for (const ref of registry.references(entry)) {
-        const targetRegistry = (registries as unknown as Record<string, Registry<RegistryEntry>>)[
-          ref.registry
-        ];
-        const target = targetRegistry?.get(ref.id);
-        if (!target) {
-          diagnostics.push(
-            error(
-              "unresolved_reference",
-              `"${ref.id}" is not registered in ${ref.registry}`,
-              ref.path,
-              source,
-            ),
-          );
-          continue;
-        }
-        if (ref.versionRange !== undefined && !semver.satisfies(target.version, ref.versionRange)) {
-          diagnostics.push(
-            error(
-              "version_mismatch",
-              `"${ref.id}" is version ${target.version}, which does not satisfy ${ref.versionRange}`,
-              ref.path,
-              source,
-            ),
-          );
-        }
-        for (const d of ref.check?.(target) ?? []) diagnostics.push({ ...d, source });
+        diagnostics.push(...checkReference(ref, lookup(registries, ref.registry, ref.id), source));
         targets.add(keyOf(ref.registry, ref.id));
       }
     }
@@ -77,6 +52,95 @@ export function resolveReferences(registries: Registries): Resolution {
     diagnostics,
     loadOrder: cycle ? [] : order.flatMap((k) => keys.get(k) ?? []),
   };
+}
+
+/** An entry to add with `addEntries`, as raw input to its registry. */
+export interface NewEntry {
+  registry: RegistryName;
+  input: unknown;
+}
+
+/**
+ * Adds entries to registries that are already resolved, e.g. a species and its appearance while
+ * the app runs. Every entry is validated as `register` would, and its references are resolved
+ * against what is registered plus the other new entries. Nothing is registered unless all of
+ * them pass. There is no cycle check: existing entries can't refer to the new ones.
+ */
+export function addEntries(
+  registries: Registries,
+  entries: readonly NewEntry[],
+): Result<EntryKey[]> {
+  const diagnostics: Diagnostic[] = [];
+  const staged = new Map<string, { key: EntryKey; entry: RegistryEntry; input: unknown }>();
+  for (const { registry: registryName, input } of entries) {
+    const registry = registries[registryName] as Registry<RegistryEntry>;
+    const result = registry.validate(input);
+    if (!result.ok) {
+      diagnostics.push(...result.diagnostics);
+      continue;
+    }
+    const { id } = result.value;
+    const key = keyOf(registryName, id);
+    if (staged.has(key)) {
+      diagnostics.push(
+        error("duplicate_id", `"${id}" is added to ${registryName} twice`, ["id"], key),
+      );
+      continue;
+    }
+    staged.set(key, { key: { registry: registryName, id }, entry: result.value, input });
+  }
+  // References to an entry that failed would only repeat its failure as "not registered".
+  if (diagnostics.length > 0) return { ok: false, diagnostics };
+  for (const [source, { key, entry }] of staged) {
+    const registry = registries[key.registry] as Registry<RegistryEntry>;
+    for (const ref of registry.references(entry)) {
+      const target =
+        staged.get(keyOf(ref.registry, ref.id))?.entry ?? lookup(registries, ref.registry, ref.id);
+      diagnostics.push(...checkReference(ref, target, source));
+    }
+  }
+  if (diagnostics.some((d) => d.severity === "error")) return { ok: false, diagnostics };
+  for (const { key, input } of staged.values()) {
+    (registries[key.registry] as Registry<RegistryEntry>).register(input);
+  }
+  return { ok: true, value: [...staged.values()].map(({ key }) => key) };
+}
+
+function lookup(registries: Registries, registry: string, id: string): RegistryEntry | undefined {
+  return (registries as unknown as Record<string, Registry<RegistryEntry> | undefined>)[
+    registry
+  ]?.get(id);
+}
+
+/** Checks one reference against its target: it exists, its version fits and its checks pass. */
+function checkReference(
+  ref: Reference,
+  target: RegistryEntry | undefined,
+  source: string,
+): Diagnostic[] {
+  if (!target) {
+    return [
+      error(
+        "unresolved_reference",
+        `"${ref.id}" is not registered in ${ref.registry}`,
+        ref.path,
+        source,
+      ),
+    ];
+  }
+  const found: Diagnostic[] = [];
+  if (ref.versionRange !== undefined && !semver.satisfies(target.version, ref.versionRange)) {
+    found.push(
+      error(
+        "version_mismatch",
+        `"${ref.id}" is version ${target.version}, which does not satisfy ${ref.versionRange}`,
+        ref.path,
+        source,
+      ),
+    );
+  }
+  for (const d of ref.check?.(target) ?? []) found.push({ ...d, source });
+  return found;
 }
 
 function topologicalOrder(edges: Map<string, Set<string>>) {

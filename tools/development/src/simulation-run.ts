@@ -22,6 +22,8 @@ export interface RunOptions {
   seed: number;
   ticks: number;
   creatures: number;
+  /** Most creatures the world holds. No limit if omitted. */
+  maxCreatures?: number;
   onTrace?: (trace: DecisionTrace) => void;
   /** Called after every tick, e.g. to record trajectories. */
   onTick?: (simulation: Simulation, events: SimulationEvent[]) => void;
@@ -58,6 +60,7 @@ export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures"
   const created = Simulation.create(content.value, {
     worldId: options.worldId,
     seed: options.seed,
+    ...(options.maxCreatures === undefined ? {} : { maxCreatures: options.maxCreatures }),
     ...(options.onTrace ? { onTrace: options.onTrace } : {}),
   });
   if (!created.ok) throw new Error(created.diagnostics.map(formatDiagnostic).join("\n"));
@@ -80,9 +83,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
   }
 
   const { model } = simulation.state;
-  const pathfinder = simulation.state.pathfinderFor(options.speciesId);
-  if (!pathfinder) throw new Error(`Unknown species "${options.speciesId}"`);
-  const masks = pathfinder.navigation.masks;
+  // Per species, since `onTick` may add species with other navigation profiles.
+  const masksOf = (speciesId: string) =>
+    simulation.state.pathfinderFor(speciesId)?.navigation.masks;
   const water = [...model.regions.values()].filter((r) => r.kind === "water");
   const { min, max } = model.bounds;
   const report: RunReport = {
@@ -128,7 +131,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
         continue;
       }
       if (region.kind === "water") violation(`${where}: in a water region`);
-      if (!masks.get(regionId)?.isWalkableAt(x, z)) violation(`${where}: not on a walkable cell`);
+      if (!masksOf(c.speciesId)?.get(regionId)?.isWalkableAt(x, z)) {
+        violation(`${where}: not on a walkable cell`);
+      }
       const y = c.world.y;
       if (!Number.isFinite(y) || y !== region.surface.heightAt(x, z)) {
         violation(`${where}: height ${y} is not on the region's surface`);

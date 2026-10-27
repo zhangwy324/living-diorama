@@ -83,22 +83,26 @@ Tray → Quit asks the page to stop first: the app sends `shutdown` to the worke
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings: the worker loads content by itself, and `ready` sends back what the main thread draws.
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws. Request commands (`register_species`, `spawn`, `despawn`) can fail in normal use; they carry a request ID and get a reply with it ([ADR 0012](adr/0012-runtime-species.md)).
 
 | Direction     | Message                        | Meaning                                                                                   |
 | ------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
-| main → worker | `init`                         | World ID, seed and tick rate. Always first.                                               |
-|               | `spawn`                        | Add a creature of a species, optionally at a named spawn point.                           |
+| main → worker | `init`                         | World ID, seed, tick rate and creature cap. Always first.                                 |
+|               | `register_species`             | Add a species and its appearance image, checked like pack content.                        |
+|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.          |
 |               | `pause`, `resume`, `set_speed` | Control the clock.                                                                        |
 |               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                             |
 |               | `shutdown`                     | Stop the clock and close the worker.                                                      |
 | worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.        |
 |               | `snapshot`                     | Every tick: creature positions and headings, plus the events since the previous snapshot. |
-|               | `error`                        | A command was rejected, with diagnostics. The app treats it as fatal.                     |
+|               | `species_registered`           | A species was registered: its summary and its appearance asset, for the renderer.         |
+|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                              |
+|               | `rejected`                     | A request failed, with diagnostics. Not fatal: the world keeps running.                   |
+|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                      |
 
 Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also carries the resolved world position, so the renderer needs no surface lookups. See [world coordinates](world-coordinates.md).
 
-Events are `creature_spawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`.
+Events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`.
 
 ### Page ↔ Rust host
 
