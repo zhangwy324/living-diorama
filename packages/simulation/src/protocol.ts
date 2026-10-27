@@ -6,17 +6,34 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
+/**
+ * Commands that may fail in normal use (ADR 0012). Their outcome comes back as a reply with the
+ * same `requestId`: `species_registered`, `spawned` or `despawned`, or `rejected`.
+ */
+export type RequestCommand =
+  /**
+   * Adds a species while the world runs, validated like pack content. Its appearance is an image
+   * asset with the ID `species.appearance` and the species' version, served from `appearanceUrl`.
+   */
+  | { type: "register_species"; requestId?: string; species: unknown; appearanceUrl: string }
+  /** Adds a creature at the given spawn point, or a random one. */
+  | { type: "spawn"; requestId?: string; speciesId: string; spawnPointId?: string }
+  | { type: "despawn"; requestId?: string; creatureId: string };
+
 export type SimulationCommand =
-  /** First message. The worker loads content itself; only IDs and settings cross the boundary. */
-  | { type: "init"; worldId: string; seed: number; tickRateHz: number }
+  /**
+   * First message. The worker loads content itself; only IDs and settings cross the boundary.
+   * `maxCreatures` caps the creatures in the world.
+   */
+  | { type: "init"; worldId: string; seed: number; tickRateHz: number; maxCreatures: number }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "set_speed"; multiplier: number }
-  | { type: "spawn"; speciesId: string; spawnPointId?: string }
+  | RequestCommand
   /** Adds debug data (routes) to snapshots while enabled (ADR 0007 §10). */
   | { type: "set_debug"; enabled: boolean }
   | { type: "shutdown" };
@@ -82,9 +99,12 @@ interface EventBase {
   creatureId: string;
 }
 
-/** v1 simulation events (roadmap M3 task 10). Structures are identified by placement ID. */
+/** Simulation events (roadmap M3 task 10, M9 task 5). Structures are identified by placement ID. */
 export type SimulationEvent =
   | (EventBase & { type: "creature_spawned"; speciesId: string; regionId: string })
+  /** The first creature of a species in this world; follows its `creature_spawned`. */
+  | (EventBase & { type: "species_introduced"; speciesId: string })
+  | (EventBase & { type: "creature_despawned"; speciesId: string; regionId: string })
   | (EventBase & {
       type: "entered_region";
       fromRegionId: string;
@@ -99,7 +119,27 @@ export type SimulationMessage =
   | ({ type: "ready"; worldId: string } & WorldContent)
   /** Sent every tick; `events` are those emitted since the previous snapshot. */
   | { type: "snapshot"; snapshot: SimulationSnapshot; events: SimulationEvent[] }
-  /** A command was rejected. After a failed `init` (e.g. content failed to load) the worker stays idle. */
+  /** A species was registered; what the main thread needs to draw its creatures. */
+  | {
+      type: "species_registered";
+      requestId?: string;
+      speciesId: string;
+      species: SpeciesSummary;
+      asset: AssetSummary;
+    }
+  | { type: "spawned"; requestId?: string; creatureId: string }
+  | { type: "despawned"; requestId?: string; creatureId: string }
+  /** A request command could not be applied. Not a fault: the world keeps running. */
+  | {
+      type: "rejected";
+      requestId?: string;
+      command: RequestCommand["type"];
+      diagnostics: Diagnostic[];
+    }
+  /**
+   * A command was misused: sent before `init`, with another protocol version, unknown or with
+   * invalid settings. After a failed `init` (e.g. content failed to load) the worker stays idle.
+   */
   | { type: "error"; diagnostics: Diagnostic[] };
 
 // ---- Envelope -------------------------------------------------------------------------------

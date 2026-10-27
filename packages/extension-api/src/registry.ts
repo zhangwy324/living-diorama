@@ -42,6 +42,13 @@ export class Registry<T extends RegistryEntry> {
   }
 
   register(input: unknown): Result<T> {
+    const result = this.validate(input);
+    if (result.ok) this.#entries.set(result.value.id, result.value);
+    return result;
+  }
+
+  /** Checks what `register` checks, that the entry is valid and its ID free, without registering. */
+  validate(input: unknown): Result<T> {
     const id =
       typeof input === "object" && input !== null && "id" in input && typeof input.id === "string"
         ? input.id
@@ -65,7 +72,6 @@ export class Registry<T extends RegistryEntry> {
         ],
       };
     }
-    this.#entries.set(entry.id, entry);
     return result;
   }
 

@@ -3,13 +3,14 @@ import {
   type Diagnostic,
   type RegionPosition,
   type Result,
+  type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
 import { Pathfinder } from "../navigation/pathfinder";
 import { profileForSpecies } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
-import { checkWorld } from "../world/integrity";
+import { checkNavigation, checkWorld } from "../world/integrity";
 import type { WorldModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
 
@@ -42,6 +43,8 @@ export interface CreatureState {
 export interface WorldStateOptions {
   worldId: string;
   seed: number;
+  /** Most creatures the world holds at once. No limit if omitted. */
+  maxCreatures?: number;
 }
 
 /** Wraps an angle into [-π, π). */
@@ -57,9 +60,12 @@ export function normalizeHeading(angle: number): number {
  */
 export class WorldState {
   readonly creatures = new Map<string, CreatureState>();
+  /** Species that have had a creature in this world, so `species_introduced` fires once each. */
+  readonly introducedSpecies = new Set<string>();
   /** Ticks simulated so far. Part of the state, so it is saved and replayed with it. */
   tick = 0;
-  readonly #pathfinders: ReadonlyMap<string, Pathfinder>;
+  readonly maxCreatures: number;
+  readonly #pathfinders: Map<string, Pathfinder>;
   readonly #rng: Rng;
   readonly #root: Rng;
   #nextCreature = 1;
@@ -67,16 +73,21 @@ export class WorldState {
   private constructor(
     readonly registries: Registries,
     readonly model: WorldModel,
-    pathfinders: ReadonlyMap<string, Pathfinder>,
+    pathfinders: Map<string, Pathfinder>,
     seed: number,
+    maxCreatures: number,
   ) {
     this.#pathfinders = pathfinders;
+    this.maxCreatures = maxCreatures;
     this.#root = Rng.fromSeed(seed);
     this.#rng = this.#root.fork("world");
   }
 
   /** Builds the state for a registered world. Expects `resolveReferences` to have passed. */
-  static create(registries: Registries, { worldId, seed }: WorldStateOptions): Result<WorldState> {
+  static create(
+    registries: Registries,
+    { worldId, seed, maxCreatures = Infinity }: WorldStateOptions,
+  ): Result<WorldState> {
     const world = registries.worlds.get(worldId);
     if (!world) {
       return {
@@ -91,7 +102,10 @@ export class WorldState {
     const pathfinders = new Map(
       check.navigations.map((nav) => [nav.profile.key, new Pathfinder(model, nav)]),
     );
-    return { ok: true, value: new WorldState(registries, model, pathfinders, seed) };
+    return {
+      ok: true,
+      value: new WorldState(registries, model, pathfinders, seed, maxCreatures),
+    };
   }
 
   /** The navigation of every profile the world was checked for. */
@@ -106,6 +120,28 @@ export class WorldState {
   }
 
   /**
+   * The pathfinder for a species' navigation profile, registered or not. If the world has no
+   * navigation for the profile yet, it is built and checked like the profiles of the species
+   * registered when the world was created (ADR 0012), and errors are returned. A new pathfinder is
+   * only used once passed to `addPathfinder`.
+   */
+  planNavigation(species: SpeciesDefinition): Result<Pathfinder> {
+    const profile = profileForSpecies(species, this.registries);
+    const existing = this.#pathfinders.get(profile.key);
+    if (existing) return { ok: true, value: existing };
+    const check = checkNavigation(this.model.definition, this.model, profile);
+    const errors = check.diagnostics.filter((d) => d.severity === "error");
+    if (errors.length > 0) return { ok: false, diagnostics: errors };
+    return { ok: true, value: new Pathfinder(this.model, check.navigation) };
+  }
+
+  /** Makes a pathfinder from `planNavigation` available to species of its profile. */
+  addPathfinder(pathfinder: Pathfinder): void {
+    const { key } = pathfinder.navigation.profile;
+    if (!this.#pathfinders.has(key)) this.#pathfinders.set(key, pathfinder);
+  }
+
+  /**
    * Adds a creature at a spawn point: the given one, or a random one the species can stand on.
    */
   spawn(speciesId: string, spawnPointId?: string): Result<CreatureState> {
@@ -113,6 +149,14 @@ export class WorldState {
     const pathfinder = this.pathfinderFor(speciesId);
     if (!species || !pathfinder) {
       return failure(error("unknown_species", `Species "${speciesId}" is not registered`));
+    }
+    if (this.creatures.size >= this.maxCreatures) {
+      return failure(
+        error(
+          "world_full",
+          `The world is full (${this.maxCreatures} creatures). Remove one to add another.`,
+        ),
+      );
     }
     const standable = this.model.definition.spawnPoints.filter((p) =>
       pathfinder.navigation.masks
@@ -147,6 +191,16 @@ export class WorldState {
       progress: { x: spawn.position.x, z: spawn.position.z, tick: this.tick },
     };
     this.creatures.set(id, creature);
+    return { ok: true, value: creature };
+  }
+
+  /** Takes a creature out of the world. */
+  despawn(creatureId: string): Result<CreatureState> {
+    const creature = this.creatures.get(creatureId);
+    if (!creature) {
+      return failure(error("unknown_creature", `There is no creature "${creatureId}"`));
+    }
+    this.creatures.delete(creatureId);
     return { ok: true, value: creature };
   }
 }

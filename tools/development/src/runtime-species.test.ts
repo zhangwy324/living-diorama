@@ -1,0 +1,174 @@
+import { registerBuiltInContent } from "@living-diorama/built-in-content";
+import { formatDiagnostic, type SizeClass } from "@living-diorama/content-schema";
+import type { Simulation, SimulationEvent } from "@living-diorama/simulation";
+import { describe, expect, it } from "vitest";
+import { registerRiverCrossing } from "./index";
+import { createSimulation, runWithInvariants } from "./simulation-run";
+
+// Species and creatures added while the world runs (roadmap M9, ADR 0012).
+
+const hollow = {
+  register: registerBuiltInContent,
+  worldId: "hollow:woodland-hollow",
+  speciesId: "hollow:mossling",
+};
+const river = {
+  register: registerRiverCrossing,
+  worldId: "fixture:river-crossing",
+  speciesId: "fixture:pebble",
+};
+
+/** A drawn species as the app would send it: a `user` ID, walking and wandering. */
+function drawnSpecies(name: string, sizeClass: SizeClass = "medium") {
+  return {
+    schemaVersion: 1,
+    id: `user:${name}`,
+    version: "1.0.0",
+    name,
+    appearance: `user:${name}/appearance.png`,
+    sizeClass,
+    capabilities: { "core:walk": 1 },
+    baseSpeed: 0.5,
+    behaviors: ["core:wander"],
+  };
+}
+
+const URL = "blob:http://localhost/drawing";
+
+function expectOk(simulation: Simulation, input: unknown) {
+  const result = simulation.registerSpecies(input, URL);
+  expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([]);
+}
+
+const codes = (result: { ok: boolean; diagnostics?: { code: string }[] }) =>
+  result.ok ? [] : (result.diagnostics ?? []).map((d) => d.code);
+
+describe("runtime species", () => {
+  it("registers a species mid-run, spawns and despawns its creatures, and keeps every invariant", () => {
+    const events: SimulationEvent[] = [];
+    const report = runWithInvariants({
+      ...hollow,
+      seed: 11,
+      ticks: 20_000,
+      creatures: 3,
+      onTick: (simulation, tickEvents) => {
+        events.push(...tickEvents);
+        if (simulation.tick === 1_000) {
+          expectOk(simulation, drawnSpecies("puddle"));
+          for (let n = 0; n < 3; n++) expect(simulation.spawn("user:puddle").ok).toBe(true);
+        }
+        if (simulation.tick === 5_000) {
+          const [first] = [...simulation.state.creatures.values()].filter(
+            (c) => c.speciesId === "user:puddle",
+          );
+          expect(simulation.despawn(first!.id).ok).toBe(true);
+        }
+      },
+    });
+    expect(report.violations).toEqual([]);
+    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+    expect(report.eventCounts.path_failed ?? 0).toBe(0);
+    expect(report.eventCounts.creature_spawned).toBe(6);
+    expect(report.eventCounts.species_introduced).toBe(2);
+    expect(report.eventCounts.creature_despawned).toBe(1);
+    // The drawn creatures wander like the mosslings: over the bridge too.
+    const drawn = new Set(
+      events.flatMap((e) =>
+        e.type === "creature_spawned" && e.speciesId === "user:puddle" ? [e.creatureId] : [],
+      ),
+    );
+    const crossed = events.filter(
+      (e) => e.type === "first_use_of_structure" && drawn.has(e.creatureId),
+    );
+    expect(crossed.length).toBeGreaterThan(0);
+  });
+
+  it("builds and checks navigation for a new profile", () => {
+    const simulation = createSimulation({ ...river, seed: 1 });
+    expect(simulation.state.navigations).toHaveLength(1);
+    expectOk(simulation, drawnSpecies("speck", "tiny"));
+    expect(simulation.state.navigations).toHaveLength(2);
+    expect(simulation.state.pathfinderFor("user:speck")).not.toBe(
+      simulation.state.pathfinderFor(river.speciesId),
+    );
+    const report = runWithInvariants({
+      ...river,
+      seed: 2,
+      ticks: 20_000,
+      creatures: 1,
+      onTick: (sim) => {
+        if (sim.tick === 100) {
+          expectOk(sim, drawnSpecies("speck", "tiny"));
+          expect(sim.spawn("user:speck").ok).toBe(true);
+        }
+      },
+    });
+    expect(report.violations).toEqual([]);
+    expect(report.eventCounts.first_use_of_structure).toBe(2);
+  });
+
+  it("rejects a species the world doesn't work for, with the world's diagnostics", () => {
+    const simulation = createSimulation({ ...river, seed: 1 });
+    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL);
+    expect(codes(result)).toContain("portal_unusable");
+    expect(simulation.state.registries.species.has("user:boulder")).toBe(false);
+    expect(simulation.state.registries.assets.has("user:boulder/appearance.png")).toBe(false);
+    expect(simulation.state.navigations).toHaveLength(1);
+  });
+
+  it("rejects invalid species and registers nothing", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const before = simulation.state.registries.species.size;
+    expect(codes(simulation.registerSpecies({ ...drawnSpecies("x"), baseSpeed: -1 }, URL))).toEqual(
+      ["too_small"],
+    );
+    expect(
+      codes(simulation.registerSpecies({ ...drawnSpecies("x"), behaviors: ["core:dance"] }, URL)),
+    ).toEqual(["unresolved_reference"]);
+    expect(
+      codes(
+        simulation.registerSpecies({ ...drawnSpecies("x"), capabilities: { "core:fly": 1 } }, URL),
+      ),
+    ).toEqual(["unresolved_reference"]);
+    expect(codes(simulation.registerSpecies(drawnSpecies("x"), ""))).toEqual(["invalid_type"]);
+    expect(
+      codes(simulation.registerSpecies({ ...drawnSpecies("x"), id: hollow.speciesId }, URL)),
+    ).toEqual(["duplicate_id"]);
+    expect(simulation.state.registries.species.size).toBe(before);
+    expect(simulation.state.registries.assets.has("user:x/appearance.png")).toBe(false);
+    // The world keeps running.
+    expect(simulation.spawn(hollow.speciesId).ok).toBe(true);
+    simulation.step();
+  });
+
+  it("caps the creatures in the world", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1, maxCreatures: 2 });
+    expect(simulation.spawn(hollow.speciesId).ok).toBe(true);
+    const second = simulation.spawn(hollow.speciesId);
+    expect(simulation.spawn(hollow.speciesId)).toEqual({
+      ok: false,
+      diagnostics: [expect.objectContaining({ code: "world_full", message: expect.any(String) })],
+    });
+    if (!second.ok) throw new Error("Expected a second creature");
+    expect(simulation.despawn(second.value.id).ok).toBe(true);
+    expect(simulation.spawn(hollow.speciesId).ok).toBe(true);
+  });
+
+  it("introduces a species once and reports despawns", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const a = simulation.spawn(hollow.speciesId);
+    simulation.spawn(hollow.speciesId);
+    if (!a.ok) throw new Error("Expected a creature");
+    simulation.step();
+    expect(codes(simulation.despawn("creature-99"))).toEqual(["unknown_creature"]);
+    simulation.despawn(a.value.id);
+    simulation.spawn(hollow.speciesId);
+    const events = simulation.step();
+    expect(events.map((e) => [e.type, e.creatureId])).toEqual([
+      ["creature_despawned", a.value.id],
+      ["creature_spawned", "creature-3"],
+    ]);
+    expect(events[0]).toMatchObject({ speciesId: hollow.speciesId, regionId: expect.any(String) });
+    expect(simulation.snapshot().creatures.map((c) => c.id)).toEqual(["creature-2", "creature-3"]);
+  });
+});

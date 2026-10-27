@@ -42,7 +42,8 @@ function startHost(register = registerBuiltInContent) {
     },
     sendRaw: (data: unknown) => handler?.(data),
     send: (command: SimulationCommand) => handler?.(envelope(command)),
-    init: (seed = 1) => host.send({ type: "init", worldId: WORLD_ID, seed, tickRateHz: 10 }),
+    init: (seed = 1) =>
+      host.send({ type: "init", worldId: WORLD_ID, seed, tickRateHz: 10, maxCreatures: 20 }),
     /** Moves time forward, firing due timers in order. */
     advance(ms: number) {
       const end = time + ms;
@@ -109,7 +110,7 @@ describe("simulation host", () => {
     host.advance(100);
     const [first] = host.snapshots();
     expect(first?.snapshot.creatures).toHaveLength(1);
-    expect(first?.events.map((e) => e.type)).toEqual(["creature_spawned"]);
+    expect(first?.events.map((e) => e.type)).toEqual(["creature_spawned", "species_introduced"]);
   });
 
   it("pauses and resumes, sending a snapshot for each", () => {
@@ -170,30 +171,126 @@ describe("simulation host", () => {
     expect(host.errorCodes()).toEqual(["not_initialized", "protocol_mismatch"]);
     host.init();
     host.init();
-    host.send({ type: "spawn", speciesId: "hollow:nobody" });
     host.send({ type: "set_speed", multiplier: 0 });
     host.sendRaw(envelope({ type: "dance" }));
     host.advance(100);
     const messages = host.take();
-    expect(messages.map((m) => m.type)).toEqual([
-      "ready",
-      "error",
-      "error",
-      "error",
-      "error",
-      "snapshot",
-    ]);
+    expect(messages.map((m) => m.type)).toEqual(["ready", "error", "error", "error", "snapshot"]);
     expect(
       messages.flatMap((m) => (m.type === "error" ? m.diagnostics.map((d) => d.code) : [])),
-    ).toEqual(["already_initialized", "unknown_species", "invalid_speed", "unknown_command"]);
+    ).toEqual(["already_initialized", "invalid_speed", "unknown_command"]);
+  });
+
+  it("registers species, spawns and despawns on request, and answers each request", () => {
+    const host = startHost();
+    host.init();
+    host.take();
+    const species = {
+      schemaVersion: 1,
+      id: "user:puddle",
+      version: "1.0.0",
+      name: "Puddle",
+      appearance: "user:puddle/appearance.png",
+      sizeClass: "medium",
+      capabilities: { "core:walk": 1 },
+      baseSpeed: 0.5,
+      behaviors: ["core:wander"],
+    };
+    const appearanceUrl = "blob:http://localhost/puddle";
+    host.send({ type: "register_species", requestId: "r1", species, appearanceUrl });
+    host.send({ type: "spawn", requestId: "r2", speciesId: "user:puddle" });
+    host.advance(100);
+    const messages = host.take();
+    expect(messages.slice(0, 2)).toEqual([
+      {
+        type: "species_registered",
+        requestId: "r1",
+        speciesId: "user:puddle",
+        species: { appearance: species.appearance, sizeClass: "medium" },
+        asset: { kind: "image", url: appearanceUrl },
+      },
+      { type: "spawned", requestId: "r2", creatureId: "creature-1" },
+    ]);
+    expect(messages.slice(0, 2).map((m) => structuredClone(m))).toEqual(messages.slice(0, 2));
+    const [snapshot] = messages.filter((m) => m.type === "snapshot");
+    expect(snapshot?.events.map((e) => e.type)).toEqual(["creature_spawned", "species_introduced"]);
+
+    host.send({ type: "despawn", requestId: "r3", creatureId: "creature-1" });
+    host.send({ type: "despawn", requestId: "r4", creatureId: "creature-1" });
+    host.advance(100);
+    const after = host.take();
+    expect(after.slice(0, 2)).toEqual([
+      { type: "despawned", requestId: "r3", creatureId: "creature-1" },
+      {
+        type: "rejected",
+        requestId: "r4",
+        command: "despawn",
+        diagnostics: [expect.objectContaining({ code: "unknown_creature" })],
+      },
+    ]);
+    const [next] = after.filter((m) => m.type === "snapshot");
+    expect(next?.snapshot.creatures).toEqual([]);
+    expect(next?.events.map((e) => e.type)).toEqual(["creature_despawned"]);
+  });
+
+  it("rejects requests it can't apply without stopping the world", () => {
+    const host = startHost();
+    host.init();
+    host.take();
+    host.send({
+      type: "register_species",
+      requestId: "bad",
+      species: { id: "user:nothing" },
+      appearanceUrl: "blob:x",
+    });
+    host.send({ type: "spawn", speciesId: "hollow:nobody" });
+    host.advance(100);
+    const messages = host.take();
+    expect(messages.map((m) => m.type)).toEqual(["rejected", "rejected", "snapshot"]);
+    expect(messages[0]).toMatchObject({ requestId: "bad", command: "register_species" });
+    expect(messages[1]).toMatchObject({
+      command: "spawn",
+      diagnostics: [expect.objectContaining({ code: "unknown_species" })],
+    });
+    expect(messages[1]).not.toHaveProperty("requestId");
+    host.advance(1000);
+    expect(host.snapshots()).toHaveLength(10);
+  });
+
+  it("enforces the creature cap set by init", () => {
+    const host = startHost();
+    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 10, maxCreatures: 2 });
+    for (let n = 0; n < 3; n++) host.send({ type: "spawn", speciesId: SPECIES_ID });
+    host.advance(100);
+    const rejected = host.take().filter((m) => m.type === "rejected");
+    expect(rejected).toEqual([
+      {
+        type: "rejected",
+        command: "spawn",
+        diagnostics: [
+          expect.objectContaining({
+            code: "world_full",
+            message: "The world is full (2 creatures). Remove one to add another.",
+          }),
+        ],
+      },
+    ]);
   });
 
   it("stays idle when init fails", () => {
     const host = startHost();
-    host.send({ type: "init", worldId: "hollow:nowhere", seed: 1, tickRateHz: 10 });
+    host.send({
+      type: "init",
+      worldId: "hollow:nowhere",
+      seed: 1,
+      tickRateHz: 10,
+      maxCreatures: 20,
+    });
     expect(host.errorCodes()).toEqual(["unknown_world"]);
-    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 0 });
+    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 0, maxCreatures: 20 });
     expect(host.errorCodes()).toEqual(["invalid_tick_rate"]);
+    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 10, maxCreatures: 0 });
+    expect(host.errorCodes()).toEqual(["invalid_max_creatures"]);
     host.send({ type: "spawn", speciesId: SPECIES_ID });
     host.advance(1000);
     expect(host.errorCodes()).toEqual(["not_initialized"]);

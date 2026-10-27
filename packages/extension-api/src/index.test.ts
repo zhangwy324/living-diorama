@@ -1,6 +1,6 @@
 import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
-import { createRegistries, resolveReferences, type Registries } from "./index";
+import { addEntries, createRegistries, resolveReferences, type Registries } from "./index";
 
 const species = {
   schemaVersion: 1,
@@ -82,6 +82,12 @@ describe("Registry", () => {
     expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([
       "error: species/test:pebble baseSpeed: Too small: expected number to be >0 (too_small)",
     ]);
+  });
+
+  it("validates without registering", () => {
+    const registries = createRegistries();
+    expectOk(registries.species.validate(species));
+    expect(registries.species.size).toBe(0);
   });
 
   it("rejects duplicate IDs regardless of version", () => {
@@ -257,5 +263,73 @@ describe("resolveReferences", () => {
       "error: behaviors/test:a: Dependency cycle: behaviors/test:a → behaviors/test:b → behaviors/test:a (dependency_cycle)",
     ]);
     expect(resolution.loadOrder).toEqual([]);
+  });
+});
+
+describe("addEntries", () => {
+  /** Resolved registries with what `species` refers to, except its appearance. */
+  function resolved() {
+    const registries = createRegistries();
+    expectOk(
+      registries.capabilities.register({
+        id: "core:walk",
+        version: "1.0.0",
+        locomotion: { regionKinds: ["land"] },
+      }),
+    );
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+    return registries;
+  }
+
+  it("adds entries that refer to each other and to registered ones", () => {
+    const registries = resolved();
+    const result = addEntries(registries, [
+      { registry: "species", input: species },
+      { registry: "assets", input: sprite },
+    ]);
+    expectOk(result);
+    expect(result.ok && result.value).toEqual([
+      { registry: "species", id: "test:pebble" },
+      { registry: "assets", id: sprite.id },
+    ]);
+    expect(registries.species.has("test:pebble")).toBe(true);
+    expect(registries.assets.has(sprite.id)).toBe(true);
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+  });
+
+  it("registers nothing if any entry is invalid or unresolved", () => {
+    const registries = resolved();
+    const result = addEntries(registries, [
+      { registry: "species", input: { ...species, behaviors: ["core:wander", "test:sleep"] } },
+      { registry: "assets", input: sprite },
+    ]);
+    expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([
+      'error: species/test:pebble behaviors[1]: "test:sleep" is not registered in behaviors (unresolved_reference)',
+    ]);
+    expect(registries.species.size).toBe(0);
+    expect(registries.assets.size).toBe(0);
+
+    const invalid = addEntries(registries, [
+      { registry: "species", input: species },
+      { registry: "assets", input: { ...sprite, kind: "sound" } },
+    ]);
+    expect(invalid.ok).toBe(false);
+    expect(registries.species.size).toBe(0);
+  });
+
+  it("rejects IDs that are registered or added twice", () => {
+    const registries = resolved();
+    expectOk(registries.assets.register(sprite));
+    const result = addEntries(registries, [
+      { registry: "species", input: species },
+      { registry: "species", input: species },
+      { registry: "assets", input: sprite },
+    ]);
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual([
+      "duplicate_id",
+      "duplicate_id",
+    ]);
+    expect(registries.species.size).toBe(0);
   });
 });

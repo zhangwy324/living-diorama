@@ -9,6 +9,8 @@ export interface StartingCreatures {
 export interface StartupConfig {
   worldId: string;
   tickRateHz: number;
+  /** Most creatures the world holds at once (roadmap §2.2). */
+  maxCreatures: number;
   /** Creatures spawned once the world is ready, at random spawn points. */
   creatures: StartingCreatures[];
 }
@@ -17,5 +19,6 @@ export interface StartupConfig {
 export const STARTUP: StartupConfig = {
   worldId: "hollow:woodland-hollow",
   tickRateHz: 10,
+  maxCreatures: 20,
   creatures: [{ speciesId: "hollow:mossling", count: 3 }],
 };
