@@ -43,6 +43,78 @@ function expectOk(simulation: Simulation, input: unknown) {
 const codes = (result: { ok: boolean; diagnostics?: { code: string }[] }) =>
   result.ok ? [] : (result.diagnostics ?? []).map((d) => d.code);
 
+/** Registers a drawn species of this size mid-run in the Hollow, spawns some and runs on. */
+function runSized(sizeClass: SizeClass, seed: number) {
+  const limits: string[] = [];
+  const events: SimulationEvent[] = [];
+  const report = runWithInvariants({
+    ...hollow,
+    seed,
+    ticks: 30_000,
+    creatures: 1,
+    onTick: (simulation, tickEvents) => {
+      events.push(...tickEvents);
+      if (simulation.tick !== 10) return;
+      const result = simulation.registerSpecies(drawnSpecies(sizeClass, sizeClass), URL);
+      if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+      limits.push(...result.value.limits.map((d) => `${d.severity} ${d.code}`));
+      for (let n = 0; n < 4; n++) expect(simulation.spawn(`user:${sizeClass}`).ok).toBe(true);
+    },
+  });
+  const sized = new Set(
+    events.flatMap((e) =>
+      e.type === "creature_spawned" && e.speciesId !== hollow.speciesId ? [e.creatureId] : [],
+    ),
+  );
+  const entered = new Set(
+    events.flatMap((e) =>
+      e.type === "entered_region" && sized.has(e.creatureId) ? [e.toRegionId] : [],
+    ),
+  );
+  return { report, limits, entered };
+}
+
+describe("size limits (ADR 0013)", () => {
+  it.each(["tiny", "small"] as const)(
+    "%s creatures wander everywhere but the pockets they can't reach",
+    (sizeClass) => {
+      const { report, limits, entered } = runSized(sizeClass, 3);
+      expect(limits).toEqual(["warning disconnected_region", "warning disconnected_region"]);
+      expect(report.violations).toEqual([]);
+      expect(report.eventCounts.path_failed ?? 0).toBe(0);
+      expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+      expect(entered.has("bridge-deck")).toBe(true);
+    },
+  );
+
+  it("large creatures can't cross the bridge and never try", () => {
+    const { report, limits, entered } = runSized("large", 4);
+    expect(limits).toContain("warning portal_unusable");
+    expect(limits).toContain("warning disconnected_region");
+    expect(report.violations).toEqual([]);
+    expect(report.eventCounts.path_failed ?? 0).toBe(0);
+    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+    expect(entered.has("bridge-deck")).toBe(false);
+  });
+
+  it("names the structure a creature can't use", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL);
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    const portals = result.value.limits.filter((d) => d.code === "portal_unusable");
+    expect(portals.map((d) => d.message)).toEqual([
+      expect.stringContaining('"bridge-west-end" of "bridge" is unusable for size class large'),
+      expect.stringContaining('"bridge-east-end" of "bridge" is unusable for size class large'),
+    ]);
+  });
+
+  it("reports no limits for a size that fits everywhere", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const result = simulation.registerSpecies(drawnSpecies("puddle"), URL);
+    expect(result.ok && result.value.limits).toEqual([]);
+  });
+});
+
 describe("runtime species", () => {
   it("registers a species mid-run, spawns and despawns its creatures, and keeps every invariant", () => {
     const events: SimulationEvent[] = [];
@@ -107,10 +179,10 @@ describe("runtime species", () => {
     expect(report.eventCounts.first_use_of_structure).toBe(2);
   });
 
-  it("rejects a species the world doesn't work for, with the world's diagnostics", () => {
+  it("rejects a species that can't stand on any spawn point", () => {
     const simulation = createSimulation({ ...river, seed: 1 });
     const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL);
-    expect(codes(result)).toContain("portal_unusable");
+    expect(codes(result)).toEqual(["no_spawn_point"]);
     expect(simulation.state.registries.species.has("user:boulder")).toBe(false);
     expect(simulation.state.registries.assets.has("user:boulder/appearance.png")).toBe(false);
     expect(simulation.state.navigations).toHaveLength(1);

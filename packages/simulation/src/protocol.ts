@@ -119,13 +119,17 @@ export type SimulationMessage =
   | ({ type: "ready"; worldId: string } & WorldContent)
   /** Sent every tick; `events` are those emitted since the previous snapshot. */
   | { type: "snapshot"; snapshot: SimulationSnapshot; events: SimulationEvent[] }
-  /** A species was registered; what the main thread needs to draw its creatures. */
+  /**
+   * A species was registered: what the main thread needs to draw its creatures, and where they
+   * don't fit in this world, as warnings (ADR 0013).
+   */
   | {
       type: "species_registered";
       requestId?: string;
       speciesId: string;
       species: SpeciesSummary;
       asset: AssetSummary;
+      limits: Diagnostic[];
     }
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }

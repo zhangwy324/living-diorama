@@ -1,4 +1,4 @@
-import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
+import { formatDiagnostic, type Diagnostic, type Result } from "@living-diorama/content-schema";
 import {
   envelope,
   openEnvelope,
@@ -19,12 +19,18 @@ import { STARTUP, type StartupConfig } from "./startup";
  */
 const COUNT_OVERRIDE = (import.meta.env.DEV && Number(import.meta.env.VITE_CREATURE_COUNT)) || 0;
 
+/** A species the worker registered, and where its creatures don't fit in this world (ADR 0013). */
+export interface RegisteredSpecies {
+  speciesId: string;
+  limits: Diagnostic[];
+}
+
 export interface SimulationClient {
   /**
-   * Adds a species while the world runs (ADR 0012). Resolves with its ID once the worker has
-   * registered it and `onSpeciesRegistered` has run, or with the diagnostics if it was rejected.
+   * Adds a species while the world runs (ADR 0012). Resolves once the worker has registered it
+   * and `onSpeciesRegistered` has run, or with the diagnostics if it was rejected.
    */
-  registerSpecies(species: unknown, appearanceUrl: string): Promise<Result<string>>;
+  registerSpecies(species: unknown, appearanceUrl: string): Promise<Result<RegisteredSpecies>>;
   /** Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added. */
   spawn(speciesId: string): Promise<Result<string>>;
   /** Takes a creature out of the world. */
@@ -69,7 +75,7 @@ export function creatureCap(config: StartupConfig, countOverride = COUNT_OVERRID
   return Math.max(config.maxCreatures, starting);
 }
 
-type Pending = (result: Result<string>) => void;
+type Pending = (result: Result<unknown>) => void;
 
 /**
  * Starts the simulation worker on the startup world, spawns its starting creatures and hands every
@@ -89,13 +95,13 @@ export function startSimulation(
     if (!stopped) worker.postMessage(envelope(command));
   };
   /** Sends a request; it stays unanswered if the worker stops first. */
-  const request = (command: RequestCommand) =>
-    new Promise<Result<string>>((resolve) => {
+  const request = <T>(command: RequestCommand) =>
+    new Promise<Result<T>>((resolve) => {
       const requestId = String(nextRequest++);
-      pending.set(requestId, resolve);
+      pending.set(requestId, resolve as Pending);
       send({ ...command, requestId });
     });
-  const answer = (requestId: string | undefined, result: Result<string>) => {
+  const answer = (requestId: string | undefined, result: Result<unknown>) => {
     if (requestId === undefined) return;
     pending.get(requestId)?.(result);
     pending.delete(requestId);
@@ -105,7 +111,7 @@ export function startSimulation(
   const spawnStartingCreatures = () => {
     for (const { speciesId, count } of config.creatures) {
       for (let i = 0; i < (COUNT_OVERRIDE || count); i++) {
-        void request({ type: "spawn", speciesId }).then((result) => {
+        void request<string>({ type: "spawn", speciesId }).then((result) => {
           if (!result.ok) {
             console.warn(
               [
@@ -137,7 +143,10 @@ export function startSimulation(
         break;
       case "species_registered":
         onSpeciesRegistered?.(message.speciesId, message.species, message.asset);
-        answer(message.requestId, { ok: true, value: message.speciesId });
+        answer(message.requestId, {
+          ok: true,
+          value: { speciesId: message.speciesId, limits: message.limits },
+        });
         break;
       case "spawned":
       case "despawned":

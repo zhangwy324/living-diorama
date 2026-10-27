@@ -21,7 +21,6 @@ import {
   type WorldQueries,
 } from "../creatures/contracts";
 import type { Pathfinder } from "../navigation/pathfinder";
-import { CellState, type RegionMask } from "../navigation/walkability";
 import type { RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
 import { Rng } from "./rng";
@@ -54,6 +53,12 @@ export interface DecisionTrace {
   result: "started" | "rejected" | "no_proposal";
   reason?: string;
   detail?: Record<string, unknown>;
+}
+
+/** A species registered while the world runs, and where its creatures don't fit. */
+export interface RegisteredSpecies {
+  species: SpeciesDefinition;
+  limits: Diagnostic[];
 }
 
 export interface SnapshotOptions {
@@ -105,7 +110,6 @@ export class Simulation {
   readonly #behaviors = new Map<string, BehaviorProvider>();
   readonly #connections: ReadonlyMap<string, ConnectionModel>;
   readonly #pathfinders = new Map<string, Pathfinder>();
-  readonly #walkableCells = new Map<RegionMask, number[]>();
   readonly #speeds = new Map<string, number>();
   /** The path each creature last walked, kept until its action ends; for debug routes only. */
   readonly #paths = new Map<string, PathState>();
@@ -150,9 +154,10 @@ export class Simulation {
    * Registers a species and its appearance image while the world runs (ADR 0012), validated and
    * resolved like pack content. The image asset has the ID `species.appearance` and the species'
    * version. A species with a new navigation profile gets its navigation built and checked like
-   * the world's at creation. Nothing is registered if anything fails.
+   * the world's at creation. Nothing is registered if anything fails. On success, `limits` says
+   * where its creatures don't fit, e.g. a bridge too narrow for them (ADR 0013).
    */
-  registerSpecies(input: unknown, appearanceUrl: string): Result<SpeciesDefinition> {
+  registerSpecies(input: unknown, appearanceUrl: string): Result<RegisteredSpecies> {
     const { registries } = this.state;
     const checked = registries.species.validate(input);
     if (!checked.ok) return checked;
@@ -174,8 +179,9 @@ export class Simulation {
       },
     ]);
     if (!added.ok) return added;
-    if (navigation) this.state.addPathfinder(navigation.value);
-    return { ok: true, value: species };
+    if (!navigation) throw new Error(`"${species.id}" was registered with unknown capabilities`);
+    this.state.addNavigation(navigation.value);
+    return { ok: true, value: { species, limits: navigation.value.limits } };
   }
 
   /** Adds a creature; it makes its first decision on the next step. */
@@ -408,21 +414,22 @@ export class Simulation {
     };
   }
 
+  /** What wander may choose from: only cells the creature can reach from where it stands. */
   #queries(creature: CreatureState): WorldQueries {
-    const { navigation } = this.#pathfinder(creature);
+    const pathfinder = this.#pathfinder(creature);
+    const reachable = pathfinder.reachableCells(creature.position);
+    const { masks } = pathfinder.navigation;
     return {
       reachableRegions: () =>
-        [...navigation.reachableRegions(creature.position.regionId)].flatMap((regionId) => {
-          const mask = navigation.masks.get(regionId);
-          const cells = mask ? this.#walkable(mask).length : 0;
-          return cells > 0 && mask
-            ? [{ regionId, walkableArea: cells * mask.cellSize * mask.cellSize }]
+        [...reachable].flatMap(([regionId, cells]) => {
+          const mask = masks.get(regionId);
+          return cells.length > 0 && mask
+            ? [{ regionId, walkableArea: cells.length * mask.cellSize * mask.cellSize }]
             : [];
         }),
       randomWalkablePoint: (regionId, rng) => {
-        const mask = navigation.masks.get(regionId);
-        const cells = mask ? this.#walkable(mask) : [];
-        const cell = rng.pick(cells);
+        const mask = masks.get(regionId);
+        const cell = rng.pick(reachable.get(regionId) ?? []);
         if (!mask || cell === undefined) return undefined;
         // Anywhere inside the cell, kept off its edges so the point stays in it.
         const { x, z } = mask.center(cell);
@@ -434,18 +441,6 @@ export class Simulation {
         };
       },
     };
-  }
-
-  #walkable(mask: RegionMask): number[] {
-    let cells = this.#walkableCells.get(mask);
-    if (!cells) {
-      cells = [];
-      for (let cell = 0; cell < mask.states.length; cell++) {
-        if (mask.states[cell] === CellState.walkable) cells.push(cell);
-      }
-      this.#walkableCells.set(mask, cells);
-    }
-    return cells;
   }
 
   /** Metres per second: base speed times the best locomotion factor for this region kind. */
