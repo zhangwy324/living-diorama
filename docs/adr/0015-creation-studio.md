@@ -1,0 +1,90 @@
+# ADR 0015: Creation Studio
+
+- **Status:** Accepted
+- **Date:** 2026-10-27
+- **Context:** Roadmap M11. The player draws a creature and releases it into the world. The strip never takes focus (ADR 0008 §6), so it can't take keyboard input such as undo shortcuts or a name, and the Studio needs a window of its own. The simulation worker and the species library (ADR 0014) live in the strip's window. M11 ships as four PRs: **1** this ADR and an editor performance spike; **2** the Studio window, the editor and the window channel; **3** the live preview, name and size, hints and the limits query; **4** release and the list of the player's creatures. Decisions for all four are recorded here; each PR updates this ADR if it has to deviate.
+
+## Decisions
+
+### The window (PR 2)
+
+1. **A separate, normal window.** Label `studio`: framed, resizable, focusable, with a taskbar entry and an Alt+Tab entry. Rust creates it on demand with `WebviewWindowBuilder` when the controls overlay or the tray asks for it (an `open_studio` command and a tray menu item). There is one at a time: opening it again shows and focuses the existing window. Closing it destroys it, which frees its WebGL context (§7), and never touches the simulation. The strip keeps every ADR 0008 behaviour, non-focusable included. Expanded mode (issue #30) is a separate question and out of scope.
+
+2. **A second Vite entry.** `apps/desktop` builds two pages, `index.html` (the strip) and `studio.html` (the Studio), as a multi-page Vite build, sharing the workspace packages. The Studio page never starts a simulation worker.
+
+3. **Its own capability file.** `capabilities/studio.json` grants the `studio` window only what it uses: listening and emitting to a target (`core:event:allow-listen`, `allow-unlisten`, `allow-emit-to`), the window calls behind the close dialog (§10), and the log. The strip's `default.json` stays scoped to `main`, and gains `allow-emit-to` for the channel's replies (it has only listen and unlisten today).
+
+### Talking to the world (PRs 2–4)
+
+4. **The world stays in the strip's window.** The worker, the registries and the species library stay in `main`. The Studio holds no world state of its own, only its drawing and the latest library snapshot.
+
+5. **A typed request/response channel in `desktop-integration`.** The only package that imports `@tauri-apps/api` (ADR 0008 §1) gets a small channel over targeted Tauri events:
+   - the Studio sends `studio-request` with `emitTo("main", …)`: `{ requestId, request }`, where `request` is one of release (save the drawing and add a creature), add a creature, remove a creature, delete a species, and check the limits for a size class (§8);
+   - `main` answers with `emitTo("studio", "studio-response", { requestId, result | error })`;
+   - `main` pushes `library-changed` with a snapshot of the library to `studio` whenever it changes. The Studio asks for one when it opens (a `snapshot` request), because a push sent before its listener exists is lost.
+
+   Each side listens with its own label as the target (`listen(event, handler, { target: label })`). `listen` defaults to any target, which would also deliver events emitted to the other window. The Studio's requests time out after a few seconds, so a reloading or busy strip shows an error rather than a stuck button. Both ends have a no-op or in-memory implementation for tests, like `DesktopShell`.
+
+   Payloads are JSON. A release carries the drawing (at most a few megabytes for a very long one, under the 16 MB file limit of ADR 0014) and the PNG bytes as a number array, which is fine for a 256 px image. Images in the snapshot are not `blob:` URLs: those belong to the strip's document. The Studio loads a species' image itself with `load_library_image` when it needs to show one.
+
+6. **The Studio ignores shell broadcasts.** Rust sends `quit-requested`, `paused-changed` and `expanded-changed` with `app.emit`, which reaches every window, and exits on the first `quit_ready`. So:
+   - the Studio page never creates a `DesktopShell` and never subscribes to these events, so it can't answer `quit-requested`;
+   - `quit_ready` also takes the calling window and ignores any caller but `main`, since app commands are callable from every window regardless of capabilities;
+   - shell events meant for the strip move to `emit_to("main", …)`, so the Studio doesn't receive them at all.
+
+   Quitting closes the Studio with the app, and a drawing that wasn't released is lost. This is a known gap, accepted for M11: the close dialog (§10) only covers closing the Studio itself, and saving drafts closes the gap later.
+
+### Preview and limits (PR 3)
+
+7. **The live preview uses the renderer's body code.** `renderer`'s `index.ts` exports `buildBody` and `readImage` (ADR 0011 §1). The Studio runs its own small three.js scene, lit like the diorama, with the body turning slowly and rebuilt from the rasterised drawing (§9) a short while after each stroke ends. The second WebGL context exists only while the Studio is open.
+
+8. **A read-only limits query.** A new worker command, `check_limits` with a `requestId`, a size class and the capabilities drawn species use (ADR 0014 §11; a navigation profile is size class plus capabilities, ADR 0012), answered by `limits` with the profile's limits as `Diagnostic[]` (ADR 0013 §4). It registers nothing. A known profile answers from the world state; a new one builds its navigation and checks it (about 30 ms in the worker) and keeps the result, so switching back and forth in the size picker is instant and a later registration of that profile can reuse it. Errors for the profile (e.g. `no_spawn_point`) come back as diagnostics too, so the Studio can say the size can't be released. `PROTOCOL_VERSION` stays 4 if v4 is still unreleased then, else it goes to 5. The Studio turns limit codes into the player's words.
+
+### The drawing (PRs 2 and 4)
+
+9. **Strokes on a square 256-unit canvas, drawn as perfect-freehand outlines.** The canvas is 256 × 256 units, the body image's size (ADR 0011 §1), shown scaled up to fit the window. Strokes keep the ADR 0014 format unchanged: tool (`pen` or `eraser`), colour, width at full pressure and flat `[x, y, pressure, …]` points in canvas units.
+
+   A stroke is drawn by turning its points and pressures into an outline polygon with [perfect-freehand](https://github.com/steveruizok/perfect-freehand) (MIT, 1.2.x) and filling it as a `Path2D`: a pen stroke with its colour, an eraser stroke with `destination-out`. The options are fixed: `size` is half the stroke's width and `thinning` is 1, so the stroke is `width × pressure` wide, as ADR 0014 defines; `simulatePressure` is off, since the pressure is in the points (§11); a finished stroke is drawn with `last: true`. One function does this for the editor and for `rasterize`, which moves out of `dev-library.ts` into a module both use (the console hook keeps using it), so the 256 px PNG the body is built from matches what the player saw. Species saved before this change keep their stored PNG; only the sample drawing renders slightly differently from now on.
+
+10. **Closing with an unreleased drawing asks first.** Closing the window while the canvas has strokes that weren't released shows a dialog: **Discard** closes, **Save draft** is shown but disabled ("coming later"), **Cancel** keeps the Studio open. An empty or released drawing closes without asking.
+
+11. **The editor is a plain `<canvas>`, not React Konva.** The roadmap proposed React Konva; the spike below showed it doesn't fit this editor. React renders the toolbar and panels only. The canvas is driven imperatively:
+    - **Finished strokes are baked into a bitmap.** A frame with a live stroke draws the bitmap, then the live stroke's outline, so only the live stroke is redrawn. A live eraser stroke fills its outline with `destination-out` over the bitmap, so the result is exact while erasing. When a stroke ends it is baked in.
+    - **Undo and redo replay the stroke list.** The bitmap is rebuilt from the strokes left (undo) or drawn one stroke further (redo). The stroke list is the only state.
+    - **Live points are not React state.** Pointer handlers append to the live stroke and request a frame.
+    - **Every sample counts.** Moves read `getCoalescedEvents()`, so a pen's samples between frames aren't lost. The context is created with `desynchronized: true` for lower latency if PR 2 confirms that it helps and renders correctly in WebView2; otherwise it is left off.
+    - **Pressure.** A pen (`pointerType` `pen`) stores the pressure it reports. A mouse reports a constant 0.5 and touch varies by device, so for every other pointer the Studio stores a pressure derived from speed instead: it eases towards a target that falls from 1 when the pointer moves slowly to a floor of about 0.35 when it moves fast, so quick flicks taper like a brush. PR 2 tunes the constants. Because the derived pressure is stored, replaying a stroke never needs to know which pointer drew it.
+    - **The backing store follows `devicePixelRatio`.** The guide ("facing right, feet on this line") is a separate element over the canvas, so it is never part of the drawing.
+
+## Spike: React Konva or a plain canvas
+
+A throwaway harness (not committed) drew ADR 0014 strokes, each segment at `width × pressure`, on a 256-unit canvas shown at 640 CSS px (device pixel ratio 1.5), with `react-konva` 19.3.2, `konva` 10.9.0 and React 19.3.1. It ran in Microsoft Edge (WebView2's engine) with the GPU, driven by synthetic pen events with varying pressure through `puppeteer-core`, on a 100 Hz display, where 10 ms is a full-rate frame. It seeded 50 strokes of 750 points, drew a new stroke at 2 pointer moves per frame, and undid and redid a stroke. Undo times include waiting for the next frame (at least 20 ms).
+
+| Editor (50 × 750)                                             | Frame while drawing, mean / p95 | JS per frame | Undo    |
+| ------------------------------------------------------------- | ------------------------------- | ------------ | ------- |
+| Plain canvas: finished strokes kept, new segments drawn       | 10 / 10 ms                      | 0.05 ms      | ~38 ms  |
+| Konva `Shape` per stroke, custom `sceneFunc` for pressure     | 32 / 40 ms                      | 0.2 ms       | ~53 ms  |
+| The same, with the live stroke in React state                 | 33 / 40 ms                      | 5.5 ms       | ~46 ms  |
+| Konva `Line` per stroke (one `strokeWidth`, pressure ignored) | 31 / 40 ms                      | 8.1 ms       | ~60 ms  |
+| Konva `Line` per segment (a width each)                       | 302 / 430 ms                    | 258 ms       | ~240 ms |
+| Konva `Shape` per stroke, finished strokes cached to a bitmap | 10 / 10 ms                      | 0.3 ms       | ~38 ms  |
+
+With 10 strokes of 500 points every variant tried kept full rate. With 50 × 1000, uncached Konva fell to 42 ms frames, while the plain canvas and cached Konva stayed at 10 ms.
+
+What it shows:
+
+- **Konva redraws the whole layer every frame,** replaying every stroke, so each new stroke gets slower as the drawing grows. The cost is in rasterising, not in JavaScript or React.
+- **Pressure needs custom drawing in Konva.** A `Line` has one `strokeWidth`, a `Line` per segment is unusable, and a `Shape` with its own `sceneFunc` is plain canvas code inside Konva.
+- **Live points in React state cost 5–16 ms of JavaScript per frame.** They stay out of React whatever draws them.
+- **Konva is fast only with the finished strokes cached to a bitmap,** which is what the plain canvas does by itself. Konva then contributes no shapes, hit testing or transforms that the editor uses.
+
+So a plain canvas, the fallback roadmap risk R1 named. The spike drew strokes segment by segment; perfect-freehand was chosen afterwards for the look: smooth, tapered, pressure-shaped strokes from the same points, in a small library without dependencies, the one Excalidraw uses for freehand drawing. With it the live stroke's whole outline is rebuilt each frame rather than only its new segments; PR 2 checks that this stays well inside a frame for long strokes.
+
+## Consequences
+
+- The app has a second window and a second page. The manual checks in `docs/development.md` gain a Studio section with PR 2: focus, one instance, closing, scaling and two monitors.
+- `desktop-integration` grows the window channel and stays the only package that imports `@tauri-apps/api`. Rust's shell events go to `main` only.
+- One new runtime dependency, `perfect-freehand`, for the Studio and `rasterize`. No scene-graph library: shapes, selection or transforms in later drawing releases would be a reason to look at one again, and the stroke format doesn't depend on the choice.
+- The editor and `rasterize` share one stroke-to-outline function, so the released image matches what the player saw.
+- A drawing that isn't released is lost when the Studio closes (after asking) or, without asking, when the app quits. This is accepted for M11; saving drafts fixes it.
+- A limits query for a new size class builds that profile's navigation, which stays in the worker even if nothing of that size is ever released, like a deleted species (ADR 0014 §9).
