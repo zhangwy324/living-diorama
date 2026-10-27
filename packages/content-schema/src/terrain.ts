@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AssetRefSchema, LocalIdSchema } from "./primitives";
+import { AssetRefSchema, HexColorSchema, LocalIdSchema } from "./primitives";
 
 // Grid layout and sampling rules: docs/world-coordinates.md, "Heightfield grid".
 
@@ -33,11 +33,9 @@ export const HeightfieldSchema = z.discriminatedUnion("source", [
 ]);
 export type Heightfield = z.output<typeof HeightfieldSchema>;
 
-const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-
 export const MaterialZoneSchema = z.strictObject({
   name: LocalIdSchema,
-  color: z.string().regex(HEX_COLOR, { error: 'Expected a colour like "#7fae5a"' }),
+  color: HexColorSchema,
 });
 
 /** One palette index per heightfield sample, same layout as the heights. */

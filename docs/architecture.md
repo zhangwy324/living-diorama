@@ -62,7 +62,7 @@ flowchart LR
   app -- "pushSnapshot" --> view
 ```
 
-- **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode, the settings file and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
+- **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode, the settings file, the species library's files and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
 - **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
 - **Simulation worker.** The only place content is registered and checked (`content.ts`). Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
 - **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)).
@@ -108,7 +108,7 @@ Events are `creature_spawned`, `species_introduced`, `creature_despawned`, `ente
 
 Defined by `DesktopShell` in [`packages/desktop-integration/src/shell.ts`](../packages/desktop-integration/src/shell.ts) and the commands registered in `apps/desktop/src-tauri/src/lib.rs`.
 
-- Commands from the page: set the strip height, pause, expand, hide, confirm it is ready to quit, and record event counts.
+- Commands from the page: set the strip height, pause, expand, hide, confirm it is ready to quit, and record event counts; list, load, save and delete species library entries ([ADR 0014](adr/0014-species-library.md)).
 - Events from the host: paused changed, expanded changed, quit requested.
 - Log lines from the page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%\com.livingdiorama.desktop\logs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
 
