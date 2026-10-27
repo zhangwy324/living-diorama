@@ -6,7 +6,8 @@ import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import type { AssetResolver } from "./props";
 
-// Creatures as solid bodies extruded from their drawings, with a shadow blob (ADR 0011), true to scale.
+// Creatures as solid bodies extruded from their drawings, casting shadows from the sun, with a
+// contact shadow blob under their feet (ADR 0011), true to scale.
 
 /** What the renderer needs to know about a species. `SpeciesDefinition` fits. */
 export interface RenderSpecies {
@@ -26,6 +27,20 @@ const GROUND_PROBE_DEPTH = 1;
 const GROUND_RECHECK_DISTANCE = 0.01;
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
+/** Where the ground is probed, in shadow radii: the centre and four points on the rim. */
+const GROUND_PROBES = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
+
+/** A hit face's normal in world space, pointing up. */
+function groundNormal(hit: THREE.Intersection): THREE.Vector3 {
+  const normal = (hit.face?.normal ?? UP).clone().transformDirection(hit.object.matrixWorld);
+  return normal.y < 0 ? normal.negate() : normal;
+}
 
 export interface CreatureBodiesOptions {
   resolveSpecies: SpeciesResolver;
@@ -148,6 +163,7 @@ export class CreatureBodies {
     const look = this.#look(pose.speciesId);
     if (!look) return undefined;
     const body = new THREE.Mesh(look.body.geometry, look.body.material);
+    body.castShadow = true;
     const shadow = new THREE.Mesh(this.#shadowGeometry, this.#shadowMaterial);
     shadow.scale.setScalar(look.radius * 1.1);
     shadow.renderOrder = -1;
@@ -160,18 +176,33 @@ export class CreatureBodies {
     return creature;
   }
 
-  /** Lays the shadow on the ground under the creature, tilted to the surface (flat if none is found). */
+  /**
+   * Lays the shadow on the ground under the creature (flat at its feet if none is found). The
+   * ground is probed at the centre and four rim points: the shadow tilts to their average normal
+   * and rises to the highest hit, so where two surfaces meet it isn't hidden under one (issue #29).
+   */
   #layShadow(creature: CreatureObject): void {
     const { root, shadow } = creature;
     creature.probedAt = root.position.clone();
-    this.#raycaster.set(root.position.clone().addScaledVector(UP, GROUND_PROBE_HEIGHT), DOWN);
-    const hit = this.#raycaster.intersectObjects([...this.#ground], true).find((h) => h.face);
-    const normal = hit?.face
-      ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
-      : UP.clone();
-    if (normal.y < 0) normal.negate();
-    const contact = hit ? hit.point.clone().sub(root.position) : new THREE.Vector3();
-    shadow.position.copy(contact).addScaledVector(normal, SHADOW_LIFT);
+    const rim = shadow.scale.x;
+    const hits = GROUND_PROBES.flatMap(([x, z]) => {
+      const from = root.position
+        .clone()
+        .add(new THREE.Vector3(x * rim, GROUND_PROBE_HEIGHT, z * rim));
+      this.#raycaster.set(from, DOWN);
+      const hit = this.#raycaster.intersectObjects([...this.#ground], true).find((h) => h.face);
+      return hit ? [{ point: hit.point, normal: groundNormal(hit) }] : [];
+    });
+    if (!hits.length) {
+      shadow.position.set(0, SHADOW_LIFT, 0);
+      shadow.quaternion.identity();
+      return;
+    }
+    const normal = hits.reduce((sum, hit) => sum.add(hit.normal), new THREE.Vector3()).normalize();
+    // The shadow's plane passes through the hit highest along the normal (on an even slope, all
+    // of them), and the shadow sits on that plane under the creature.
+    const offset = Math.max(...hits.map((hit) => hit.point.clone().sub(root.position).dot(normal)));
+    shadow.position.set(0, offset / normal.y, 0).addScaledVector(normal, SHADOW_LIFT);
     shadow.quaternion.setFromUnitVectors(UP, normal);
   }
 
