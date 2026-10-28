@@ -21,7 +21,10 @@ export interface CreaturePose {
   speciesId: string;
   world: Vec3;
   heading: number;
-  /** What the creature shows (ADR 0018 §15), from the newest snapshot; the creatures fade them in and out. */
+  /**
+   * What the creature shows (ADR 0018 §15): the cues of the snapshot the pose blends from, the
+   * newest once the pose reaches it, so cues don't lead the body. The creatures fade them.
+   */
   cues: readonly Cue[];
 }
 
@@ -84,7 +87,8 @@ export class SnapshotInterpolator {
           z: from.world.z + (world.z - from.world.z) * t,
         },
         heading: lerpHeading(from.heading, heading, t),
-        cues,
+        // The cues of the snapshot the pose blends from, until it arrives, so cues don't lead the body.
+        cues: t < 1 ? from.cues : cues,
       };
     });
   }

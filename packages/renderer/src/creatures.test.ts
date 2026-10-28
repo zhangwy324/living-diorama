@@ -60,11 +60,14 @@ describe("SnapshotInterpolator", () => {
     expect(b!.world.x).toBe(5);
   });
 
-  it("carries each creature's cues from the newest snapshot", () => {
+  it("carries the cues of the snapshot the pose blends from, so they don't lead the body", () => {
     const interpolator = new SnapshotInterpolator(100);
     interpolator.push(snapshot(1, [at(0)]), 0);
     interpolator.push(snapshot(2, [{ ...at(1), cues: ["eating", "hungry"] }]), 100);
-    expect(interpolator.sample(110)[0]!.cues).toEqual(["eating", "hungry"]);
+    expect(interpolator.sample(150)[0]!.cues).toEqual([]);
+    // Once the pose arrives (also when the next snapshot is late, e.g. paused) it shows them.
+    expect(interpolator.sample(200)[0]!.cues).toEqual(["eating", "hungry"]);
+    expect(interpolator.sample(5000)[0]!.cues).toEqual(["eating", "hungry"]);
     interpolator.push(snapshot(3, [{ ...at(10), cues: ["sleeping"] }]), 200); // snapped
     expect(interpolator.sample(210)[0]!.cues).toEqual(["sleeping"]);
   });

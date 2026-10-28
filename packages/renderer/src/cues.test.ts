@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
 import {
   BUBBLE_PX,
+  SNAP_SECONDS,
   ScreenScale,
   Z_COUNT,
   bodyMotion,
@@ -21,6 +22,8 @@ import {
 import { SceneLayer } from "./layers";
 
 const none = (): CueWeights => ({ eating: 0, sleeping: 0, hungry: 0 });
+/** A frame whose animation and real clocks agree. */
+const at = (t: number) => ({ time: t, realTime: t });
 const times = Array.from({ length: 400 }, (_, k) => k * 0.037);
 
 describe("cue weights", () => {
@@ -35,6 +38,12 @@ describe("cue weights", () => {
     expect(weights.eating).toBeGreaterThan(0);
     stepCueWeights(weights, [], 10);
     expect(weights).toEqual(none());
+  });
+
+  it("snaps to the cues after a long gap, e.g. a hidden page", () => {
+    const weights = { eating: 1, sleeping: 0, hungry: 0.3 };
+    stepCueWeights(weights, ["sleeping"], SNAP_SECONDS + 0.5);
+    expect(weights).toEqual({ eating: 0, sleeping: 1, hungry: 0 });
   });
 
   it("ignores a negative or non-finite step", () => {
@@ -170,8 +179,8 @@ describe("cue sprites", () => {
 
   it("shows z's while sleeping and a bubble while hungry, over the creature's head", () => {
     const { bodies, sprites } = make();
-    bodies.update([creature("a", ["sleeping", "hungry"])], 0);
-    bodies.update([creature("a", ["sleeping", "hungry"])], 2);
+    bodies.update([creature("a", ["sleeping", "hungry"])], at(0));
+    bodies.update([creature("a", ["sleeping", "hungry"])], at(2));
     expect(bodies.cueSprites).toBe(Z_COUNT + 1);
     const shown = sprites();
     expect(shown.filter((s) => s.name === "cue:z")).toHaveLength(Z_COUNT);
@@ -186,29 +195,29 @@ describe("cue sprites", () => {
 
   it("fades sprites out, then pools them for the next creature", () => {
     const { layer, bodies } = make();
-    bodies.update([creature("a", ["sleeping"])], 0);
-    bodies.update([creature("a", ["sleeping"])], 2);
+    bodies.update([creature("a", ["sleeping"])], at(0));
+    bodies.update([creature("a", ["sleeping"])], at(2));
     const all = () => {
       let count = 0;
       layer.group.traverse((o) => (count += o instanceof THREE.Sprite ? 1 : 0));
       return count;
     };
     expect(all()).toBe(Z_COUNT);
-    bodies.update([creature("a", [])], 2.1);
+    bodies.update([creature("a", [])], at(2.1));
     expect(bodies.cueSprites).toBe(Z_COUNT); // still fading out
-    for (let t = 2.2; t < 4; t += 0.1) bodies.update([creature("a", [])], t);
+    for (let t = 2.2; t < 4; t += 0.1) bodies.update([creature("a", [])], at(t));
     expect(bodies.cueSprites).toBe(0);
-    bodies.update([creature("a", []), creature("b", ["sleeping"])], 4.1);
+    bodies.update([creature("a", []), creature("b", ["sleeping"])], at(4.1));
     expect(bodies.cueSprites).toBe(Z_COUNT);
     expect(all()).toBe(Z_COUNT); // reused, not made anew
   });
 
   it("hands back a departed creature's sprites and disposes everything", () => {
     const { layer, bodies } = make();
-    bodies.update([creature("a", ["hungry"])], 0);
-    bodies.update([creature("a", ["hungry"])], 1);
+    bodies.update([creature("a", ["hungry"])], at(0));
+    bodies.update([creature("a", ["hungry"])], at(1));
     expect(bodies.cueSprites).toBe(1);
-    bodies.update([], 1.1);
+    bodies.update([], at(1.1));
     expect(bodies.cueSprites).toBe(0);
     const bubble = layer.group.getObjectByName("cue:bubble") as THREE.Sprite;
     const disposed = vi.fn();
@@ -219,20 +228,56 @@ describe("cue sprites", () => {
     expect(layer.group.getObjectByName("cues")).toBeUndefined();
   });
 
+  it("fades cues on real time while paused, holding the motion still", () => {
+    const { layer, bodies, sprites } = make();
+    const body = () => layer.group.getObjectByName("a") as THREE.Mesh;
+    // Paused: animation time stands at 5 while real time runs on.
+    bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: 0 });
+    for (let t = 0.1; t < 1.5; t += 0.1) {
+      bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: t });
+    }
+    expect(body().scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
+    expect(sprites()).toHaveLength(Z_COUNT);
+    const held = sprites().map((s) => s.position.y);
+    bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: 1.6 });
+    expect(sprites().map((s) => s.position.y)).toEqual(held);
+  });
+
+  it("keeps a long body's front above the ground while it pecks", async () => {
+    // A 2:1 body: 40 × 20 px, so its front reaches as far ahead of its feet as it is tall.
+    const long = { width: 40, height: 20, data: new Uint8Array(40 * 20 * 4).fill(255) };
+    const layer = new SceneLayer("creatures");
+    const bodies = new CreatureBodies(layer, {
+      resolveSpecies: () => ({ appearance: "x", sizeClass: "medium", body: { thickness: 0.25 } }),
+      resolveAsset: () => ({ kind: "image", url: "long.png" }),
+      readImage: async () => long,
+    });
+    bodies.update([creature("a", ["eating"])], at(0));
+    await bodies.ready;
+    const mesh = () => layer.group.getObjectByName("a") as THREE.Mesh;
+    let deepest = Infinity;
+    for (let t = 1; t < 4; t += 0.05) {
+      bodies.update([creature("a", ["eating"])], at(t));
+      deepest = Math.min(deepest, new THREE.Box3().setFromObject(mesh()).min.y);
+    }
+    expect(mesh().geometry.type).toBe("ExtrudeGeometry");
+    expect(deepest).toBeGreaterThanOrEqual(-1e-6);
+  });
+
   it("poses the body: a bob while eating, lowered while sleeping", () => {
     const { layer, bodies } = make();
     const body = () => layer.group.getObjectByName("a") as THREE.Mesh;
-    bodies.update([creature("a", ["sleeping"])], 0);
-    bodies.update([creature("a", ["sleeping"])], 0.2);
+    bodies.update([creature("a", ["sleeping"])], at(0));
+    bodies.update([creature("a", ["sleeping"])], at(0.2));
     const fading = body().scale.y;
     expect(fading).toBeLessThan(1);
     expect(fading).toBeGreaterThan(0.9); // still easing in
-    for (let t = 0.4; t < 3; t += 0.2) bodies.update([creature("a", ["sleeping"])], t);
+    for (let t = 0.4; t < 3; t += 0.2) bodies.update([creature("a", ["sleeping"])], at(t));
     expect(body().scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
-    for (let t = 3; t < 6; t += 0.2) bodies.update([creature("a", ["eating"])], t);
+    for (let t = 3; t < 6; t += 0.2) bodies.update([creature("a", ["eating"])], at(t));
     expect(body().scale.y).toBe(1);
     const heights = [6, 6.2, 6.4, 6.6, 6.8].map((t) => {
-      bodies.update([creature("a", ["eating"])], t);
+      bodies.update([creature("a", ["eating"])], at(t));
       return body().position.y;
     });
     expect(Math.max(...heights)).toBeGreaterThan(0);

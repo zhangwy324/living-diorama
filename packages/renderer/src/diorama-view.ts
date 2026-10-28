@@ -222,8 +222,9 @@ export function createDioramaView(
   controls.minDistance = 8;
   controls.maxDistance = 220;
 
-  // Cue sprites are sized in CSS pixels of the view (ADR 0018 §15).
+  // Cue sprites are sized in CSS pixels of the view, and cues fade on real time (ADR 0018 §15).
   const cueView = { camera, heightPx: 1 };
+  const creatureFrame = { time: 0, realTime: 0, view: cueView };
 
   let reset:
     | {
@@ -302,7 +303,9 @@ export function createDioramaView(
     }
     controls.update();
     const poses = snapshots.sample(now);
-    creatures.update(poses, timer.getElapsed(), cueView);
+    creatureFrame.time = timer.getElapsed();
+    creatureFrame.realTime = now / 1000;
+    creatures.update(poses, creatureFrame);
     if (overlays.group.visible) {
       overlays.routes.update(poses);
       // One screen pixel's height at one metre from the camera, so labels keep their pixel size.

@@ -15,12 +15,22 @@ export interface CueWeights {
 /** Seconds a cue takes to fade fully in or out. */
 const FADE_SECONDS: CueWeights = { eating: 0.4, sleeping: 1.2, hungry: 0.5 };
 
-/** Moves `weights` towards the cues in `cues` by `dt` seconds of fading. Mutates and returns it. */
+const CUE_NAMES = ["eating", "sleeping", "hungry"] as const;
+/**
+ * A longer gap between frames (the page was hidden, the PC slept) shows cues as they are now
+ * instead of slowly fading out ones long gone.
+ */
+export const SNAP_SECONDS = 1;
+
+/**
+ * Moves `weights` towards the cues in `cues` by `dt` seconds of fading, or straight to them after a
+ * gap longer than `SNAP_SECONDS`. Mutates and returns it.
+ */
 export function stepCueWeights(weights: CueWeights, cues: readonly Cue[], dt: number): CueWeights {
   const step = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  for (const cue of ["eating", "sleeping", "hungry"] as const) {
+  for (const cue of CUE_NAMES) {
     const target = cues.includes(cue) ? 1 : 0;
-    const delta = step / FADE_SECONDS[cue];
+    const delta = step > SNAP_SECONDS ? 1 : step / FADE_SECONDS[cue];
     const current = weights[cue];
     weights[cue] =
       target > current ? Math.min(target, current + delta) : Math.max(target, current - delta);
@@ -57,13 +67,19 @@ const BREATH = 0.025;
 export interface BodyMotion {
   /** Rise of the feet, as a share of the body's height. */
   lift: number;
-  /** Forward tilt in radians; positive dips the drawing's front (+X). */
+  /**
+   * Forward tilt in radians about the feet; positive dips the drawing's front (+X). Lift the body
+   * by `frontLift` so its front doesn't sink into the ground.
+   */
   pitch: number;
   /** Vertical scale of the body. */
   scaleY: number;
   /** Horizontal scale of the body. */
   scaleXZ: number;
 }
+
+/** How far to lift a body whose front reaches `front` metres ahead of its feet, tilted by `pitch`. */
+export const frontLift = (front: number, pitch: number) => Math.max(0, front * Math.sin(pitch));
 
 export const restingMotion = (): BodyMotion => ({ lift: 0, pitch: 0, scaleY: 1, scaleXZ: 1 });
 
@@ -276,8 +292,11 @@ const texture = (data: Uint8Array, size: number) => {
   return map;
 };
 
-/** Cue sprites draw over everything: a bubble behind a tree would say nothing. */
-const CUE_RENDER_ORDER = 10;
+/**
+ * Cue sprites draw over everything: a bubble behind a tree would say nothing. After the debug
+ * overlays (10), so a label never hides a cue.
+ */
+const CUE_RENDER_ORDER = 12;
 
 /** Sprites of one look, reused as cues come and go. */
 class SpritePool {

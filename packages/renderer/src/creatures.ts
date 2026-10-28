@@ -7,6 +7,7 @@ import {
   ScreenScale,
   bodyMotion,
   cuePhase,
+  frontLift,
   noCueSprites,
   restingMotion,
   stepCueWeights,
@@ -44,6 +45,18 @@ interface SpeciesLook {
   body: Body;
   /** Metres from the feet to the top of the head. */
   height: number;
+  /** Metres from the feet forward to the front of the body, for lifting it as it pecks. */
+  front: number;
+}
+
+/** A frame's clocks, in seconds. */
+export interface CreatureFrame {
+  /** Animation time: stops while the simulation is paused, so bobs and z's hold still. */
+  time: number;
+  /** Real time: cues fade in and out on it even while paused. */
+  realTime: number;
+  /** The camera cue sprites are sized for, in its CSS pixels. */
+  view?: CueView;
 }
 
 interface Creature {
@@ -53,10 +66,14 @@ interface Creature {
   sprites: CreatureCueSprites;
 }
 
-/** A longer frame (a throttled or hidden page) fades cues no further than this many seconds. */
-const MAX_FRAME_SECONDS = 0.25;
 /** Without a camera, cues are sized as if a pixel were this many metres. */
 const DEFAULT_UNITS_PER_PIXEL = 0.02;
+
+/** How far a body reaches forward (+X) of its feet. */
+function frontOf(body: Body): number {
+  body.geometry.computeBoundingBox();
+  return Math.max(0, body.geometry.boundingBox?.max.x ?? 0);
+}
 
 export class CreatureBodies {
   readonly #creatures = new Map<string, Creature>();
@@ -74,7 +91,8 @@ export class CreatureBodies {
   readonly #motion = restingMotion();
   readonly #anchor: CueAnchor;
   readonly #seen = new Set<string>();
-  #time: number | undefined;
+  #frame: CreatureFrame = { time: 0, realTime: 0 };
+  #realTime: number | undefined;
 
   constructor(layer: SceneLayer, options: CreatureBodiesOptions) {
     this.#layer = layer;
@@ -96,12 +114,14 @@ export class CreatureBodies {
   }
 
   /**
-   * Places each creature for this frame at `time` seconds, posed and marked for its cues; creatures
-   * not in `poses` are removed. Cue sprites are sized in CSS pixels of `view`.
+   * Places each creature for this `frame` (by default the last one again), posed and marked for its
+   * cues; creatures not in `poses` are removed.
    */
-  update(poses: readonly CreaturePose[], time: number = this.#time ?? 0, view?: CueView) {
-    const dt = Math.min(MAX_FRAME_SECONDS, Math.max(0, time - (this.#time ?? time)));
-    this.#time = time;
+  update(poses: readonly CreaturePose[], frame: CreatureFrame = this.#frame) {
+    this.#frame = frame;
+    const { time, realTime, view } = frame;
+    const dt = realTime - (this.#realTime ?? realTime);
+    this.#realTime = realTime;
     if (view) this.#screen.set(view);
     const seen = this.#seen;
     seen.clear();
@@ -113,7 +133,9 @@ export class CreatureBodies {
       const { mesh, weights, phase } = creature;
       stepCueWeights(weights, pose.cues, dt);
       const motion = bodyMotion(weights, time, phase, this.#motion);
-      mesh.position.set(pose.world.x, pose.world.y + motion.lift * look.height, pose.world.z);
+      // The pitch turns about the feet, so the body rises as its front dips, to keep it above ground.
+      const lift = motion.lift * look.height + frontLift(look.front * motion.scaleXZ, motion.pitch);
+      mesh.position.set(pose.world.x, pose.world.y + lift, pose.world.z);
       // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h). The pitch turns
       // about the drawing's own depth axis, so its front dips.
       mesh.rotation.set(0, pose.heading - Math.PI / 2, -motion.pitch);
@@ -180,7 +202,8 @@ export class CreatureBodies {
     }
     const { height } = SIZE_CLASSES[species.sizeClass];
     const { thickness } = species.body;
-    const look: SpeciesLook = { body: fallbackBody(height, thickness), height };
+    const block = fallbackBody(height, thickness);
+    const look: SpeciesLook = { body: block, height, front: frontOf(block) };
     this.#bodies.push(look.body);
     this.#looks.set(speciesId, look);
 
@@ -199,6 +222,7 @@ export class CreatureBodies {
           }
           this.#bodies.push(body);
           look.body = body;
+          look.front = frontOf(body);
         },
         (error: unknown) => console.warn(`Could not load ${species.appearance}`, error),
       ),
