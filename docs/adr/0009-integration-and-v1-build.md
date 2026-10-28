@@ -27,7 +27,7 @@
 
 4. **The shipped app keeps a fixed count of 3.** Roadmap §1.9 Q3 asked for a configurable count; no user-facing need for it exists yet, so it is not a setting. Instead:
    - a headless test runs 20 creatures through the invariant checks, so nothing in the simulation assumes one creature;
-   - in development builds only, `VITE_CREATURE_COUNT` overrides the count, to check the renderer and frame rate with about 20 creatures in the real app. Production builds ignore it.
+   - in development builds only, `VITE_CREATURE_COUNT` overrides the count, to check the renderer and frame rate with about 20 creatures in the real app. Production builds ignore it. _Superseded by [ADR 0016](0016-integration-and-v0.2-build.md) §10: any build honours it when it is set at build time._
 
 ### Soak test and performance baseline (PR B)
 

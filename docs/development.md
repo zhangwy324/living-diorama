@@ -27,9 +27,61 @@ gh repo clone zhangwy324/living-diorama-design docs/design
 - Line endings are LF in the repo and working tree (`.gitattributes`); only `.bat`/`.cmd`/`.ps1` use CRLF.
 - Keep the repo on a local NTFS path (not a network or WSL path) for fast file watching and Rust builds.
 - Rust build output (`target/`) can grow to several GB; exclude it from antivirus real-time scanning if builds are slow.
-- To run `pnpm dev` with more creatures than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). Production builds ignore it (ADR 0009 §4).
-- To keep `pnpm dev` away from your own drawn creatures, set `LIVING_DIORAMA_DEV_DATA_DIR` to a folder before starting it (PowerShell: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMPdiorama-dev"; pnpm dev`). The species library then lives in `library/` under that folder instead of `%APPDATA%com.livingdiorama.desktoplibrary`. Release builds ignore it; settings and logs stay where they are.
+- To run `pnpm dev` with another number of mosslings than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). `0` starts with none. Release builds honour it too when it is set at build time (ADR 0016 §10); the release workflow fails if it is set.
+- To keep `pnpm dev` away from your own drawn creatures, set `LIVING_DIORAMA_DEV_DATA_DIR` to a folder before starting it (PowerShell: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-dev"; pnpm dev`). The species library then lives in `library\` under that folder instead of `%APPDATA%\com.livingdiorama.desktop\library`. Release builds ignore it; settings and logs stay where they are.
 - `pnpm measure` samples the running app's CPU, GPU and memory into a CSV under `tools/development/out/measurements/` (ADR 0009 §5–7). Start a release build first (`pnpm tauri build --no-bundle`, then `apps\desktop\src-tauri\target\release\living-diorama.exe`). With no arguments it measures the four baseline states, 5 minutes each, and says how to put the app in each one. For the soak test run `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`; it ends with the stuck and path-failed counts the app writes to `%LOCALAPPDATA%\com.livingdiorama.desktop\event-counts.json`. Results go in [performance.md](performance.md).
+
+## Measuring with many creatures
+
+v0.2 measures a release build with 20 creatures, some of them drawn (ADR 0016 §10–13). The drawn species come from a library of 20 sample species generated in the dev app, copied to where the release app keeps its library. All commands are PowerShell, from the repository root.
+
+1. **Generate the 20 species** in a library folder of their own:
+
+   ```powershell
+   $env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-measure"; pnpm dev
+   ```
+
+   Open the dev tools (right-click the strip, Inspect) and run `await livingDiorama.library.saveSamples()` in the console. It saves Bramble, Pip, … Hazel through the library, as the Studio saves a drawing, and resolves with the species it could not save: `[]` when all 20 were saved. Quit the app. `$env:TEMP\diorama-measure\library` now holds 20 folders.
+
+2. **Move your own creatures aside.** The release build reads its library only from `%APPDATA%\com.livingdiorama.desktop\library`:
+
+   ```powershell
+   $data = "$env:APPDATA\com.livingdiorama.desktop"
+   if (Test-Path "$data\library") { Rename-Item "$data\library" library.mine }
+   ```
+
+3. **Measure the built-in species** with the library empty, as it was for the M6 baseline. Build once per count; the diagnostics log says `Starting count overridden: N` when the build has one.
+   - **3 mosslings:** the shipped build, without the variable: `pnpm tauri build --no-bundle`, start `apps\desktop\src-tauri\target\release\living-diorama.exe`, then `pnpm measure`.
+   - **20 mosslings:**
+
+     ```powershell
+     $env:VITE_CREATURE_COUNT = "20"; pnpm tauri build --no-bundle; Remove-Item Env:VITE_CREATURE_COUNT
+     ```
+
+     Start the exe, then `pnpm measure`.
+
+4. **Copy the 20 species** into the release app's data folder:
+
+   ```powershell
+   Copy-Item -Recurse "$env:TEMP\diorama-measure\library" "$data\library"
+   ```
+
+5. **20 creatures of different drawn species:** build with no mosslings:
+
+   ```powershell
+   $env:VITE_CREATURE_COUNT = "0"; pnpm tauri build --no-bundle; Remove-Item Env:VITE_CREATURE_COUNT
+   ```
+
+   Start the exe, open the Creation Studio, and in My creatures click Add once on each of the 20 species. Close the Studio, then `pnpm measure`.
+
+6. **The soak mix: 3 mosslings and 17 different drawn species.** Build without the variable, as for 3 mosslings. Start the exe, click Add once on every species in My creatures except the last three (Burdock, Tansy and Hazel), close the Studio and show the strip with the cursor off it. Then `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`.
+
+7. **Afterwards** put your own library back, and build once more without the variable before using the release exe for anything else:
+
+   ```powershell
+   Remove-Item -Recurse "$data\library"
+   if (Test-Path "$data\library.mine") { Rename-Item "$data\library.mine" library }
+   ```
 
 ## Troubleshooting
 

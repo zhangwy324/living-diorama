@@ -50,8 +50,10 @@
 ### Measuring a release build (PR 4)
 
 10. **`VITE_CREATURE_COUNT` in any build.** The build-time override of the starting creature count (ADR 0009 §4) is honoured whenever it is set at build time, in release builds too, so performance can be measured on a release build with 20 creatures. The release workflow never sets it, so the published installers are unchanged.
+    - **Settled in PR 4.** `0` is honoured too and starts with no built-in creatures, for the state with 20 drawn species; only an unset or empty variable means no override, and anything but a whole number is ignored with a warning. A build with an override logs `Starting count overridden: N`. `tools/development/check-no-creature-count.sh` fails if the variable is set in the environment or in `apps/desktop/.env*`; the release workflow runs it before building the installer, and CI's Windows build runs it on every PR.
 
 11. **A seeding hook for 20 drawn species.** A development hook generates 20 varied drawn species into a species library folder. For the measurements that folder is copied into the release app's data folder (ADR 0014 §1), and creatures are added from My creatures in the Studio, so the measured app goes through the same library, schemas and registries as a player's drawings.
+    - **Settled in PR 4.** The hook is `livingDiorama.library.saveSamples()` in the dev app's console. It saves 20 species built from strokes from eight body plans, varied in colour, outline and size class (four tiny, six small, six medium, four large); three have separate shapes. Creatures are added by hand, once per species, in My creatures: the user chose that over a build-time option spawning one of each library species. `docs/development.md` has the procedure.
 
 ### Side colours (PR 3)
 

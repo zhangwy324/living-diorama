@@ -1,7 +1,12 @@
 import { runSimulationHost, type SimulationSnapshot } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
-import { creatureCap, startSimulation, type WorkerLike } from "./simulation-client";
+import {
+  creatureCap,
+  parseCountOverride,
+  startSimulation,
+  type WorkerLike,
+} from "./simulation-client";
 import { STARTUP } from "./startup";
 
 /** A worker that runs the real host in this thread; its timers fire only in `tick`. */
@@ -52,7 +57,7 @@ const drawn = {
   behaviors: ["core:wander"],
 };
 
-function start() {
+function start(countOverride?: number) {
   const { worker, tick } = fakeWorker();
   const callbacks = {
     onReady: vi.fn(),
@@ -60,7 +65,7 @@ function start() {
     onSnapshot: vi.fn<(snapshot: SimulationSnapshot) => void>(),
     onFailure: vi.fn(),
   };
-  const client = startSimulation(callbacks, STARTUP, worker);
+  const client = startSimulation(callbacks, STARTUP, worker, countOverride);
   return { client, callbacks, tick };
 }
 
@@ -72,6 +77,14 @@ describe("simulation client", () => {
     const [snapshot] = callbacks.onSnapshot.mock.calls.at(-1) ?? [];
     const starting = STARTUP.creatures.reduce((sum, c) => sum + c.count, 0);
     expect(snapshot?.creatures).toHaveLength(starting);
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 25])("starts with %i of each starting species under a count override", (count) => {
+    const { callbacks, tick } = start(count);
+    tick(100);
+    const [snapshot] = callbacks.onSnapshot.mock.calls.at(-1) ?? [];
+    expect(snapshot?.creatures).toHaveLength(count * STARTUP.creatures.length);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 
@@ -135,9 +148,27 @@ describe("simulation client", () => {
 });
 
 describe("creatureCap", () => {
-  it("is the startup cap, raised by a larger development count", () => {
+  it("is the startup cap, raised by a larger count override", () => {
+    expect(creatureCap(STARTUP, undefined)).toBe(20);
     expect(creatureCap(STARTUP, 0)).toBe(20);
     expect(creatureCap(STARTUP, 5)).toBe(20);
     expect(creatureCap({ ...STARTUP, creatures: [{ speciesId: "a:b", count: 2 }] }, 30)).toBe(30);
+  });
+});
+
+describe("parseCountOverride", () => {
+  it("reads a whole number from 0, and nothing from an unset or empty variable", () => {
+    expect(parseCountOverride(undefined)).toBeUndefined();
+    expect(parseCountOverride("")).toBeUndefined();
+    expect(parseCountOverride(" ")).toBeUndefined();
+    expect(parseCountOverride("0")).toBe(0);
+    expect(parseCountOverride("20")).toBe(20);
+  });
+
+  it("ignores anything else, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const raw of ["-1", "2.5", "many"]) expect(parseCountOverride(raw)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
   });
 });
