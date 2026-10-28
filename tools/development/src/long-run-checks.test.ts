@@ -2,11 +2,13 @@ import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import type { DayPhase, DecisionTrace, SimulationEvent } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { LongRunChecks, type CreatureTick, type LongRunCheckOptions } from "./long-run-checks";
+import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { runWithInvariants } from "./simulation-run";
 
 // The ADR 0018 §20 checks, fed synthetic runs that break them, and wired into the runner.
 
 const HZ = 10;
+const withoutTick = (violation: string) => violation.replace(/^seed \d+, tick \d+: /, "");
 const HOUR = 3600 * HZ;
 
 function checker(options: LongRunCheckOptions = {}) {
@@ -167,6 +169,44 @@ describe("long-run checks", () => {
   });
 
   it("are wired into the runner, with the meal and sleep checks off by default", () => {
+    // Pebbles only wander: no food, no sleep.
+    const river = {
+      register: registerRiverCrossing,
+      worldId: "fixture:river-crossing",
+      speciesId: "fixture:pebble",
+      seed: 1,
+      creatures: 2,
+      tickRateHz: 2,
+      startMinutes: 19 * 60,
+      ticks: 4 * 3600 * 2,
+      // Short walks in a small world (see LongRunCheckOptions).
+      maxDecisionsPer10Seconds: 2,
+    };
+    const clean = runWithInvariants(river);
+    expect(clean.violations).toEqual([]);
+    expect(Object.keys(clean.creatures)).toEqual(["creature-1", "creature-2"]);
+    expect(clean.creatures["creature-1"]).toMatchObject({ ticks: river.ticks, meals: 0 });
+    expect(clean.creatures["creature-1"]!.decisions).toBeGreaterThan(0);
+    // On, both fail: nothing to eat, and no sleep.
+    const checked = runWithInvariants({ ...river, meals: {}, sleep: {} });
+    expect(checked.violations.map(withoutTick)).toEqual([
+      "creature-1: no meal for 3 h",
+      "creature-2: no meal for 3 h",
+      "creature-1: asleep 0% of the night (at least 50%)",
+      "creature-2: asleep 0% of the night (at least 50%)",
+    ]);
+
+    const corrupted = runWithInvariants({
+      ...river,
+      ticks: 2,
+      onTick: (simulation) => {
+        simulation.state.creatures.get("creature-1")!.needs["test:corrupt"] = 1.5;
+      },
+    });
+    expect(corrupted.violations).toEqual(["seed 1, tick 2: creature-1: test:corrupt is 1.5"]);
+  });
+
+  it("holds mosslings to the meal check: they eat, but don't sleep yet", () => {
     const hollow = {
       register: registerBuiltInContent,
       worldId: "hollow:woodland-hollow",
@@ -177,17 +217,10 @@ describe("long-run checks", () => {
       startMinutes: 19 * 60,
       ticks: 4 * 3600 * 2,
     };
-    // Mosslings neither eat nor sleep yet.
-    const clean = runWithInvariants(hollow);
-    expect(clean.violations).toEqual([]);
-    expect(Object.keys(clean.creatures)).toEqual(["creature-1", "creature-2"]);
-    expect(clean.creatures["creature-1"]).toMatchObject({ ticks: hollow.ticks, meals: 0 });
-    expect(clean.creatures["creature-1"]!.decisions).toBeGreaterThan(0);
-
     const checked = runWithInvariants({ ...hollow, meals: {}, sleep: {} });
-    expect(checked.violations.map((v) => v.replace(/^.*: (creature)/, "$1"))).toEqual([
-      "creature-1: no meal for 3 h",
-      "creature-2: no meal for 3 h",
+    for (const c of Object.values(checked.creatures)) expect(c.meals).toBeGreaterThan(0);
+    // Sleep arrives in PR 5a.
+    expect(checked.violations.map(withoutTick)).toEqual([
       "creature-1: asleep 0% of the night (at least 50%)",
       "creature-2: asleep 0% of the night (at least 50%)",
     ]);
@@ -199,24 +232,14 @@ describe("long-run checks", () => {
       meals: {
         creatures: (c, simulation) => {
           seen.push(c.id);
-          return c.id === "creature-1" && simulation.state.model.regions.has(c.position.regionId);
+          return simulation.state.model.regions.has(c.position.regionId);
         },
       },
       sleep: { creatures: (c) => c.id === "creature-2" },
     });
     expect(seen).toEqual(["creature-1", "creature-2"]);
-    expect(filtered.violations.map((v) => v.replace(/^.*: (creature)/, "$1"))).toEqual([
-      "creature-1: no meal for 3 h",
+    expect(filtered.violations.map(withoutTick)).toEqual([
       "creature-2: asleep 0% of the night (at least 50%)",
     ]);
-
-    const corrupted = runWithInvariants({
-      ...hollow,
-      ticks: 2,
-      onTick: (simulation) => {
-        simulation.state.creatures.get("creature-1")!.needs["core:hunger"] = 1.5;
-      },
-    });
-    expect(corrupted.violations).toEqual(["seed 1, tick 2: creature-1: core:hunger is 1.5"]);
   });
 });
