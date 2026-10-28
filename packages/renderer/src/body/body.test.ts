@@ -141,14 +141,17 @@ describe("buildBody", () => {
     expect(depth(thin)).toBeCloseTo(BODY_THICKNESS.min);
     expect(depth(thick)).toBeCloseTo(BODY_THICKNESS.max);
     expect(depth(buildBody(pixels, 1)!)).toBeCloseTo(BODY_THICKNESS.default);
-    // The preview scales one body in z instead of rebuilding it: that must be the same body.
-    const position = (body: { geometry: THREE.BufferGeometry }) =>
-      body.geometry.getAttribute("position");
+    // The preview scales one body in z instead of rebuilding it: that must be the same body,
+    // shaded the same. Scaling transforms the normals as the mesh's normal matrix does.
+    const attribute = (body: { geometry: THREE.BufferGeometry }, name: string) =>
+      Array.from(body.geometry.getAttribute(name).array);
     const scaled = buildBody(pixels, 1, 1)!;
     scaled.geometry.scale(1, 1, BODY_THICKNESS.min);
-    expect(Array.from(position(scaled).array)).toEqual(
-      Array.from(position(thin).array).map((v) => expect.closeTo(v, 6) as unknown as number),
-    );
+    for (const name of ["position", "normal"]) {
+      expect(attribute(scaled, name)).toEqual(
+        attribute(thin, name).map((v) => expect.closeTo(v, 6) as unknown as number),
+      );
+    }
     expect(Array.from(scaled.geometry.getAttribute("uv").array)).toEqual(
       Array.from(thin.geometry.getAttribute("uv").array),
     );

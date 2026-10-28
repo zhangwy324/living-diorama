@@ -39,7 +39,7 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 7. **Orientation by heading.** The drawing faces +x in the body's own frame; the body turns about the vertical axis to the creature's heading. The camera-facing turn and the mirroring are gone.
 
-8. **A neutral fallback block.** Until the image has loaded, or if it fails or has no opaque shape, a creature is a grey rounded box at its size class's height, 0.75 of that wide and 0.4 deep, oriented like a body. When the image arrives every creature of the species switches to the body.
+8. **A neutral fallback block.** Until the image has loaded, or if it fails or has no opaque shape, a creature is a grey rounded box at its size class's height, 0.75 of that wide and 0.4 deep, oriented like a body. _No longer true since [ADR 0017](0017-hollow-bodies-and-fill.md) §11: the block is as deep as the species' thickness, 0.4 of its height by default._ When the image arrives every creature of the species switches to the body.
 
 ### Shadows (PR B)
 
@@ -65,5 +65,5 @@ Known limits, for pack authors and the Creation Studio's hints (roadmap M11):
 - **The silhouette is slightly larger than the drawing,** by the rounded edge (about 1–2 px in the strip). Thin strokes get thicker rather than breaking. At sharp inward corners the rounded edge can overlap itself a little.
 - **Parts that aren't joined are separate slabs,** floating where they were drawn. Parts touching only at a corner count as separate.
 - **The sides show the drawing's edge, without its outline** (§5). A rim of one colour around a different core, up to a third of the shape's depth, counts as an outline even if it was meant as the creature's colour. A detail of another colour right behind the outline shows on the sides there. Where two colours meet at the edge, the sides blend them over a few pixels.
-- **Thickness is the same everywhere,** 40% of the height, so a thin limb is as deep as the body.
+- **Thickness is the same everywhere,** 40% of the height, so a thin limb is as deep as the body. _No longer true since [ADR 0017](0017-hollow-bodies-and-fill.md) §11: each species chooses its thickness, 10% to 80% of the height, 40% by default; it is still the same everywhere on one body._
 - Building a body takes about 30 ms per species on the main thread (the mossling, measured in development), once, when its image arrives. Each species costs two 256 px textures.
