@@ -34,7 +34,7 @@
    - Beyond that migration, nothing promises that older library files keep loading: a later format change may leave them unreadable, and they are skipped as §3 says rather than lost.
    - Rust is unchanged: it never interprets `drawing.json`.
 
-6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Drawings have one migration, from version 1 to 2 (§5 amendment); library entries have none yet. A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
+6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Drawings have one migration, from version 1 to 2 (§5 amendment). Library entries have one too, from version 1 to 2, which gives a stored drawn species `core:feed`, `core:rest` and vision ([ADR 0018](0018-living-behavior.md) §4). A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
 
 7. **Images reach the renderer as `blob:` URLs.** `load_library_image` returns the PNG's bytes as raw binary (`ipc::Response`), and the frontend makes a `blob:` URL from them for `register_species`. The CSP already allows `blob:` images, so the asset protocol isn't needed. The URL is revoked when the species is deleted.
 
@@ -44,7 +44,7 @@
 
 10. **The library holds only drawn species.** The mossling isn't in it, and still spawns at launch. Adding a creature works for any registered species, so the Studio can list the mossling later if wanted.
 
-11. **Drawn species defaults** (`core:walk`, `core:wander`, base speed 0.6, the mossling's) are app configuration, next to the startup config.
+11. **Drawn species defaults** (`core:walk`, `core:wander`, base speed 0.6, the mossling's) are app configuration, next to the startup config. Since [ADR 0018](0018-living-behavior.md) §4 they also take the mossling's `core:feed`, `core:rest` and `core:vision` 8.
 
 12. **A console hook until the Studio.** Development builds put the library on `window.livingDiorama.library`, with `saveSample()` to save a sample drawing, so saving and relaunching can be checked by hand before M11 gives it a UI.
 

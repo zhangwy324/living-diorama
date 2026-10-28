@@ -88,14 +88,16 @@ describe("saving", () => {
     expect(registered).toEqual([speciesId]);
     const [stored] = await store.list();
     expect(stored?.entry).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       species: {
         id: speciesId,
         appearance: appearanceId,
         body: { thickness: 0.4 },
         capabilities: { "core:walk": 1 },
         baseSpeed: 0.6,
-        behaviors: ["core:wander"],
+        behaviors: ["core:wander", "core:feed", "core:rest"],
+        senses: { "core:vision": 8 },
+        traits: {},
       },
     });
     expect(await store.loadDrawing(UUIDS[0] ?? "")).toEqual(DRAWING);
@@ -187,7 +189,7 @@ describe("startup", () => {
   it("skips entries that fail their schema or hold another ID, and leaves their files", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { schemaVersion: 2 }, DRAWING, PNG);
+    await store.save(UUIDS[0] ?? "", { schemaVersion: 3 }, DRAWING, PNG);
     const other = userSpeciesIds(UUIDS[0]);
     await store.save(
       UUIDS[1] ?? "",

@@ -23,7 +23,7 @@ function validDrawing() {
 
 function validEntry() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     species: {
       schemaVersion: 1,
       id: "user:3f9c2a1e-0000-4000-8000-000000000000",
@@ -34,11 +34,21 @@ function validEntry() {
       body: { thickness: 0.3 },
       capabilities: { "core:walk": 1 },
       baseSpeed: 0.6,
-      behaviors: ["core:wander"],
-      senses: {},
+      behaviors: ["core:wander", "core:feed", "core:rest"],
+      senses: { "core:vision": 8 },
       traits: {},
     },
     createdAt: "2026-10-27T12:00:00.000Z",
+  };
+}
+
+/** `validEntry` as version 1 stored it: wandering only, and blind. */
+function version1Entry(species: Record<string, unknown> = {}) {
+  const entry = validEntry();
+  return {
+    ...entry,
+    schemaVersion: 1,
+    species: { ...entry.species, behaviors: ["core:wander"], senses: {}, ...species },
   };
 }
 
@@ -142,6 +152,45 @@ describe("parseLibraryEntry", () => {
 
   it.each([[null], [[]], ["entry"], [{ species: {} }]])("rejects %j", (input) => {
     expect(parseLibraryEntry(input).ok).toBe(false);
+  });
+
+  it("gives a version 1 species feeding, resting and vision", () => {
+    expect(parseLibraryEntry(version1Entry())).toEqual({ ok: true, value: validEntry() });
+  });
+
+  it("gives vision to a version 1 species saved before senses existed", () => {
+    const entry = version1Entry();
+    const species: Record<string, unknown> = { ...entry.species };
+    delete species.senses;
+    delete species.traits;
+    const result = parseLibraryEntry({ ...entry, species });
+    expect(result.ok && result.value.species).toMatchObject({
+      behaviors: ["core:wander", "core:feed", "core:rest"],
+      senses: { "core:vision": 8 },
+    });
+  });
+
+  it("keeps what a version 1 species already has", () => {
+    const entry = version1Entry({
+      behaviors: ["core:rest", "core:wander"],
+      senses: { "core:vision": 12 },
+    });
+    const result = parseLibraryEntry(entry);
+    expect(result.ok && result.value.species).toMatchObject({
+      behaviors: ["core:rest", "core:wander", "core:feed"],
+      senses: { "core:vision": 12 },
+    });
+  });
+
+  it.each([
+    ["behaviors", { behaviors: "core:wander" }],
+    ["senses", { senses: [] }],
+  ])("leaves malformed version 1 %s for validation to reject", (_, species) => {
+    expect(parseLibraryEntry(version1Entry(species)).ok).toBe(false);
+  });
+
+  it("leaves a version 1 species that isn't an object for validation to reject", () => {
+    expect(parseLibraryEntry({ ...version1Entry(), species: "blob" }).ok).toBe(false);
   });
 });
 
