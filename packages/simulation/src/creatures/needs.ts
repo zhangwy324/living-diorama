@@ -3,8 +3,14 @@ import type { NeedType, SenseType, TraitType } from "@living-diorama/extension-a
 // The core needs, senses and traits (ADR 0018 §1, §4 and its amendments). They are data; the
 // engine and behaviors read them. All numbers are starting values, to tune.
 
-/** Rises from 0 to 1 in 90 minutes awake, at a tenth of that asleep, so creatures sleep the night. */
+/** Rises from 0 to 1 in 90 minutes awake. */
 const HUNGER_HOURS_TO_FULL = 1.5;
+/**
+ * Asleep, hunger rises at a fifteenth of its awake rate: about 0.44 over a 10-hour night. A
+ * creature goes to bed with hunger below `actAt` 0.4, so it wakes at dawn short of the trigger at
+ * 0.9 that wakes a sleeper (ADR 0018 §13), and now and then hungry enough to show the bubble.
+ */
+const HUNGER_ASLEEP_FACTOR = 1 / 15;
 
 /**
  * Rises from 0 to 1 in 18 hours awake, so a creature up at dawn reaches `actAt` 0.9 only near
@@ -12,6 +18,13 @@ const HUNGER_HOURS_TO_FULL = 1.5;
  */
 const TIREDNESS_HOURS_TO_FULL = 18;
 const TIREDNESS_HOURS_TO_RESTED = 8;
+/**
+ * A spawned creature starts with tiredness below this, as if it had just woken, so even one
+ * spawned at dawn reaches `actAt` 0.9 no earlier than dusk and bedtime follows the night (§13).
+ * Drawn below `actAt`, one spawned by day close to 0.9 napped at once, and a nap that ran into
+ * the evening lasted until dawn.
+ */
+const TIREDNESS_START_BELOW = 0.1;
 
 /** Individuals differ by up to 15% in need rates and vision range (ADR 0018 §16). */
 const INDIVIDUAL_VARIATION = 0.15;
@@ -20,7 +33,7 @@ const INDIVIDUAL_VARIATION = 0.15;
 export const hungerNeed: NeedType = {
   id: "core:hunger",
   version: "1.0.0",
-  perHour: { awake: 1 / HUNGER_HOURS_TO_FULL, asleep: 1 / HUNGER_HOURS_TO_FULL / 10 },
+  perHour: { awake: 1 / HUNGER_HOURS_TO_FULL, asleep: HUNGER_ASLEEP_FACTOR / HUNGER_HOURS_TO_FULL },
   actAt: 0.4,
   triggers: [0.4, 0.9, 1],
   cue: { cue: "hungry", from: 0.8 },
@@ -36,6 +49,7 @@ export const tirednessNeed: NeedType = {
   perHour: { awake: 1 / TIREDNESS_HOURS_TO_FULL, asleep: -1 / TIREDNESS_HOURS_TO_RESTED },
   actAt: 0.9,
   triggers: [0.9],
+  startBelow: TIREDNESS_START_BELOW,
   variation: INDIVIDUAL_VARIATION,
 };
 

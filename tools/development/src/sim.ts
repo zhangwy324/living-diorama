@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
-import { runWithInvariants, type RunReport } from "./simulation-run";
+import { LIVING_BEHAVIOR_CHECKS, runWithInvariants, type RunReport } from "./simulation-run";
 import { renderDebugMap } from "./worldgen/debug-map";
 
 // `pnpm sim`: the headless runner (ADR 0006 §12). Runs a world with the M3 invariants checked
@@ -26,6 +26,7 @@ const WORLDS = {
     register: registerBuiltInContent,
     worldId: "hollow:woodland-hollow",
     speciesId: "hollow:mossling",
+    ...LIVING_BEHAVIOR_CHECKS,
   },
   river: {
     register: registerRiverCrossing,

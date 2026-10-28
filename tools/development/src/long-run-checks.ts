@@ -43,14 +43,15 @@ export interface LongRunCheckOptions {
    */
   maxFailedDecisionsInARow?: number;
   /**
-   * Each creature eats (a `MEAL_EVENT`) at least once every `hours` (default 3). Off by default
-   * until food exists; PR 6 turns it on, with `creatures` choosing those that can reach food.
+   * Each creature eats (a `MEAL_EVENT`) at least once every `hours` (default 3) awake. Ticks it
+   * spends asleep don't count, so a night's sleep of about 10 hours is no gap. Off unless given;
+   * `creatures` chooses those held to it, e.g. those that can reach food.
    */
   meals?: { hours?: number; creatures?: CreatureFilter };
   /**
    * Each creature is asleep for at least `minShare` (default 0.5) of the night ticks it lived
-   * through, once it has lived through `minNightHours` (default 1). Off by default until sleep
-   * exists; PR 6 turns it on.
+   * through, once it has lived through `minNightHours` (default 1). Off unless given;
+   * `creatures` chooses those held to it, e.g. those that sleep at night.
    */
   sleep?: { minShare?: number; minNightHours?: number; creatures?: CreatureFilter };
 }
@@ -91,8 +92,8 @@ export class LongRunChecks {
   readonly #ticksPerMinute: number;
   /** Per creature, the ticks of its interruptions within the last minute. */
   readonly #recentInterruptions = new Map<string, number[]>();
-  /** Per creature, the tick of its last meal, or of when it was first seen. */
-  readonly #lastMeal = new Map<string, number>();
+  /** Per creature, its ticks awake since its last meal, or since it was first seen. */
+  readonly #awakeSinceMeal = new Map<string, number>();
   /** Per creature, its `rejected` and `no_proposal` evaluations since the last `started`. */
   readonly #failedInARow = new Map<string, number>();
   /** Creatures the sleep check skips. */
@@ -159,7 +160,7 @@ export class LongRunChecks {
     // Compared as a string, so this works before the event type exists.
     if ((event.type as string) !== MEAL_EVENT || !("creatureId" in event)) return;
     this.#stats(event.creatureId).meals++;
-    this.#lastMeal.set(event.creatureId, event.tick);
+    this.#awakeSinceMeal.set(event.creatureId, 0);
   }
 
   /** After each tick, with every creature alive. */
@@ -182,14 +183,14 @@ export class LongRunChecks {
         stats.nightTicks++;
         if (c.asleep) stats.asleepAtNightTicks++;
       }
-      const last = this.#lastMeal.get(c.id);
-      if (last === undefined) this.#lastMeal.set(c.id, tick);
-      else if (meals && c.checkMeals !== false) {
-        if (tick - last > mealTicks) {
-          this.violation(`${c.id}: no meal for ${meals.hours ?? 3} h`);
-          // Once per gap, not every tick after.
-          this.#lastMeal.set(c.id, tick);
-        }
+      // Only time awake counts towards a gap between meals: a night's sleep is no gap.
+      if (c.asleep) continue;
+      const awake = (this.#awakeSinceMeal.get(c.id) ?? 0) + 1;
+      this.#awakeSinceMeal.set(c.id, awake);
+      if (meals && c.checkMeals !== false && awake > mealTicks) {
+        this.violation(`${c.id}: no meal for ${meals.hours ?? 3} h awake`);
+        // Once per gap, not every tick after.
+        this.#awakeSinceMeal.set(c.id, 0);
       }
     }
   }

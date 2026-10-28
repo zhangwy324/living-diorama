@@ -43,7 +43,8 @@ export function speciesTraits(
 /**
  * Draws an individual: a variation factor in [1 − v, 1 + v] for each of its needs and senses
  * that declares `variation` (needs first, then senses, each in declaration order), then each
- * need's starting value, uniformly below its `actAt` so spawned creatures don't all act at once,
+ * need's starting value, uniformly below its `startBelow` (default `actAt`, so spawned creatures
+ * don't all act at once),
  * then the angle at which it stands beside a place it eats or sleeps at (ADR 0018 amendments, §11).
  * The draws come from the stream forked as `"individual"` off the creature's own stream, so they
  * never shift the sequence its behaviors see.
@@ -63,7 +64,9 @@ export function drawIndividual(
     const v = registries.senses.get(id)?.variation;
     if (v) variation.senses[id] = factor(rng, v);
   }
-  const values = Object.fromEntries(needs.map((n) => [n.id, rng.range(0, n.actAt)]));
+  const values = Object.fromEntries(
+    needs.map((n) => [n.id, rng.range(0, n.startBelow ?? n.actAt)]),
+  );
   const spotAngle = rng.range(-Math.PI, Math.PI);
   return { variation, needs: values, spotAngle };
 }

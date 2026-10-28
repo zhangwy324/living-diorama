@@ -160,6 +160,7 @@ describe("Registry", () => {
     };
     expectOk(registries.needs.validate(hunger));
     expectOk(registries.needs.validate({ ...hunger, cue: undefined }));
+    expectOk(registries.needs.validate({ ...hunger, startBelow: 0.1 }));
     expectOk(
       registries.needs.validate({
         id: "core:tiredness",
@@ -172,6 +173,7 @@ describe("Registry", () => {
     const bad = registries.needs.validate({
       ...hunger,
       perHour: { awake: "fast" },
+      startBelow: 0,
       triggers: [0.9, 0.5, 1.5],
       cue: { cue: "eating", from: 0 },
       atMax: { speedFactor: 2 },
@@ -181,6 +183,7 @@ describe("Registry", () => {
     expect(bad.ok ? [] : bad.diagnostics.map((d) => `${d.path.join(".")}: ${d.message}`)).toEqual([
       "perHour.awake: Expected the change per hour awake",
       "perHour.asleep: Expected the change per hour asleep",
+      "startBelow: startBelow must be a number in (0, 1]",
       "triggers.1: Triggers must be in ascending order",
       "triggers.2: A trigger must be a number in (0, 1]",
       "triggers: Triggers must include actAt",
