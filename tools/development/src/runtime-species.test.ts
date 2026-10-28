@@ -76,10 +76,11 @@ function runSized(sizeClass: SizeClass, seed: number) {
 
 describe("size limits (ADR 0013)", () => {
   it.each(["tiny", "small"] as const)(
-    "%s creatures wander everywhere but the pockets they can't reach",
+    "%s creatures wander everywhere, with no limits for the edge slivers they can't reach",
     (sizeClass) => {
       const { report, limits, entered } = runSized(sizeClass, 3);
-      expect(limits).toEqual(["warning disconnected_region", "warning disconnected_region"]);
+      // The river mouths leave cut-off islands of 2 to 4 cells (at most 1 m²): too small to count.
+      expect(limits).toEqual([]);
       expect(report.violations).toEqual([]);
       expect(report.eventCounts.path_failed ?? 0).toBe(0);
       expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
@@ -95,6 +96,19 @@ describe("size limits (ADR 0013)", () => {
     expect(report.eventCounts.path_failed ?? 0).toBe(0);
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
     expect(entered.has("bridge-deck")).toBe(false);
+  });
+
+  it("still reports cut-off areas larger than a square metre, and counts only those", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL);
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    const splits = result.value.limits.filter((d) => d.code === "disconnected_region");
+    // West woods: an 18-cell (4.5 m²) island. East meadow: the 163 cells behind the rock; its
+    // 3-, 1- and 1-cell slivers are left out.
+    expect(splits.map((d) => d.message)).toEqual([
+      expect.stringMatching(/"west-woods" splits into 2 walkable areas .*; 18 more,/),
+      expect.stringMatching(/"east-meadow" splits into 2 walkable areas .*; 163 more,/),
+    ]);
   });
 
   it("names the structure a creature can't use", () => {
