@@ -9,6 +9,7 @@ import { createSkyLight, createSunLight, SUN_DIRECTION } from "./lighting";
 import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
 import { createDebugOverlays, type DebugOverlays } from "./overlays";
+import { followPixelRatio } from "./pixel-ratio";
 import { loadGltf, loadProps, type AssetResolver, type ModelLoader } from "./props";
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
@@ -31,6 +32,12 @@ export interface DioramaViewOptions {
   navigation?: NavigationOverlay;
 }
 
+/** Where the camera is and what it looks at, e.g. to keep one per window shape (ADR 0016 §6). */
+export interface CameraState {
+  position: readonly [number, number, number];
+  target: readonly [number, number, number];
+}
+
 export interface DioramaView {
   /** Hands the view the newest simulation snapshot; creatures are drawn interpolated (ADR 0007 §8). */
   pushSnapshot(snapshot: SimulationSnapshot): void;
@@ -41,6 +48,10 @@ export interface DioramaView {
   setDebug(enabled: boolean): void;
   /** Animates back to the art-directed default framing. */
   resetCamera(): void;
+  /** The camera's current state. */
+  cameraState(): CameraState;
+  /** Moves the camera to `state` at once, or to the default framing when it is undefined. */
+  setCameraState(state: CameraState | undefined): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
   setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
   /** Resolves once every prop model is placed (or replaced by its fallback). */
@@ -147,7 +158,6 @@ export function createDioramaView(
   options: DioramaViewOptions = {},
 ): DioramaView {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -192,6 +202,11 @@ export function createDioramaView(
   };
   resize();
   frame();
+  // Sharp on every monitor, without drawing at 2× on a 100% one (issue #55).
+  const stopPixelRatio = followPixelRatio(window, (ratio) => {
+    renderer.setPixelRatio(ratio);
+    renderer.render(world, camera);
+  });
   // Resizing clears the canvas. Draw again before the browser paints, or a throttled loop would
   // leave it blank until its next frame, e.g. throughout a drag of the strip's height handle.
   const observer = new ResizeObserver(() => {
@@ -274,6 +289,20 @@ export function createDioramaView(
         t: 0,
       };
     },
+    cameraState() {
+      return { position: camera.position.toArray(), target: controls.target.toArray() };
+    },
+    setCameraState(state) {
+      reset = undefined;
+      if (state) {
+        camera.position.fromArray(state.position);
+        controls.target.fromArray(state.target);
+        controls.update();
+      } else {
+        frame();
+      }
+      moved = true;
+    },
     setClipping(layer, planes) {
       layers[layer].setClipping(planes);
     },
@@ -284,6 +313,7 @@ export function createDioramaView(
       canvas.removeEventListener("pointerenter", onPointerEnter);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       observer.disconnect();
+      stopPixelRatio();
       controls.dispose();
       timer.dispose();
       creatures.dispose();

@@ -3,11 +3,13 @@ import type { ReactNode } from "react";
 export interface ControlsOverlayProps {
   paused: boolean;
   expanded: boolean;
+  fullScreen: boolean;
   debug: boolean;
   onTogglePaused(): void;
   onToggleExpanded(): void;
   onResetCamera(): void;
   onToggleDebug(): void;
+  onToggleFullScreen(): void;
   onHide(): void;
   onOpenStudio(): void;
 }
@@ -15,7 +17,8 @@ export interface ControlsOverlayProps {
 /**
  * Icon buttons in the top-right corner that fade in while the pointer is over the window (ADR 0008
  * §11), and the Creation Studio (ADR 0015 §1). The strip never takes keyboard focus, so these are
- * its only controls besides the tray.
+ * its only controls besides the tray. The normal window has Full screen where the strip has Hide,
+ * since minimizing hides it (ADR 0016 §7); Collapse stays where Expand was.
  */
 export function ControlsOverlay(props: ControlsOverlayProps) {
   return (
@@ -50,9 +53,22 @@ export function ControlsOverlay(props: ControlsOverlayProps) {
       >
         <path className="stroke" d="M2.5 2.5h11v11h-11zM2.5 8h11M8 2.5v11" />
       </ControlButton>
-      <ControlButton label="Hide" onClick={props.onHide}>
-        <path className="stroke" d="M3.5 6l4.5 4.5 4.5-4.5" />
-      </ControlButton>
+      {props.expanded ? (
+        <ControlButton
+          label={props.fullScreen ? "Leave full screen" : "Full screen"}
+          onClick={props.onToggleFullScreen}
+        >
+          {props.fullScreen ? (
+            <path className="stroke" d="M6 2.5V6H2.5M10 2.5V6h3.5M13.5 10H10v3.5M2.5 10H6v3.5" />
+          ) : (
+            <path className="stroke" d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" />
+          )}
+        </ControlButton>
+      ) : (
+        <ControlButton label="Hide" onClick={props.onHide}>
+          <path className="stroke" d="M3.5 6l4.5 4.5 4.5-4.5" />
+        </ControlButton>
+      )}
     </div>
   );
 }

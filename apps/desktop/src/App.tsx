@@ -11,6 +11,8 @@ import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
 import { EventCounter } from "./event-counts";
 import { creatureCap, startSimulation, type SimulationClient } from "./simulation-client";
+import { ShapeCameras } from "./shape-cameras";
+import { shortcutFor } from "./shortcuts";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { StripResizeHandle } from "./StripResizeHandle";
 import { STARTUP } from "./startup";
@@ -31,9 +33,11 @@ export function App() {
   // Set while the diorama runs; cleared when it stops, so nothing is torn down twice.
   const view = useRef<DioramaView>(undefined);
   const simulation = useRef<SimulationClient>(undefined);
-  // The shell owns paused and expanded; these mirror its change events.
+  const cameras = useRef(new ShapeCameras());
+  // The shell owns paused, expanded and full screen; these mirror its change events.
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
   const [debug, setDebug] = useState(false);
   const [failure, setFailure] = useState<Failure>();
 
@@ -49,7 +53,11 @@ export function App() {
         simulation.current?.setPaused(value);
         setPaused(value);
       }),
-      shell.onExpandedChanged(setExpanded),
+      shell.onExpandedChanged((value) => {
+        cameras.current.switchTo(value, view.current);
+        setExpanded(value);
+      }),
+      shell.onFullScreenChanged(setFullScreen),
       // Clean shutdown (ADR 0008 §14); the process exits next.
       shell.onQuitRequested(() => {
         simulation.current?.shutdown();
@@ -60,6 +68,20 @@ export function App() {
       for (const stop of stopListening) stop();
     };
   }, []);
+
+  // The normal window takes focus, so it has keys; only these three (ADR 0016 §2).
+  useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const shortcut = shortcutFor(event, fullScreen);
+      if (!shortcut) return;
+      event.preventDefault();
+      if (shortcut === "reset-camera") view.current?.resetCamera();
+      else void shell.setFullScreen(shortcut === "toggle-full-screen" && !fullScreen);
+    };
+    addEventListener("keydown", onKeyDown);
+    return () => removeEventListener("keydown", onKeyDown);
+  }, [expanded, fullScreen]);
 
   // The worker loads and checks the content; the view starts once the worker describes the world.
   useEffect(() => {
@@ -194,11 +216,13 @@ export function App() {
       <ControlsOverlay
         paused={paused}
         expanded={expanded}
+        fullScreen={fullScreen}
         debug={debug}
         onTogglePaused={() => void shell.setPaused(!paused)}
         onToggleExpanded={() => void shell.setExpanded(!expanded)}
         onResetCamera={() => view.current?.resetCamera()}
         onToggleDebug={toggleDebug}
+        onToggleFullScreen={() => void shell.setFullScreen(!fullScreen)}
         onHide={() => void shell.hide()}
         onOpenStudio={() => void shell.openStudio()}
       />

@@ -5,11 +5,14 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::placement::{DEFAULT_STRIP_HEIGHT, clamp_strip_height};
+use crate::placement::{DEFAULT_STRIP_HEIGHT, NormalWindow, clamp_strip_height};
 
-/// The file format version this build reads and writes.
+/// The file format version this build reads and writes. Adding an optional field keeps it: older
+/// builds ignore fields they don't know, and newer ones give missing fields their defaults. The
+/// normal window's geometry (ADR 0016 §5) was added that way, so 0.1 and 0.2 read each other's
+/// files.
 pub const SETTINGS_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,6 +26,12 @@ pub struct Settings {
     pub always_on_top: bool,
     /// Whether the strip reserves its space, so maximized windows stop above it (ADR 0008 §10).
     pub reserve_space: bool,
+    /// The normal window's geometry, once it has been expanded (ADR 0016 §5).
+    #[serde(
+        deserialize_with = "normal_window_or_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expanded: Option<NormalWindow>,
 }
 
 impl Default for Settings {
@@ -33,8 +42,17 @@ impl Default for Settings {
             height: DEFAULT_STRIP_HEIGHT,
             always_on_top: false,
             reserve_space: true,
+            expanded: None,
         }
     }
+}
+
+/// A malformed normal window is forgotten, rather than costing the other settings their values.
+fn normal_window_or_none<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<NormalWindow>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 /// Parses the file's contents. Missing fields take their defaults and the height is clamped, so a
@@ -113,6 +131,16 @@ mod tests {
             height: 240.0,
             always_on_top: true,
             reserve_space: false,
+            expanded: Some(NormalWindow {
+                monitor: Some(r"\\.\DISPLAY1".to_owned()),
+                scale_factor: 1.5,
+                x: -9,
+                y: 120,
+                width: 1600,
+                height: 900,
+                maximized: true,
+                full_screen: false,
+            }),
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -137,6 +165,26 @@ mod tests {
                 ..Settings::default()
             }
         );
+    }
+
+    #[test]
+    fn reads_a_file_written_before_the_normal_window_was_saved() {
+        // Version 0.1.0's file: the same version, without `expanded`.
+        let old = r#"{ "version": 1, "monitor": null, "height": 240.0, "alwaysOnTop": false, "reserveSpace": true }"#;
+        let settings = parse(old).unwrap();
+        assert_eq!(settings.expanded, None);
+        assert_eq!(settings.height, 240.0);
+        // Nothing saved, nothing written.
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("expanded"));
+    }
+
+    #[test]
+    fn a_malformed_normal_window_is_forgotten_alone() {
+        let json = r#"{ "version": 1, "height": 240, "expanded": { "x": "left" } }"#;
+        let settings = parse(json).unwrap();
+        assert_eq!(settings.expanded, None);
+        assert_eq!(settings.height, 240.0);
     }
 
     #[test]

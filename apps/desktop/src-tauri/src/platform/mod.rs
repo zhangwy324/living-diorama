@@ -26,6 +26,22 @@ pub trait Platform: Send + Sync {
     /// task-switcher entry. Focus policy itself is Tauri's `focusable: false`.
     fn prepare_strip(&self, window: &WebviewWindow) -> tauri::Result<()>;
 
+    /// Switches the OS window style between the strip's and the normal window's (ADR 0016 §8):
+    /// the normal window has a taskbar and task-switcher entry and may stay active, so the strip's
+    /// style and activation hooks stand aside. Back in the strip's style, activation goes back to
+    /// the app the user was in. Focusability, the frame and the taskbar tab are Tauri's calls.
+    fn set_normal_window(&self, window: &WebviewWindow, normal: bool) -> tauri::Result<()>;
+
+    /// Turns the OS's animations of minimizing, maximizing and restoring the window on or off.
+    /// Off while the window switches shape, or un-maximizing on the way back to the strip animates
+    /// for about 120 ms over the strip's place (ADR 0016 §8).
+    fn set_window_animations(&self, window: &WebviewWindow, on: bool) -> tauri::Result<()>;
+
+    /// Hides the window from view while it keeps being laid out and drawn, or shows it again. A
+    /// switch of shape happens hidden so, and the window is shown once the page has drawn at its
+    /// new size, rather than showing the steps and one stale frame (ADR 0016 §8).
+    fn set_cloaked(&self, window: &WebviewWindow, cloaked: bool) -> tauri::Result<()>;
+
     /// Calls `on_event` on the main thread, outside any window message handling. Bursts of
     /// `Changed` may be coalesced into one call.
     fn watch_displays(
@@ -78,6 +94,18 @@ struct Unsupported;
 #[cfg(not(windows))]
 impl Platform for Unsupported {
     fn prepare_strip(&self, _window: &WebviewWindow) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn set_normal_window(&self, _window: &WebviewWindow, _normal: bool) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn set_window_animations(&self, _window: &WebviewWindow, _on: bool) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn set_cloaked(&self, _window: &WebviewWindow, _cloaked: bool) -> tauri::Result<()> {
         Ok(())
     }
 

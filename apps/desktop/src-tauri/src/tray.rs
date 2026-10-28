@@ -1,5 +1,6 @@
-//! The tray icon and its menu (ADR 0008 §7, plus the Creation Studio of ADR 0015 §1). Left-click toggles the window; the menu's labels and
-//! checks are refreshed from the shell state after every change.
+//! The tray icon and its menu (ADR 0008 §7, plus the Creation Studio of ADR 0015 §1 and the normal
+//! window of ADR 0016 §3). Left-click toggles the strip, and brings the normal window to the front;
+//! the menu's labels and checks are refreshed from the shell state after every change.
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -98,7 +99,7 @@ pub fn create(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         STUDIO => studio::open(app),
-        SHOW_HIDE => shell::toggle_visible(app),
+        SHOW_HIDE => shell::show_or_hide(app),
         EXPAND => shell::toggle_expanded(app),
         PAUSE => shell::toggle_paused(app),
         ALWAYS_ON_TOP => shell::toggle_always_on_top(app),
@@ -125,11 +126,14 @@ fn try_refresh(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     };
     let shell = app.state::<ShellState>().lock().unwrap().clone();
-    let visible = window.is_visible().unwrap_or(false);
+    let offers_show = shell::offers_show(&window);
     tray.show_hide
-        .set_text(if visible { "Hide" } else { "Show" })?;
-    tray.expand
-        .set_text(if shell.expanded { "Collapse" } else { "Expand" })?;
+        .set_text(if offers_show { "Show" } else { "Hide" })?;
+    tray.expand.set_text(if shell.expanded() {
+        "Collapse"
+    } else {
+        "Expand"
+    })?;
     tray.pause
         .set_text(if shell.paused { "Resume" } else { "Pause" })?;
     tray.always_on_top

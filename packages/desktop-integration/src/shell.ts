@@ -3,17 +3,25 @@ import { STRIP_WINDOW, subscribeAs } from "./events";
 
 /**
  * What the app can ask of the desktop shell it runs in, and hear from it (ADR 0008 §1). The shell
- * owns the paused and expanded state, so the tray and the controls overlay agree: setting either
- * is answered by its change event, which is how the app learns the new state. The shell starts
- * unpaused and collapsed.
+ * owns the paused, expanded and full-screen state, so the tray and the controls overlay agree:
+ * setting one is answered by its change event, which is how the app learns the new state. The
+ * shell starts unpaused, collapsed and not full screen.
  */
 export interface DesktopShell {
   /** Sets the compact strip height in logical pixels. The shell clamps it to its limits. */
   setStripHeight(height: number): Promise<void>;
   /** Pauses or resumes the simulation; `onPausedChanged` hears the result. */
   setPaused(paused: boolean): Promise<void>;
-  /** Expands or collapses the window; `onExpandedChanged` hears the result. */
+  /**
+   * Turns the strip into the normal window or back (ADR 0016 §1); `onExpandedChanged` hears the
+   * result.
+   */
   setExpanded(expanded: boolean): Promise<void>;
+  /**
+   * Enters or leaves full screen; only the normal window has it (ADR 0016 §2).
+   * `onFullScreenChanged` hears the result.
+   */
+  setFullScreen(fullScreen: boolean): Promise<void>;
   /** Hides the window. The simulation keeps running (ADR 0008 §12). */
   hide(): Promise<void>;
   /** Opens the Creation Studio's window, or shows and focuses it if it is open (ADR 0015 §1). */
@@ -22,6 +30,8 @@ export interface DesktopShell {
   onPausedChanged(listener: (paused: boolean) => void): () => void;
   /** Calls `listener` whenever the window is expanded or collapsed. Returns a function that stops listening. */
   onExpandedChanged(listener: (expanded: boolean) => void): () => void;
+  /** Calls `listener` whenever the window enters or leaves full screen. Returns a function that stops listening. */
+  onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void;
   /**
    * Calls `listener` when the user quits. The shell exits once the promise it returns settles, or
    * after one second (ADR 0008 §14). Returns a function that stops listening.
@@ -46,10 +56,12 @@ export const noopShell: DesktopShell = {
   setStripHeight: () => Promise.resolve(),
   setPaused: () => Promise.resolve(),
   setExpanded: () => Promise.resolve(),
+  setFullScreen: () => Promise.resolve(),
   hide: () => Promise.resolve(),
   openStudio: () => Promise.resolve(),
   onPausedChanged: () => () => {},
   onExpandedChanged: () => () => {},
+  onFullScreenChanged: () => () => {},
   onQuitRequested: () => () => {},
   recordEventCounts: () => Promise.resolve(),
 };
@@ -62,10 +74,12 @@ const tauriShell: DesktopShell = {
   setStripHeight: (height) => invoke("set_strip_height", { height }),
   setPaused: (paused) => invoke("set_paused", { paused }),
   setExpanded: (expanded) => invoke("set_expanded", { expanded }),
+  setFullScreen: (fullScreen) => invoke("set_full_screen", { fullScreen }),
   hide: () => invoke("hide"),
   openStudio: () => invoke("open_studio"),
   onPausedChanged: (listener) => subscribe("paused-changed", listener),
   onExpandedChanged: (listener) => subscribe("expanded-changed", listener),
+  onFullScreenChanged: (listener) => subscribe("full-screen-changed", listener),
   onQuitRequested: (listener) =>
     subscribe("quit-requested", () => {
       void Promise.resolve()
