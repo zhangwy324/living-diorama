@@ -6,6 +6,7 @@ import {
 } from "@living-diorama/extension-api";
 import {
   pointInPolygon,
+  minutesAfter,
   registerCoreEngine,
   Simulation,
   type DecisionTrace,
@@ -24,10 +25,18 @@ export interface RunOptions {
   creatures: number;
   /** Most creatures the world holds. No limit if omitted. */
   maxCreatures?: number;
+  /**
+   * The time of day the run starts at, in minutes since midnight; default noon. It then follows
+   * simulation time, as the main thread's clock would at speed 1 (ADR 0018 §5).
+   */
+  startMinutes?: number;
   onTrace?: (trace: DecisionTrace) => void;
   /** Called after every tick, e.g. to record trajectories. */
   onTick?: (simulation: Simulation, events: SimulationEvent[]) => void;
 }
+
+/** Where a run starts in the day unless told otherwise. */
+export const DEFAULT_START_MINUTES = 12 * 60;
 
 export interface RunReport {
   seed: number;
@@ -61,6 +70,7 @@ export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures"
     worldId: options.worldId,
     seed: options.seed,
     ...(options.maxCreatures === undefined ? {} : { maxCreatures: options.maxCreatures }),
+    minutes: options.startMinutes ?? DEFAULT_START_MINUTES,
     ...(options.onTrace ? { onTrace: options.onTrace } : {}),
   });
   if (!created.ok) throw new Error(created.diagnostics.map(formatDiagnostic).join("\n"));
@@ -103,7 +113,11 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
   };
 
+  const startMinutes = options.startMinutes ?? DEFAULT_START_MINUTES;
   for (let t = 0; t < options.ticks; t++) {
+    simulation.setTimeOfDay(
+      minutesAfter(startMinutes, (simulation.tick * 1000) / simulation.tickRateHz),
+    );
     const events = simulation.step();
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;

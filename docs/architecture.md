@@ -131,30 +131,33 @@ Tray → Quit asks the page to stop first: the app sends `shutdown` to the worke
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 5; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 6; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
 Request commands (`register_species`, `spawn`, `despawn`, `check_limits`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8).
 
-| Direction     | Message                        | Meaning                                                                                            |
-| ------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-| main → worker | `init`                         | World ID, seed, tick rate and creature cap. Always first.                                          |
-|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                      |
-|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.                   |
-|               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.       |
-|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                 |
-|               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                                      |
-|               | `shutdown`                     | Stop the clock and close the worker.                                                               |
-| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                 |
-|               | `snapshot`                     | Every tick: creature positions and headings, plus the events since the previous snapshot.          |
-|               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                        |
-|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.   |
-|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                       |
-|               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running. |
-|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                               |
+| Direction     | Message                        | Meaning                                                                                                    |
+| ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| main → worker | `init`                         | World ID, seed, tick rate, creature cap and the local time of day. Always first.                           |
+|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                              |
+|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.                           |
+|               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.               |
+|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                         |
+|               | `set_time_of_day`              | The local time of day, every minute and on resume ([ADR 0018](adr/0018-living-behavior.md) §5).            |
+|               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                                              |
+|               | `shutdown`                     | Stop the clock and close the worker.                                                                       |
+| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                         |
+|               | `snapshot`                     | Every tick: the time of day, creature positions and headings, plus the events since the previous snapshot. |
+|               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                                |
+|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.           |
+|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                               |
+|               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running.         |
+|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                                       |
 
 Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also carries the resolved world position, so the renderer needs no surface lookups. See [world coordinates](world-coordinates.md).
 
-Events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
+Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`; each carries a `creatureId`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
+
+World events carry no `creatureId`. So far there is only `day_phase_changed`, with the phase before and after (dawn, day, dusk or night). It is not sent for the time the world starts at, and a jump across several phases sends one.
 
 ### Studio ↔ strip
 

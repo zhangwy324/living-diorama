@@ -39,7 +39,10 @@ export interface CameraState {
 }
 
 export interface DioramaView {
-  /** Hands the view the newest simulation snapshot; creatures are drawn interpolated (ADR 0007 §8). */
+  /**
+   * Hands the view the newest simulation snapshot; creatures are drawn interpolated (ADR 0007 §8)
+   * and the diorama is lit for its time of day (ADR 0018 §6).
+   */
   pushSnapshot(snapshot: SimulationSnapshot): void;
   /**
    * Shows or hides the debug overlays and stats. Routes appear only once the simulation sends
@@ -52,11 +55,6 @@ export interface DioramaView {
   cameraState(): CameraState;
   /** Moves the camera to `state` at once, or to the default framing when it is undefined. */
   setCameraState(state: CameraState | undefined): void;
-  /**
-   * Lights the diorama for `minutes` since local midnight (ADR 0018 §6). Until it is called the
-   * diorama is in daylight.
-   */
-  setTimeOfDay(minutes: number): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
   setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
   /** Resolves once every prop model is placed (or replaced by its fallback). */
@@ -321,6 +319,8 @@ export function createDioramaView(
       timer.setTimescale(snapshot.paused ? 0 : 1);
       snapshots.push(snapshot, performance.now());
       overlays.routes.setRoutes(snapshot);
+      // Relit only when the minute changes; the next frame is then drawn at full rate.
+      if (setTimeOfDay(snapshot.timeOfDay)) moved = true;
       stats.snapshot(snapshot);
     },
     setDebug(enabled) {
@@ -350,10 +350,6 @@ export function createDioramaView(
         frame();
       }
       moved = true;
-    },
-    setTimeOfDay(minutes) {
-      // The next frame is drawn at full rate, as after a camera move.
-      if (setTimeOfDay(minutes)) moved = true;
     },
     setClipping(layer, planes) {
       layers[layer].setClipping(planes);

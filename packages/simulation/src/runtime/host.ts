@@ -42,6 +42,12 @@ export interface HostOptions {
 
 type QueuedCommand = Exclude<SimulationCommand, { type: "init" }>;
 
+const invalidTimeOfDay = (minutes: unknown) =>
+  error(
+    "invalid_time_of_day",
+    `The time of day must be a number of minutes, got ${String(minutes)}`,
+  );
+
 const summarizeAsset = ({ kind, url, scale }: AssetEntry): AssetSummary => ({
   kind,
   url,
@@ -90,9 +96,13 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       reject([error("already_initialized", "The simulation is already initialized")]);
       return;
     }
-    const { tickRateHz, maxCreatures } = command;
+    const { tickRateHz, maxCreatures, minutes } = command;
     if (!(Number.isFinite(tickRateHz) && tickRateHz > 0)) {
       reject([error("invalid_tick_rate", `Tick rate must be positive, got ${tickRateHz}`)]);
+      return;
+    }
+    if (!Number.isFinite(minutes)) {
+      reject([invalidTimeOfDay(minutes)]);
       return;
     }
     if (!(Number.isInteger(maxCreatures) && maxCreatures > 0)) {
@@ -114,6 +124,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       seed: command.seed,
       tickRateHz,
       maxCreatures,
+      minutes,
     });
     if (!created.ok) {
       reject(created.diagnostics);
@@ -143,6 +154,15 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           reject([
             error("invalid_speed", `Speed must be positive, got ${String(command.multiplier)}`),
           ]);
+        }
+        break;
+      case "set_time_of_day":
+        if (Number.isFinite(command.minutes)) {
+          sim.setTimeOfDay(command.minutes);
+          // No tick runs while paused, so the paused world shows the new time this way.
+          if (ticks.paused) sendSnapshot(sim, true);
+        } else {
+          reject([invalidTimeOfDay(command.minutes)]);
         }
         break;
       case "set_debug":

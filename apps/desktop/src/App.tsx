@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
+import { installTimeDevHook } from "./dev-time";
 import { EventCounter } from "./event-counts";
 import { creatureCap, startSimulation, type SimulationClient } from "./simulation-client";
 import { ShapeCameras } from "./shape-cameras";
@@ -88,6 +89,7 @@ export function App() {
     const element = container.current;
     if (!element) return;
     let created: DioramaView | undefined;
+    let uninstallTimeHook = () => {};
     // Recorded at start too, so the measuring script never reads a previous run's counts.
     const counter = new EventCounter();
     const recordCounts = () =>
@@ -162,14 +164,7 @@ export function App() {
           return;
         }
         view.current = created;
-        // Until the simulation sends the time of day (ADR 0018 §5), preview it from the console.
-        if (import.meta.env.DEV) {
-          const shown = created;
-          window.livingDiorama = {
-            ...window.livingDiorama,
-            setTimeOfDay: (m) => shown.setTimeOfDay(m),
-          };
-        }
+        if (import.meta.env.DEV) uninstallTimeHook = installTimeDevHook(client);
         worldReady();
         openLibrary();
       },
@@ -195,7 +190,7 @@ export function App() {
       client.stop();
       studio.close();
       created?.dispose();
-      if (import.meta.env.DEV && window.livingDiorama) delete window.livingDiorama.setTimeOfDay;
+      uninstallTimeHook();
     };
     return stop;
   }, []);

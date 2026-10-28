@@ -24,6 +24,7 @@ const snapshot = (tick: number, creatures: CreatureSnapshot[]): SimulationSnapsh
   tick,
   timeMs: tick * 100,
   paused: false,
+  timeOfDay: 720,
   creatures,
 });
 

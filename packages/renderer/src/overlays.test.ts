@@ -133,14 +133,26 @@ describe("debug overlays", () => {
         ],
       },
     ];
-    routes.setRoutes({ tick: 1, timeMs: 100, paused: false, creatures: [creature(legs)] });
+    routes.setRoutes({
+      tick: 1,
+      timeMs: 100,
+      paused: false,
+      timeOfDay: 720,
+      creatures: [creature(legs)],
+    });
     routes.update(poses);
     const line = routes.group.children[0] as THREE.Line;
     const positions = line.geometry.getAttribute("position");
     expect(positions.count).toBe(4);
     expect(positions.getX(0)).toBe(0.5);
 
-    routes.setRoutes({ tick: 2, timeMs: 200, paused: false, creatures: [creature()] });
+    routes.setRoutes({
+      tick: 2,
+      timeMs: 200,
+      paused: false,
+      timeOfDay: 720,
+      creatures: [creature()],
+    });
     routes.update(poses);
     expect(routes.count).toBe(0);
     expect(routes.group.children).toHaveLength(0);

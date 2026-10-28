@@ -13,6 +13,7 @@ import {
   type WorldContent,
 } from "@living-diorama/simulation";
 import { STARTUP, type StartupConfig } from "./startup";
+import { systemWallClock, timeOfDayFeed, type WallClock } from "./time-of-day";
 
 /**
  * The starting count `VITE_CREATURE_COUNT` gives every startup entry, or `undefined` when it is
@@ -55,6 +56,13 @@ export interface SimulationClient {
   setDebug(enabled: boolean): void;
   /** Stops or restarts the simulation clock. */
   setPaused(paused: boolean): void;
+  /** Scales how fast simulation time passes; must be a positive number. */
+  setSpeed(multiplier: number): void;
+  /**
+   * Fixes the time of day at `minutes` since midnight, or follows the local clock again when
+   * undefined (ADR 0018 §5). For development: the player's world always follows the clock.
+   */
+  fixTimeOfDay(minutes: number | undefined): void;
   /** Asks the worker to stop its clock and close itself. */
   shutdown(): void;
   /** Ends the worker at once. */
@@ -96,13 +104,15 @@ type Pending = (result: Result<unknown>) => void;
 /**
  * Starts the simulation worker on the startup world, spawns its starting creatures and hands every
  * snapshot and its events to `onSnapshot`. The seed changes every launch and is logged so a run
- * can be reproduced.
+ * can be reproduced. The worker gets the local time of day at init, whenever the minute changes
+ * and on resume (ADR 0018 §5).
  */
 export function startSimulation(
   { onReady, onSpeciesRegistered, onSnapshot, onFailure }: SimulationCallbacks,
   config: StartupConfig = STARTUP,
   worker: WorkerLike = createWorker(),
   countOverride = COUNT_OVERRIDE,
+  clock: WallClock = systemWallClock,
 ): SimulationClient {
   let ready = false;
   let stopped = false;
@@ -123,6 +133,7 @@ export function startSimulation(
     pending.get(requestId)?.(result);
     pending.delete(requestId);
   };
+  const timeOfDay = timeOfDayFeed((minutes) => send({ type: "set_time_of_day", minutes }), clock);
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
   const spawnStartingCreatures = () => {
@@ -143,6 +154,8 @@ export function startSimulation(
   };
 
   worker.onmessage = (event: MessageEvent) => {
+    // A message already queued when the client stopped must not start anything again.
+    if (stopped) return;
     const message = openEnvelope<SimulationMessage>(event.data);
     if (!message) {
       onFailure("The simulation stopped", ["The simulation worker uses another protocol version"]);
@@ -154,6 +167,7 @@ export function startSimulation(
         if (countOverride !== undefined)
           console.info(`Starting count overridden: ${countOverride}`);
         ready = true;
+        timeOfDay.start();
         onReady(message);
         spawnStartingCreatures();
         break;
@@ -201,6 +215,7 @@ export function startSimulation(
     seed,
     tickRateHz: config.tickRateHz,
     maxCreatures: creatureCap(config, countOverride),
+    minutes: timeOfDay.minutes,
   });
 
   return {
@@ -211,10 +226,17 @@ export function startSimulation(
     spawn: (speciesId) => request({ type: "spawn", speciesId }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
-    setPaused: (paused) => send({ type: paused ? "pause" : "resume" }),
+    setPaused: (paused) => {
+      // Before resuming, so the snapshot sent on resume already shows the time of day.
+      if (!paused) timeOfDay.resync();
+      send({ type: paused ? "pause" : "resume" });
+    },
+    setSpeed: (multiplier) => send({ type: "set_speed", multiplier }),
+    fixTimeOfDay: (minutes) => timeOfDay.fix(minutes),
     shutdown: () => send({ type: "shutdown" }),
     stop: () => {
       stopped = true;
+      timeOfDay.stop();
       pending.clear();
       worker.terminate();
     },
