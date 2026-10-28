@@ -83,6 +83,30 @@ describe("long-run checks", () => {
     expect(checks.creatures.get("c1")!.peakInterruptionsPerMinute).toBe(5);
   });
 
+  it("fails a retry loop: more than 20 rejected or empty evaluations in a row", () => {
+    const { checks, violations, trace } = checker();
+    const failures = (from: number, count: number) => {
+      for (let n = 0; n < count; n++) {
+        checks.trace(trace(from + n, { result: n % 2 ? "rejected" : "no_proposal" }));
+      }
+    };
+    failures(0, 20);
+    // `kept` neither counts nor ends the run; `started` ends it.
+    checks.trace(
+      trace(20, { running: { action: "a", behavior: "b", utility: 1 }, result: "kept" }),
+    );
+    checks.trace(trace(21));
+    failures(22, 20);
+    expect(violations).toEqual([]);
+    checks.trace(trace(42, { result: "rejected" }));
+    failures(43, 5);
+    expect(violations).toEqual(["c1: 21 rejected or empty evaluations in a row (at most 20)"]);
+
+    const loose = checker({ maxFailedDecisionsInARow: 100 });
+    for (let n = 0; n < 100; n++) loose.checks.trace(loose.trace(n, { result: "no_proposal" }));
+    expect(loose.violations).toEqual([]);
+  });
+
   it("counts meals, and checks one every 3 h only when asked", () => {
     const meal = (tick: number) => ({ type: "ate", tick, creatureId: "c1" }) as never;
     const off = checker();
@@ -101,10 +125,9 @@ describe("long-run checks", () => {
     on.checks.event({ type: "creature_stuck", tick: 1, creatureId: "c1" } as SimulationEvent);
     expect(on.checks.creatures.get("c1")!.meals).toBe(1);
 
-    const filtered = checker({
-      meals: { hours: 1, creatures: (c) => c.speciesId !== "test:critter" },
-    });
-    filtered.live(0, 2 * HOUR, "day");
+    // A creature its `creatures` filter leaves out.
+    const filtered = checker({ meals: { hours: 1 } });
+    filtered.live(0, 2 * HOUR, "day", { checkMeals: false });
     expect(filtered.violations).toEqual([]);
   });
 
@@ -122,6 +145,10 @@ describe("long-run checks", () => {
       "c1: asleep 50% of the night (at least 50%)",
     ]);
     expect(run({ sleep: {} }, HOUR).violations).toEqual([]);
+    const skipped = checker({ sleep: {} });
+    skipped.live(0, 2 * HOUR, "night", { checkSleep: false });
+    skipped.checks.finish();
+    expect(skipped.violations).toEqual([]);
     // Less than an hour of night: too little to judge.
     expect(run({ sleep: {} }, 0, HOUR - 1).violations).toEqual([]);
     expect(run({ sleep: { minShare: 0.9 } }, 1.5 * HOUR).checks.creatures.get("c1")).toMatchObject({
@@ -162,6 +189,24 @@ describe("long-run checks", () => {
       "creature-1: no meal for 3 h",
       "creature-2: no meal for 3 h",
       "creature-1: asleep 0% of the night (at least 50%)",
+      "creature-2: asleep 0% of the night (at least 50%)",
+    ]);
+
+    // Filters see the creature's state and the simulation, once per creature.
+    const seen: string[] = [];
+    const filtered = runWithInvariants({
+      ...hollow,
+      meals: {
+        creatures: (c, simulation) => {
+          seen.push(c.id);
+          return c.id === "creature-1" && simulation.state.model.regions.has(c.position.regionId);
+        },
+      },
+      sleep: { creatures: (c) => c.id === "creature-2" },
+    });
+    expect(seen).toEqual(["creature-1", "creature-2"]);
+    expect(filtered.violations.map((v) => v.replace(/^.*: (creature)/, "$1"))).toEqual([
+      "creature-1: no meal for 3 h",
       "creature-2: asleep 0% of the night (at least 50%)",
     ]);
 

@@ -9,6 +9,7 @@ import {
   minutesAfter,
   registerCoreEngine,
   Simulation,
+  type CreatureState,
   type DecisionTrace,
   type SimulationEvent,
 } from "@living-diorama/simulation";
@@ -126,6 +127,19 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
   };
   const checks = new LongRunChecks(simulation.tickRateHz, options, violation);
+  /** Per creature, whether the meal and sleep checks apply, decided when first seen. */
+  const checked = new Map<string, { checkMeals: boolean; checkSleep: boolean }>();
+  const checkedFor = (state: CreatureState) => {
+    let entry = checked.get(state.id);
+    if (!entry) {
+      entry = {
+        checkMeals: options.meals?.creatures?.(state, simulation) ?? true,
+        checkSleep: options.sleep?.creatures?.(state, simulation) ?? true,
+      };
+      checked.set(state.id, entry);
+    }
+    return entry;
+  };
 
   const startMinutes = options.startMinutes ?? DEFAULT_START_MINUTES;
   for (let t = 0; t < options.ticks; t++) {
@@ -157,14 +171,16 @@ export function runWithInvariants(options: RunOptions): RunReport {
       simulation.tick,
       simulation.state.dayPhase,
       snapshot.creatures.map((c) => {
-        const state = simulation.state.creatures.get(c.id);
-        const needs = state?.needs ?? {};
+        // Every snapshot creature has state.
+        const state = simulation.state.creatures.get(c.id) as CreatureState;
+        const { needs, asleep } = state;
         return {
           id: c.id,
           speciesId: c.speciesId,
           needs,
-          asleep: state?.asleep ?? false,
+          asleep,
           cues: c.cues,
+          ...checkedFor(state),
         };
       }),
     );

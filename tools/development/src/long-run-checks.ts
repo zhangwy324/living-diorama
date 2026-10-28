@@ -1,4 +1,10 @@
-import type { DayPhase, DecisionTrace, SimulationEvent } from "@living-diorama/simulation";
+import type {
+  CreatureState,
+  DayPhase,
+  DecisionTrace,
+  Simulation,
+  SimulationEvent,
+} from "@living-diorama/simulation";
 
 // The living-behavior checks of the long runs (ADR 0018 §20 and its amendments), kept apart from
 // the runner so they can be fed synthetic traces in tests. Needs stay in [0, 1], decisions and
@@ -6,6 +12,8 @@ import type { DayPhase, DecisionTrace, SimulationEvent } from "@living-diorama/s
 
 /** By default, on average at most this many decisions per creature per 10 simulated seconds. */
 export const MAX_DECISIONS_PER_10_SECONDS = 1;
+/** By default, at most this many `rejected` or `no_proposal` evaluations in a row. */
+export const MAX_FAILED_DECISIONS_IN_A_ROW = 20;
 /** At most this many interruptions per creature in any simulated minute. */
 export const MAX_INTERRUPTIONS_PER_MINUTE = 3;
 /** The event that counts as a meal (ADR 0018, PR 4a). */
@@ -14,8 +22,12 @@ export const MEAL_EVENT = "ate";
 export const HUNGRY_FROM = 0.8;
 const HUNGER_NEED = "core:hunger";
 
-/** Which creatures a check applies to; all by default. */
-export type CreatureFilter = (creature: { id: string; speciesId: string }) => boolean;
+/**
+ * Which creatures a check applies to; all by default. The runner calls it once per creature, when
+ * it first sees it, with its state and the simulation, so a filter can ask about the world, e.g.
+ * whether any food is reachable from where the creature is.
+ */
+export type CreatureFilter = (creature: CreatureState, simulation: Simulation) => boolean;
 
 export interface LongRunCheckOptions {
   /**
@@ -24,6 +36,12 @@ export interface LongRunCheckOptions {
    * walks are short, so fixtures may loosen it.
    */
   maxDecisionsPer10Seconds?: number;
+  /**
+   * Catches a retry loop that the lifetime average would hide: at most this many `rejected` or
+   * `no_proposal` evaluations in a row per creature; default `MAX_FAILED_DECISIONS_IN_A_ROW`.
+   * Only a `started` evaluation ends the run of failures; `kept` neither counts nor ends it.
+   */
+  maxFailedDecisionsInARow?: number;
   /**
    * Each creature eats (a `MEAL_EVENT`) at least once every `hours` (default 3). Off by default
    * until food exists; PR 6 turns it on, with `creatures` choosing those that can reach food.
@@ -63,6 +81,9 @@ export interface CreatureTick {
   needs: Readonly<Record<string, number>>;
   asleep: boolean;
   cues: readonly string[];
+  /** Whether the meal and sleep checks, if on, apply to it (their `creatures` filters). */
+  checkMeals?: boolean;
+  checkSleep?: boolean;
 }
 
 export class LongRunChecks {
@@ -72,6 +93,10 @@ export class LongRunChecks {
   readonly #recentInterruptions = new Map<string, number[]>();
   /** Per creature, the tick of its last meal, or of when it was first seen. */
   readonly #lastMeal = new Map<string, number>();
+  /** Per creature, its `rejected` and `no_proposal` evaluations since the last `started`. */
+  readonly #failedInARow = new Map<string, number>();
+  /** Creatures the sleep check skips. */
+  readonly #noSleepCheck = new Set<string>();
 
   constructor(
     private readonly tickRateHz: number,
@@ -104,6 +129,17 @@ export class LongRunChecks {
   trace(trace: DecisionTrace) {
     const stats = this.#stats(trace.creatureId);
     stats.decisions++;
+    if (trace.result === "started") this.#failedInARow.set(trace.creatureId, 0);
+    else if (trace.result === "rejected" || trace.result === "no_proposal") {
+      const failed = (this.#failedInARow.get(trace.creatureId) ?? 0) + 1;
+      this.#failedInARow.set(trace.creatureId, failed);
+      const max = this.options.maxFailedDecisionsInARow ?? MAX_FAILED_DECISIONS_IN_A_ROW;
+      if (failed === max + 1) {
+        this.violation(
+          `${trace.creatureId}: ${failed} rejected or empty evaluations in a row (at most ${max})`,
+        );
+      }
+    }
     // Interruption emits no event; a trace that starts a challenger over a running action is one.
     if (!trace.running || trace.result !== "started") return;
     stats.interruptions++;
@@ -140,6 +176,7 @@ export class LongRunChecks {
       if (c.cues.includes("hungry") || (c.needs[HUNGER_NEED] ?? 0) >= HUNGRY_FROM) {
         stats.hungryTicks++;
       }
+      if (c.checkSleep === false) this.#noSleepCheck.add(c.id);
       if (c.asleep) stats.asleepTicks++;
       if (dayPhase === "night") {
         stats.nightTicks++;
@@ -147,7 +184,7 @@ export class LongRunChecks {
       }
       const last = this.#lastMeal.get(c.id);
       if (last === undefined) this.#lastMeal.set(c.id, tick);
-      else if (meals && (meals.creatures?.(c) ?? true)) {
+      else if (meals && c.checkMeals !== false) {
         if (tick - last > mealTicks) {
           this.violation(`${c.id}: no meal for ${meals.hours ?? 3} h`);
           // Once per gap, not every tick after.
@@ -169,7 +206,7 @@ export class LongRunChecks {
             `(at most ${maxDecisionsPer10Seconds} per 10 s)`,
         );
       }
-      if (!sleep || !(sleep.creatures?.({ id, speciesId: stats.speciesId }) ?? true)) continue;
+      if (!sleep || this.#noSleepCheck.has(id)) continue;
       const minNightTicks = (sleep.minNightHours ?? 1) * 3600 * this.tickRateHz;
       if (stats.nightTicks < minNightTicks) continue;
       const share = stats.asleepAtNightTicks / stats.nightTicks;
