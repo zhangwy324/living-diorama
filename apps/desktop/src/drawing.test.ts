@@ -83,7 +83,9 @@ const mouseLike = (width: number): Stroke =>
 describe("drawStroke", () => {
   it("draws a lone point as a dot as wide as the stroke", () => {
     const { context, ops } = recordingContext();
-    drawStroke(context, SAMPLE_DRAWING.history[0] as Stroke);
+    const [first] = SAMPLE_DRAWING.history;
+    if (first?.kind !== "stroke") throw new Error("The sample starts with a stroke");
+    drawStroke(context, first);
     expect(ops.filter((op) => op.kind === "fill")).toEqual([
       { kind: "fill", color: "#5a8f3c", mode: "source-over", dots: [[128, 145, 75]] },
     ]);

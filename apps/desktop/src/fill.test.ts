@@ -257,7 +257,7 @@ describe("floodFill does nothing", () => {
   });
 });
 
-it("fills a 256 px image in a few milliseconds", () => {
+it("fills a 256 px image in well under a frame", () => {
   const image = ring();
   const empty = blank();
   // Warm up, then time the inside of the ring and a whole empty canvas.
@@ -270,7 +270,15 @@ it("fills a 256 px image in a few milliseconds", () => {
     floodFill(empty, 0, 0, BLUE);
   }
   const each = (performance.now() - start) / (runs * 3);
-  console.log(`floodFill: ${each.toFixed(2)} ms per fill on 256 × 256`);
-  // Generous, so a slow CI machine doesn't fail it; locally it takes a few ms.
+  // Generous, so a slow CI machine doesn't fail it; locally a fill takes about 1 ms.
   expect(each).toBeLessThan(50);
+});
+
+it("reads pixels that don't start on a 4-byte boundary", () => {
+  const buffer = new Uint8ClampedArray(1 + 4 * 4);
+  const image = { width: 2, height: 2, data: buffer.subarray(1) };
+  image.data.set([200, 40, 30, 255], 0);
+  const after = floodFill(image, 0, 0, BLUE);
+  expect(Array.from(after?.subarray(0, 4) ?? [])).toEqual([...BLUE_RGB, 255]);
+  expect(Array.from(after?.subarray(4, 8) ?? [])).toEqual([0, 0, 0, 0]);
 });

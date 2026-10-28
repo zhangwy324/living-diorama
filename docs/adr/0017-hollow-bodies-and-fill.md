@@ -49,14 +49,14 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
     - **Possible later controls:** a tolerance slider starting at 0, and separately an opt-in gap-bridging setting.
     - **Toolbar:** a dedicated button whose icon cannot be confused with the eraser, which players had mistaken for a bucket.
     - **Undo and preview:** each fill is a single undo step and appears in the log (§8). The 3D preview is rebuilt after a fill exactly as after a stroke, so filling an opening closes it in the body.
-    - **As built** (`apps/desktop/src/studio/fill.ts`, a pure function on the RGBA pixels, tested without a canvas):
+    - **As built** (`apps/desktop/src/fill.ts`, a pure function on the RGBA pixels, tested without a canvas):
       - The flood is a span (scanline) fill over a mask. On the background every pixel with alpha 0 matches whatever its RGB, so the eraser's leftovers count as background.
       - The growth into soft edges goes breadth first, 2 steps at most, each step to a side-joined pixel whose alpha is above 0, below 255 and no lower than the pixel it steps from. Fully opaque pixels are never entered: painting under them would change nothing, and they are the wall that stops the growth. It never steps back onto a transparent pixel, so it cannot leak across a faint line one or two pixels thick.
       - Painting under is done on un-premultiplied values: each painted pixel becomes `colour × a + fill × (1 − a)` with alpha 255. Everything a background fill paints therefore ends opaque, so the body sees the filled region as solid.
-      - A recolour writes the new colour at alpha 255, also when the clicked area was semi-transparent (a click on a soft edge pixel).
+      - A recolour writes the new colour at alpha 255, also when the clicked area was semi-transparent (a click on a soft edge pixel). Such a click recolours only the few edge pixels of that exact RGBA; this is kept as designed, and the manual checks watch for how often players hit it.
       - A click that would change nothing (on an area already exactly the fill colour) is not recorded, so it adds no undo step; a background click always changes something.
       - The log entry is `{ kind: "fill", x, y, color }`: the clicked pixel in canvas pixels (integers) and the colour. Whether it filled or recoloured follows from the image, so it isn't stored. The drawing format stays at version 2, since adding a kind leaves every older file valid. `paintHistory` (formerly `paintStrokes`), used only for drawings made by code, replays fills as well as strokes.
-      - The colour is the palette colour selected for the pen. Picking a swatch keeps the fill tool selected; only the eraser switches back to the pen on a swatch click. The tools have no single-key shortcuts, so the fill has none either. Over the canvas the cursor is a small bucket outlined in white, whose drop marks the pixel filled.
+      - The colour is the palette colour selected for the pen. Picking a swatch keeps the fill tool selected; only the eraser switches back to the pen on a swatch click. The brush sizes are disabled while the fill tool is selected, since a fill has no width. The tools have no single-key shortcuts, so the fill has none either. Over the canvas the cursor is a small bucket outlined in white, whose drop marks the pixel filled.
       - It takes about 1 ms on a 256 px image in Node (inside a ring, and a whole empty canvas).
 
 ### Thickness (PR 4)

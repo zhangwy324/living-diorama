@@ -327,6 +327,7 @@ export function Studio() {
               key={size}
               label={`Brush size ${size}`}
               pressed={width === size}
+              disabled={tool === "fill"}
               onClick={() => setWidth(size)}
             >
               <circle cx="8" cy="8" r={1 + (size / Math.max(...BRUSH_WIDTHS)) * 5.5} />

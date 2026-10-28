@@ -5,7 +5,7 @@ import {
   type DrawingOperation,
   type Stroke,
 } from "@living-diorama/content-schema";
-import { floodFill } from "./studio/fill";
+import { floodFill } from "./fill";
 
 // Strokes to pixels (ADR 0015 §9). The Studio's editor paints them into its 256 px image, which
 // is the drawing the library keeps (ADR 0014 §5).

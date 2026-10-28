@@ -1,5 +1,6 @@
-// The fill tool (ADR 0017 §10): a flood fill on the drawing's RGBA pixels, with no tolerance and
-// no gap closing. Pure, so it is tested without a canvas.
+// The Studio's fill tool (ADR 0017 §10): a flood fill on the drawing's RGBA pixels, with no
+// tolerance and no gap closing. Pure, so it is tested without a canvas; beside `drawing.ts`, which
+// replays fills for drawings made by code.
 
 /** RGBA pixels, row by row, un-premultiplied as canvas `ImageData` holds them. */
 export interface FillImage {
@@ -43,7 +44,9 @@ export function floodFill(
   if (x < 0 || y < 0 || x >= width || y >= height) return undefined;
   const rgb = parseColor(color);
   const seed = y * width + x;
-  const pixels = new Uint32Array(data.buffer, data.byteOffset, width * height);
+  // A 32-bit view needs a 4-byte-aligned start; ImageData always has one, a subarray may not.
+  const aligned = data.byteOffset % 4 === 0 ? data : data.slice();
+  const pixels = new Uint32Array(aligned.buffer, aligned.byteOffset, width * height);
   const out = new Uint8ClampedArray(data);
 
   if (data[seed * 4 + 3] !== 0) {

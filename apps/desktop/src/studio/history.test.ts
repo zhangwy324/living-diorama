@@ -1,6 +1,6 @@
 import type { Fill, Stroke } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
-import { floodFill } from "./fill";
+import { floodFill } from "../fill";
 import { changedBox, DrawingHistory, type Change } from "./history";
 
 const SIZE = 8;

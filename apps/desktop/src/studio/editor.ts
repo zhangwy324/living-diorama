@@ -1,6 +1,6 @@
 import type { Drawing } from "@living-diorama/content-schema";
 import { CANVAS_SIZE, drawRuns, drawStroke, encodePng, strokeRuns, toDrawing } from "../drawing";
-import { floodFill } from "./fill";
+import { floodFill } from "../fill";
 import { DrawingHistory, type Change } from "./history";
 import { LiveStroke, type Brush } from "./live-stroke";
 
