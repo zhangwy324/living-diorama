@@ -2,6 +2,8 @@
 
 The measured cost of the running app, the starting budget for later changes (ADR 0009 §7). Measure with `pnpm measure` on a release build; [development.md](development.md) explains how, and how to measure with many creatures, drawn ones too.
 
+The numbers below are for v0.1. v0.2's (20 creatures, drawn species, an 8-hour soak with them) are not measured yet: issue #68.
+
 ## Reference machine
 
 | Part     | Value                                                       |

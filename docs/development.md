@@ -209,3 +209,9 @@ Run in [Windows Sandbox](https://learn.microsoft.com/windows/security/applicatio
 - [ ] The tray icon, Start menu entry and installer show the diorama icon, not the Tauri logo.
 - [ ] Tray → Quit exits; no `living-diorama.exe` process is left in Task Manager.
 - [ ] **Settings → Apps → Installed apps** lists Living Diorama with the right version, and uninstalling removes it and its Start menu entry.
+- [ ] Uninstalling offers **Delete the application data**, unticked. Left unticked, `%APPDATA%\com.livingdiorama.desktop` (settings and the creature library) stays.
+
+Installing over the previous version (install it first, change a few settings, release a creature):
+
+- [ ] The installer offers **Uninstall before installing** (the default) or **Do not uninstall**. With the default, the uninstall page's **Delete the application data** is unticked.
+- [ ] The new version starts with the same settings, and My creatures lists the creatures released before.
