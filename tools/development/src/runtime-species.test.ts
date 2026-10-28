@@ -182,6 +182,8 @@ describe("runtime species", () => {
       seed: 2,
       ticks: 20_000,
       creatures: 1,
+      // Short walks in a small world (see LongRunCheckOptions).
+      maxDecisionsPer10Seconds: 2,
       onTick: (sim) => {
         if (sim.tick === 100) {
           expectOk(sim, drawnSpecies("speck", "tiny"));

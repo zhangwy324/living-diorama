@@ -12,17 +12,21 @@ import {
   type DecisionTrace,
   type SimulationEvent,
 } from "@living-diorama/simulation";
+import { LongRunChecks, type CreatureStats, type LongRunCheckOptions } from "./long-run-checks";
 
-// Long randomized runs with the M3 invariants checked every tick (roadmap M3 tests). Shared by
-// the Vitest suite (a few seeds) and `pnpm soak` (many).
+// Long randomized runs with the M3 invariants checked every tick (roadmap M3 tests), plus the
+// living-behavior checks of ADR 0018 §20 (long-run-checks.ts). Shared by the Vitest suite (a few
+// seeds), `pnpm soak` (many) and `pnpm sim`.
 
-export interface RunOptions {
+export interface RunOptions extends LongRunCheckOptions {
   register: (registries: Registries) => unknown;
   worldId: string;
   speciesId: string;
   seed: number;
   ticks: number;
   creatures: number;
+  /** Default 10, the app's rate. */
+  tickRateHz?: number;
   /** Most creatures the world holds. No limit if omitted. */
   maxCreatures?: number;
   /**
@@ -41,6 +45,7 @@ export const DEFAULT_START_MINUTES = 12 * 60;
 export interface RunReport {
   seed: number;
   ticks: number;
+  tickRateHz: number;
   /** The first few invariant violations; empty when the run is clean. */
   violations: string[];
   eventCounts: Record<string, number>;
@@ -49,6 +54,8 @@ export interface RunReport {
   /** Ticks spent in each region, over all creatures. */
   regionTicks: Record<string, number>;
   decisions: number;
+  /** Per creature ID: decisions, interruptions, meals, hunger and sleep. */
+  creatures: Record<string, CreatureStats>;
   elapsedMs: number;
 }
 
@@ -69,6 +76,7 @@ export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures"
   const created = Simulation.create(content.value, {
     worldId: options.worldId,
     seed: options.seed,
+    ...(options.tickRateHz === undefined ? {} : { tickRateHz: options.tickRateHz }),
     ...(options.maxCreatures === undefined ? {} : { maxCreatures: options.maxCreatures }),
     minutes: options.startMinutes ?? DEFAULT_START_MINUTES,
     ...(options.onTrace ? { onTrace: options.onTrace } : {}),
@@ -80,10 +88,13 @@ export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures"
 export function runWithInvariants(options: RunOptions): RunReport {
   const started = performance.now();
   let decisions = 0;
+  /** This tick's traces, for the checks. */
+  const traces: DecisionTrace[] = [];
   const simulation = createSimulation({
     ...options,
     onTrace: (trace) => {
       decisions++;
+      traces.push(trace);
       options.onTrace?.(trace);
     },
   });
@@ -101,10 +112,12 @@ export function runWithInvariants(options: RunOptions): RunReport {
   const report: RunReport = {
     seed: options.seed,
     ticks: options.ticks,
+    tickRateHz: simulation.tickRateHz,
     violations: [],
     eventCounts: {},
     regionTicks: {},
     decisions: 0,
+    creatures: {},
     elapsedMs: 0,
   };
   const violation = (message: string) => {
@@ -112,6 +125,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
       report.violations.push(`seed ${options.seed}, tick ${simulation.tick}: ${message}`);
     }
   };
+  const checks = new LongRunChecks(simulation.tickRateHz, options, violation);
 
   const startMinutes = options.startMinutes ?? DEFAULT_START_MINUTES;
   for (let t = 0; t < options.ticks; t++) {
@@ -119,8 +133,11 @@ export function runWithInvariants(options: RunOptions): RunReport {
       minutesAfter(startMinutes, (simulation.tick * 1000) / simulation.tickRateHz),
     );
     const events = simulation.step();
+    for (const trace of traces) checks.trace(trace);
+    traces.length = 0;
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;
+      checks.event(event);
       if (event.type === "first_use_of_structure") report.firstStructureUse ??= event.tick;
       if (event.type === "entered_region") {
         // Regions change only through a connection that joins them, in a direction it allows.
@@ -135,7 +152,23 @@ export function runWithInvariants(options: RunOptions): RunReport {
         }
       }
     }
-    for (const c of simulation.snapshot().creatures) {
+    const snapshot = simulation.snapshot();
+    checks.tick(
+      simulation.tick,
+      simulation.state.dayPhase,
+      snapshot.creatures.map((c) => {
+        const state = simulation.state.creatures.get(c.id);
+        const needs = state?.needs ?? {};
+        return {
+          id: c.id,
+          speciesId: c.speciesId,
+          needs,
+          asleep: state?.asleep ?? false,
+          cues: c.cues,
+        };
+      }),
+    );
+    for (const c of snapshot.creatures) {
       const { regionId, x, z } = c.position;
       const where = `${c.id} at "${regionId}" (${x.toFixed(3)}, ${z.toFixed(3)})`;
       report.regionTicks[regionId] = (report.regionTicks[regionId] ?? 0) + 1;
@@ -164,7 +197,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
     options.onTick?.(simulation, events);
   }
+  checks.finish();
   report.decisions = decisions;
+  report.creatures = Object.fromEntries(checks.creatures);
   report.elapsedMs = performance.now() - started;
   return report;
 }
