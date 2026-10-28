@@ -1,8 +1,8 @@
 # ADR 0016: Integration and the v0.2 build
 
-- **Status:** Proposed. The open questions at the end are for the user to settle; the PR that settles them makes this Accepted.
+- **Status:** Accepted
 - **Date:** 2026-10-27
-- **Context:** Roadmap M12 (integration and the v0.2 build). M11 gave the app a second window, the Creation Studio (ADR 0015). M12 reworks expanded mode (issue #30), polishes the sides of drawn bodies (issue #40), measures and soaks a release build with 20 creatures, and ships v0.2.0. The user settled the M12 decisions on 2026-10-27 (roadmap M12, "Settled with the user"), and settled the shape of expanded mode after the two experiments below. This ADR records the decisions for the code. It ships as six PRs, in the order of §18; each PR updates this ADR if it has to deviate.
+- **Context:** Roadmap M12 (integration and the v0.2 build). M11 gave the app a second window, the Creation Studio (ADR 0015). M12 reworks expanded mode (issue #30), polishes the sides of drawn bodies (issue #40), measures and soaks a release build with 20 creatures, and ships v0.2.0. The user settled the M12 decisions on 2026-10-27 (roadmap M12, "Settled with the user"), then settled the shape of expanded mode after the two experiments below and the details that shape left open (§2, §3, §5, §7). This ADR records the decisions for the code. It ships as six PRs, in the order of §18; each PR updates this ADR if it has to deviate.
 
 ## Decisions
 
@@ -10,17 +10,19 @@
 
 1. **The strip's window becomes a normal window.** Expanded mode is still the one `main` window (ADR 0008 §2 stands: one window, one simulation worker, one WebGL context), but expanding now changes the window's style as well as its size. In the strip shape it is as ADR 0008 describes: borderless, non-focusable, no taskbar or Alt+Tab entry, its band reserved. In the normal shape it is framed, resizable, movable and focusable, with a taskbar and an Alt+Tab entry. This replaces ADR 0008 §8 (expanded mode) and the expanded bullet of §10. A separate expanded window was measured too and is the documented fallback (_Experiment 1_ below).
 
-2. **Full screen.** F11 or a button in the overlay toggles full screen in the normal shape. Esc leaves full screen and never collapses the window. Home resets the camera. The normal shape takes focus, so unlike the strip it can have keyboard shortcuts.
+2. **Full screen and keys.** F11 or a button in the overlay toggles full screen in the normal shape. Esc leaves full screen; outside full screen it does nothing, and it never collapses the window. Home resets the camera. The normal shape takes focus, so unlike the strip it can have keyboard shortcuts, but it has only these three: F11, Esc and Home.
 
 3. **No strip while expanded.** Switching to the normal shape gives the band back (ADR 0008 §10), so other windows grow; they shrink again when the strip returns. Closing the normal window (its frame's X, the overlay's Collapse button, or the tray) turns it back into the strip rather than quitting. Minimizing is an ordinary minimize: the window stays in its normal shape.
+   - **The tray** (ADR 0008 §7) follows the shape. Expand/Collapse reads "Collapse" in the normal shape and turns the window back into the strip. Left-click and Show bring the normal window to the front, restoring it if it is minimized, rather than hiding it. Hide hides the window in whichever shape it has, and Show brings it back in that shape.
+   - **The error screen's Details** (ADR 0009 §3) keeps working as it did: it switches to the normal shape, which lists every diagnostic, now in a framed, focusable window the user can resize and close.
 
 4. **No forwarding.** The world, the worker and the species library stay in the one page, as today. The Studio's window channel (ADR 0015 §5) is unchanged.
 
-5. **Persistence.** The normal shape's size, position, monitor and whether it is maximized or full screen are saved in `settings.json` (ADR 0008 §9) and restored the next time the window expands. The app always launches as the strip.
+5. **Persistence.** The normal shape's size, position, monitor and whether it is maximized or full screen are saved in `settings.json` (ADR 0008 §9) and restored the next time the window expands, maximized or not. The app always launches as the strip. The first time it expands, with nothing saved, the window opens maximized on the strip's monitor; its restore size (what un-maximizing gives) is about 70% of that monitor's work area without the band, centred.
 
 6. **Its own camera.** The normal shape has its own camera, separate from the strip's: it starts at the default view and keeps its position while the app runs, also across collapsing and expanding again. It is not saved across launches. The view keeps one camera state per shape and swaps them on each switch.
 
-7. **Edits start from the Studio.** The overlay in the normal shape has an "Open Studio" button, which opens or focuses the Studio as the strip's pencil button does (ADR 0015 §1). Editing the world in place comes in a later release.
+7. **The overlay in the normal shape** (ADR 0008 §11) has Pause/Resume, Reset camera, debug overlays, Full screen, Open Studio and Collapse. It has no Hide: minimizing does that. Open Studio opens or focuses the Studio as the strip's pencil button does (ADR 0015 §1); editing the world in place comes in a later release.
 
 ### Known pitfalls for the build (PR 2)
 
@@ -28,14 +30,17 @@
    - **The normal shape never reserves the band.** The experiment's placement reserved the band, then released it for the normal shape. Each change of the work area made the shell place the window again (ADR 0008 §5), so it reserved and released at 10–25 Hz and every maximized window flickered. Unit test.
    - **No re-placing when the window's own scale changes.** Dragging the normal window from the 150% monitor to the 100% one sends it `WM_DPICHANGED`, which the shell treats as a display change (ADR 0008 §5). Placing it there moved it back to its saved rectangle on the first monitor, which changed its scale again: a placement loop. In the normal shape, display changes leave the window where the user put it, and Windows rescales it. Pull the placement decision (which shape, which event, what to do) into a pure function with unit tests, as `placement.rs` already does for the rectangles.
    - **Restore the position before the size.** Setting the saved size while the window is still on another monitor, then moving it, makes Windows rescale it: restored onto the 100% monitor from the 150% one, it came back at two thirds of its size. Moving first, then sizing, restored it exactly. This is Windows behaviour, so it is a manual check, not a unit test.
-   - **The first-open size comes from the work area without the band.** Computed from the work area with the strip's band reserved, the default normal window at 200% was 577 px tall. It should come from the monitor's work area as it is without the band (open question 4).
+   - **The first-open geometry comes from the work area without the band.** Computed from the work area with the strip's band reserved, the experiment's default normal window at 200% was 577 px tall. The first open is maximized (§5), so this now sets the restore size, which must come from the monitor's work area as it is without the band. Maximizing likewise waits until the band is given back, or the maximized window stops short of the space the strip just freed.
    - **One stale frame going back to the strip.** For about 80 ms the strip shows the page still at the normal window's size, then redraws. A small glitch; PR 2 tries to hide it (for example by drawing once at the new size before the switch shows), and accepts it if that fails.
    - **The tool-window style needs one raw Win32 call, and the focus hooks stand aside.** Tauri switches focusable (`set_focusable`), decorations, resizing, shadow and the taskbar tab at runtime, but has no call for `WS_EX_TOOLWINDOW`, which keeps a window out of the taskbar and Alt+Tab. The `Platform` trait gains a method that sets or clears it (`SetWindowLongPtrW`, then `SetWindowPos` with `SWP_FRAMECHANGED`). The strip's style subclass, which forces the tool-window style back, and its activation hand-back (ADR 0015 §1) are skipped in the normal shape, or the normal window could never stay active.
    - **The renderer follows the pixel density.** The diorama view and the Studio preview set the renderer's pixel ratio once, when they are created. On a 100% monitor after starting on a 200% one, the canvas drew at 2× (3840×2160 in full screen). Issue [#55](https://github.com/zhangwy324/living-diorama/issues/55), fixed in PR 2.
 
 9. **Manual checks PR 2 adds to `docs/development.md`,** at 100%, 150% and 200% with two monitors:
    - switching to the normal shape and back several times: the band goes and comes back once per switch, the strip returns to the same place and still never takes focus;
-   - F11, Esc and Home in the normal shape;
+   - the first expand opens maximized on the strip's monitor, filling the space the band gave back, and un-maximizing gives a centred window;
+   - F11, Esc and Home in the normal shape, and Esc outside full screen doing nothing;
+   - the tray in each shape: Collapse, left-click and Show on a minimized normal window, Hide and Show keeping the shape;
+   - the overlay's buttons in the normal shape, and the error screen's Details;
    - full screen on each monitor, and back;
    - moving the normal window between monitors with different scales, then collapsing and expanding again: it comes back at the same place and size, and the canvas stays sharp (#55);
    - minimizing, and the saved geometry after a relaunch.
@@ -129,16 +134,6 @@ The page logged the keys it received, its canvas size and the camera. The refere
 - **Visual.** No white or blank frame. One captured frame going back to the strip showed the page still at the old size (§8). The camera kept its position through every switch, and the canvas always matched the client size (at the starting pixel ratio, #55).
 - **Full screen.** F11 covered the whole monitor, taskbar included (2560×1440 on the primary, 1920×1080 on the second), and Esc returned to the exact saved rectangle.
 - **The two bugs** were the placement loops of §8. The first, reserving then releasing the band, flickered maximized windows at 10–25 Hz until fixed. The second appeared when the normal window was dragged between monitors with different scales: no display setting changed; the move itself changed the window's scale. With both fixes, the 200% run passed everything, including a drag onto the 100% monitor with no placement during the drag.
-
-## Open questions
-
-The roadmap and the experiments don't settle these. They are for the user; each has a recommendation.
-
-1. **The overlay and keys in the normal shape.** Recommended: Pause/Resume, Reset camera, debug overlays, Full screen, Open Studio and Collapse; no Hide, since minimizing does that. Keys: F11, Esc and Home only.
-2. **Esc outside full screen.** The roadmap says Esc leaves full screen and doesn't collapse the window. Recommended: outside full screen, Esc does nothing.
-3. **The tray in the normal shape.** Recommended: Expand/Collapse reads "Collapse" and turns the window back into the strip. Left-click and Show bring the normal window to the front, restoring it if minimized, rather than hiding it. Hide hides the window in whichever shape it has, and Show brings it back in that shape. The alternative is to disable Show/Hide while expanded.
-4. **Where it first opens,** before any geometry is saved (§5). Recommended: about 70% of the work area without the band, centred on the strip's monitor, as ADR 0008 §8 did.
-5. **The error screen's Details.** ADR 0009 §3 shows the details by expanding the window. With one window that changes shape this still works: Details switches to the normal shape, which shows every diagnostic. Recommended: keep it, so the error screen also gets a framed, focusable window the user can resize and close.
 
 ## Consequences
 
