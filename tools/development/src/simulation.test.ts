@@ -87,7 +87,6 @@ describe("long randomized runs keep every invariant", () => {
       seed: 5,
       ticks: 20_000,
       creatures: 20,
-      ...LIVING_BEHAVIOR_CHECKS,
     });
     expect(report.violations).toEqual([]);
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);

@@ -16,6 +16,8 @@ export const MAX_DECISIONS_PER_10_SECONDS = 1;
 export const MAX_FAILED_DECISIONS_IN_A_ROW = 20;
 /** At most this many interruptions per creature in any simulated minute. */
 export const MAX_INTERRUPTIONS_PER_MINUTE = 3;
+/** By default, a creature that lived a whole day is asleep at most this many hours a day. */
+export const MAX_SLEEP_HOURS_PER_DAY = 14;
 /** The event that counts as a meal (ADR 0018, PR 4a). */
 export const MEAL_EVENT = "ate";
 /** A creature counts as hungry with the `hungry` cue or with this much hunger. */
@@ -50,10 +52,17 @@ export interface LongRunCheckOptions {
   meals?: { hours?: number; creatures?: CreatureFilter };
   /**
    * Each creature is asleep for at least `minShare` (default 0.5) of the night ticks it lived
-   * through, once it has lived through `minNightHours` (default 1). Off unless given;
-   * `creatures` chooses those held to it, e.g. those that sleep at night.
+   * through, once it has lived through `minNightHours` (default 1), and, once it has lived a
+   * whole simulated day, for at most `maxHoursPerDay` (default 14) a day on average, so one that
+   * never wakes fails too. Off unless given; `creatures` chooses those held to it, e.g. those
+   * that sleep at night (a nocturnal creature sleeps by day, so it is left out).
    */
-  sleep?: { minShare?: number; minNightHours?: number; creatures?: CreatureFilter };
+  sleep?: {
+    minShare?: number;
+    minNightHours?: number;
+    maxHoursPerDay?: number;
+    creatures?: CreatureFilter;
+  };
 }
 
 /** What one creature did over a run; also the runner's per-creature report. */
@@ -208,6 +217,12 @@ export class LongRunChecks {
         );
       }
       if (!sleep || this.#noSleepCheck.has(id)) continue;
+      const dayTicks = 24 * 3600 * this.tickRateHz;
+      const maxHours = sleep.maxHoursPerDay ?? MAX_SLEEP_HOURS_PER_DAY;
+      const hoursPerDay = (24 * stats.asleepTicks) / Math.max(1, stats.ticks);
+      if (stats.ticks >= dayTicks && hoursPerDay > maxHours) {
+        this.violation(`${id}: asleep ${hoursPerDay.toFixed(1)} h a day (at most ${maxHours})`);
+      }
       const minNightTicks = (sleep.minNightHours ?? 1) * 3600 * this.tickRateHz;
       if (stats.nightTicks < minNightTicks) continue;
       const share = stats.asleepAtNightTicks / stats.nightTicks;

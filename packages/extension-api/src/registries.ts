@@ -95,8 +95,8 @@ export interface NeedType extends CodeEntry {
   /** Values that start a decision when the need rises across them. Ascending, and includes `actAt`. */
   readonly triggers: readonly number[];
   /**
-   * A spawned creature starts with a value drawn uniformly below this; default `actAt`, so
-   * creatures spawned together don't all act at once.
+   * A spawned creature starts with a value drawn uniformly below this, at most `actAt`; default
+   * `actAt`, so creatures spawned together don't all act at once.
    */
   readonly startBelow?: number;
   /** A cue the creature shows from the given value, e.g. `"hungry"` from 0.8. */
@@ -209,6 +209,12 @@ function validateNeed(entry: NeedType, source: string): Diagnostic[] {
     found.push(
       error("invalid_value", "startBelow must be a number in (0, 1]", ["startBelow"], source),
     );
+  } else if (
+    entry.startBelow !== undefined &&
+    isShare(entry.actAt) &&
+    entry.startBelow > entry.actAt
+  ) {
+    found.push(error("invalid_value", "startBelow must be at most actAt", ["startBelow"], source));
   }
   if (!Array.isArray(entry.triggers)) {
     found.push(error("invalid_type", "Expected a list of trigger values", ["triggers"], source));

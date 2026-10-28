@@ -7,8 +7,9 @@ import type { NeedType, SenseType, TraitType } from "@living-diorama/extension-a
 const HUNGER_HOURS_TO_FULL = 1.5;
 /**
  * Asleep, hunger rises at a fifteenth of its awake rate: about 0.44 over a 10-hour night. A
- * creature goes to bed with hunger below `actAt` 0.4, so it wakes at dawn short of the trigger at
- * 0.9 that wakes a sleeper (ADR 0018 §13), and now and then hungry enough to show the bubble.
+ * creature goes to bed with hunger below about `actAt` 0.4, so it almost always reaches dawn short
+ * of the trigger at 0.9 that wakes a sleeper (ADR 0018 §13), and now and then is hungry enough to
+ * show the bubble.
  */
 const HUNGER_ASLEEP_FACTOR = 1 / 15;
 

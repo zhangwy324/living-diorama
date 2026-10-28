@@ -1,5 +1,11 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import type { DayPhase, DecisionTrace, SimulationEvent } from "@living-diorama/simulation";
+import type {
+  CreatureState,
+  DayPhase,
+  DecisionTrace,
+  Simulation,
+  SimulationEvent,
+} from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { LongRunChecks, type CreatureTick, type LongRunCheckOptions } from "./long-run-checks";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
@@ -161,6 +167,20 @@ describe("long-run checks", () => {
     skipped.live(0, 2 * HOUR, "night", { checkSleep: false });
     skipped.checks.finish();
     expect(skipped.violations).toEqual([]);
+    // At most 14 hours a day asleep, once a whole day is lived: one that never wakes fails.
+    const sleepy = (asleepHours: number) => {
+      const c = checker({ sleep: {} });
+      c.live(0, asleepHours * HOUR, "night", { asleep: true });
+      c.live(asleepHours * HOUR, (24 - asleepHours) * HOUR, "day");
+      c.checks.finish();
+      return c.violations;
+    };
+    expect(sleepy(14)).toEqual([]);
+    expect(sleepy(24)).toEqual(["c1: asleep 24.0 h a day (at most 14)"]);
+    const short = checker({ sleep: {} });
+    short.live(0, 4 * HOUR, "night", { asleep: true });
+    short.checks.finish();
+    expect(short.violations).toEqual([]);
     // Less than an hour of night: too little to judge.
     expect(run({ sleep: {} }, 0, HOUR - 1).violations).toEqual([]);
     expect(run({ sleep: { minShare: 0.9 } }, 1.5 * HOUR).checks.creatures.get("c1")).toMatchObject({
@@ -237,6 +257,18 @@ describe("long-run checks", () => {
       expect(c.meals).toBeGreaterThan(0);
       expect(c.asleepAtNightTicks / c.nightTicks).toBeGreaterThan(0.99);
     }
+
+    // A hungry creature that can reach no food is left out of the meal check, as is one without
+    // hunger.
+    const fed = { id: "c", needs: { "core:hunger": 0.2 } } as unknown as CreatureState;
+    const unreachable = {
+      state: { model: { propsByAffordance: new Map([["core:food", [{ id: "far-bush" }]]]) } },
+      spotFor: () => undefined,
+    } as unknown as Simulation;
+    expect(reachesFood(fed, unreachable)).toBe(false);
+    const reachable = { ...unreachable, spotFor: () => ({ regionId: "r", x: 0, z: 0 }) };
+    expect(reachesFood(fed, reachable as unknown as Simulation)).toBe(true);
+    expect(reachesFood({ ...fed, needs: {} }, reachable as unknown as Simulation)).toBe(false);
 
     // Filters see the creature's state and the simulation, once per creature.
     const seen: string[] = [];

@@ -5,7 +5,6 @@ import {
   type Registries,
 } from "@living-diorama/extension-api";
 import {
-  findSpot,
   hungerNeed,
   isNocturnal,
   pointInPolygon,
@@ -59,25 +58,16 @@ export const DEFAULT_START_MINUTES = 12 * 60;
  * Whether the meal check holds a creature to it: it gets hungry and, from where it is first seen,
  * it can reach its spot at some food (ADR 0018 §20).
  */
-export const reachesFood: CreatureFilter = (creature, simulation) => {
-  if (!Object.hasOwn(creature.needs, hungerNeed.id)) return false;
-  const pathfinder = simulation.state.pathfinderFor(creature.speciesId);
-  if (!pathfinder) return false;
-  const reachable = pathfinder.reachableCells(creature.position);
-  return (simulation.state.model.propsByAffordance.get(FOOD) ?? []).some((prop) => {
-    const { x, y, z } = prop.transform.position;
-    const place = { id: prop.id, x, y, z, blockRadius: prop.blockRadius, affordances: {} };
-    return !!findSpot({
-      place,
-      radius: pathfinder.navigation.profile.radius,
-      angle: creature.spotAngle,
-      masks: pathfinder.navigation.masks,
-      reachable,
-    });
-  });
-};
+export const reachesFood: CreatureFilter = (creature, simulation) =>
+  Object.hasOwn(creature.needs, hungerNeed.id) &&
+  (simulation.state.model.propsByAffordance.get(FOOD) ?? []).some(
+    (prop) => simulation.spotFor(creature.id, prop.id) !== undefined,
+  );
 
-/** Whether the sleep check holds a creature to it: it gets tired and sleeps at night (§20). */
+/**
+ * Whether the sleep check holds a creature to it: it gets tired and sleeps at night (§20). A
+ * `core:nocturnal` creature sleeps by day, so it skips the check.
+ */
 export const sleepsAtNight: CreatureFilter = (creature, simulation) => {
   const { registries } = simulation.state;
   const species = registries.species.get(creature.speciesId);

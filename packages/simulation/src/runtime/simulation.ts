@@ -386,6 +386,16 @@ export class Simulation {
     this.state.minutes = wrapMinutes(minutes);
   }
 
+  /**
+   * A creature's spot at a placement, as its behaviors and actions would find it from where it
+   * stands (ADR 0018 §11); undefined for an unknown creature or placement, or a spot it can't
+   * reach. Read-only, for tools and tests.
+   */
+  spotFor(creatureId: string, placementId: string): RegionPosition | undefined {
+    const creature = this.state.creatures.get(creatureId);
+    return creature && this.#placeQueries(creature).spotAt(placementId);
+  }
+
   /** Advances one tick. Returns the events emitted since the previous step, spawns included. */
   step(): SimulationEvent[] {
     const phase = dayPhaseAt(this.state.minutes);

@@ -161,6 +161,11 @@ describe("Registry", () => {
     expectOk(registries.needs.validate(hunger));
     expectOk(registries.needs.validate({ ...hunger, cue: undefined }));
     expectOk(registries.needs.validate({ ...hunger, startBelow: 0.1 }));
+    expectOk(registries.needs.validate({ ...hunger, startBelow: 0.4 }));
+    const above = registries.needs.validate({ ...hunger, startBelow: 0.5 });
+    expect(
+      above.ok ? [] : above.diagnostics.map((d) => `${d.path.join(".")}: ${d.message}`),
+    ).toEqual(["startBelow: startBelow must be at most actAt"]);
     expectOk(
       registries.needs.validate({
         id: "core:tiredness",
