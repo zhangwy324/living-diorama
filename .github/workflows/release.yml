@@ -1,7 +1,7 @@
 name: Release
 
 # Pushing a tag vX.Y.Z builds the NSIS installer and publishes it as a GitHub pre-release
-# (ADR 0009 §10).
+# (ADR 0009 §10), with the notes in docs/release-notes/<version>.md (ADR 0016 §14).
 on:
   push:
     tags: ["v*"]
@@ -32,6 +32,16 @@ jobs:
             exit 1
           fi
           echo "VERSION=$tag" >> "$GITHUB_ENV"
+      - name: Check the release notes exist
+        run: |
+          # A release candidate publishes the notes of the version it names (ADR 0016 §14).
+          tag="${GITHUB_REF_NAME#v}"
+          notes="docs/release-notes/${tag%%-*}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::Missing $notes. Add the release notes for this version before tagging."
+            exit 1
+          fi
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v5
         with:
@@ -50,8 +60,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "$installer" \
             --prerelease \
             --title "Living Diorama $VERSION" \
-            --notes "Proof-of-concept build for Windows 11.
-
-          The installer is **not code-signed**, so Windows SmartScreen will warn that it comes from an unknown publisher. Choose **More info**, then **Run anyway**. It installs for the current user only and needs no admin rights.
-
-          See the README for how to use the app."
+            --notes-file "$NOTES"
