@@ -11,6 +11,7 @@ import { createSimulation, loadContent } from "./simulation-run";
 
 const WORLD_ID = "hollow:woodland-hollow";
 const SPECIES_ID = "hollow:mossling";
+const NOON = 12 * 60;
 
 /** Runs the host against a fake port and a fake clock whose timers fire only in `advance`. */
 function startHost(register = registerBuiltInContent) {
@@ -42,8 +43,15 @@ function startHost(register = registerBuiltInContent) {
     },
     sendRaw: (data: unknown) => handler?.(data),
     send: (command: SimulationCommand) => handler?.(envelope(command)),
-    init: (seed = 1) =>
-      host.send({ type: "init", worldId: WORLD_ID, seed, tickRateHz: 10, maxCreatures: 20 }),
+    init: (seed = 1, minutes = NOON) =>
+      host.send({
+        type: "init",
+        worldId: WORLD_ID,
+        seed,
+        tickRateHz: 10,
+        maxCreatures: 20,
+        minutes,
+      }),
     /** Moves time forward, firing due timers in order. */
     advance(ms: number) {
       const end = time + ms;
@@ -270,7 +278,14 @@ describe("simulation host", () => {
 
   it("enforces the creature cap set by init", () => {
     const host = startHost();
-    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 10, maxCreatures: 2 });
+    host.send({
+      type: "init",
+      worldId: WORLD_ID,
+      seed: 1,
+      tickRateHz: 10,
+      maxCreatures: 2,
+      minutes: NOON,
+    });
     for (let n = 0; n < 3; n++) host.send({ type: "spawn", speciesId: SPECIES_ID });
     host.advance(100);
     const rejected = host.take().filter((m) => m.type === "rejected");
@@ -296,11 +311,26 @@ describe("simulation host", () => {
       seed: 1,
       tickRateHz: 10,
       maxCreatures: 20,
+      minutes: NOON,
     });
     expect(host.errorCodes()).toEqual(["unknown_world"]);
-    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 0, maxCreatures: 20 });
+    host.send({
+      type: "init",
+      worldId: WORLD_ID,
+      seed: 1,
+      tickRateHz: 0,
+      maxCreatures: 20,
+      minutes: NOON,
+    });
     expect(host.errorCodes()).toEqual(["invalid_tick_rate"]);
-    host.send({ type: "init", worldId: WORLD_ID, seed: 1, tickRateHz: 10, maxCreatures: 0 });
+    host.send({
+      type: "init",
+      worldId: WORLD_ID,
+      seed: 1,
+      tickRateHz: 10,
+      maxCreatures: 0,
+      minutes: NOON,
+    });
     expect(host.errorCodes()).toEqual(["invalid_max_creatures"]);
     host.send({ type: "spawn", speciesId: SPECIES_ID });
     host.advance(1000);
@@ -335,5 +365,80 @@ describe("simulation host", () => {
     });
     expect(fromHost).toHaveLength(300);
     expect(fromHost).toEqual(expected);
+  });
+});
+
+describe("time of day in the host", () => {
+  const phaseEvents = (messages: SimulationMessage[]) =>
+    messages.flatMap((m) =>
+      m.type === "snapshot" ? m.events.filter((e) => e.type === "day_phase_changed") : [],
+    );
+
+  it("starts at the time of day init carries, without announcing its phase", () => {
+    const host = startHost();
+    host.init(1, 19 * 60 + 30);
+    host.advance(1000);
+    const messages = host.take();
+    expect(phaseEvents(messages)).toEqual([]);
+    const snapshots = messages.flatMap((m) => (m.type === "snapshot" ? [m.snapshot] : []));
+    expect(snapshots.map((s) => s.timeOfDay)).toEqual(Array(10).fill(19 * 60 + 30));
+  });
+
+  it("applies set_time_of_day at the next tick boundary, announcing the new phase there", () => {
+    const host = startHost();
+    host.init();
+    host.advance(300);
+    host.take();
+    host.send({ type: "set_time_of_day", minutes: 20 * 60 + 5 });
+    expect(host.take()).toEqual([]);
+    host.advance(200);
+    const messages = host.take();
+    expect(
+      messages.map((m) => (m.type === "snapshot" ? [m.snapshot.tick, m.snapshot.timeOfDay] : [])),
+    ).toEqual([
+      [4, 20 * 60 + 5],
+      [5, 20 * 60 + 5],
+    ]);
+    // Day jumps straight to night: one event across dusk, on the first tick that sees it.
+    expect(phaseEvents(messages)).toEqual([
+      { type: "day_phase_changed", tick: 3, from: "day", to: "night" },
+    ]);
+    // Exactly what postMessage would deliver.
+    for (const message of messages) expect(structuredClone(message)).toEqual(message);
+  });
+
+  it("announces nothing for a new time in the same phase, and wraps minutes into a day", () => {
+    const host = startHost();
+    host.init();
+    host.send({ type: "set_time_of_day", minutes: 17 * 60 });
+    host.advance(100);
+    host.send({ type: "set_time_of_day", minutes: 24 * 60 + 9 * 60 });
+    host.advance(100);
+    const messages = host.take();
+    expect(phaseEvents(messages)).toEqual([]);
+    expect(messages.at(-1)).toMatchObject({ snapshot: { timeOfDay: 9 * 60 } });
+  });
+
+  it("shows a new time of day while paused", () => {
+    const host = startHost();
+    host.init();
+    host.send({ type: "pause" });
+    host.advance(100);
+    host.take();
+    host.send({ type: "set_time_of_day", minutes: 23 * 60 });
+    host.advance(100);
+    expect(host.snapshots().map((m) => [m.snapshot.paused, m.snapshot.timeOfDay])).toEqual([
+      [true, 23 * 60],
+    ]);
+  });
+
+  it("rejects a time of day that is not a number", () => {
+    const host = startHost();
+    host.init(1, Number.NaN);
+    expect(host.errorCodes()).toEqual(["invalid_time_of_day"]);
+    host.init();
+    host.send({ type: "set_time_of_day", minutes: Number.POSITIVE_INFINITY });
+    host.advance(100);
+    expect(host.errorCodes()).toEqual(["invalid_time_of_day"]);
   });
 });

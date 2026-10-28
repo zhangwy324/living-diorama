@@ -94,7 +94,9 @@ describe("determinism", () => {
     if (withNeighbour) simulation.spawn(hollow.speciesId, "meadow");
     const lines: string[] = [];
     for (let t = 0; t < ticks; t++) {
-      const events = simulation.step().filter((e) => e.creatureId === "creature-1");
+      const events = simulation
+        .step()
+        .filter((e) => "creatureId" in e && e.creatureId === "creature-1");
       const { position, heading } = simulation.state.creatures.get("creature-1")!;
       lines.push(`${position.regionId} ${position.x} ${position.z} ${heading}`);
       lines.push(...events.map((e) => JSON.stringify(e)));
@@ -313,4 +315,44 @@ it("refuses actions and behaviors registered without an implementation", () => {
     "no_action_implementation",
     "no_behavior_implementation",
   ]);
+});
+
+describe("time of day", () => {
+  it("derives the time of day in headless runs from simulation time and a start", () => {
+    const changes: SimulationEvent[] = [];
+    const times: number[] = [];
+    const report = runWithInvariants({
+      ...hollow,
+      seed: 1,
+      // 19:59 plus 90 s at 10 Hz.
+      startMinutes: 19 * 60 + 59,
+      ticks: 900,
+      creatures: 1,
+      onTick: (simulation, events) => {
+        changes.push(...events.filter((e) => e.type === "day_phase_changed"));
+        times.push(simulation.snapshot().timeOfDay);
+      },
+    });
+    expect(report.violations).toEqual([]);
+    expect(times[0]).toBe(19 * 60 + 59);
+    expect(times.at(-1)).toBeCloseTo(19 * 60 + 59 + 899 / 600);
+    // Not at the start; once, on the tick that reaches 20:00.
+    expect(changes).toEqual([{ type: "day_phase_changed", tick: 600, from: "dusk", to: "night" }]);
+  });
+
+  it("announces a jump across several phases once, from the old phase to the new", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1, startMinutes: 12 * 60 });
+    simulation.step();
+    // Forward from noon past dusk and night into dawn.
+    simulation.setTimeOfDay(24 * 60 + 7 * 60);
+    expect(simulation.step()).toEqual([
+      { type: "day_phase_changed", tick: 1, from: "day", to: "dawn" },
+    ]);
+    expect(simulation.state.dayPhase).toBe("dawn");
+    // Two changes before one tick count as one jump, and a round trip as none.
+    simulation.setTimeOfDay(21 * 60);
+    simulation.setTimeOfDay(7 * 60 + 30);
+    expect(simulation.step()).toEqual([]);
+    expect(() => simulation.setTimeOfDay(Number.NaN)).toThrow(RangeError);
+  });
 });

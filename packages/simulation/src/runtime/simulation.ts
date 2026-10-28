@@ -27,6 +27,7 @@ import { navProfile, profileForSpecies } from "../navigation/profile";
 import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
 import { Rng } from "./rng";
+import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
   normalizeHeading,
   WorldState,
@@ -141,6 +142,9 @@ export class Simulation {
     const tickRateHz = options.tickRateHz ?? 10;
     if (!(tickRateHz > 0) || !Number.isFinite(tickRateHz)) {
       throw new RangeError(`tickRateHz must be positive, got ${tickRateHz}`);
+    }
+    if (options.minutes !== undefined && !Number.isFinite(options.minutes)) {
+      throw new RangeError(`The time of day must be a finite number, got ${options.minutes}`);
     }
     const missing = implementationDiagnostics(registries);
     if (missing.length > 0) return { ok: false, diagnostics: missing };
@@ -266,8 +270,21 @@ export class Simulation {
     return result;
   }
 
+  /**
+   * Sets the time of day, in minutes since local midnight (ADR 0018 §5). The next step takes up
+   * the change, so a run replays from its commands; a new day phase is announced then.
+   */
+  setTimeOfDay(minutes: number): void {
+    if (!Number.isFinite(minutes)) {
+      throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
+    }
+    this.state.minutes = wrapMinutes(minutes);
+  }
+
   /** Advances one tick. Returns the events emitted since the previous step, spawns included. */
   step(): SimulationEvent[] {
+    const phase = dayPhaseAt(this.state.minutes);
+    if (phase !== this.state.dayPhase) this.#dayPhaseChanged(this.state.dayPhase, phase);
     for (const creature of this.state.creatures.values()) this.#stepCreature(creature);
     this.state.tick++;
     const events = this.#events;
@@ -282,6 +299,7 @@ export class Simulation {
       tick: this.tick,
       timeMs: this.tick * this.tickSeconds * 1000,
       paused,
+      timeOfDay: this.state.minutes,
       creatures: [...this.state.creatures.values()].map((c) => {
         const { regionId, x, z } = c.position;
         const y = model.regions.get(regionId)?.surface.heightAt(x, z) ?? NaN;
@@ -312,6 +330,16 @@ export class Simulation {
 
   #emit(event: SimulationEvent) {
     this.#events.push(event);
+  }
+
+  /**
+   * The day phase changed since the last tick, by however many phases the time of day jumped:
+   * one event from the old phase to the new. This is where a phase change becomes a decision
+   * trigger (ADR 0018 §7).
+   */
+  #dayPhaseChanged(from: DayPhase, to: DayPhase) {
+    this.state.dayPhase = to;
+    this.#emit({ type: "day_phase_changed", tick: this.tick, from, to });
   }
 
   #stepCreature(creature: CreatureState) {

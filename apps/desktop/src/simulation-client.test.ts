@@ -8,6 +8,17 @@ import {
   type WorkerLike,
 } from "./simulation-client";
 import { STARTUP } from "./startup";
+import type { WallClock } from "./time-of-day";
+
+/** A wall clock that stays at `minutes` until changed, with no timers. */
+function stillClock(minutes: { now: number }): WallClock {
+  return {
+    now: () => minutes.now * 60_000,
+    minutesAt: (ms) => ms / 60_000,
+    every: () => () => {},
+    onVisible: () => () => {},
+  };
+}
 
 /** A worker that runs the real host in this thread; its timers fire only in `tick`. */
 function fakeWorker() {
@@ -57,7 +68,7 @@ const drawn = {
   behaviors: ["core:wander"],
 };
 
-function start(countOverride?: number) {
+function start(countOverride?: number, time = { now: 12 * 60 }) {
   const { worker, tick } = fakeWorker();
   const callbacks = {
     onReady: vi.fn(),
@@ -65,7 +76,7 @@ function start(countOverride?: number) {
     onSnapshot: vi.fn<(snapshot: SimulationSnapshot) => void>(),
     onFailure: vi.fn(),
   };
-  const client = startSimulation(callbacks, STARTUP, worker, countOverride);
+  const client = startSimulation(callbacks, STARTUP, worker, countOverride, stillClock(time));
   return { client, callbacks, tick };
 }
 
@@ -124,6 +135,24 @@ describe("simulation client", () => {
       "unknown_creature",
     ]);
     expect(callbacks.onSpeciesRegistered).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("sends the time of day at init, on resume and when fixed", () => {
+    const time = { now: 21 * 60 };
+    const { client, callbacks, tick } = start(0, time);
+    const shown = () => callbacks.onSnapshot.mock.calls.at(-1)?.[0].timeOfDay;
+    tick(100);
+    expect(shown()).toBe(21 * 60);
+    client.setPaused(true);
+    time.now = 22 * 60 + 30;
+    client.setPaused(false);
+    tick(100);
+    expect(shown()).toBe(22 * 60 + 30);
+    client.fixTimeOfDay(6 * 60);
+    client.setSpeed(2);
+    tick(100);
+    expect(shown()).toBe(6 * 60);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 

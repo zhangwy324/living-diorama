@@ -12,6 +12,7 @@ import type { Navigation } from "../navigation/region-graph";
 import { checkNavigation, checkWorld } from "../world/integrity";
 import type { WorldModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
+import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 
 /**
  * One creature's authoritative state. Plain data only (no classes or closures), so it can be
@@ -44,6 +45,8 @@ export interface WorldStateOptions {
   seed: number;
   /** Most creatures the world holds at once. No limit if omitted. */
   maxCreatures?: number;
+  /** The time of day the world starts at, in minutes since local midnight. Default noon. */
+  minutes?: number;
 }
 
 /** A profile's pathfinder and where its creatures don't fit, as warnings. */
@@ -69,6 +72,16 @@ export class WorldState {
   readonly introducedSpecies = new Set<string>();
   /** Ticks simulated so far. Part of the state, so it is saved and replayed with it. */
   tick = 0;
+  /**
+   * The time of day, in minutes since local midnight (ADR 0018 §5): an input, set from outside
+   * and never advanced by ticks.
+   */
+  minutes: number;
+  /**
+   * The day phase as of the last tick. After the time of day is set it may lag `minutes` until
+   * the next tick, which takes up the change (and emits `day_phase_changed`).
+   */
+  dayPhase: DayPhase;
   readonly maxCreatures: number;
   readonly #pathfinders: Map<string, Pathfinder>;
   /** Per profile key, where its creatures don't fit (ADR 0013). */
@@ -86,7 +99,10 @@ export class WorldState {
     limits: Map<string, Diagnostic[]>,
     seed: number,
     maxCreatures: number,
+    minutes: number,
   ) {
+    this.minutes = wrapMinutes(minutes);
+    this.dayPhase = dayPhaseAt(this.minutes);
     this.#pathfinders = pathfinders;
     this.#limits = limits;
     this.maxCreatures = maxCreatures;
@@ -97,7 +113,7 @@ export class WorldState {
   /** Builds the state for a registered world. Expects `resolveReferences` to have passed. */
   static create(
     registries: Registries,
-    { worldId, seed, maxCreatures = Infinity }: WorldStateOptions,
+    { worldId, seed, maxCreatures = Infinity, minutes = 12 * 60 }: WorldStateOptions,
   ): Result<WorldState> {
     const world = registries.worlds.get(worldId);
     if (!world) {
@@ -122,6 +138,7 @@ export class WorldState {
         new Map(check.limits),
         seed,
         maxCreatures,
+        minutes,
       ),
     };
   }

@@ -17,6 +17,7 @@ const snapshot = (...creatures: CreatureSnapshot[]): SimulationSnapshot => ({
   tick: 0,
   timeMs: 0,
   paused: false,
+  timeOfDay: 720,
   creatures,
 });
 const stuck = (x: number): SimulationEvent => ({

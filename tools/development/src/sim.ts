@@ -1,6 +1,12 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import type { WorldDefinition } from "@living-diorama/content-schema";
-import type { Navigation, SimulationEvent, WorldModel } from "@living-diorama/simulation";
+import {
+  formatClockTime,
+  parseClockTime,
+  type Navigation,
+  type SimulationEvent,
+  type WorldModel,
+} from "@living-diorama/simulation";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +38,8 @@ const { values } = parseArgs({
     seed: { type: "string", default: "1" },
     ticks: { type: "string", default: "6000" },
     creatures: { type: "string", default: "1" },
+    // The time of day the run starts at; it follows simulation time from there (ADR 0018 §5).
+    start: { type: "string", default: "12:00" },
     "no-map": { type: "boolean", default: false },
   },
 });
@@ -40,6 +48,8 @@ if (!preset) throw new Error(`--world must be one of: ${Object.keys(WORLDS).join
 const seed = Number(values.seed);
 const ticks = Number(values.ticks);
 const creatures = Number(values.creatures);
+const startMinutes = parseClockTime(values.start);
+if (startMinutes === undefined) throw new Error(`--start must be a time such as 21:30`);
 const TICK_RATE_HZ = 10; // runWithInvariants uses the simulation default
 
 const outDir = resolve(dirname(fileURLToPath(import.meta.url)), "../out");
@@ -65,6 +75,8 @@ function describe(e: SimulationEvent): string {
       return `path failed (${e.reason}) to ${e.to.regionId} (${e.to.x.toFixed(1)}, ${e.to.z.toFixed(1)})`;
     case "creature_stuck":
       return `stuck for ${e.ticksStuck} ticks in ${e.position.regionId}`;
+    case "day_phase_changed":
+      return `${e.from} → ${e.to}`;
   }
 }
 
@@ -73,11 +85,13 @@ const report = runWithInvariants({
   seed,
   ticks,
   creatures,
+  startMinutes,
   onTrace: (trace) => lines.push(JSON.stringify({ kind: "decision", ...trace })),
   onTick: (simulation, events) => {
     for (const event of events) {
       lines.push(JSON.stringify({ kind: "event", ...event }));
-      console.log(`${time(event.tick)}  ${event.creatureId}  ${describe(event)}`);
+      const who = "creatureId" in event ? event.creatureId : "world";
+      console.log(`${time(event.tick)}  ${who}  ${describe(event)}`);
     }
     for (const c of simulation.snapshot().creatures) {
       let points = trajectories.get(c.id);
@@ -102,7 +116,7 @@ if (!values["no-map"] && mapInputs) {
 const total = Object.values(report.regionTicks).reduce((a, b) => a + b, 0);
 console.log("");
 console.log(
-  `${preset.worldId}, seed ${seed}: ${ticks} ticks (${time(ticks).trim()}), ${creatures} creature(s), ` +
+  `${preset.worldId}, seed ${seed}: ${ticks} ticks (${time(ticks).trim()}), ${creatures} creature(s) from ${formatClockTime(startMinutes)}, ` +
     `${Math.round(report.elapsedMs)} ms`,
 );
 console.log(`  decisions: ${report.decisions}`);

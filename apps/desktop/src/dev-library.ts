@@ -1,6 +1,7 @@
 import { formatDiagnostic, type Drawing, type SizeClass } from "@living-diorama/content-schema";
 import { encodePng, paintHistory } from "./drawing";
 import { sampleSpecies } from "./sample-species";
+import type { TimeDevHook } from "./dev-time";
 import type { SpeciesLibrary } from "./species-library";
 
 // A development-only console hook to the species library (ADR 0014), for checks the Studio (M11)
@@ -9,7 +10,8 @@ import type { SpeciesLibrary } from "./species-library";
 //   await livingDiorama.library.saveSample("Puddle", "small")
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
 //   await livingDiorama.library.saveSamples()   // the twenty species measurements use
-//   livingDiorama.setTimeOfDay(23 * 60)         // night lighting preview (ADR 0018 §6)
+//
+// `dev-time.ts` adds `livingDiorama.time`.
 
 /** A round green critter with two eyes and a notch between its feet. */
 export const SAMPLE_DRAWING: Drawing = {
@@ -51,7 +53,7 @@ async function saveDrawn(
 
 declare global {
   interface Window {
-    livingDiorama?: { library?: unknown; setTimeOfDay?: (minutes: number) => void };
+    livingDiorama?: { library?: unknown; time?: TimeDevHook };
   }
 }
 

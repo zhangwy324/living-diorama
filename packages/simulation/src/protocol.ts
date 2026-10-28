@@ -7,12 +7,13 @@ import type {
 } from "@living-diorama/content-schema";
 import type { AssetKind } from "@living-diorama/extension-api";
 import type { NavigationOverlay } from "./navigation/overlay";
+import type { DayPhase } from "./runtime/time-of-day";
 import type { SceneData } from "./world/scene";
 
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -43,12 +44,25 @@ export type RequestCommand =
 export type SimulationCommand =
   /**
    * First message. The worker loads content itself; only IDs and settings cross the boundary.
-   * `maxCreatures` caps the creatures in the world.
+   * `maxCreatures` caps the creatures in the world. `minutes` is the local time of day, in
+   * minutes since midnight (ADR 0018 §5).
    */
-  | { type: "init"; worldId: string; seed: number; tickRateHz: number; maxCreatures: number }
+  | {
+      type: "init";
+      worldId: string;
+      seed: number;
+      tickRateHz: number;
+      maxCreatures: number;
+      minutes: number;
+    }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "set_speed"; multiplier: number }
+  /**
+   * The local time of day, in minutes since midnight (ADR 0018 §5). Sent every minute and on
+   * resume, and applied at a tick boundary like any other command, so a run replays from its log.
+   */
+  | { type: "set_time_of_day"; minutes: number }
   | RequestCommand
   /** Adds debug data (routes) to snapshots while enabled (ADR 0007 §10). */
   | { type: "set_debug"; enabled: boolean }
@@ -117,29 +131,56 @@ export interface SimulationSnapshot {
   /** Simulation time at this tick, in milliseconds. */
   timeMs: number;
   paused: boolean;
+  /** The time of day the simulation runs at, in minutes since local midnight (ADR 0018 §6). */
+  timeOfDay: number;
   creatures: CreatureSnapshot[];
 }
 
-interface EventBase {
+interface WorldEventBase {
   tick: number;
+}
+
+interface CreatureEventBase extends WorldEventBase {
   creatureId: string;
 }
 
-/** Simulation events (roadmap M3 task 10, M9 task 5). Structures are identified by placement ID. */
-export type SimulationEvent =
-  | (EventBase & { type: "creature_spawned"; speciesId: string; regionId: string })
+/**
+ * Events about one creature (roadmap M3 task 10, M9 task 5). Structures are identified by
+ * placement ID.
+ */
+export type CreatureEvent =
+  | (CreatureEventBase & { type: "creature_spawned"; speciesId: string; regionId: string })
   /** The first creature of a species in this world; follows its `creature_spawned`. */
-  | (EventBase & { type: "species_introduced"; speciesId: string })
-  | (EventBase & { type: "creature_despawned"; speciesId: string; regionId: string })
-  | (EventBase & {
+  | (CreatureEventBase & { type: "species_introduced"; speciesId: string })
+  | (CreatureEventBase & { type: "creature_despawned"; speciesId: string; regionId: string })
+  | (CreatureEventBase & {
       type: "entered_region";
       fromRegionId: string;
       toRegionId: string;
       connectionId: string;
     })
-  | (EventBase & { type: "first_use_of_structure"; structureId: string; connectionId: string })
-  | (EventBase & { type: "path_failed"; from: RegionPosition; to: RegionPosition; reason: string })
-  | (EventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number });
+  | (CreatureEventBase & {
+      type: "first_use_of_structure";
+      structureId: string;
+      connectionId: string;
+    })
+  | (CreatureEventBase & {
+      type: "path_failed";
+      from: RegionPosition;
+      to: RegionPosition;
+      reason: string;
+    })
+  | (CreatureEventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number });
+
+/** Events about the world as a whole, with no creature (ADR 0018 §17). */
+export type WorldEvent =
+  /**
+   * The day phase changed. Not emitted for the time of day the world starts at. A jump across
+   * several phases emits one event, from the phase before the jump to the one after it.
+   */
+  WorldEventBase & { type: "day_phase_changed"; from: DayPhase; to: DayPhase };
+
+export type SimulationEvent = CreatureEvent | WorldEvent;
 
 export type SimulationMessage =
   | ({ type: "ready"; worldId: string } & WorldContent)

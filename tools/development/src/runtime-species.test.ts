@@ -250,7 +250,7 @@ describe("runtime species", () => {
     simulation.despawn(a.value.id);
     simulation.spawn(hollow.speciesId);
     const events = simulation.step();
-    expect(events.map((e) => [e.type, e.creatureId])).toEqual([
+    expect(events.map((e) => [e.type, "creatureId" in e && e.creatureId])).toEqual([
       ["creature_despawned", a.value.id],
       ["creature_spawned", "creature-3"],
     ]);
