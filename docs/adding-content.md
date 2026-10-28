@@ -94,7 +94,7 @@ The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](
 
 ### Drawing an appearance
 
-The renderer traces the drawing's outline, with any holes in it, and extrudes it into a slab with straight walls, 40% of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md), [ADR 0017](adr/0017-hollow-bodies-and-fill.md)). The front shows the drawing, the back shows it mirrored, and each point of a wall takes the colour of the drawing's edge there.
+The renderer traces the drawing's outline, with any holes in it, and extrudes it into a slab with straight walls, 40% of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md), [ADR 0017](adr/0017-hollow-bodies-and-fill.md)). The front shows the drawing, the back shows it mirrored, and the walls are coloured like the edge of the drawing beside them.
 
 - **Draw the creature facing right, side on,** with its feet at the bottom. The body turns to the creature's heading, so the drawing is what you see from the side.
 - **Use a transparent background.** A pixel counts as part of the body at 50% opacity or more. Padding around the drawing is ignored: the body is sized to what is drawn.

@@ -65,10 +65,15 @@ export function bodyGeometry(
 ): THREE.BufferGeometry {
   // Built in pixels with y up, then scaled. The texture's rows are top first, so v = -y / height.
   const drawn = outline.bounds.maxY - outline.bounds.minY;
-  const vectors = (loop: readonly Point[]) => loop.map(([x, y]) => new THREE.Vector2(x, -y));
-  const shapes = outline.shapes.map(({ outer, holes }) => {
-    const shape = new THREE.Shape(vectors(outer));
-    shape.holes = holes.map((loop) => new THREE.Path(vectors(loop)));
+  const shapes = outline.shapes.map(({ outer, holes, traced }) => {
+    // three's triangulation can, rarely, cover a hole of a simplified shape; the traced loops
+    // follow pixel edges and triangulate as they should.
+    const loops = triangulates(outer, holes) ? { outer, holes } : traced;
+    const contour = vectors(loops.outer);
+    // Counter-clockwise, so ExtrudeGeometry reverses it and puts every hole the other way round.
+    if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+    const shape = new THREE.Shape(contour);
+    shape.holes = loops.holes.map((loop) => new THREE.Path(vectors(loop)));
     return shape;
   });
   const uv = (vertices: number[], index: number) =>
@@ -91,6 +96,38 @@ export function bodyGeometry(
   geometry.translate(-centre.x, -box.min.y, -centre.z);
   const scale = height / (box.max.y - box.min.y);
   return geometry.scale(scale, scale, scale);
+}
+
+/** A loop in the extrusion's plane: y up. */
+const vectors = (loop: readonly Point[]) => loop.map(([x, y]) => new THREE.Vector2(x, -y));
+
+/**
+ * Whether three triangulates the shape exactly: its triangles add up to the shape's area, the
+ * holes' taken from the outer loop's. Loops don't cross (`traceOutline`), so any other total
+ * means a triangle covers a hole or misses part of the shape.
+ */
+export function triangulates(
+  outer: readonly Point[],
+  holes: readonly (readonly Point[])[],
+): boolean {
+  // Oriented as ExtrudeGeometry orients them: the outer loop clockwise, the holes not.
+  const contour = vectors(outer);
+  if (!THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+  const paths = holes.map((loop) => {
+    const path = vectors(loop);
+    return THREE.ShapeUtils.isClockWise(path) ? path.reverse() : path;
+  });
+  const area = (loop: THREE.Vector2[]) => Math.abs(THREE.ShapeUtils.area(loop));
+  const expected = area(contour) - paths.reduce((sum, path) => sum + area(path), 0);
+  // It drops a last point repeating the first, so the faces index the loops it was given.
+  const given = [[...contour], ...paths.map((path) => [...path])];
+  const faces = THREE.ShapeUtils.triangulateShape(given[0] ?? [], given.slice(1));
+  const points = given.flat();
+  const total = faces.reduce((sum, face) => {
+    const corners = face.map((i) => points[i] ?? new THREE.Vector2());
+    return sum + area(corners);
+  }, 0);
+  return Math.abs(total - expected) <= 1e-6 * Math.max(1, expected);
 }
 
 /** A neutral rounded block, shown while a drawing loads or if it fails. */

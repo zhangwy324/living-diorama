@@ -9,6 +9,8 @@ export type Point = readonly [x: number, y: number];
 export interface OutlineShape {
   outer: Point[];
   holes: Point[][];
+  /** The same loops as traced along pixel edges, before simplifying. */
+  traced: { outer: Point[]; holes: Point[][] };
 }
 
 export interface Outline {
@@ -98,14 +100,16 @@ export function traceOutline(pixels: Pixels): Outline {
     );
   }
 
+  const simplified = simplifyShapes(raw);
+  // From the traced loops: the shapes' exact pixel bounds.
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-  for (const component of shapes) {
-    bounds.minX = Math.min(bounds.minX, component.minX);
-    bounds.minY = Math.min(bounds.minY, component.minY);
-    bounds.maxX = Math.max(bounds.maxX, component.maxX + 1);
-    bounds.maxY = Math.max(bounds.maxY, component.maxY + 1);
+  for (const [x, y] of simplified.flatMap((s) => s.traced.outer)) {
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.maxY = Math.max(bounds.maxY, y);
   }
-  return { shapes: simplifyShapes(raw), bounds };
+  return { shapes: simplified, bounds };
 }
 
 const inside = (x: number, y: number, width: number, height: number) =>
@@ -241,10 +245,11 @@ function simplifyShapes(raw: { outer: Point[]; holes: Point[][] }[]): OutlineSha
   );
   const level = traced.map(() => 0);
   const simplify = (k: number) => {
-    const { loop, hole } = traced[k] ?? { loop: [], hole: false };
+    const loop = traced[k]?.loop ?? [];
     const simplified = simplifyLoop(loop, SIMPLIFY_TOLERANCES[level[k] ?? 0]);
-    // A small hole is kept whatever its size, as traced if simplifying would leave no area.
-    return simplified.length >= 3 || !hole ? simplified : [...loop];
+    // A small shape or hole is kept whatever its size, as traced if simplifying would leave no
+    // area: a line a pixel wide, or a pinhole.
+    return simplified.length >= 3 ? simplified : [...loop];
   };
   const loops = traced.map((_, k) => simplify(k));
   const last = SIMPLIFY_TOLERANCES.length - 1;
@@ -256,7 +261,7 @@ function simplifyShapes(raw: { outer: Point[]; holes: Point[][] }[]): OutlineSha
       loops[k] = simplify(k);
     }
   }
-  const shapes: OutlineShape[] = raw.map(() => ({ outer: [], holes: [] }));
+  const shapes: OutlineShape[] = raw.map((traced) => ({ outer: [], holes: [], traced }));
   traced.forEach(({ shape, hole }, k) => {
     const loop = loops[k] ?? [];
     const target = shapes[shape];
@@ -370,10 +375,11 @@ const between = (p: Point, a: Point, b: Point) =>
   p[1] <= Math.max(a[1], b[1]);
 
 /**
- * Whether two segments cross, overlap, or one ends on the other's middle. Segments that only
- * share an end point don't.
+ * Whether two segments cross, overlap (the same segment twice included), or one ends on the
+ * other's middle. Segments that only share an end point don't.
  */
 function crosses(s: Segment, t: Segment): boolean {
+  if ((same(s.a, t.a) && same(s.b, t.b)) || (same(s.a, t.b) && same(s.b, t.a))) return true;
   const o1 = orient(s.a, s.b, t.a);
   const o2 = orient(s.a, s.b, t.b);
   const o3 = orient(t.a, t.b, s.a);

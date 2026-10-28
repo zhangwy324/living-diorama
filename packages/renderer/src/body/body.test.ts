@@ -1,7 +1,84 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { BODY_DEPTH, buildBody, fallbackBody } from "./body";
+import { BODY_DEPTH, bodyGeometry, buildBody, fallbackBody, triangulates } from "./body";
+import { traceOutline, type Point } from "./outline";
 import type { Pixels } from "./pixels";
+
+/** A noisy blob whose simplified largest shape three triangulates over one of its holes. */
+const NOISY = [
+  "................................................",
+  "................................................",
+  "................................................",
+  "................................................",
+  "..................g.ggggggggggg.................",
+  "................ggg..ggggg.gg...g...............",
+  "..............gggggggggg.gggg....gg.............",
+  "............gg..gggg..gggggg.....gg.............",
+  "............gg.......ggg.gggg....gggg...........",
+  "..........ggggg......gggggggggg....gg...........",
+  ".........gg.ggg......ggggg.ggggg...gg...........",
+  ".........gggggg.gg....ggggggggg.................",
+  "............ggggggg....g.g.g....g......g.g......",
+  "...........gggggggg...................g..g......",
+  "......g...gggg.gggg.....gg.....gg...g.g.g.g.....",
+  ".........gggggggggg...........gggg..g.g.ggg.....",
+  ".....g...ggg.gggg.............ggggggg.ggg.......",
+  ".....g...ggg.gggg..............gggggggggg.g.....",
+  "........ggg.gggggg..gggg.......gggg.g.ggg.gg....",
+  "............gggggggg.g....ggg..ggg..ggg..ggg....",
+  "........ggg....ggggg.....g.ggggggg..g.g...ggg...",
+  ".....gg...g...ggggg....ggggggggg.gggggg.....g...",
+  ".....gggg.gg..ggg.....ggggggggggggggggg...g.g...",
+  "......g...g.ggggg...ggggg.ggggggg.gggg......g...",
+  ".........ggggggggggggggg...ggggggggggg..........",
+  "........ggggg.gggggggggg...gg...g.ggg...........",
+  "....ggg.ggg....gggggggggg..ggg..ggggg...........",
+  "....gggggg..g.ggggg.ggggg...gggggggggg.gg..g....",
+  "....ggg.gg....ggggg.ggggg...gggggggg.gggggggg...",
+  "....gggggg....ggggg.gggggg..g...gggg.gggggggg...",
+  "....g...ggg...g.g...ggggg........ggg..g.g.ggg...",
+  ".....g.g.gggggg......ggg..............g...gg....",
+  ".......g.gggggg......g.......ggggg.gggggg.......",
+  "......gg.ggggg....ggg.ggg...gggggg..ggg.........",
+  "......ggggggg...gggggggggggggg...g..ggg.........",
+  ".......ggggg....ggggggggggggg....gg.g....g......",
+  ".......ggggg......ggggggg..gg.....g.....gg......",
+  "..........ggg....ggggggg........ggg....gg.......",
+  "...........gg....ggggg...............ggg........",
+  "...........gg...ggggg........gggg....gg.........",
+  "...........gg...ggg.g..ggg...gggg....g..........",
+  "............g...ggg...gggg...ggggg..............",
+  "..............ggggg...gggg....ggggg.............",
+  "................gggggggggg.....gg...............",
+  "..................ggggggggg...g.................",
+  "................................................",
+  "................................................",
+  "................................................",
+];
+
+/** The area inside a loop. */
+const loopArea = (loop: readonly Point[]) =>
+  Math.abs(
+    loop.reduce((sum, [x, y], i) => {
+      const [px, py] = loop.at(i - 1)!;
+      return sum + px * y - x * py;
+    }, 0),
+  ) / 2;
+
+/** The total area of the front and back faces (material 0), over two. */
+function faceArea(geometry: THREE.BufferGeometry): number {
+  const position = geometry.getAttribute("position");
+  const index = geometry.index;
+  const vertex = (k: number) =>
+    new THREE.Vector3().fromBufferAttribute(position, index ? index.getX(k) : k);
+  let area = 0;
+  for (const group of geometry.groups.filter((g) => g.materialIndex === 0)) {
+    for (let k = group.start; k < group.start + group.count; k += 3) {
+      area += new THREE.Triangle(vertex(k), vertex(k + 1), vertex(k + 2)).getArea();
+    }
+  }
+  return area / 2;
+}
 
 const COLOURS: Record<string, [number, number, number]> = {
   g: [0, 200, 0],
@@ -92,6 +169,19 @@ describe("buildBody", () => {
     // Four walls outside and four inside, two triangles each.
     expect(walls!.count / 3).toBe(16);
     body.dispose();
+  });
+
+  it("builds a shape from its traced loops where three would cover a hole", () => {
+    const pixels = art(...NOISY);
+    const outline = traceOutline(pixels);
+    expect(outline.shapes.some((s) => !triangulates(s.outer, s.holes))).toBe(true);
+    // Each shape's faces cover its loops exactly: simplified, or as traced where those fail.
+    const expected = outline.shapes.reduce((sum, { outer, holes, traced }) => {
+      const loops = triangulates(outer, holes) ? { outer, holes } : traced;
+      return sum + loopArea(loops.outer) - loops.holes.reduce((h, loop) => h + loopArea(loop), 0);
+    }, 0);
+    const drawn = outline.bounds.maxY - outline.bounds.minY;
+    expect(faceArea(bodyGeometry(outline, pixels, drawn))).toBeCloseTo(expected, 3);
   });
 
   it("builds nothing from a transparent drawing", () => {

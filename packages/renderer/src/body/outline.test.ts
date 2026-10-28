@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodePng, MOSSLING, STUDIO_FIXTURES } from "./fixtures/load";
 import { crossingLoops, simplifyLoop, traceOutline, type Outline, type Point } from "./outline";
+import { checkBody } from "./check";
 import type { Pixels } from "./pixels";
 
 /** Pixels from rows of characters: `.` is transparent, anything else opaque. */
@@ -55,7 +56,7 @@ function contains(loop: readonly Point[], [x, y]: Point): boolean {
 describe("traceOutline", () => {
   it("traces a rectangle as its four corners, clockwise on screen", () => {
     const outline = traceOutline(art("......", ".gggg.", ".gggg.", "......"));
-    expect(outline.shapes).toEqual([
+    expect(outline.shapes).toMatchObject([
       {
         outer: [
           [1, 1],
@@ -92,6 +93,21 @@ describe("traceOutline", () => {
     expect(new Set(outline.shapes[0]!.holes[0]!.map(String))).toEqual(
       new Set(["1,1", "5,1", "5,3", "1,3"]),
     );
+  });
+
+  it("keeps a shape a pixel wide, which simplifying would flatten, and sizes the body by it", () => {
+    // A 40 px block, and apart from it a vertical line 1 px wide and 80 px tall.
+    const rows = Array.from({ length: 100 }, (_, y) =>
+      Array.from({ length: 60 }, (_, x) =>
+        (x < 40 && y >= 50 && y < 90) || (x === 50 && y >= 10 && y < 90) ? "g" : ".",
+      ).join(""),
+    );
+    const pixels = art(...rows);
+    const outline = traceOutline(pixels);
+    expect(outline.shapes).toHaveLength(2);
+    expect(outline.bounds).toEqual({ minX: 0, minY: 10, maxX: 51, maxY: 90 });
+    // The hints see the same shapes as the body.
+    expect(checkBody(pixels).shapes).toBe(2);
   });
 
   it("keeps a hole of a single pixel", () => {
@@ -241,6 +257,11 @@ describe("crossingLoops", () => {
 
   it("finds a corner lying on another loop's side", () => {
     expect(crossingLoops([square(0, 0, 4), square(4, 1, 2)])).toEqual([0, 1]);
+  });
+
+  it("finds two loops running along the same segment", () => {
+    // The second square's left side is the first's right side, the other way round.
+    expect(crossingLoops([square(0, 0, 2), square(2, 0, 2)])).toEqual([0, 1]);
   });
 
   it("lets loops share a corner, as traced loops do at a diagonal", () => {
