@@ -18,6 +18,7 @@ const creature = (id: string, world: Vec3, heading = 0): CreatureSnapshot => ({
   position: { regionId: "r", x: world.x, z: world.z },
   world,
   heading,
+  cues: [],
 });
 
 const snapshot = (tick: number, creatures: CreatureSnapshot[]): SimulationSnapshot => ({

@@ -5,7 +5,8 @@ import type {
   SizeClass,
   Vec3,
 } from "@living-diorama/content-schema";
-import type { AssetKind } from "@living-diorama/extension-api";
+import type { AssetKind, Cue } from "@living-diorama/extension-api";
+import type { CreatureKnowledge } from "./creatures/knowledge";
 import type { NavigationOverlay } from "./navigation/overlay";
 import type { DayPhase } from "./runtime/time-of-day";
 import type { SceneData } from "./world/scene";
@@ -13,7 +14,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -122,8 +123,20 @@ export interface CreatureSnapshot {
   world: Vec3;
   heading: number;
   currentAction?: string;
+  /**
+   * What the creature visibly shows (ADR 0018 §15), so the renderer needs no action or need IDs:
+   * its action's cue (`eating`, `sleeping`) while that action isn't walking, then the cue of
+   * each need at or above the value it shows from (`hungry`).
+   */
+  cues: Cue[];
   /** Waypoints still to reach, per region, from where the creature stands. Only with debug on. */
   route?: RouteLegSnapshot[];
+  /** Need ID → value in [0, 1]. Only with debug on. */
+  needs?: Record<string, number>;
+  /** Places seen and cells visited. Only with debug on. */
+  knowledge?: CreatureKnowledge;
+  /** The placement ID of its home, or null. Only with debug on. */
+  home?: string | null;
 }
 
 export interface SimulationSnapshot {

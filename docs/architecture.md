@@ -24,16 +24,16 @@ flowchart TD
   api --> schema
 ```
 
-| Package               | Owns                                                                                                                                                                                                                                                                                                                                |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)). Also the drawing and library entry schemas of drawn species and their migrations ([ADR 0014](adr/0014-species-library.md) §5–6).                        |
-| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)), and `addEntries`, which adds a batch of entries to resolved registries all or nothing ([ADR 0012](adr/0012-runtime-species.md) §3).                                                               |
-| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation and size limits, actions, behaviors, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md), [ADR 0013](adr/0013-size-limits.md)). |
-| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)). Creature bodies extruded from their appearance image ([ADR 0011](adr/0011-extruded-creature-bodies.md)), and the Studio's body preview and drawing checks.                         |
-| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)), the `LibraryStore` over the species library's files, and the window channel between the Studio and the strip ([ADR 0015](adr/0015-creation-studio.md) §5).                                                 |
-| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                                                                                |
-| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and two React pages, the strip (`index.html`), which wires everything together, and the Creation Studio (`studio.html`).                                                                                                                                                              |
-| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                                                                      |
+| Package               | Owns                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)). Also the drawing and library entry schemas of drawn species and their migrations ([ADR 0014](adr/0014-species-library.md) §5–6).                                                                        |
+| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)), and `addEntries`, which adds a batch of entries to resolved registries all or nothing ([ADR 0012](adr/0012-runtime-species.md) §3).                                                                                                               |
+| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation and size limits, actions, behaviors, needs, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md), [ADR 0013](adr/0013-size-limits.md), [ADR 0018](adr/0018-living-behavior.md)). |
+| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)). Creature bodies extruded from their appearance image ([ADR 0011](adr/0011-extruded-creature-bodies.md)), and the Studio's body preview and drawing checks.                                                                         |
+| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)), the `LibraryStore` over the species library's files, and the window channel between the Studio and the strip ([ADR 0015](adr/0015-creation-studio.md) §5).                                                                                                 |
+| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                                                                                                                                |
+| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and two React pages, the strip (`index.html`), which wires everything together, and the Creation Studio (`studio.html`).                                                                                                                                                                                                              |
+| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                                                                                                                      |
 
 Each package's README lists what it owns and what it must not do.
 
@@ -135,25 +135,27 @@ Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/pr
 
 Request commands (`register_species`, `spawn`, `despawn`, `check_limits`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8).
 
-| Direction     | Message                        | Meaning                                                                                                    |
-| ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| main → worker | `init`                         | World ID, seed, tick rate, creature cap and the local time of day. Always first.                           |
-|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                              |
-|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.                           |
-|               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.               |
-|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                         |
-|               | `set_time_of_day`              | The local time of day, every minute and on resume ([ADR 0018](adr/0018-living-behavior.md) §5).            |
-|               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                                              |
-|               | `shutdown`                     | Stop the clock and close the worker.                                                                       |
-| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                         |
-|               | `snapshot`                     | Every tick: the time of day, creature positions and headings, plus the events since the previous snapshot. |
-|               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                                |
-|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.           |
-|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                               |
-|               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running.         |
-|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                                       |
+| Direction     | Message                        | Meaning                                                                                                          |
+| ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| main → worker | `init`                         | World ID, seed, tick rate, creature cap and the local time of day. Always first.                                 |
+|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                                    |
+|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.                                 |
+|               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.                     |
+|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                               |
+|               | `set_time_of_day`              | The local time of day, every minute and on resume ([ADR 0018](adr/0018-living-behavior.md) §5).                  |
+|               | `set_debug`                    | Include each walking creature's remaining route, need values, knowledge and home in snapshots.                   |
+|               | `shutdown`                     | Stop the clock and close the worker.                                                                             |
+| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                               |
+|               | `snapshot`                     | Every tick: the time of day, creature positions, headings and cues, plus the events since the previous snapshot. |
+|               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                                      |
+|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.                 |
+|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                                     |
+|               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running.               |
+|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                                             |
 
 Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also carries the resolved world position, so the renderer needs no surface lookups. See [world coordinates](world-coordinates.md).
+
+Each creature's `cues` say what it visibly shows, so the renderer needs no action or need IDs: its action's cue (`eating`, `sleeping`) while that action isn't walking, then each need's cue from the value the need declares (`hungry`) ([ADR 0018](adr/0018-living-behavior.md) §15).
 
 Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`; each carries a `creatureId`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
 
@@ -193,7 +195,7 @@ The tray and the page's controls both go through the host, so the host's state i
 
 Content is data registered into typed registries, and the engine refers to it only by ID. The flow is the same for built-in and third-party content:
 
-1. `createRegistries()` makes empty registries: `worlds`, `structures`, `species`, `surfaces`, `actions`, `behaviors`, `capabilities`, `affordances`, `assets`.
+1. `createRegistries()` makes empty registries: `worlds`, `structures`, `props`, `species`, `surfaces`, `actions`, `behaviors`, `capabilities`, `affordances`, `assets`, `needs`, `senses`, `traits`.
 2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, `core:walk`, `core:crossable`, the actions and the `core:wander` behavior.
 3. Each pack registers its entries. Registration validates each entry against its schema and rejects duplicates.
 4. `resolveReferences()` checks every reference between entries: the target exists, its version satisfies the declared range, and target-specific checks pass (surface params against the surface type's schema, a prop's model is a model asset).

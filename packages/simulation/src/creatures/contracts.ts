@@ -1,7 +1,9 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
-import type { ActionType, BehaviorType } from "@living-diorama/extension-api";
+import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
 import type { Rng } from "../runtime/rng";
+import type { DayPhase } from "../runtime/time-of-day";
+import type { CreatureKnowledge } from "./knowledge";
 
 // The code contracts behind action and behavior registry entries (ADR 0006 §7, §8). Like
 // surface providers, an implementation is a registered entry with extra methods; an entry
@@ -32,10 +34,26 @@ export interface ActionContext {
   readonly tick: number;
   readonly tickSeconds: number;
   readonly position: Readonly<RegionPosition>;
+  /** The day phase as of this tick (ADR 0018 §5). */
+  readonly dayPhase: DayPhase;
+  /** The creature's needs, ID → value in [0, 1]. Change them through `adjustNeed`. */
+  readonly needs: Readonly<Record<string, number>>;
+  /** Every registered trait: the species' value or the registry default. */
+  readonly traits: Readonly<Record<string, number>>;
   /** Plans a route from the creature to `destination`. A failure emits `path_failed`. */
   planRoute(destination: RegionPosition): RouteResult;
-  /** Moves the creature one tick along `path` at its species speed, switching region at portals. */
+  /**
+   * Moves the creature one tick along `path` at its species speed, switching region at portals.
+   * Only ticks on which an action walks count towards the stuck watchdog, and an action's cue is
+   * hidden on them. Any call counts as walking, also on a path already walked to its end (which
+   * moves nothing), so an action that has arrived should stop calling it.
+   */
   walk(path: PathState): "moving" | "arrived";
+  /**
+   * Changes one of the creature's needs by `delta`, clamped to [0, 1], at once (ADR 0018
+   * amendments, §11). A need the creature doesn't have is ignored.
+   */
+  adjustNeed(id: string, delta: number): void;
 }
 
 export type ActionStart =
@@ -48,13 +66,24 @@ export type ActionStart =
     }
   | { ok: false; reason: string; detail?: Record<string, unknown> };
 
-export type ActionStatus =
-  { status: "running" } | { status: "done" } | { status: "failed"; reason: string };
+/** What an action reports about the creature on each step, besides its progress. */
+export interface StepReport {
+  /** The creature slept this tick, so its needs change at their asleep rates. */
+  asleep?: boolean;
+  /**
+   * The cue the creature shows this tick. Shown only if it is the action type's declared `cue`
+   * and the action didn't walk this tick (ADR 0018 amendments, §15).
+   */
+  cue?: ActionCue;
+}
+
+export type ActionStatus = (
+  { status: "running" } | { status: "done" } | { status: "failed"; reason: string }
+) &
+  StepReport;
 
 /** An action type with its implementation, registered in the `actions` registry. */
 export interface ActionProvider extends ActionType {
-  /** True when the action is meant to move the creature; the stuck watchdog watches these. */
-  readonly moves: boolean;
   /** Checks preconditions and params, and returns the initial state. */
   start(params: unknown, context: ActionContext): ActionStart;
   /** Advances one tick. `state` is the value `start` returned, changed in place. */
@@ -73,7 +102,7 @@ export interface ReachableRegion {
   walkableArea: number;
 }
 
-/** Read-only world queries for behaviors. v1 has no senses, so they see the whole world. */
+/** Read-only world queries for behaviors. Perception (ADR 0018 §10) narrows them from PR 4a. */
 export interface WorldQueries {
   /**
    * Regions with walkable area the creature can reach from where it stands, its own included. A
@@ -87,6 +116,13 @@ export interface WorldQueries {
   randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
 }
 
+/** The action a creature is running and the behavior that chose it. */
+export interface RunningAction {
+  readonly id: string;
+  readonly behavior: string;
+  readonly startTick: number;
+}
+
 /** What a behavior sees. Copies, so a behavior cannot change the creature through it. */
 export interface CreatureObservation {
   readonly tick: number;
@@ -98,6 +134,21 @@ export interface CreatureObservation {
     readonly heading: number;
   };
   readonly lastResult?: Readonly<ActionResult>;
+  /**
+   * The running action, when behaviors are evaluated on a trigger while it runs (ADR 0018 §8).
+   * The behavior that owns it is asked for its current utility, which challengers must beat.
+   */
+  readonly action?: RunningAction;
+  readonly dayPhase: DayPhase;
+  /** The creature's needs, ID → value in [0, 1]: those its species' behaviors depend on. */
+  readonly needs: Readonly<Record<string, number>>;
+  /** Every registered trait: the species' value or the registry default. */
+  readonly traits: Readonly<Record<string, number>>;
+  /** The senses the species has, with this individual's variation applied. */
+  readonly senses: Readonly<Record<string, number>>;
+  readonly knowledge: Readonly<CreatureKnowledge>;
+  /** The placement ID of the creature's home, or null if it has none. */
+  readonly home: string | null;
   readonly world: WorldQueries;
 }
 
@@ -106,6 +157,8 @@ export interface Proposal {
   action: string;
   params?: unknown;
   utility: number;
+  /** Why, in a few words, for decision traces. */
+  reason?: string;
 }
 
 /** Plain data the engine keeps per creature and behavior, for cooldowns and hysteresis. */
@@ -114,8 +167,22 @@ export type BehaviorMemory = Record<string, unknown>;
 /** A behavior type with its implementation, registered in the `behaviors` registry. */
 export interface BehaviorProvider extends BehaviorType {
   /**
-   * Proposes the next action, or null. Called only when the creature needs a decision: its
-   * action finished or failed, or the watchdog interrupted it. Changes to `memory` are kept.
+   * Proposes the next action, or null. Called only on a trigger: the creature's action finished,
+   * failed or was interrupted, a need rose across a trigger value, or the day phase changed
+   * (ADR 0006 §8, ADR 0018 §7). A behavior that reads a need declares it as a `needs`
+   * dependency, which also gives the creature the need.
+   *
+   * - **Continuing.** While an action runs, `observation.action` names it and the behavior that
+   *   owns it. The owner is asked for its utility for continuing that action, and its proposal
+   *   is used only as that bar, never to replace the action. An owner that returns null sets the
+   *   bar to 0, so any other proposal of at least 0.15 interrupts its action.
+   * - **Memory.** Each behavior gets its own copy of `memory`, and changes to it are kept only
+   *   if the behavior is chosen. Nothing written while not chosen survives, so cooldowns and
+   *   anything a behavior must not forget come from the observation (its `lastResult`, running
+   *   `action`, `knowledge` or the tick), not from memory alone.
+   * - **Random draws.** Every behavior in one evaluation starts from the same position of the
+   *   creature's stream, so they see the same draws. Only the chosen behavior's use advances the
+   *   stream; an evaluation that chooses nothing advances it by one draw.
    */
   evaluate(observation: CreatureObservation, memory: BehaviorMemory, rng: Rng): Proposal | null;
 }
