@@ -44,7 +44,9 @@ export interface ActionContext {
   planRoute(destination: RegionPosition): RouteResult;
   /**
    * Moves the creature one tick along `path` at its species speed, switching region at portals.
-   * Only ticks on which an action walks count towards the stuck watchdog.
+   * Only ticks on which an action walks count towards the stuck watchdog, and an action's cue is
+   * hidden on them. Any call counts as walking, also on a path already walked to its end (which
+   * moves nothing), so an action that has arrived should stop calling it.
    */
   walk(path: PathState): "moving" | "arrived";
   /**
@@ -167,9 +169,20 @@ export interface BehaviorProvider extends BehaviorType {
   /**
    * Proposes the next action, or null. Called only on a trigger: the creature's action finished,
    * failed or was interrupted, a need rose across a trigger value, or the day phase changed
-   * (ADR 0006 §8, ADR 0018 §7). Every behavior is evaluated on its own copy of `memory` and of
-   * the creature's random stream; only the chosen behavior's changes to them are kept. A behavior
-   * that reads a need declares it as a `needs` dependency, which also gives the creature the need.
+   * (ADR 0006 §8, ADR 0018 §7). A behavior that reads a need declares it as a `needs`
+   * dependency, which also gives the creature the need.
+   *
+   * - **Continuing.** While an action runs, `observation.action` names it and the behavior that
+   *   owns it. The owner is asked for its utility for continuing that action, and its proposal
+   *   is used only as that bar, never to replace the action. An owner that returns null sets the
+   *   bar to 0, so any other proposal of at least 0.15 interrupts its action.
+   * - **Memory.** Each behavior gets its own copy of `memory`, and changes to it are kept only
+   *   if the behavior is chosen. Nothing written while not chosen survives, so cooldowns and
+   *   anything a behavior must not forget come from the observation (its `lastResult`, running
+   *   `action`, `knowledge` or the tick), not from memory alone.
+   * - **Random draws.** Every behavior in one evaluation starts from the same position of the
+   *   creature's stream, so they see the same draws. Only the chosen behavior's use advances the
+   *   stream; an evaluation that chooses nothing advances it by one draw.
    */
   evaluate(observation: CreatureObservation, memory: BehaviorMemory, rng: Rng): Proposal | null;
 }

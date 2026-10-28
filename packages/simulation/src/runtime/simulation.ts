@@ -77,8 +77,12 @@ export interface DecisionTrace {
   position: RegionPosition;
   /** How the previous action ended; absent for a creature's first decision. */
   lastResult?: ActionResult;
-  /** A need or day-phase trigger, if one started this evaluation. */
-  trigger?: DecisionTrigger;
+  /**
+   * Every need and day-phase trigger of this tick, in order: each trigger value a need rose
+   * across (needs in declaration order), then the day-phase reaction. Empty for an evaluation
+   * started only by the usual triggers.
+   */
+  triggers: DecisionTrigger[];
   /** The creature's need values at the decision. */
   needs: Record<string, number>;
   /**
@@ -509,17 +513,18 @@ export class Simulation {
     }
     creature.asleep = asleep;
 
-    let trigger = before && this.#integrateNeeds(creature, profile, before);
+    const triggers = before ? this.#integrateNeeds(creature, profile, before) : [];
     if (creature.phaseReactionTick !== undefined && this.tick >= creature.phaseReactionTick) {
       delete creature.phaseReactionTick;
-      trigger ??= { kind: "day_phase", phase: this.state.dayPhase };
+      triggers.push({ kind: "day_phase", phase: this.state.dayPhase });
     }
-    if (trigger) {
-      if (creature.action) this.#reconsider(creature, profile, trigger);
+    // Several triggers on one tick make one evaluation, which records them all.
+    if (triggers.length > 0) {
+      if (creature.action) this.#reconsider(creature, profile, triggers);
       else creature.decideAtTick = Math.min(creature.decideAtTick, this.tick);
     }
     if (!creature.action && this.tick >= creature.decideAtTick) {
-      this.#decide(creature, profile, trigger);
+      this.#decide(creature, profile, triggers);
     }
     // An action's cue shows while that action still runs after this tick.
     if (cue !== undefined && creature.action === running) this.#actionCues.set(creature.id, cue);
@@ -528,27 +533,29 @@ export class Simulation {
 
   /**
    * Needs change on simulation time at their awake or asleep rate, scaled by the rate trait and
-   * the individual's variation, and stay in [0, 1]. Returns the first trigger value a need rose
-   * across this tick (`before < t && now >= t`, so the trigger at 1 fires though 1 is the cap).
+   * the individual's variation, and stay in [0, 1]. Returns every trigger value a need rose across
+   * this tick (`before < t && now >= t`, so the trigger at 1 fires though 1 is the cap).
    */
   #integrateNeeds(
     creature: CreatureState,
     profile: SpeciesProfile,
     before: Readonly<Record<string, number>>,
-  ): DecisionTrigger | undefined {
+  ): DecisionTrigger[] {
     const hours = this.tickSeconds / SECONDS_PER_HOUR;
-    let trigger: DecisionTrigger | undefined;
+    const triggers: DecisionTrigger[] = [];
     for (const need of profile.needs) {
       const perHour = creature.asleep ? need.perHour.asleep : need.perHour.awake;
       const scale = (profile.rateScales[need.id] ?? 1) * (creature.variation.needs[need.id] ?? 1);
       const now = clamp01((creature.needs[need.id] ?? 0) + perHour * scale * hours);
       creature.needs[need.id] = now;
-      if (trigger) continue;
       const was = before[need.id] ?? 0;
-      const threshold = need.triggers.find((t) => was < t && now >= t);
-      if (threshold !== undefined) trigger = { kind: "need", need: need.id, threshold };
+      for (const threshold of need.triggers) {
+        if (was < threshold && now >= threshold) {
+          triggers.push({ kind: "need", need: need.id, threshold });
+        }
+      }
     }
-    return trigger;
+    return triggers;
   }
 
   #finish(creature: CreatureState, result: ActionResult) {
@@ -647,13 +654,21 @@ export class Simulation {
     creature.rng = chosen.rng;
   }
 
-  #traceBase(creature: CreatureState, trigger: DecisionTrigger | undefined) {
+  /**
+   * Moves the creature's random stream on by one draw when an evaluation commits nothing, so the
+   * next evaluation (a retry or another trigger) doesn't replay the same draws.
+   */
+  #advance(creature: CreatureState) {
+    new Rng(creature.rng).nextUint32();
+  }
+
+  #traceBase(creature: CreatureState, triggers: DecisionTrigger[]) {
     return {
       tick: this.tick,
       creatureId: creature.id,
       position: { ...creature.position },
       ...(creature.lastResult ? { lastResult: { ...creature.lastResult } } : {}),
-      ...(trigger ? { trigger } : {}),
+      triggers,
       needs: { ...creature.needs },
     };
   }
@@ -683,15 +698,16 @@ export class Simulation {
   }
 
   /** A decision with no action running (ADR 0006 §8): the highest proposal wins. */
-  #decide(creature: CreatureState, profile: SpeciesProfile, trigger?: DecisionTrigger) {
+  #decide(creature: CreatureState, profile: SpeciesProfile, triggers: DecisionTrigger[]) {
     const evaluated = this.#evaluate(creature, profile, this.#observation(creature, profile));
     const best = this.#best(evaluated);
     const trace: DecisionTrace = {
-      ...this.#traceBase(creature, trigger),
+      ...this.#traceBase(creature, triggers),
       candidates: evaluated.map(({ behavior, proposal }) => ({ behavior, proposal })),
       result: "no_proposal",
     };
     if (!best) {
+      this.#advance(creature);
       creature.decideAtTick = this.tick + this.#retryTicks;
       this.#onTrace?.(trace);
       return;
@@ -719,7 +735,7 @@ export class Simulation {
    * action only if it beats the bar by `INTERRUPT_MARGIN` and starts; the old action then ends as
    * `interrupted` (`outranked`). A challenger that fails to start leaves the action running.
    */
-  #reconsider(creature: CreatureState, profile: SpeciesProfile, trigger: DecisionTrigger) {
+  #reconsider(creature: CreatureState, profile: SpeciesProfile, triggers: DecisionTrigger[]) {
     const running = creature.action;
     if (!running || !profile.behaviors.some((b) => b.id !== running.behavior)) return;
     const observation = this.#observation(creature, profile, {
@@ -732,12 +748,13 @@ export class Simulation {
     const bar = usable(own) ? own.utility : 0;
     const best = this.#best(evaluated, running.behavior);
     const trace: DecisionTrace = {
-      ...this.#traceBase(creature, trigger),
+      ...this.#traceBase(creature, triggers),
       running: { action: running.id, behavior: running.behavior, utility: bar },
       candidates: evaluated.map(({ behavior, proposal }) => ({ behavior, proposal })),
       result: "kept",
     };
     if (!best || best.proposal.utility - bar < INTERRUPT_MARGIN - UTILITY_EPSILON) {
+      this.#advance(creature);
       this.#onTrace?.(trace);
       return;
     }

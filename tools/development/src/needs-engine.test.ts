@@ -4,6 +4,7 @@ import {
   followPathAction,
   INTERRUPT_MARGIN,
   PHASE_REACTION_SECONDS,
+  Rng,
   type ActionProvider,
   type BehaviorProvider,
   type CreatureObservation,
@@ -271,7 +272,7 @@ describe("triggers", () => {
     });
     const creature = spawn();
     run(1);
-    const needTriggers = () => traces.filter((t) => t.trigger?.kind === "need");
+    const needTriggers = () => traces.filter((t) => t.triggers.some((x) => x.kind === "need"));
     creature.needs["test:tiredness"] = 0;
     creature.needs["test:hunger"] = 0.49;
     run(10);
@@ -281,10 +282,10 @@ describe("triggers", () => {
     run(10);
     // Clamped at 1, it rises across nothing more.
     run(100);
-    expect(needTriggers().map((t) => [t.trigger, t.result])).toEqual([
-      [{ kind: "need", need: "test:hunger", threshold: 0.5 }, "kept"],
-      [{ kind: "need", need: "test:hunger", threshold: 0.9 }, "kept"],
-      [{ kind: "need", need: "test:hunger", threshold: 1 }, "kept"],
+    expect(needTriggers().map((t) => [t.triggers, t.result])).toEqual([
+      [[{ kind: "need", need: "test:hunger", threshold: 0.5 }], "kept"],
+      [[{ kind: "need", need: "test:hunger", threshold: 0.9 }], "kept"],
+      [[{ kind: "need", need: "test:hunger", threshold: 1 }], "kept"],
     ]);
     expect(needTriggers()[2]!.needs["test:hunger"]).toBe(1);
     expect(creature.action?.id).toBe("core:idle");
@@ -305,7 +306,7 @@ describe("triggers", () => {
       simulation.setTimeOfDay(18 * 60);
       run(PHASE_REACTION_SECONDS * 10 + 1);
       return traces
-        .filter((t) => t.trigger?.kind === "day_phase")
+        .filter((t) => t.triggers.some((x) => x.kind === "day_phase"))
         .map((t) => [t.creatureId, t.tick] as const);
     };
     const first = reactions();
@@ -319,6 +320,28 @@ describe("triggers", () => {
     }
     expect(new Set(first.map(([, tick]) => tick)).size).toBeGreaterThan(1);
     expect(reactions()).toEqual(first);
+  });
+
+  it("records every trigger of a tick in one evaluation", () => {
+    const { spawn, run, traces } = setup({
+      behaviors: [always("test:a", idleLong), always("test:watcher", null)],
+    });
+    const creature = spawn();
+    run(1);
+    creature.needs["test:hunger"] = 0.4999;
+    creature.needs["test:tiredness"] = 0.8999;
+    // Both rise across a trigger value on the same tick.
+    run(1);
+    creature.needs["test:hunger"] = 0.4999;
+    creature.needs["test:tiredness"] = 0;
+    run(1);
+    expect(traces.filter((t) => t.triggers.length > 0).map((t) => t.triggers)).toEqual([
+      [
+        { kind: "need", need: "test:hunger", threshold: 0.5 },
+        { kind: "need", need: "test:tiredness", threshold: 0.9 },
+      ],
+      [{ kind: "need", need: "test:hunger", threshold: 0.5 }],
+    ]);
   });
 });
 
@@ -348,7 +371,7 @@ describe("interruption", () => {
     creature.needs["test:tiredness"] = 0;
     creature.needs["test:hunger"] = 0.495;
     s.run(5);
-    const trace = s.traces.find((t) => t.trigger?.kind === "need")!;
+    const trace = s.traces.find((t) => t.triggers.some((x) => x.kind === "need"))!;
     return { ...s, creature, trace };
   }
 
@@ -410,12 +433,69 @@ describe("interruption", () => {
     run(1);
     const rng = structuredClone(creature.rng);
     const memory = structuredClone(creature.memory);
+    // With no action running, only the chosen behavior's memory was kept.
     expect(memory).toEqual({ "test:owner": { calls: 1, roll: expect.any(Number) } });
+    creature.needs["test:tiredness"] = 0;
     creature.needs["test:hunger"] = 0.495;
     run(5);
     expect(traces.at(-1)!.result).toBe("kept");
+    // Nothing was chosen: memory is untouched and the stream moved on by exactly one draw.
+    new Rng(rng).nextUint32();
     expect(creature.rng).toEqual(rng);
     expect(creature.memory).toEqual(memory);
+  });
+
+  it("leaves the running action alone when a winning challenger can't start", () => {
+    const challenger = behavior("test:challenger", (observation) =>
+      observation.action ? { action: "test:nothing", utility: 1, reason: "eager" } : null,
+    );
+    const { spawn, run, traces } = setup({
+      behaviors: [always("test:owner", idleLong), challenger],
+    });
+    const creature = spawn();
+    run(1);
+    creature.needs["test:tiredness"] = 0;
+    creature.needs["test:hunger"] = 0.495;
+    run(5);
+    expect(traces.at(-1)).toMatchObject({
+      result: "rejected",
+      reason: "unknown_action",
+      chosen: { behavior: "test:challenger", action: "test:nothing" },
+    });
+    expect(creature.action).toMatchObject({ id: "core:idle", behavior: "test:owner" });
+    expect(creature.lastResult).toBeUndefined();
+  });
+});
+
+describe("decisions with no action running", () => {
+  it("evaluates on scratch memory and keeps only the chosen behavior's", () => {
+    const writing = (id: string, utility: number) =>
+      behavior(id, (_observation, memory) => {
+        memory.wrote = id;
+        return { ...idleLong, utility };
+      });
+    const { spawn, run, traces } = setup({
+      behaviors: [writing("test:low", 0.2), writing("test:high", 0.4)],
+    });
+    const creature = spawn();
+    run(1);
+    expect(traces[0]!.chosen?.behavior).toBe("test:high");
+    expect(creature.memory).toEqual({ "test:high": { wrote: "test:high" } });
+  });
+
+  it("moves the random stream on when nothing is proposed, so retries draw anew", () => {
+    const rolls: number[] = [];
+    const shy = behavior("test:shy", (_observation, _memory, rng) => {
+      const roll = rng.next();
+      rolls.push(roll);
+      return roll < 0.8 ? null : idleLong;
+    });
+    const { spawn, run, traces } = setup({ behaviors: [shy] });
+    spawn();
+    // A retry every second.
+    for (let t = 0; t < 1_000 && !traces.some((x) => x.result === "started"); t++) run(1);
+    expect(traces.some((t) => t.result === "started")).toBe(true);
+    expect(new Set(rolls).size).toBe(rolls.length);
   });
 });
 
