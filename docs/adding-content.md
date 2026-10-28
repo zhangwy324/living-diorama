@@ -74,7 +74,9 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
   "body": { "thickness": 0.3 },
   "capabilities": { "core:walk": 0.8 },
   "baseSpeed": 0.6,
-  "behaviors": ["core:wander"]
+  "behaviors": ["core:wander"],
+  "senses": { "core:vision": 8 },
+  "traits": { "core:nocturnal": 0 }
 }
 ```
 
@@ -91,6 +93,10 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
 - `body.thickness` (optional) is how deep the body is from front to back, as a share of its height: from 0.1 to 0.8, 0.4 if left out. The Studio's Thickness slider sets it for drawn creatures.
 - `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. v1 has one locomotion capability, `core:walk` (land and cave regions, slopes up to 35°). A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
 - `behaviors` lists what decides the creature's next action. v1 has `core:wander`. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
+- `senses` (optional) maps each sense the creature has to its strength. A sense left out is one it lacks. The engine registers `core:vision`, its range in metres (1 to 30).
+- `traits` (optional) maps traits to values. A trait left out takes its default. The engine registers `core:nocturnal` (0 sleeps at night, 1 by day; default 0) and `core:appetite` (scales how fast hunger rises, 0.5 to 2; default 1).
+
+  Senses and traits are registered in `senses` and `traits` with a `default`, `min` and `max`, and a species value outside that range is an error ([ADR 0018](adr/0018-living-behavior.md) §4). Needs (`core:hunger`, `core:tiredness`) are registered in `needs`. Nothing reads senses, traits or needs yet: creatures act on them once living behavior lands.
 
 The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](../apps/desktop/src/startup.ts). To see a new species, add it there with a count.
 

@@ -327,6 +327,36 @@ describe("SpeciesDefinition", () => {
     );
   });
 
+  it("defaults senses and traits to none and checks their keys", () => {
+    expect(parseSpeciesDefinition(species)).toMatchObject({
+      ok: true,
+      value: { senses: {}, traits: {} },
+    });
+    expect(
+      parseSpeciesDefinition({
+        ...species,
+        senses: { "core:vision": 8 },
+        traits: { "core:nocturnal": 1 },
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: { senses: { "core:vision": 8 }, traits: { "core:nocturnal": 1 } },
+    });
+    const found = diagnostics(
+      parseSpeciesDefinition({
+        ...species,
+        senses: { vision: 8 },
+        traits: { "core:nocturnal": "yes" },
+      }),
+    );
+    expect(found.map((d) => d.path)).toEqual(
+      expect.arrayContaining([
+        ["senses", "vision"],
+        ["traits", "core:nocturnal"],
+      ]),
+    );
+  });
+
   it("requires at least one capability", () => {
     expect(messages(parseSpeciesDefinition({ ...species, capabilities: {} }))).toEqual([
       "error: capabilities: A species needs at least one capability (custom)",

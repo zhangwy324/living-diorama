@@ -1,4 +1,8 @@
-import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
+import {
+  FoodAffordanceParamsSchema,
+  formatDiagnostic,
+  type Result,
+} from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
 import { addEntries, createRegistries, resolveReferences, type Registries } from "./index";
 
@@ -119,6 +123,93 @@ describe("Registry", () => {
       "Expected a params schema",
     ]);
   });
+
+  it("validates affordances: a params schema and a positive whole remember cap", () => {
+    const registries = createRegistries();
+    expectOk(
+      registries.affordances.register({
+        id: "core:food",
+        version: "1.0.0",
+        paramsSchema: FoodAffordanceParamsSchema,
+        remember: 8,
+      }),
+    );
+    const result = registries.affordances.register({
+      id: "core:shelter",
+      version: "1.0.0",
+      remember: 2.5,
+    });
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "paramsSchema",
+      "remember",
+    ]);
+  });
+
+  it("validates needs: rates, actAt, ascending triggers including actAt, cue and atMax", () => {
+    const registries = createRegistries();
+    const hunger = {
+      id: "core:hunger",
+      version: "1.0.0",
+      perHour: { awake: 0.6, asleep: 0.06 },
+      actAt: 0.4,
+      triggers: [0.4, 0.9, 1],
+      cue: { cue: "hungry", from: 0.8 },
+      atMax: { speedFactor: 0.8 },
+    };
+    expectOk(registries.needs.validate(hunger));
+    expectOk(
+      registries.needs.validate({
+        id: "core:tiredness",
+        version: "1.0.0",
+        perHour: { awake: 0.05, asleep: -0.125 },
+        actAt: 0.9,
+        triggers: [0.9],
+      }),
+    );
+    const bad = registries.needs.validate({
+      ...hunger,
+      perHour: { awake: "fast" },
+      triggers: [0.9, 0.5, 1.5],
+      cue: { cue: "starving", from: 0 },
+      atMax: { speedFactor: 2 },
+    });
+    expect(bad.ok ? [] : bad.diagnostics.map((d) => `${d.path.join(".")}: ${d.message}`)).toEqual([
+      "perHour.awake: Expected the change per hour awake",
+      "perHour.asleep: Expected the change per hour asleep",
+      "triggers.1: Triggers must be in ascending order",
+      "triggers.2: A trigger must be a number in (0, 1]",
+      "triggers: Triggers must include actAt",
+      'cue.cue: Unknown cue "starving" (expected one of eating, sleeping, hungry)',
+      "cue.from: A cue's from must be a number in (0, 1]",
+      "atMax.speedFactor: speedFactor must be a number in (0, 1]",
+    ]);
+  });
+
+  it("validates senses and traits: a default within [min, max]", () => {
+    const registries = createRegistries();
+    expectOk(
+      registries.traits.validate({
+        id: "core:nocturnal",
+        version: "1.0.0",
+        default: 0,
+        min: 0,
+        max: 1,
+      }),
+    );
+    const outside = registries.senses.validate({
+      id: "core:vision",
+      version: "1.0.0",
+      default: 40,
+      min: 1,
+      max: 30,
+    });
+    expect(outside.ok ? [] : outside.diagnostics.map((d) => d.path.join("."))).toEqual(["default"]);
+    const missing = registries.senses.validate({ id: "core:vision", version: "1.0.0", min: 1 });
+    expect(missing.ok ? [] : missing.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "default",
+      "max",
+    ]);
+  });
 });
 
 describe("resolveReferences", () => {
@@ -207,6 +298,57 @@ describe("resolveReferences", () => {
     expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
       'error: structures/test:bridge affordances[0]: "core:crossable" is not registered in affordances (unresolved_reference)',
       'error: species/test:pebble capabilities.core:wlak: "core:wlak" is not registered in capabilities (unresolved_reference)',
+    ]);
+  });
+
+  it("checks a species' senses and traits against the registered ranges", () => {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(
+      registries.senses.register({
+        id: "core:vision",
+        version: "1.0.0",
+        default: 8,
+        min: 1,
+        max: 30,
+      }),
+    );
+    expectOk(
+      registries.traits.register({
+        id: "core:appetite",
+        version: "1.0.0",
+        default: 1,
+        min: 0.5,
+        max: 2,
+      }),
+    );
+    expectOk(
+      registries.species.register({
+        ...species,
+        senses: { "core:vision": 8 },
+        traits: { "core:appetite": 2 },
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+
+    const bad = createRegistries();
+    withActions(bad);
+    expectOk(bad.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(bad.senses.register(registries.senses.get("core:vision")));
+    expectOk(bad.traits.register(registries.traits.get("core:appetite")));
+    expectOk(
+      bad.species.register({
+        ...species,
+        senses: { "core:vision": 40, "core:smell": 3 },
+        traits: { "core:appetite": 0.1, "core:shy": 1 },
+      }),
+    );
+    expect(resolveReferences(bad).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: species/test:pebble senses.core:vision: "core:vision" is 40, outside its range [1, 30] (invalid_value)',
+      'error: species/test:pebble senses.core:smell: "core:smell" is not registered in senses (unresolved_reference)',
+      'error: species/test:pebble traits.core:appetite: "core:appetite" is 0.1, outside its range [0.5, 2] (invalid_value)',
+      'error: species/test:pebble traits.core:shy: "core:shy" is not registered in traits (unresolved_reference)',
     ]);
   });
 

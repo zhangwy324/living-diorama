@@ -29,6 +29,9 @@ export const REGISTRY_NAMES = [
   "capabilities",
   "affordances",
   "assets",
+  "needs",
+  "senses",
+  "traits",
 ] as const;
 export type RegistryName = (typeof REGISTRY_NAMES)[number];
 
@@ -52,8 +55,49 @@ export interface SurfaceType extends CodeEntry {
 
 export type ActionType = CodeEntry;
 export type BehaviorType = CodeEntry;
-/** An affordance a structure can offer, e.g. `core:crossable` (ADR 0005 §2). */
-export type AffordanceType = CodeEntry;
+
+/**
+ * An affordance a structure or prop can offer, e.g. `core:crossable` (ADR 0005 §2) or `core:food`
+ * (ADR 0018 §2). Where it is offered, its params are validated against `paramsSchema`.
+ */
+export interface AffordanceType extends CodeEntry {
+  readonly paramsSchema: Schema;
+  /** How many places offering it a creature remembers at most. Not remembered if omitted. */
+  readonly remember?: number;
+}
+
+/** Visible cues the renderer knows how to show, without knowing any content ID (ADR 0018 §15). */
+export const CUES = ["eating", "sleeping", "hungry"] as const;
+export type Cue = (typeof CUES)[number];
+
+/**
+ * A need such as `core:hunger` (ADR 0018 §1). Its value runs from 0 (met) to 1 (pressing) and
+ * changes on its own at the declared rates; actions change it further.
+ */
+export interface NeedType extends CodeEntry {
+  /** Change per hour of simulation time, awake and asleep. Negative falls, e.g. tiredness asleep. */
+  readonly perHour: { readonly awake: number; readonly asleep: number };
+  /** The value from which a creature starts to act on the need. */
+  readonly actAt: number;
+  /** Values that start a decision when the need rises across them. Ascending, and includes `actAt`. */
+  readonly triggers: readonly number[];
+  /** A cue the creature shows from the given value, e.g. `"hungry"` from 0.8. */
+  readonly cue?: { readonly cue: Cue; readonly from: number };
+  /** What happens while the need is at 1, e.g. walking at 80% speed. */
+  readonly atMax?: { readonly speedFactor?: number };
+}
+
+/** A numeric value a species can declare, with its range and the value used when omitted. */
+export interface RangedEntry extends CodeEntry {
+  readonly default: number;
+  readonly min: number;
+  readonly max: number;
+}
+
+/** A sense, e.g. `core:vision` with its range in metres. A species without it lacks the sense. */
+export type SenseType = RangedEntry;
+/** A trait, e.g. `core:nocturnal`. A species without it has the default. */
+export type TraitType = RangedEntry;
 
 /** Where and how a locomotion capability moves a creature (ADR 0005 §3). */
 export interface LocomotionRule {
@@ -84,7 +128,10 @@ export interface AssetEntry extends CodeEntry {
   readonly scale?: number;
 }
 
-/** The v1 registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007). */
+/**
+ * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
+ * needs, senses and traits (ADR 0018).
+ */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
@@ -95,6 +142,109 @@ export interface Registries {
   capabilities: Registry<CapabilityType>;
   affordances: Registry<AffordanceType>;
   assets: Registry<AssetEntry>;
+  needs: Registry<NeedType>;
+  senses: Registry<SenseType>;
+  traits: Registry<TraitType>;
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isShare = (value: unknown): value is number =>
+  isFiniteNumber(value) && value > 0 && value <= 1;
+
+function validateAffordance(entry: AffordanceType, source: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  if (typeof entry.paramsSchema?.safeParse !== "function") {
+    found.push(error("invalid_type", "Expected a params schema", ["paramsSchema"], source));
+  }
+  const remember = entry.remember;
+  if (remember !== undefined && !(Number.isInteger(remember) && remember > 0)) {
+    found.push(error("invalid_value", "remember must be a positive integer", ["remember"], source));
+  }
+  return found;
+}
+
+function validateNeed(entry: NeedType, source: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  for (const key of ["awake", "asleep"] as const) {
+    if (!isFiniteNumber(entry.perHour?.[key])) {
+      found.push(
+        error("invalid_type", `Expected the change per hour ${key}`, ["perHour", key], source),
+      );
+    }
+  }
+  if (!isShare(entry.actAt)) {
+    found.push(error("invalid_value", "actAt must be a number in (0, 1]", ["actAt"], source));
+  }
+  if (!Array.isArray(entry.triggers)) {
+    found.push(error("invalid_type", "Expected a list of trigger values", ["triggers"], source));
+  } else {
+    entry.triggers.forEach((value, i) => {
+      if (!isShare(value)) {
+        found.push(
+          error("invalid_value", "A trigger must be a number in (0, 1]", ["triggers", i], source),
+        );
+      } else if (i > 0 && !(value > (entry.triggers[i - 1] ?? 0))) {
+        found.push(
+          error("invalid_value", "Triggers must be in ascending order", ["triggers", i], source),
+        );
+      }
+    });
+    if (isShare(entry.actAt) && !entry.triggers.includes(entry.actAt)) {
+      found.push(error("invalid_value", "Triggers must include actAt", ["triggers"], source));
+    }
+  }
+  if (entry.cue !== undefined) {
+    if (!CUES.includes(entry.cue.cue)) {
+      found.push(
+        error(
+          "invalid_value",
+          `Unknown cue "${String(entry.cue.cue)}" (expected one of ${CUES.join(", ")})`,
+          ["cue", "cue"],
+          source,
+        ),
+      );
+    }
+    if (!isShare(entry.cue.from)) {
+      found.push(
+        error("invalid_value", "A cue's from must be a number in (0, 1]", ["cue", "from"], source),
+      );
+    }
+  }
+  const speedFactor = entry.atMax?.speedFactor;
+  if (speedFactor !== undefined && !isShare(speedFactor)) {
+    found.push(
+      error(
+        "invalid_value",
+        "speedFactor must be a number in (0, 1]",
+        ["atMax", "speedFactor"],
+        source,
+      ),
+    );
+  }
+  return found;
+}
+
+function validateRanged(entry: RangedEntry, source: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  for (const key of ["default", "min", "max"] as const) {
+    if (!isFiniteNumber(entry[key])) {
+      found.push(error("invalid_type", `Expected a number for ${key}`, [key], source));
+    }
+  }
+  if (found.length > 0) return found;
+  if (!(entry.min <= entry.default && entry.default <= entry.max)) {
+    found.push(
+      error(
+        "invalid_value",
+        `default must lie in [min, max], here [${entry.min}, ${entry.max}]`,
+        ["default"],
+        source,
+      ),
+    );
+  }
+  return found;
 }
 
 function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[] {
@@ -291,6 +441,32 @@ function worldReferences(world: WorldDefinition): Reference[] {
   return refs;
 }
 
+/** References from a species' sense or trait map, each value checked against the entry's range. */
+const rangedReferences = (
+  registry: "senses" | "traits",
+  values: Record<string, number>,
+): Reference[] =>
+  Object.entries(values).map(([id, value]) => {
+    const path = [registry, id];
+    return {
+      registry,
+      id,
+      path,
+      check: (target) => {
+        const { min, max } = target as RangedEntry;
+        return value >= min && value <= max
+          ? []
+          : [
+              error(
+                "invalid_value",
+                `"${id}" is ${value}, outside its range [${min}, ${max}]`,
+                path,
+              ),
+            ];
+      },
+    };
+  });
+
 const speciesReferences = (species: SpeciesDefinition): Reference[] => [
   assetReference(species.appearance, ["appearance"]),
   ...species.behaviors.map((id, i) => ({ registry: "behaviors", id, path: ["behaviors", i] })),
@@ -299,6 +475,8 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
     id,
     path: ["capabilities", id],
   })),
+  ...rangedReferences("senses", species.senses),
+  ...rangedReferences("traits", species.traits),
 ];
 
 const structureReferences = (structure: StructureDefinition): Reference[] => [
@@ -342,11 +520,23 @@ export function createRegistries(): Registries {
       references: dependencyReferences,
     }),
     affordances: new Registry<AffordanceType>("affordances", {
-      validate: validateCodeEntry(),
+      validate: validateCodeEntry<AffordanceType>(validateAffordance),
       references: dependencyReferences,
     }),
     assets: new Registry<AssetEntry>("assets", {
       validate: validateCodeEntry<AssetEntry>(validateAsset),
+      references: dependencyReferences,
+    }),
+    needs: new Registry<NeedType>("needs", {
+      validate: validateCodeEntry<NeedType>(validateNeed),
+      references: dependencyReferences,
+    }),
+    senses: new Registry<SenseType>("senses", {
+      validate: validateCodeEntry<SenseType>(validateRanged),
+      references: dependencyReferences,
+    }),
+    traits: new Registry<TraitType>("traits", {
+      validate: validateCodeEntry<TraitType>(validateRanged),
       references: dependencyReferences,
     }),
   };

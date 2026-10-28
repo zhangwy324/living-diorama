@@ -4,7 +4,7 @@ Versioned data contracts for worlds, terrain, regions, connections, structures a
 
 ## Owns
 
-- Schema definitions and their schema versions.
+- Schema definitions and their schema versions, and the params schemas of the core affordances.
 - The species library's drawing and entry schemas, and the migrations that bring older library files up to date ([ADR 0014](../../docs/adr/0014-species-library.md)).
 - Validation of content data, with structured, readable diagnostics.
 - Namespaced and local ID formats, and the constants from [world coordinates](../../docs/world-coordinates.md).
