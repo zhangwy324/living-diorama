@@ -4,6 +4,8 @@
 - **Date:** 2026-10-27
 - **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs and the mossling art. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
 
+**Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13): holes are kept (§2), walls are straight with no rounded edge (§4), and the walls take the rim's own colour instead of the side texture (§5). The notes in those sections say what changed.
+
 This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still holds.
 
 ## Decisions
@@ -14,11 +16,17 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 2. **Trace the outline of each opaque shape.** A pixel is opaque at alpha ≥ 128. Opaque pixels are grouped into 4-connected shapes; a shape under 0.5% of the opaque area is a speck and is dropped. Holes in a shape are filled. Each shape's outer boundary is followed along pixel edges and simplified (Ramer–Douglas–Peucker, 1 px tolerance).
 
+   _Amended by [ADR 0017](0017-hollow-bodies-and-fill.md) §1 and §4:_ holes are no longer filled. Every enclosed undrawn area is a hole through the body, whatever its size, and a shape inside a hole is kept as its own slab. Loops that would cross after simplifying are simplified less.
+
 3. **Size from the drawn content, not the image.** The body is trimmed to the bounds of the shapes it keeps: the size class's height is the height of the body, its feet touch the ground, and it is centred on the creature's position across its width. Transparent padding around a drawing no longer makes a creature float or shrink.
 
 4. **Extrude with rounded edges that grow outward.** Each shape becomes its own slab (`THREE.ExtrudeGeometry`), all centred on the same plane. The body is 40% of its height thick, including the rounded edges. The rounded edge is 4% of the height, in 3 segments, and grows outward from the outline: the drawing's outline is the edge of the front and back faces, and the silhouette is that much larger than the drawing. Growing outward can't break on thin strokes, where shrinking the faces to keep the silhouette exact would turn them inside out.
 
+   _Amended by [ADR 0017](0017-hollow-bodies-and-fill.md) §2:_ the bevel is removed. Each wall is a single vertical step between the two faces, the depth stays 40%, and the body's outline is the traced picture; the bevel folded over itself in narrow openings.
+
 5. **One projection, two textures.** Every vertex takes its texture coordinates from its position in the drawing's plane, so front, back, sides and rounded edges all line up with the drawing.
+
+   _Amended by [ADR 0017](0017-hollow-bodies-and-fill.md) §3:_ faces and walls share one texture. A wall is coloured like the closest drawn pixel (alpha at least half), outline included, with no blur. The side texture below and its outline detection were removed (kept for later as issue #71). The back is still the drawing mirrored.
    - The **front and back** use the drawing. Its transparent pixels take the colour of the nearest opaque pixel, so the slight overreach of a simplified outline never shows the background. The back shows the drawing mirrored, which reads as the creature facing the other way.
    - The **sides and rounded edges** use the drawing's colours without its outline (amendment, M12, issue #40). The outline is measured from the drawing rather than assumed:
      - Its colour is the commonest colour of the boundary (opaque pixels at most 2 px deep, depth by Euclidean distance). It counts as an outline if it covers at least half the boundary, differs from the commonest colour of the drawing's core (pixels at least half as deep as the deepest), and is a band no thicker than a third of that deepest depth. Thickness is the 90th percentile depth of the pixels of that colour joined to the boundary, so eyes and other details of the same colour don't count. Colours within an RGB distance of 40 count as one.
@@ -53,7 +61,7 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 Known limits, for pack authors and the Creation Studio's hints (roadmap M11):
 
-- **Holes are filled.** A doughnut becomes a disc, with the hole's colour on its faces.
+- **Holes are filled.** A doughnut becomes a disc, with the hole's colour on its faces. _No longer true since [ADR 0017](0017-hollow-bodies-and-fill.md): a doughnut is a doughnut, the silhouette is exactly the drawing, and the walls take the edge's colour, outline included._
 - **The silhouette is slightly larger than the drawing,** by the rounded edge (about 1–2 px in the strip). Thin strokes get thicker rather than breaking. At sharp inward corners the rounded edge can overlap itself a little.
 - **Parts that aren't joined are separate slabs,** floating where they were drawn. Parts touching only at a corner count as separate.
 - **The sides show the drawing's edge, without its outline** (§5). A rim of one colour around a different core, up to a third of the shape's depth, counts as an outline even if it was meant as the creature's colour. A detail of another colour right behind the outline shows on the sides there. Where two colours meet at the edge, the sides blend them over a few pixels.

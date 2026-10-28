@@ -1,16 +1,15 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { traceOutline, type Outline } from "./outline";
+import { traceOutline, type Outline, type Point } from "./outline";
 import type { Pixels } from "./pixels";
-import { capColours, sideColours } from "./textures";
+import { bodyColours } from "./textures";
 
-// A solid body extruded from a drawing (ADR 0011). The drawing faces +x, feet at y = 0.
+// A solid body extruded from a drawing (ADR 0011, ADR 0017). The drawing faces +x, feet at y = 0.
 
-/** Thickness, including the rounded edges, as a share of the body's height. */
+/** Thickness as a share of the body's height. */
 export const BODY_DEPTH = 0.4;
-/** The rounded edge, as a share of the body's height. It grows outward from the outline. */
-const BEVEL = 0.04;
-const BEVEL_SEGMENTS = 3;
+/** The fallback block's rounded edge, as a share of its height. */
+const FALLBACK_RADIUS = 0.04;
 const EMISSIVE_INTENSITY = 0.35;
 const ROUGHNESS = 0.9;
 /**
@@ -24,8 +23,8 @@ const FALLBACK_ASPECT = 0.75;
 
 export interface Body {
   geometry: THREE.BufferGeometry;
-  /** Front and back, then sides and rounded edges: the extrusion's two groups. */
-  material: THREE.Material | THREE.Material[];
+  /** One material for the front, back and walls: the extrusion's two groups share it. */
+  material: THREE.Material;
   dispose(): void;
 }
 
@@ -34,32 +33,31 @@ export function buildBody(pixels: Pixels, height: number): Body | undefined {
   const outline = traceOutline(pixels);
   if (!outline.shapes.length) return undefined;
   const geometry = bodyGeometry(outline, pixels, height);
-  const textures = [capColours(pixels), sideColours(pixels)].map((colours) =>
-    bodyTexture(colours, pixels.width, pixels.height),
-  );
-  const material = textures.map(
-    (map) =>
-      new THREE.MeshStandardMaterial({
-        map,
-        emissive: "#ffffff",
-        emissiveMap: map,
-        emissiveIntensity: EMISSIVE_INTENSITY,
-        roughness: ROUGHNESS,
-        shadowSide: SHADOW_SIDE,
-      }),
-  );
+  // Faces and walls read the same texture, so a wall takes the colour of the rim it runs back from.
+  const map = bodyTexture(bodyColours(pixels), pixels.width, pixels.height);
+  const material = new THREE.MeshStandardMaterial({
+    map,
+    emissive: "#ffffff",
+    emissiveMap: map,
+    emissiveIntensity: EMISSIVE_INTENSITY,
+    roughness: ROUGHNESS,
+    shadowSide: SHADOW_SIDE,
+  });
   return {
     geometry,
     material,
     dispose() {
       geometry.dispose();
-      for (const m of material) m.dispose();
-      for (const t of textures) t.dispose();
+      material.dispose();
+      map.dispose();
     },
   };
 }
 
-/** The extruded shapes, scaled to `height`, centred on x and z, feet at y = 0. */
+/**
+ * The extruded shapes with their holes, scaled to `height`, centred on x and z, feet at y = 0.
+ * The walls run straight from the front face to the back, so the silhouette is the drawing's.
+ */
 export function bodyGeometry(
   outline: Outline,
   image: { width: number; height: number },
@@ -67,22 +65,25 @@ export function bodyGeometry(
 ): THREE.BufferGeometry {
   // Built in pixels with y up, then scaled. The texture's rows are top first, so v = -y / height.
   const drawn = outline.bounds.maxY - outline.bounds.minY;
-  const bevel = drawn * BEVEL;
-  const shapes = outline.shapes.map(
-    (loop) => new THREE.Shape(loop.map(([x, y]) => new THREE.Vector2(x, -y))),
-  );
+  const shapes = outline.shapes.map(({ outer, holes, traced }) => {
+    // three's triangulation can, rarely, cover a hole of a simplified shape; the traced loops
+    // follow pixel edges and triangulate as they should.
+    const loops = triangulates(outer, holes) ? { outer, holes } : traced;
+    const contour = vectors(loops.outer);
+    // Counter-clockwise, so ExtrudeGeometry reverses it and puts every hole the other way round.
+    if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+    const shape = new THREE.Shape(contour);
+    shape.holes = loops.holes.map((loop) => new THREE.Path(vectors(loop)));
+    return shape;
+  });
   const uv = (vertices: number[], index: number) =>
     new THREE.Vector2(
       (vertices[index * 3] ?? 0) / image.width,
       -(vertices[index * 3 + 1] ?? 0) / image.height,
     );
   const geometry = new THREE.ExtrudeGeometry(shapes, {
-    depth: drawn * BODY_DEPTH - 2 * bevel,
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelOffset: 0,
-    bevelSegments: BEVEL_SEGMENTS,
+    depth: drawn * BODY_DEPTH,
+    bevelEnabled: false,
     UVGenerator: {
       generateTopUV: (_geometry, vertices, a, b, c) => [a, b, c].map((i) => uv(vertices, i)),
       generateSideWallUV: (_geometry, vertices, a, b, c, d) =>
@@ -97,6 +98,38 @@ export function bodyGeometry(
   return geometry.scale(scale, scale, scale);
 }
 
+/** A loop in the extrusion's plane: y up. */
+const vectors = (loop: readonly Point[]) => loop.map(([x, y]) => new THREE.Vector2(x, -y));
+
+/**
+ * Whether three triangulates the shape exactly: its triangles add up to the shape's area, the
+ * holes' taken from the outer loop's. Loops don't cross (`traceOutline`), so any other total
+ * means a triangle covers a hole or misses part of the shape.
+ */
+export function triangulates(
+  outer: readonly Point[],
+  holes: readonly (readonly Point[])[],
+): boolean {
+  // Oriented as ExtrudeGeometry orients them: the outer loop clockwise, the holes not.
+  const contour = vectors(outer);
+  if (!THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+  const paths = holes.map((loop) => {
+    const path = vectors(loop);
+    return THREE.ShapeUtils.isClockWise(path) ? path.reverse() : path;
+  });
+  const area = (loop: THREE.Vector2[]) => Math.abs(THREE.ShapeUtils.area(loop));
+  const expected = area(contour) - paths.reduce((sum, path) => sum + area(path), 0);
+  // It drops a last point repeating the first, so the faces index the loops it was given.
+  const given = [[...contour], ...paths.map((path) => [...path])];
+  const faces = THREE.ShapeUtils.triangulateShape(given[0] ?? [], given.slice(1));
+  const points = given.flat();
+  const total = faces.reduce((sum, face) => {
+    const corners = face.map((i) => points[i] ?? new THREE.Vector2());
+    return sum + area(corners);
+  }, 0);
+  return Math.abs(total - expected) <= 1e-6 * Math.max(1, expected);
+}
+
 /** A neutral rounded block, shown while a drawing loads or if it fails. */
 export function fallbackBody(height: number): Body {
   const geometry = new RoundedBoxGeometry(
@@ -104,7 +137,7 @@ export function fallbackBody(height: number): Body {
     height,
     height * BODY_DEPTH,
     2,
-    height * BEVEL,
+    height * FALLBACK_RADIUS,
   ).translate(0, height / 2, 0);
   const material = new THREE.MeshStandardMaterial({
     color: FALLBACK_COLOR,

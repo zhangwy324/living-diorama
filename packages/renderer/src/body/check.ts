@@ -1,9 +1,9 @@
-import { SPECK_SHARE } from "./outline";
-import { isOpaque, neighbours, type Pixels } from "./pixels";
+import { solidShapes } from "./outline";
+import { neighbours, type Pixels } from "./pixels";
 
 // What in a drawing would extrude badly (ADR 0015 §7, hints): parts too thin to read as solid,
-// and shapes that aren't joined, each of which becomes a slab of its own. Measured on the opaque
-// mask with holes filled, as the body is built (ADR 0011 §2).
+// and shapes that aren't joined, each of which becomes a slab of its own. Measured on the solid
+// shapes the body is built from, holes included (ADR 0017): the wall of a ring can be thin.
 
 /**
  * A part is thin where it is narrower than this share of the drawing's height. The body is 0.4 of
@@ -44,15 +44,8 @@ export interface BodyCheck {
 /** Checks a drawing for thin parts and separate shapes. */
 export function checkBody(pixels: Pixels): BodyCheck {
   const { width, height } = pixels;
-  const filled = fillHoles(pixels);
-  const { labels, areas } = components(filled, width, height, false);
-  const total = areas.reduce((sum, a) => sum + a, 0);
-  // Labels of the shapes kept, as the outline keeps them, largest first.
-  const kept = areas
-    .map((area, i) => ({ label: i + 1, area }))
-    .filter(({ area }) => area > 0 && area >= total * SPECK_SHARE)
-    .sort((a, b) => b.area - a.area)
-    .map(({ label }) => label);
+  const { labels, shapes } = solidShapes(pixels);
+  const kept = shapes.map((s) => s.label);
   const keptSet = new Set(kept);
 
   const shape = new Uint8Array(width * height);
@@ -81,36 +74,6 @@ export function checkBody(pixels: Pixels): BodyCheck {
   for (const area of parts.areas) if (area >= minArea) thinParts++;
 
   return { width, height, empty: kept.length === 0, shapes: kept.length, thinParts, thin, loose };
-}
-
-/** The opaque mask with every enclosed transparent area filled. */
-function fillHoles(pixels: Pixels): Uint8Array {
-  const { width, height } = pixels;
-  const mask = new Uint8Array(width * height);
-  for (let i = 0; i < mask.length; i++) mask[i] = isOpaque(pixels, i) ? 1 : 0;
-  // Shapes are 4-connected, so the background is 8-connected: it leaks through diagonal gaps.
-  const outside = new Uint8Array(mask.length);
-  const queue = new Int32Array(mask.length);
-  let tail = 0;
-  for (let i = 0; i < mask.length; i++) {
-    const x = i % width;
-    const y = (i - x) / width;
-    const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
-    if (edge && !mask[i]) {
-      outside[i] = 1;
-      queue[tail++] = i;
-    }
-  }
-  for (let head = 0; head < tail; head++) {
-    const i = queue[head] ?? 0;
-    for (const n of neighbours(i, width, height, true)) {
-      if (outside[n] || mask[n]) continue;
-      outside[n] = 1;
-      queue[tail++] = n;
-    }
-  }
-  for (let i = 0; i < mask.length; i++) mask[i] = outside[i] ? 0 : 1;
-  return mask;
 }
 
 /** Labels the set pixels' connected areas from 1; `areas[label - 1]` is each one's size. */

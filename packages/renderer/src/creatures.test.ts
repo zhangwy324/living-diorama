@@ -158,7 +158,7 @@ describe("CreatureBodies", () => {
     expect(bodyOf(layer, "b").geometry).toBe(body.geometry);
     expect(bodyOf(layer, "b").position.toArray()).toEqual([1, 0, 0]);
     expect(boxOf(body).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
-    expect(body.material).toHaveLength(2);
+    expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
   });
 
   it("turns the drawing's facing (+X) to the creature's heading", () => {
@@ -191,7 +191,7 @@ describe("CreatureBodies", () => {
     expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide]); // the block
     await bodies.ready;
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide, THREE.FrontSide]);
+    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide]); // the body
   });
 
   it("draws nothing for an unknown species and keeps the block if the drawing fails", async () => {
