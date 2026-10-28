@@ -6,7 +6,8 @@ import type { SimulationClient } from "./simulation-client";
 //
 //   livingDiorama.time.set("21:30")   // fix the time of day; phases and lighting follow it
 //   livingDiorama.time.follow()       // back to the real clock
-//   livingDiorama.time.speed(20)      // run simulation time 20 times as fast (1 is normal)
+//   livingDiorama.time.speed(10)      // run simulation time 10 times as fast (1 is normal;
+//                                     // at most about 10 runs faster, issue #100)
 
 export interface TimeDevHook {
   set(time: string): void;

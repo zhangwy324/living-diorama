@@ -169,6 +169,20 @@ describe("spawning", () => {
     }
   });
 
+  it("starts a need below its startBelow where it declares one: mosslings start rested", () => {
+    const simulation = createSimulation({
+      register: registerBuiltInContent,
+      worldId: "hollow:woodland-hollow",
+      seed: 1,
+    });
+    for (let n = 0; n < 20; n++) {
+      const spawned = simulation.spawn("hollow:mossling");
+      if (!spawned.ok) throw new Error("spawn failed");
+      expect(spawned.value.needs["core:hunger"]).toBeLessThan(0.4);
+      expect(spawned.value.needs["core:tiredness"]).toBeLessThan(0.1);
+    }
+  });
+
   it("only takes needs a behavior declares, and none for a creature that only wanders", () => {
     const { spawn } = setup({ behaviors: [always("test:a", idleLong, ["test:hunger"])] });
     expect(Object.keys(spawn().needs)).toEqual(["test:hunger"]);

@@ -11,7 +11,7 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { pebble, registerRiverCrossing } from "./index";
-import { createSimulation, runWithInvariants } from "./simulation-run";
+import { createSimulation, LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 
 const hollow = {
   register: registerBuiltInContent,
@@ -67,6 +67,7 @@ describe("long randomized runs keep every invariant", () => {
       ticks: DAY_TICKS,
       tickRateHz: CHECK_HZ,
       creatures: 3,
+      ...LIVING_BEHAVIOR_CHECKS,
       onTrace: (t) => traces.push(t),
     });
     expect(report.violations).toEqual([]);
@@ -81,7 +82,12 @@ describe("long randomized runs keep every invariant", () => {
 
   // Nothing may assume a single creature (roadmap M6 task 4, ADR 0009 §4).
   it("Woodland Hollow with 20 creatures, 20k ticks", () => {
-    const report = runWithInvariants({ ...hollow, seed: 5, ticks: 20_000, creatures: 20 });
+    const report = runWithInvariants({
+      ...hollow,
+      seed: 5,
+      ticks: 20_000,
+      creatures: 20,
+    });
     expect(report.violations).toEqual([]);
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
     expect(report.eventCounts.path_failed ?? 0).toBe(0);

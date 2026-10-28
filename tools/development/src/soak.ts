@@ -1,10 +1,10 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import { parseArgs } from "node:util";
-import { runWithInvariants } from "./simulation-run";
+import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 
 // `pnpm soak`: the long-run invariant and living-behavior checks over many more seeds and a
-// higher tick rate than `pnpm check` runs (ADR 0006 §12, ADR 0018 §20). Defaults: 32 seeds × one
-// simulated day from noon at the app's 10 Hz, 3 creatures each.
+// higher tick rate than `pnpm check` runs (ADR 0006 §12, ADR 0018 §20), with the meal and sleep
+// checks on. Defaults: 32 seeds × one simulated day from noon at the app's 10 Hz, 3 creatures each.
 
 const { values } = parseArgs({
   options: {
@@ -29,6 +29,7 @@ for (let seed = 1; seed <= seeds; seed++) {
     ticks,
     tickRateHz,
     creatures,
+    ...LIVING_BEHAVIOR_CHECKS,
   });
   const counts = report.eventCounts;
   const problems = [

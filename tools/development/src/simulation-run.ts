@@ -5,15 +5,26 @@ import {
   type Registries,
 } from "@living-diorama/extension-api";
 import {
+  hungerNeed,
+  isNocturnal,
   pointInPolygon,
   minutesAfter,
   registerCoreEngine,
   Simulation,
+  speciesTraits,
+  tirednessNeed,
   type CreatureState,
   type DecisionTrace,
   type SimulationEvent,
 } from "@living-diorama/simulation";
-import { LongRunChecks, type CreatureStats, type LongRunCheckOptions } from "./long-run-checks";
+import {
+  LongRunChecks,
+  type CreatureFilter,
+  type CreatureStats,
+  type LongRunCheckOptions,
+} from "./long-run-checks";
+
+const FOOD = "core:food";
 
 // Long randomized runs with the M3 invariants checked every tick (roadmap M3 tests), plus the
 // living-behavior checks of ADR 0018 §20 (long-run-checks.ts). Shared by the Vitest suite (a few
@@ -42,6 +53,39 @@ export interface RunOptions extends LongRunCheckOptions {
 
 /** Where a run starts in the day unless told otherwise. */
 export const DEFAULT_START_MINUTES = 12 * 60;
+
+/**
+ * Whether the meal check holds a creature to it: it gets hungry and, from where it is first seen,
+ * it can reach its spot at some food (ADR 0018 §20).
+ */
+export const reachesFood: CreatureFilter = (creature, simulation) =>
+  Object.hasOwn(creature.needs, hungerNeed.id) &&
+  (simulation.state.model.propsByAffordance.get(FOOD) ?? []).some(
+    (prop) => simulation.spotFor(creature.id, prop.id) !== undefined,
+  );
+
+/**
+ * Whether the sleep check holds a creature to it: it gets tired and sleeps at night (§20). A
+ * `core:nocturnal` creature sleeps by day, so it skips the check.
+ */
+export const sleepsAtNight: CreatureFilter = (creature, simulation) => {
+  const { registries } = simulation.state;
+  const species = registries.species.get(creature.speciesId);
+  return (
+    Object.hasOwn(creature.needs, tirednessNeed.id) &&
+    !!species &&
+    !isNocturnal(speciesTraits(species, registries))
+  );
+};
+
+/**
+ * The meal and sleep checks of ADR 0018 §20, on for the creatures they apply to. Woodland Hollow
+ * runs use them; a species that only wanders has no needs, so neither applies to it.
+ */
+export const LIVING_BEHAVIOR_CHECKS = {
+  meals: { creatures: reachesFood },
+  sleep: { creatures: sleepsAtNight },
+} satisfies LongRunCheckOptions;
 
 export interface RunReport {
   seed: number;

@@ -455,7 +455,7 @@ describe("sleeping in Woodland Hollow", () => {
     expect(creature.home).toBeNull();
   });
 
-  it("asleep, hunger rises at a tenth of its rate and tiredness falls", () => {
+  it("asleep, hunger rises at a fifteenth of its rate and tiredness falls", () => {
     const { run, spawn } = setup(3, 22 * 60);
     const creature = spawn();
     creature.needs[HUNGER] = 0;
@@ -467,7 +467,7 @@ describe("sleeping in Woodland Hollow", () => {
     expect(creature.asleep).toBe(true);
     const h = creature.variation.needs[HUNGER]!;
     const t = creature.variation.needs[TIREDNESS]!;
-    expect(creature.needs[HUNGER]! - hunger).toBeCloseTo((h * 1) / 15, 6);
+    expect(creature.needs[HUNGER]! - hunger).toBeCloseTo(h / 1.5 / 15, 6);
     expect(tiredness - creature.needs[TIREDNESS]!).toBeCloseTo(t / 8, 6);
   });
 
