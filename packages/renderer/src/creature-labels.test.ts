@@ -73,6 +73,7 @@ const pose = (id: string): CreaturePose => ({
   speciesId: "s",
   world: { x: 1, y: 0, z: 1 },
   heading: 0,
+  cues: [],
 });
 
 /** Records draws and disposals instead of painting a canvas. */
