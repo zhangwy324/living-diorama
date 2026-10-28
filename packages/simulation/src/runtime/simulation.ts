@@ -514,14 +514,15 @@ export class Simulation {
     const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
     let cue: ActionCue | undefined;
-    let asleep = false;
+    // Awake unless the action says otherwise; an interruption below wakes it again.
+    creature.asleep = false;
     if (running) {
       const provider = this.#actions.get(running.id);
       const activity = { walked: false };
       const status: ActionStatus = provider
         ? provider.step(running.state, this.#actionContext(creature, profile, activity))
         : { status: "failed", reason: "unknown_action" };
-      asleep = status.asleep === true;
+      creature.asleep = status.asleep === true;
       if (status.status === "running") {
         // Standing still to eat or sleep is not being stuck (ADR 0018 amendments).
         if (activity.walked) this.#watch(creature, profile, running.id);
@@ -535,7 +536,6 @@ export class Simulation {
         );
       }
     }
-    creature.asleep = asleep;
 
     const triggers = before ? this.#integrateNeeds(creature, profile, before) : [];
     if (creature.phaseReactionTick !== undefined && this.tick >= creature.phaseReactionTick) {
@@ -831,9 +831,15 @@ export class Simulation {
     this.#commit(creature, best);
     const { action, params } = best.proposal;
     trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
+    // Whether the challenger starts decides whether the running action is interrupted, so it is
+    // started first; on success the old action's `interrupted` events are moved before anything
+    // the start emitted, so e.g. `woke_up` precedes the new action's events.
+    const mark = this.#events.length;
     const start = this.#start(creature, profile, best);
     if (start.ok) {
+      const started = this.#events.splice(mark);
       this.#interrupted(creature, profile, running, "outranked");
+      this.#events.push(...started);
       this.#paths.delete(creature.id);
       creature.lastResult = { action: running.id, outcome: "interrupted", reason: "outranked" };
       trace.result = "started";

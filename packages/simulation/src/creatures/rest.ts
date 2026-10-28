@@ -2,7 +2,7 @@ import type { DayPhase } from "../runtime/time-of-day";
 import { pathFromRoute } from "./core-actions";
 import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState } from "./contracts";
 import { tirednessNeed } from "./needs";
-import { chooseNearestByRoute, isRecord, type PlaceChoice } from "./shared";
+import { isRecord, routeNearest, type PlaceChoice } from "./shared";
 
 // `core:rest` and `core:sleep` (ADR 0018 §13, §14 and amendments). A tired creature, or any
 // creature once its sleeping phase draws near, goes to a shelter it knows (its home, unless that
@@ -82,11 +82,17 @@ export function inReleaseGrace({ creature, tick, tickSeconds }: CreatureObservat
  */
 export function chooseShelter(observation: CreatureObservation): PlaceChoice | undefined {
   const { home, world } = observation;
-  const nearest = chooseNearestByRoute(observation, SHELTER);
-  const place = home === null ? undefined : world.place(home);
-  const spot = place && Object.hasOwn(place.affordances, SHELTER) && world.spotAt(place.id);
-  const length = spot ? world.routeLength(spot) : undefined;
-  if (home === null || length === undefined) return nearest;
+  const routed = routeNearest(observation, SHELTER);
+  const nearest = routed[0];
+  if (home === null) return nearest;
+  // Home's route, from the candidates already routed if it is among them.
+  let length = routed.find((c) => c.placementId === home)?.length;
+  if (length === undefined) {
+    const place = world.place(home);
+    const spot = place && Object.hasOwn(place.affordances, SHELTER) && world.spotAt(place.id);
+    length = spot ? world.routeLength(spot) : undefined;
+  }
+  if (length === undefined) return nearest;
   return !nearest || length <= HOME_DETOUR_FACTOR * nearest.length
     ? { placementId: home, length }
     : nearest;

@@ -10,6 +10,8 @@ import {
   sleepAction,
   sleepCycle,
   type ActionContext,
+  type ActionProvider,
+  type BehaviorProvider,
   type CreatureObservation,
   type CreatureState,
   type DayPhase,
@@ -17,6 +19,7 @@ import {
   type SimulationEvent,
   type WorldQueries,
 } from "@living-diorama/simulation";
+import type { Registries } from "@living-diorama/extension-api";
 import { describe, expect, it } from "vitest";
 import { createSimulation } from "./simulation-run";
 
@@ -151,16 +154,16 @@ describe("core:rest", () => {
     expect(evaluate({ ...unreachable, dayPhase: "night" })).toMatchObject({ params: {} });
   });
 
-  it("sleeps where it stands after failing to reach a shelter", () => {
-    const observation = observe(
-      { places: { t: { x: 3, z: 0 } }, routes: { t: 4 } },
-      {
-        dayPhase: "night",
-        knowledge: knowing("t"),
-        lastResult: { action: "core:sleep", outcome: "interrupted", reason: "stuck" },
-      },
-    );
+  it.each([
+    { action: "core:sleep", outcome: "interrupted", reason: "stuck" },
+    { action: "core:sleep", outcome: "failed", reason: "no_spot" },
+  ] as const)("sleeps where it stands after its last sleep ended $outcome", (lastResult) => {
+    const stub = { places: { t: { x: 3, z: 0 } }, routes: { t: 4 } };
+    const observation = observe(stub, { dayPhase: "night", knowledge: knowing("t"), lastResult });
     expect(evaluate(observation)).toMatchObject({ params: {} });
+    // Otherwise, the shelter.
+    const fine = observe(stub, { dayPhase: "night", knowledge: knowing("t") });
+    expect(evaluate(fine)).toMatchObject({ params: { placementId: "t" } });
   });
 
   it("prefers home unless its route is more than twice the nearest shelter's", () => {
@@ -312,6 +315,19 @@ describe("core:sleep", () => {
     expect(emitted.at(-1)).toEqual({ type: "woke_up", reason: "rested", tiredness: 0.09 });
   });
 
+  it("arriving already rested in its waking phase, doesn't lie down at all", () => {
+    const { context, emitted, homes } = sleepContext({ tiredness: 0.3 });
+    const start = sleepAction.start({ placementId: "tree" }, context);
+    if (!start.ok) throw new Error("start failed");
+    // Dawn comes on the way, by when it is rested.
+    context.dayPhase = "dawn";
+    context.needs[TIREDNESS] = 0.05;
+    expect(sleepAction.step(start.state, context)).toEqual({ status: "running" });
+    expect(sleepAction.step(start.state, context)).toEqual({ status: "done" });
+    expect(emitted).toEqual([]);
+    expect(homes).toEqual([]);
+  });
+
   it("ends a daytime nap only at tiredness 0", () => {
     const { context } = sleepContext({ phase: "day", tiredness: 0.95 });
     const start = sleepAction.start({}, context);
@@ -363,10 +379,18 @@ describe("core:sleep", () => {
 // ---- In the simulation -----------------------------------------------------------------------
 
 describe("sleeping in Woodland Hollow", () => {
-  function setup(seed: number, startMinutes: number, tickRateHz = 10) {
+  function setup(
+    seed: number,
+    startMinutes: number,
+    tickRateHz = 10,
+    extra?: (registries: Registries) => void,
+  ) {
     const traces: DecisionTrace[] = [];
     const simulation = createSimulation({
-      register: registerBuiltInContent,
+      register: (r: Registries) => {
+        registerBuiltInContent(r);
+        extra?.(r);
+      },
       worldId: "hollow:woodland-hollow",
       seed,
       startMinutes,
@@ -382,8 +406,8 @@ describe("sleeping in Woodland Hollow", () => {
         events.push(...simulation.step());
       }
     };
-    const spawn = (options?: { released?: boolean }): CreatureState => {
-      const spawned = simulation.spawn("hollow:mossling", "meadow", options);
+    const spawn = (options?: { released?: boolean }, speciesId = "hollow:mossling") => {
+      const spawned = simulation.spawn(speciesId, "meadow", options);
       if (!spawned.ok) throw new Error("spawn failed");
       return spawned.value;
     };
@@ -511,6 +535,129 @@ describe("sleeping in Woodland Hollow", () => {
     run(5 * 120, () => released.asleep);
     expect(released.asleep).toBe(true);
     expect(simulation.tick * 0.5).toBeGreaterThanOrEqual(600);
+  });
+
+  it("a nocturnal creature sleeps by day and wakes at dusk", () => {
+    const { run, spawn, of } = setup(9, 11 * 60, 2, (r) => {
+      r.species.register({
+        ...r.species.get("hollow:mossling")!,
+        id: "test:night-mossling",
+        traits: { [NOCTURNAL]: 1 },
+      });
+    });
+    const creature = spawn(undefined, "test:night-mossling");
+    creature.needs[HUNGER] = 0;
+    creature.needs[TIREDNESS] = 0.3;
+    // Day is its sleeping phase: the bonus alone sends it to bed.
+    run(1_200, () => creature.asleep);
+    expect(creature.asleep).toBe(true);
+    // Rested by early afternoon, it sleeps on until its waking phase begins at 18:00.
+    run(6 * 7_200 - 1_300);
+    expect(creature.asleep).toBe(true);
+    run(2 * 7_200);
+    expect(of(creature, "woke_up")).toEqual([
+      expect.objectContaining({ reason: "rested", tick: 7 * 7_200 }),
+    ]);
+    // Awake through dusk and into the night: the bonus alone doesn't send it back to bed there.
+    expect(of(creature, "fell_asleep")).toHaveLength(1);
+    expect(creature.asleep).toBe(false);
+  });
+
+  it("the watchdog calls interrupted, and the creature is awake at once", () => {
+    const interrupts: string[] = [];
+    // Reports asleep while it walks, so the watchdog stops it on a tick it reported asleep.
+    const sleepwalk: ActionProvider = {
+      id: "test:sleepwalk",
+      version: "1.0.0",
+      start: () => ({
+        ok: true,
+        state: { points: [{ regionId: "west-woods", x: -15, z: 7 }], next: 0 },
+      }),
+      step: (state, context) => {
+        context.walk(state as Parameters<ActionContext["walk"]>[0]);
+        return { status: "running", asleep: true };
+      },
+      interrupted: (_state, _context, reason) => interrupts.push(reason),
+    };
+    const sleepwalker: BehaviorProvider = {
+      id: "test:sleepwalker",
+      version: "1.0.0",
+      dependencies: [{ registry: "actions", id: "test:sleepwalk" }],
+      evaluate: (o) => (o.tick < 5 ? { action: "test:sleepwalk", utility: 0.5 } : null),
+    };
+    const { run, spawn } = setup(10, 12 * 60, 10, (r) => {
+      r.actions.register(sleepwalk);
+      r.behaviors.register(sleepwalker);
+      r.species.register({
+        ...r.species.get("hollow:mossling")!,
+        id: "test:sleepwalker",
+        // So slow that walking never makes the watchdog's 5 cm of progress in 5 s.
+        baseSpeed: 0.001,
+        behaviors: ["test:sleepwalker"],
+      });
+    });
+    const creature = spawn(undefined, "test:sleepwalker");
+    // Decides on the first tick, steps (asleep) from the second.
+    run(2);
+    expect(creature.action?.id).toBe("test:sleepwalk");
+    expect(creature.asleep).toBe(true);
+    run(100, () => creature.action === undefined);
+    expect(interrupts).toEqual(["stuck"]);
+    expect(creature.lastResult).toMatchObject({ outcome: "interrupted", reason: "stuck" });
+    expect(creature.asleep).toBe(false);
+  });
+
+  it("emits the interrupted action's woke_up before the challenger's events", () => {
+    const sleeper: ActionProvider = {
+      id: "test:sleeper",
+      version: "1.0.0",
+      start: () => ({ ok: true, state: {} }),
+      step: () => ({ status: "running", asleep: true }),
+      interrupted: (_state, context) =>
+        context.emit({ type: "woke_up", reason: "interrupted", tiredness: 0 }),
+    };
+    const announce: ActionProvider = {
+      id: "test:announce",
+      version: "1.0.0",
+      start: (_params, context) => {
+        context.emit({ type: "ate", placementId: "none", hunger: 0 });
+        return { ok: true, state: {} };
+      },
+      step: () => ({ status: "running" }),
+    };
+    const behaviors: BehaviorProvider[] = [
+      {
+        id: "test:sleepy",
+        version: "1.0.0",
+        dependencies: [{ registry: "actions", id: "test:sleeper" }],
+        evaluate: () => ({ action: "test:sleeper", utility: 0.5 }),
+      },
+      {
+        id: "test:eager",
+        version: "1.0.0",
+        dependencies: [{ registry: "actions", id: "test:announce" }],
+        evaluate: (o) => (o.tick > 1 ? { action: "test:announce", utility: 1 } : null),
+      },
+    ];
+    const { simulation, events, run, spawn } = setup(11, 12 * 60, 10, (r) => {
+      r.actions.register(sleeper);
+      r.actions.register(announce);
+      for (const b of behaviors) r.behaviors.register(b);
+      r.species.register({
+        ...r.species.get("hollow:mossling")!,
+        id: "test:sleepy",
+        behaviors: ["test:sleepy", "test:eager"],
+      });
+    });
+    const creature = spawn(undefined, "test:sleepy");
+    run(3);
+    expect(creature.action?.id).toBe("test:sleeper");
+    creature.phaseReactionTick = simulation.tick;
+    run(1);
+    expect(creature.action?.id).toBe("test:announce");
+    expect(creature.asleep).toBe(false);
+    const order = events.filter((e) => e.type === "woke_up" || e.type === "ate");
+    expect(order.map((e) => e.type)).toEqual(["woke_up", "ate"]);
   });
 
   it("repeats the same nights for the same seed", () => {
