@@ -118,6 +118,7 @@ describe("debug overlays", () => {
       position: { regionId: "west", ...world },
       world,
       heading: 0,
+      cues: [],
       ...(route ? { route } : {}),
     });
     const poses: CreaturePose[] = [

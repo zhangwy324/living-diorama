@@ -21,7 +21,6 @@ const isPosition = (value: unknown): value is RegionPosition =>
 export const idleAction: ActionProvider = {
   id: "core:idle",
   version: "1.0.0",
-  moves: false,
   start(params, { tickSeconds }) {
     const seconds = isRecord(params) ? params.seconds : undefined;
     if (typeof seconds !== "number" || !(seconds > 0) || !Number.isFinite(seconds)) {
@@ -41,7 +40,6 @@ export const idleAction: ActionProvider = {
 export const followPathAction: ActionProvider = {
   id: "core:follow_path",
   version: "1.0.0",
-  moves: true,
   start(params, context) {
     const destination = isRecord(params) ? params.destination : undefined;
     if (!isPosition(destination)) {

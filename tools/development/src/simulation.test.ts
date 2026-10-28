@@ -123,14 +123,16 @@ describe("determinism", () => {
   });
 });
 
-// A test pack: an action that claims to move but never does, and a behavior that plays a script.
+// A test pack: an action that walks but never gets anywhere, and a behavior that plays a script.
 
 const frozen: ActionProvider = {
   id: "test:frozen",
   version: "1.0.0",
-  moves: true,
   start: () => ({ ok: true, state: {} }),
-  step: () => ({ status: "running" }),
+  step: (_state, context) => {
+    context.walk({ points: [], next: 0 });
+    return { status: "running" };
+  },
 };
 const undeclared: ActionProvider = { ...frozen, id: "test:undeclared" };
 
@@ -283,7 +285,7 @@ describe("actions, locomotion and events", () => {
       { action: "core:idle", params: { seconds: 60 }, utility: 1 },
     ]);
     run(2);
-    const route = simulation.snapshot({ routes: true }).creatures[0]!.route!;
+    const route = simulation.snapshot({ debug: true }).creatures[0]!.route!;
     expect(route.map((leg) => leg.regionId)).toEqual(["north-bank", "bridge-deck", "south-bank"]);
     const { model } = simulation.state;
     for (const leg of route) {
@@ -295,12 +297,12 @@ describe("actions, locomotion and events", () => {
     // Reached waypoints drop off; the route goes once the walk ends.
     const count = (r: typeof route) => r.flatMap((leg) => leg.points).length;
     run(40);
-    expect(count(simulation.snapshot({ routes: true }).creatures[0]!.route!)).toBeLessThan(
+    expect(count(simulation.snapshot({ debug: true }).creatures[0]!.route!)).toBeLessThan(
       count(route),
     );
     for (let t = 0; t < 1_000 && !creature().lastResult; t++) run(1);
     run(1);
-    expect(simulation.snapshot({ routes: true }).creatures[0]!.route).toBeUndefined();
+    expect(simulation.snapshot({ debug: true }).creatures[0]!.route).toBeUndefined();
   });
 });
 

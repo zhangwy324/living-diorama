@@ -8,7 +8,13 @@ import {
   type SizeClass,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
-import { addEntries, type Registries } from "@living-diorama/extension-api";
+import {
+  addEntries,
+  type ActionCue,
+  type Cue,
+  type NeedType,
+  type Registries,
+} from "@living-diorama/extension-api";
 import {
   isActionProvider,
   isBehaviorProvider,
@@ -16,17 +22,22 @@ import {
   type ActionProvider,
   type ActionResult,
   type ActionStart,
+  type ActionStatus,
+  type BehaviorMemory,
   type BehaviorProvider,
   type CreatureObservation,
   type PathState,
   type Proposal,
+  type RunningAction,
   type WorldQueries,
 } from "../creatures/contracts";
+import { clamp01, speciesNeeds, speciesTraits } from "../creatures/individual";
+import { copyKnowledge } from "../creatures/knowledge";
 import type { Pathfinder } from "../navigation/pathfinder";
 import { navProfile, profileForSpecies } from "../navigation/profile";
 import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
-import { Rng } from "./rng";
+import { Rng, type RngState } from "./rng";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
   normalizeHeading,
@@ -35,15 +46,29 @@ import {
   type WorldStateOptions,
 } from "./world-state";
 
-// The tick loop (roadmap M3 tasks 6–11, ADR 0006 §7–§10): actions advance every tick,
-// behaviors are evaluated only when a creature needs a decision, locomotion is kinematic along
-// planned routes, and a watchdog interrupts moving actions that make no progress.
+// The tick loop (roadmap M3 tasks 6–11, ADR 0006 §7–§10, ADR 0018 §7–§9): actions advance every
+// tick, needs change on simulation time, behaviors are evaluated only on triggers, locomotion is
+// kinematic along planned routes, and a watchdog interrupts walking actions that make no progress.
 
-/** A moving action that gets less than PROGRESS_DISTANCE further in this long is stuck. */
+/** An action that walks for this long without getting PROGRESS_DISTANCE further is stuck. */
 const STUCK_SECONDS = 5;
 const PROGRESS_DISTANCE = 0.05;
 /** Wait before re-evaluating when no proposal could be started. */
 const RETRY_SECONDS = 1;
+/** A challenger must beat the running behavior's current utility by this much (ADR 0018 §8). */
+export const INTERRUPT_MARGIN = 0.15;
+/** Absorbs rounding, so that 0.25 beats 0.1 by the margin. */
+const UTILITY_EPSILON = 1e-9;
+/** Each creature reacts to a day-phase change after a random delay up to this long. */
+export const PHASE_REACTION_SECONDS = 30;
+const SECONDS_PER_HOUR = 3600;
+
+/**
+ * What started an evaluation besides the usual ones (the action ending, the watchdog, a retry,
+ * a first decision): a need rising across one of its trigger values, or the day phase changing.
+ */
+export type DecisionTrigger =
+  { kind: "need"; need: string; threshold: number } | { kind: "day_phase"; phase: DayPhase };
 
 /** One behavior evaluation: what was proposed, what was chosen and how starting it went. */
 export interface DecisionTrace {
@@ -52,11 +77,57 @@ export interface DecisionTrace {
   position: RegionPosition;
   /** How the previous action ended; absent for a creature's first decision. */
   lastResult?: ActionResult;
+  /** A need or day-phase trigger, if one started this evaluation. */
+  trigger?: DecisionTrigger;
+  /** The creature's need values at the decision. */
+  needs: Record<string, number>;
+  /**
+   * When evaluated while an action runs: that action, the behavior that owns it and its current
+   * utility, which a challenger must beat by `INTERRUPT_MARGIN`.
+   */
+  running?: { action: string; behavior: string; utility: number };
+  /** Every behavior's proposal, with its reason. */
   candidates: { behavior: string; proposal: Proposal | null }[];
   chosen?: { behavior: string; action: string; params?: unknown };
-  result: "started" | "rejected" | "no_proposal";
+  /** `kept`: evaluated while an action runs, and no challenger beat it. */
+  result: "started" | "rejected" | "no_proposal" | "kept";
   reason?: string;
   detail?: Record<string, unknown>;
+}
+
+/** What the engine derives once per species. */
+interface SpeciesProfile {
+  behaviors: { id: string; provider: BehaviorProvider | undefined }[];
+  needs: readonly NeedType[];
+  /** Every registered trait, with defaults; frozen, as actions and behaviors share it. */
+  traits: Readonly<Record<string, number>>;
+  /** The species' senses before individual variation. */
+  senses: Readonly<Record<string, number>>;
+  /** Per need ID, the value of its rate trait (1 without one). */
+  rateScales: Record<string, number>;
+}
+
+/** A behavior's proposal with its scratch memory and random stream. */
+interface Evaluation {
+  behavior: string;
+  proposal: Proposal | null;
+  memory: BehaviorMemory;
+  rng: RngState;
+}
+type Chosen = Evaluation & { proposal: Proposal };
+
+const usable = (proposal: Proposal | null | undefined): proposal is Proposal =>
+  proposal !== null && proposal !== undefined && Number.isFinite(proposal.utility);
+
+/** A deep copy of plain data (behavior memory). */
+function clonePlain<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(clonePlain) as T;
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, clonePlain(v as unknown)]),
+    ) as T;
+  }
+  return value;
 }
 
 /** A species registered while the world runs, and where its creatures don't fit. */
@@ -67,7 +138,8 @@ export interface RegisteredSpecies {
 
 export interface SnapshotOptions {
   paused?: boolean;
-  routes?: boolean;
+  /** Adds debug data: remaining routes, need values, knowledge and home. */
+  debug?: boolean;
 }
 
 export interface SimulationOptions extends WorldStateOptions {
@@ -118,6 +190,9 @@ export class Simulation {
   readonly #speeds = new Map<string, number>();
   /** The path each creature last walked, kept until its action ends; for debug routes only. */
   readonly #paths = new Map<string, PathState>();
+  readonly #profiles = new Map<string, SpeciesProfile>();
+  /** The action cue each creature showed on its last tick, if any. */
+  readonly #actionCues = new Map<string, ActionCue>();
   #events: SimulationEvent[] = [];
 
   private constructor(
@@ -261,6 +336,7 @@ export class Simulation {
     if (result.ok) {
       const creature = result.value;
       this.#paths.delete(creatureId);
+      this.#actionCues.delete(creatureId);
       this.#emit({
         type: "creature_despawned",
         tick: this.tick,
@@ -294,8 +370,11 @@ export class Simulation {
     return events;
   }
 
-  /** `routes` adds each walking creature's remaining route, for debug overlays (ADR 0007 §10). */
-  snapshot({ paused = false, routes = false }: SnapshotOptions = {}): SimulationSnapshot {
+  /**
+   * `debug` adds each walking creature's remaining route (ADR 0007 §10) and its need values,
+   * knowledge and home (ADR 0018 §15), for the dev overlays.
+   */
+  snapshot({ paused = false, debug = false }: SnapshotOptions = {}): SimulationSnapshot {
     const { model } = this.state;
     return {
       tick: this.tick,
@@ -312,10 +391,32 @@ export class Simulation {
           world: { x, y, z },
           heading: c.heading,
           ...(c.action ? { currentAction: c.action.id } : {}),
-          ...(routes && this.#paths.has(c.id) ? { route: this.#route(c.id) } : {}),
+          cues: this.#cues(c),
+          ...(debug
+            ? {
+                ...(this.#paths.has(c.id) ? { route: this.#route(c.id) } : {}),
+                needs: { ...c.needs },
+                knowledge: copyKnowledge(c.knowledge),
+                home: c.home,
+              }
+            : {}),
         };
       }),
     };
+  }
+
+  /**
+   * What the creature shows (ADR 0018 §15): its action's cue while that action isn't walking,
+   * then each need's cue from the value the need declares.
+   */
+  #cues(creature: CreatureState): Cue[] {
+    const cues: Cue[] = [];
+    const action = this.#actionCues.get(creature.id);
+    if (action) cues.push(action);
+    for (const need of this.#profile(creature.speciesId).needs) {
+      if (need.cue && (creature.needs[need.id] ?? 0) >= need.cue.from) cues.push(need.cue.cue);
+    }
+    return cues;
   }
 
   #route(creatureId: string): RouteLegSnapshot[] {
@@ -336,23 +437,67 @@ export class Simulation {
 
   /**
    * The day phase changed since the last tick, by however many phases the time of day jumped:
-   * one event from the old phase to the new. This is where a phase change becomes a decision
-   * trigger (ADR 0018 §7).
+   * one event from the old phase to the new. Each creature reacts to it as a decision trigger
+   * (ADR 0018 §7) after its own random delay of up to 30 s, so they don't all decide at once.
+   * The delay comes from a stream forked off the creature's own, so its behaviors' sequence
+   * doesn't shift.
    */
   #dayPhaseChanged(from: DayPhase, to: DayPhase) {
     this.state.dayPhase = to;
     this.#emit({ type: "day_phase_changed", tick: this.tick, from, to });
+    for (const creature of this.state.creatures.values()) {
+      const delay = new Rng(creature.rng)
+        .fork(`day-phase@${this.tick}`)
+        .range(0, PHASE_REACTION_SECONDS);
+      creature.phaseReactionTick = this.tick + Math.round(delay * this.tickRateHz);
+    }
   }
 
+  /** What the engine derives once per species: its behaviors, needs and traits. */
+  #profile(speciesId: string): SpeciesProfile {
+    let profile = this.#profiles.get(speciesId);
+    if (!profile) {
+      const { registries } = this.state;
+      const species = registries.species.get(speciesId);
+      // Spawning already checked that the species is registered.
+      if (!species) throw new Error(`Species "${speciesId}" is not registered`);
+      const traits = Object.freeze(speciesTraits(species, registries));
+      const needs = speciesNeeds(species, registries);
+      profile = {
+        behaviors: species.behaviors.map((id) => ({ id, provider: this.#behaviors.get(id) })),
+        needs,
+        traits,
+        senses: species.senses,
+        rateScales: Object.fromEntries(
+          needs.map((n) => [n.id, n.rateTrait === undefined ? 1 : (traits[n.rateTrait] ?? 1)]),
+        ),
+      };
+      this.#profiles.set(speciesId, profile);
+    }
+    return profile;
+  }
+
+  /**
+   * One creature's tick: its action steps, its needs change, and its behaviors are evaluated on
+   * a trigger. With an action running, a trigger may interrupt it (ADR 0018 §8).
+   */
   #stepCreature(creature: CreatureState) {
+    const profile = this.#profile(creature.speciesId);
+    const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
+    let cue: ActionCue | undefined;
+    let asleep = false;
     if (running) {
       const provider = this.#actions.get(running.id);
-      const status = provider
-        ? provider.step(running.state, this.#actionContext(creature))
-        : { status: "failed" as const, reason: "unknown_action" };
+      const activity = { walked: false };
+      const status: ActionStatus = provider
+        ? provider.step(running.state, this.#actionContext(creature, profile, activity))
+        : { status: "failed", reason: "unknown_action" };
+      asleep = status.asleep === true;
       if (status.status === "running") {
-        if (provider?.moves) this.#watch(creature, running.id);
+        // Standing still to eat or sleep is not being stuck (ADR 0018 amendments).
+        if (activity.walked) this.#watch(creature, running.id);
+        else if (status.cue !== undefined && status.cue === provider?.cue) cue = status.cue;
       } else {
         this.#finish(
           creature,
@@ -362,7 +507,48 @@ export class Simulation {
         );
       }
     }
-    if (!creature.action && this.tick >= creature.decideAtTick) this.#decide(creature);
+    creature.asleep = asleep;
+
+    let trigger = before && this.#integrateNeeds(creature, profile, before);
+    if (creature.phaseReactionTick !== undefined && this.tick >= creature.phaseReactionTick) {
+      delete creature.phaseReactionTick;
+      trigger ??= { kind: "day_phase", phase: this.state.dayPhase };
+    }
+    if (trigger) {
+      if (creature.action) this.#reconsider(creature, profile, trigger);
+      else creature.decideAtTick = Math.min(creature.decideAtTick, this.tick);
+    }
+    if (!creature.action && this.tick >= creature.decideAtTick) {
+      this.#decide(creature, profile, trigger);
+    }
+    // An action's cue shows while that action still runs after this tick.
+    if (cue !== undefined && creature.action === running) this.#actionCues.set(creature.id, cue);
+    else this.#actionCues.delete(creature.id);
+  }
+
+  /**
+   * Needs change on simulation time at their awake or asleep rate, scaled by the rate trait and
+   * the individual's variation, and stay in [0, 1]. Returns the first trigger value a need rose
+   * across this tick (`before < t && now >= t`, so the trigger at 1 fires though 1 is the cap).
+   */
+  #integrateNeeds(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    before: Readonly<Record<string, number>>,
+  ): DecisionTrigger | undefined {
+    const hours = this.tickSeconds / SECONDS_PER_HOUR;
+    let trigger: DecisionTrigger | undefined;
+    for (const need of profile.needs) {
+      const perHour = creature.asleep ? need.perHour.asleep : need.perHour.awake;
+      const scale = (profile.rateScales[need.id] ?? 1) * (creature.variation.needs[need.id] ?? 1);
+      const now = clamp01((creature.needs[need.id] ?? 0) + perHour * scale * hours);
+      creature.needs[need.id] = now;
+      if (trigger) continue;
+      const was = before[need.id] ?? 0;
+      const threshold = need.triggers.find((t) => was < t && now >= t);
+      if (threshold !== undefined) trigger = { kind: "need", need: need.id, threshold };
+    }
+    return trigger;
   }
 
   #finish(creature: CreatureState, result: ActionResult) {
@@ -372,15 +558,18 @@ export class Simulation {
     creature.decideAtTick = this.tick;
   }
 
-  /** The stuck watchdog: interrupts a moving action that has made no progress for a while. */
+  /**
+   * The stuck watchdog: interrupts an action that walks but has made no progress for a while.
+   * Called only on ticks on which the action walked.
+   */
   #watch(creature: CreatureState, actionId: string) {
     const { x, z } = creature.position;
     const anchor = creature.progress;
     if (Math.hypot(x - anchor.x, z - anchor.z) >= PROGRESS_DISTANCE) {
-      creature.progress = { x, z, tick: this.tick };
+      creature.progress = { x, z, stalledTicks: 0 };
       return;
     }
-    const ticksStuck = this.tick - anchor.tick;
+    const ticksStuck = ++anchor.stalledTicks;
     if (ticksStuck < this.#stuckTicks) return;
     this.#emit({
       type: "creature_stuck",
@@ -392,12 +581,14 @@ export class Simulation {
     this.#finish(creature, { action: actionId, outcome: "interrupted", reason: "stuck" });
   }
 
-  #decide(creature: CreatureState) {
-    const tick = this.tick;
-    const species = this.state.registries.species.get(creature.speciesId);
-    const rng = new Rng(creature.rng);
-    const observation: CreatureObservation = {
-      tick,
+  /** What a behavior sees: copies, so evaluating changes nothing about the creature. */
+  #observation(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    action?: RunningAction,
+  ): CreatureObservation {
+    return {
+      tick: this.tick,
       tickSeconds: this.tickSeconds,
       creature: {
         id: creature.id,
@@ -406,51 +597,159 @@ export class Simulation {
         heading: creature.heading,
       },
       ...(creature.lastResult ? { lastResult: { ...creature.lastResult } } : {}),
+      ...(action ? { action } : {}),
+      dayPhase: this.state.dayPhase,
+      needs: { ...creature.needs },
+      traits: profile.traits,
+      senses: Object.fromEntries(
+        Object.entries(profile.senses).map(([id, value]) => [
+          id,
+          value * (creature.variation.senses[id] ?? 1),
+        ]),
+      ),
+      knowledge: copyKnowledge(creature.knowledge),
+      home: creature.home,
       world: this.#queries(creature),
     };
-    const candidates = (species?.behaviors ?? []).map((behavior) => {
-      const provider = this.#behaviors.get(behavior);
-      const memory = (creature.memory[behavior] ??= {});
-      return { behavior, proposal: provider?.evaluate(observation, memory, rng) ?? null };
+  }
+
+  /**
+   * Evaluates every behavior of the species on its own copy of its memory and of the creature's
+   * random stream, so a behavior that isn't chosen leaves no trace (ADR 0018 §8 amendments).
+   */
+  #evaluate(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    observation: CreatureObservation,
+  ): Evaluation[] {
+    return profile.behaviors.map(({ id, provider }) => {
+      const memory = clonePlain(creature.memory[id] ?? {});
+      const rng: RngState = { words: [...creature.rng.words], key: creature.rng.key };
+      const proposal = provider?.evaluate(observation, memory, new Rng(rng)) ?? null;
+      return { behavior: id, proposal, memory, rng };
     });
-    let best: { behavior: string; proposal: Proposal } | undefined;
-    for (const { behavior, proposal } of candidates) {
-      if (!proposal || !Number.isFinite(proposal.utility)) continue;
-      if (!best || proposal.utility > best.proposal.utility) best = { behavior, proposal };
+  }
+
+  /** The highest usable proposal, the first on a tie, leaving out `excluded`'s. */
+  #best(evaluated: Evaluation[], excluded?: string): Chosen | undefined {
+    let best: Chosen | undefined;
+    for (const e of evaluated) {
+      if (e.behavior === excluded || !usable(e.proposal)) continue;
+      if (!best || e.proposal.utility > best.proposal.utility)
+        best = { ...e, proposal: e.proposal };
     }
-    const trace: DecisionTrace = {
-      tick,
+    return best;
+  }
+
+  /** Keeps the chosen behavior's memory and random-stream use. */
+  #commit(creature: CreatureState, chosen: Chosen) {
+    creature.memory[chosen.behavior] = chosen.memory;
+    creature.rng = chosen.rng;
+  }
+
+  #traceBase(creature: CreatureState, trigger: DecisionTrigger | undefined) {
+    return {
+      tick: this.tick,
       creatureId: creature.id,
       position: { ...creature.position },
       ...(creature.lastResult ? { lastResult: { ...creature.lastResult } } : {}),
-      candidates,
-      result: "no_proposal",
+      ...(trigger ? { trigger } : {}),
+      needs: { ...creature.needs },
     };
-    if (!best) {
-      creature.decideAtTick = tick + this.#retryTicks;
-      this.#onTrace?.(trace);
-      return;
-    }
+  }
 
-    const { action, params } = best.proposal;
-    trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
-    const provider = this.#actions.get(action);
+  /** Starts the chosen proposal's action, if its behavior declared it and it can start. */
+  #start(creature: CreatureState, profile: SpeciesProfile, { behavior, proposal }: Chosen) {
+    const provider = this.#actions.get(proposal.action);
     // A behavior may only start actions it declared as dependencies.
-    const declared = this.#behaviors
-      .get(best.behavior)
-      ?.dependencies?.some((d) => d.registry === "actions" && d.id === action);
+    const declared = profile.behaviors
+      .find((b) => b.id === behavior)
+      ?.provider?.dependencies?.some((d) => d.registry === "actions" && d.id === proposal.action);
     const start: ActionStart = !provider
       ? { ok: false, reason: "unknown_action" }
       : !declared
         ? { ok: false, reason: "undeclared_action" }
-        : provider.start(params, this.#actionContext(creature));
+        : provider.start(proposal.params, this.#actionContext(creature, profile));
     if (start.ok) {
-      creature.action = { id: action, state: start.state, startTick: tick };
-      creature.progress = { x: creature.position.x, z: creature.position.z, tick };
+      creature.action = {
+        id: proposal.action,
+        behavior,
+        state: start.state,
+        startTick: this.tick,
+      };
+      creature.progress = { x: creature.position.x, z: creature.position.z, stalledTicks: 0 };
+    }
+    return start;
+  }
+
+  /** A decision with no action running (ADR 0006 §8): the highest proposal wins. */
+  #decide(creature: CreatureState, profile: SpeciesProfile, trigger?: DecisionTrigger) {
+    const evaluated = this.#evaluate(creature, profile, this.#observation(creature, profile));
+    const best = this.#best(evaluated);
+    const trace: DecisionTrace = {
+      ...this.#traceBase(creature, trigger),
+      candidates: evaluated.map(({ behavior, proposal }) => ({ behavior, proposal })),
+      result: "no_proposal",
+    };
+    if (!best) {
+      creature.decideAtTick = this.tick + this.#retryTicks;
+      this.#onTrace?.(trace);
+      return;
+    }
+    this.#commit(creature, best);
+    const { action, params } = best.proposal;
+    trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
+    const start = this.#start(creature, profile, best);
+    if (start.ok) {
       trace.result = "started";
     } else {
       creature.lastResult = { action, outcome: "failed", reason: start.reason };
-      creature.decideAtTick = tick + this.#retryTicks;
+      creature.decideAtTick = this.tick + this.#retryTicks;
+      trace.result = "rejected";
+      trace.reason = start.reason;
+    }
+    if (start.detail) trace.detail = start.detail;
+    this.#onTrace?.(trace);
+  }
+
+  /**
+   * A trigger while an action runs (ADR 0018 §8 and amendments). Every behavior is evaluated.
+   * The behavior that owns the action proposes its current utility, which sets the bar (0 if it
+   * proposes nothing), and its proposals never challenge. The best other proposal replaces the
+   * action only if it beats the bar by `INTERRUPT_MARGIN` and starts; the old action then ends as
+   * `interrupted` (`outranked`). A challenger that fails to start leaves the action running.
+   */
+  #reconsider(creature: CreatureState, profile: SpeciesProfile, trigger: DecisionTrigger) {
+    const running = creature.action;
+    if (!running || !profile.behaviors.some((b) => b.id !== running.behavior)) return;
+    const observation = this.#observation(creature, profile, {
+      id: running.id,
+      behavior: running.behavior,
+      startTick: running.startTick,
+    });
+    const evaluated = this.#evaluate(creature, profile, observation);
+    const own = evaluated.find((e) => e.behavior === running.behavior)?.proposal;
+    const bar = usable(own) ? own.utility : 0;
+    const best = this.#best(evaluated, running.behavior);
+    const trace: DecisionTrace = {
+      ...this.#traceBase(creature, trigger),
+      running: { action: running.id, behavior: running.behavior, utility: bar },
+      candidates: evaluated.map(({ behavior, proposal }) => ({ behavior, proposal })),
+      result: "kept",
+    };
+    if (!best || best.proposal.utility - bar < INTERRUPT_MARGIN - UTILITY_EPSILON) {
+      this.#onTrace?.(trace);
+      return;
+    }
+    this.#commit(creature, best);
+    const { action, params } = best.proposal;
+    trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
+    const start = this.#start(creature, profile, best);
+    if (start.ok) {
+      this.#paths.delete(creature.id);
+      creature.lastResult = { action: running.id, outcome: "interrupted", reason: "outranked" };
+      trace.result = "started";
+    } else {
       trace.result = "rejected";
       trace.reason = start.reason;
     }
@@ -469,13 +768,23 @@ export class Simulation {
     return pathfinder;
   }
 
-  #actionContext(creature: CreatureState): ActionContext {
+  /** `activity` records whether the action walked this tick, for the watchdog and cues. */
+  #actionContext(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    activity?: { walked: boolean },
+  ): ActionContext {
     return {
       tick: this.tick,
       tickSeconds: this.tickSeconds,
       get position() {
         return creature.position;
       },
+      dayPhase: this.state.dayPhase,
+      get needs() {
+        return creature.needs;
+      },
+      traits: profile.traits,
       planRoute: (destination) => {
         const result = this.#pathfinder(creature).findRoute(creature.position, destination);
         if (!result.ok) {
@@ -490,7 +799,14 @@ export class Simulation {
         }
         return result;
       },
-      walk: (path) => this.#walk(creature, path),
+      walk: (path) => {
+        if (activity) activity.walked = true;
+        return this.#walk(creature, profile, path);
+      },
+      adjustNeed: (id, delta) => {
+        if (!Object.hasOwn(creature.needs, id) || !Number.isFinite(delta)) return;
+        creature.needs[id] = clamp01((creature.needs[id] ?? 0) + delta);
+      },
     };
   }
 
@@ -542,14 +858,16 @@ export class Simulation {
   }
 
   /**
-   * Locomotion (roadmap M3 task 8): kinematic movement along the path at the species speed.
+   * Locomotion (roadmap M3 task 8): kinematic movement along the path at the species speed,
+   * slowed by any need at 1 that declares an `atMax` speed factor (ADR 0018 §18).
    * Heading follows the direction of travel; height is never stored, it always comes from the
    * current region's surface. On a portal crossing the region changes on the shared cell edge.
    */
-  #walk(creature: CreatureState, path: PathState): "moving" | "arrived" {
+  #walk(creature: CreatureState, profile: SpeciesProfile, path: PathState): "moving" | "arrived" {
     this.#paths.set(creature.id, path);
     const kind = this.state.model.regions.get(creature.position.regionId)?.kind;
-    let budget = kind ? this.#speed(creature.speciesId, kind) * this.tickSeconds : 0;
+    const speed = kind ? this.#speed(creature.speciesId, kind) : 0;
+    let budget = speed * atMaxSpeedFactor(creature, profile) * this.tickSeconds;
     while (budget > 0) {
       const target = path.points[path.next];
       if (!target) break;
@@ -624,4 +942,14 @@ export class Simulation {
     creature.usedStructures.push(structureId);
     this.#emit({ ...base, type: "first_use_of_structure", structureId, connectionId });
   }
+}
+
+/** The product of the speed factors of the creature's needs that are at 1 (ADR 0018 §18). */
+function atMaxSpeedFactor(creature: CreatureState, profile: SpeciesProfile): number {
+  let factor = 1;
+  for (const need of profile.needs) {
+    const speedFactor = need.atMax?.speedFactor;
+    if (speedFactor !== undefined && (creature.needs[need.id] ?? 0) >= 1) factor *= speedFactor;
+  }
+  return factor;
 }

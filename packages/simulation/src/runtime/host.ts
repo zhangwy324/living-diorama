@@ -89,7 +89,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
   const send = (message: SimulationMessage) => port.postMessage(envelope(message));
   const reject = (diagnostics: Diagnostic[]) => send({ type: "error", diagnostics });
   const sendSnapshot = (sim: Simulation, paused: boolean) =>
-    send({ type: "snapshot", snapshot: sim.snapshot({ paused, routes: debug }), events: [] });
+    send({ type: "snapshot", snapshot: sim.snapshot({ paused, debug }), events: [] });
 
   const init = (command: Extract<SimulationCommand, { type: "init" }>) => {
     if (simulation) {
@@ -248,7 +248,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
     const due = clock.advance(options.now());
     for (let n = 0; n < due; n++) {
       const events = simulation.step();
-      send({ type: "snapshot", snapshot: simulation.snapshot({ routes: debug }), events });
+      send({ type: "snapshot", snapshot: simulation.snapshot({ debug }), events });
     }
     options.schedule(loop, clock.tickMs);
   };

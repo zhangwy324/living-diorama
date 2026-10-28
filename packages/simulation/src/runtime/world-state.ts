@@ -6,6 +6,8 @@ import {
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
+import { drawIndividual, speciesNeeds, type IndividualVariation } from "../creatures/individual";
+import { emptyKnowledge, type CreatureKnowledge } from "../creatures/knowledge";
 import { Pathfinder } from "../navigation/pathfinder";
 import { profileForSpecies, type NavProfile } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
@@ -27,8 +29,8 @@ export interface CreatureState {
   /** Radians in [-π, π); 0 faces +Z and π/2 faces +X (world-coordinates.md). */
   heading: number;
   rng: RngState;
-  /** The running action and its own plain-data state. */
-  action?: { id: string; state: unknown; startTick: number };
+  /** The running action, the behavior that chose it and the action's own plain-data state. */
+  action?: { id: string; behavior: string; state: unknown; startTick: number };
   lastResult?: ActionResult;
   /** With no action running, behaviors are evaluated at this tick or later. */
   decideAtTick: number;
@@ -36,8 +38,26 @@ export interface CreatureState {
   memory: Record<string, BehaviorMemory>;
   /** Structure placements already used, so `first_use_of_structure` fires once each. */
   usedStructures: string[];
-  /** Where the creature last made progress, for the stuck watchdog. */
-  progress: { x: number; z: number; tick: number };
+  /**
+   * Where the creature last made progress, and how many ticks it has walked since without getting
+   * further, for the stuck watchdog. Ticks on which it doesn't walk don't count.
+   */
+  progress: { x: number; z: number; stalledTicks: number };
+  /**
+   * Need ID → value in [0, 1] (ADR 0018 §1). Only the needs its species' behaviors declare as
+   * `needs` dependencies, so a creature that only wanders has none.
+   */
+  needs: Record<string, number>;
+  /** Places seen and cells visited (ADR 0018 §10, §16). */
+  knowledge: CreatureKnowledge;
+  /** The placement ID of its home (ADR 0018 §14), or null. */
+  home: string | null;
+  /** Factors drawn once at spawn (ADR 0018 §16). */
+  variation: IndividualVariation;
+  /** Whether its action reported it asleep on the last tick, which selects the need rates. */
+  asleep: boolean;
+  /** The tick at which it reacts to the last day-phase change (ADR 0018 §7), if still to come. */
+  phaseReactionTick?: number;
 }
 
 export interface WorldStateOptions {
@@ -228,17 +248,29 @@ export class WorldState {
       );
     }
     const id = `creature-${this.#nextCreature++}`;
+    const rng = this.#root.fork(id).state;
+    const individual = drawIndividual(
+      rng,
+      speciesNeeds(species, this.registries),
+      species,
+      this.registries,
+    );
     const creature: CreatureState = {
       id,
       speciesId,
       speciesVersion: species.version,
       position: { ...spawn.position },
       heading: normalizeHeading(spawn.heading),
-      rng: this.#root.fork(id).state,
+      rng,
       decideAtTick: this.tick,
       memory: {},
       usedStructures: [],
-      progress: { x: spawn.position.x, z: spawn.position.z, tick: this.tick },
+      progress: { x: spawn.position.x, z: spawn.position.z, stalledTicks: 0 },
+      needs: individual.needs,
+      knowledge: emptyKnowledge(),
+      home: null,
+      variation: individual.variation,
+      asleep: false,
     };
     this.creatures.set(id, creature);
     return { ok: true, value: creature };
