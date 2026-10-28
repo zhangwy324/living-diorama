@@ -24,93 +24,165 @@ flowchart TD
   api --> schema
 ```
 
-| Package               | Owns                                                                                                                                                                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)).                                                                                                    |
-| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)).                                                                                                                                              |
-| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation, actions, behaviors, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md)). |
-| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)).                                                                                                                               |
-| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)).                                                                                                                                                       |
-| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                           |
-| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and the React host that wires everything together.                                                                                                                                                                               |
-| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                 |
+| Package               | Owns                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)). Also the drawing and library entry schemas of drawn species and their migrations ([ADR 0014](adr/0014-species-library.md) §5–6).                        |
+| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)), and `addEntries`, which adds a batch of entries to resolved registries all or nothing ([ADR 0012](adr/0012-runtime-species.md) §3).                                                               |
+| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation and size limits, actions, behaviors, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md), [ADR 0013](adr/0013-size-limits.md)). |
+| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)). Creature bodies extruded from their appearance image ([ADR 0011](adr/0011-extruded-creature-bodies.md)), and the Studio's body preview and drawing checks.                         |
+| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)), the `LibraryStore` over the species library's files, and the window channel between the Studio and the strip ([ADR 0015](adr/0015-creation-studio.md) §5).                                                 |
+| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                                                                                |
+| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and two React pages, the strip (`index.html`), which wires everything together, and the Creation Studio (`studio.html`).                                                                                                                                                              |
+| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                                                                      |
 
 Each package's README lists what it owns and what it must not do.
 
 ## Runtime topology
 
-The installed app is one Windows process tree: the Rust host and the WebView2 processes it starts. The page in the WebView runs on two threads.
+The installed app is one Windows process tree: the Rust host and the WebView2 processes it starts. It has at most two windows, each with its own page:
+
+- `main`, the diorama, which is either the strip or the expanded normal window. Its page runs on two threads: the main thread and the simulation worker.
+- `studio`, the Creation Studio, which exists only while it is open. Its page has no worker and no world of its own.
 
 ```mermaid
 flowchart LR
   subgraph host["Rust host (src-tauri)"]
-    shell["shell: window, AppBar,<br/>tray, settings, log"]
+    shell["shell: window shapes, AppBar,<br/>tray, settings, library files, log"]
   end
-  subgraph webview["WebView2 page"]
-    subgraph main["Main thread"]
+  subgraph mainwin["main window: strip or normal (index.html)"]
+    subgraph mainthread["Main thread"]
       app["React app<br/>(App.tsx)"]
+      library["species-library.ts"]
       view["renderer<br/>DioramaView"]
     end
     subgraph worker["Web Worker"]
       sim["simulation<br/>runSimulationHost"]
     end
   end
+  subgraph studiowin["studio window (studio.html)"]
+    studio["Studio.tsx<br/>editor, body preview"]
+  end
 
-  app <-- "invoke / events<br/>(desktop-integration)" --> shell
+  app <-- "invoke / events<br/>(DesktopShell)" --> shell
+  library <-- "library commands<br/>(LibraryStore)" --> shell
   app -- "commands" --> sim
-  sim -- "snapshots + events" --> app
+  sim -- "snapshots, events, replies" --> app
   app -- "pushSnapshot" --> view
+  studio -- "studio-request" --> app
+  app -- "studio-response,<br/>library-changed" --> studio
+  studio -- "open_studio, load_library_image" --> shell
 ```
 
-- **Rust host.** Owns the window and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, DPI and monitor changes, focus policy, the tray menu, always-on-top, expanded mode, the settings file, the species library's files and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused and expanded state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md)).
-- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). `species-library.ts` keeps the drawn species: it checks the stored entries, registers them and adds, removes and deletes them. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
-- **Simulation worker.** The only place content is registered and checked (`content.ts`). Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
-- **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)).
+- **Rust host.** Owns the windows and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, switching the `main` window between its two shapes, DPI and monitor changes, focus policy, the tray menu, always-on-top, the settings file, the species library's files and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused, expanded and full-screen state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md), [ADR 0016](adr/0016-integration-and-v0.2-build.md) §1–8).
+- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). `species-library.ts` keeps the drawn species: it checks the stored entries, registers them and adds, removes and deletes them. `studio-protocol.ts` answers the Studio's requests from the library and the latest snapshot. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
+- **Simulation worker.** The only place content is registered and checked: the packs at `init` (`content.ts`), drawn species while the world runs. Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
+- **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)). The renderer follows the window's pixel density when it moves between monitors.
+- **Studio page.** The editor, the live body preview, name, size and hints, and My creatures. It holds only its drawing and the latest library snapshot, and asks the strip for everything else ([ADR 0015](adr/0015-creation-studio.md) §4).
+
+### One window, two shapes
+
+Expanding doesn't open a window: the `main` window changes its style and size ([ADR 0016](adr/0016-integration-and-v0.2-build.md) §1). So there is one page, one worker and one WebGL context for the diorama, and nothing is forwarded between windows.
+
+| Shape  | Window                                                                                                   | Band                                         |
+| ------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Strip  | Borderless, non-focusable, no taskbar or Alt+Tab entry (`WS_EX_TOOLWINDOW`), on top if the setting is on | Reserved as an AppBar, if the setting is on. |
+| Normal | Framed, resizable, movable, focusable, in the taskbar and Alt+Tab; can be maximized or full screen       | Given back.                                  |
+
+- `shell.rs` makes the switch. It cloaks the window while it changes, then shows it fully drawn. `placement.rs` decides each placement as a pure, unit-tested function of the shape and what triggered it. In the normal shape it never reserves the band and never re-places the window on a display change, since both caused loops ([ADR 0016](adr/0016-integration-and-v0.2-build.md) §8).
+- The strip's style subclass and its activation hand-back ([ADR 0015](adr/0015-creation-studio.md) §1) stand aside in the normal shape, so the normal window can stay active.
+- Closing the normal window turns it back into the strip. Its geometry is saved in `settings.json` as the optional `expanded` field, and the app always starts as the strip ([ADR 0016](adr/0016-integration-and-v0.2-build.md) §5).
+- The page keeps one camera per shape (`shape-cameras.ts`), and handles F11, Esc and Home only in the normal shape (`shortcuts.ts`).
+
+### The Creation Studio
+
+Rust creates the `studio` window on demand, from the overlay's pencil button (`open_studio`) or the tray, one at a time. Closing it destroys it and frees its WebGL context; the world doesn't notice ([ADR 0015](adr/0015-creation-studio.md) §1). Its capability file, `capabilities/studio.json`, grants only targeted events, closing itself and the log.
+
+The Studio never creates a `DesktopShell` and never hears the shell's events. Rust sends those to `main` only, and accepts `quit_ready` only from `main` ([ADR 0015](adr/0015-creation-studio.md) §6). Quitting closes the Studio with the app, and an unreleased drawing is lost.
+
+### Drawn species: from strokes to a body
+
+1. **Strokes.** The Studio's editor (`studio/editor.ts`) draws on a plain `<canvas>` of 256 × 256 units. Each stroke is a tool, colour, width and flat `[x, y, pressure, …]` points. `drawing.ts` turns a stroke into an outline with perfect-freehand, for the editor and for `rasterize` alike, so the image matches what the player saw ([ADR 0015](adr/0015-creation-studio.md) §9, §11).
+2. **Preview and hints.** 200 ms after the strokes change, the Studio takes the drawing's pixels, runs `checkBody` (thin parts, separate shapes) and rebuilds the `createBodyPreview` scene. Both are the renderer's, so the preview is the body the world will build. It also asks the strip for the chosen size's limits ([ADR 0015](adr/0015-creation-studio.md) §7–8).
+3. **Release.** `rasterize` encodes the drawing as a 256 px PNG. The Studio sends the drawing, the PNG bytes, the name, the size and a `releaseId` UUID to the strip. The strip saves it through the library, which registers the species before storing it, then adds one creature ([ADR 0015](adr/0015-creation-studio.md) §12).
+4. **Registration.** The library makes a `blob:` URL from the PNG and sends `register_species` to the worker: a species definition with the ID `user:<uuid>`, the drawn species defaults from `startup.ts`, and the image URL ([ADR 0012](adr/0012-runtime-species.md) §2, §5).
+5. **Body.** When the renderer first meets a creature of the species, it shows a grey fallback block, reads the image as 256 px pixels and builds the body once per species. Each opaque shape is traced, extruded with rounded edges, and textured from the drawing on its faces and from the drawing without its outline on its sides ([ADR 0011](adr/0011-extruded-creature-bodies.md)).
+
+### The species library
+
+Rust stores, TypeScript checks ([ADR 0014](adr/0014-species-library.md)).
+
+- **Rust** (`src-tauri/src/library.rs`) keeps one folder per species in `%APPDATA%\com.livingdiorama.desktop\library`, named by the species' UUID: `entry.json`, `drawing.json` and `appearance.png`. It saves and deletes atomically through a `.tmp` folder, accepts only lowercase UUIDs as IDs, limits each file's size, and never interprets the contents. Development builds use `LIVING_DIORAMA_DEV_DATA_DIR` instead when it is set.
+- **TypeScript** (`species-library.ts`) reads the entries through `LibraryStore`, migrates and validates them with `content-schema`, and checks that each holds the species its folder names. An entry that fails is skipped with a diagnostic, and its files are left alone.
+- At launch, once the world is ready, the library registers every stored species, one at a time, and spawns none. A species the world rejects stays in the list as unavailable. Deleting a species takes its creatures out of the world and deletes its files; it stays registered, unreachable, until the next launch.
 
 ### Startup
 
-1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it and starts the tray.
+1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it as the strip and starts the tray.
 2. The page loads, starts the worker and sends `init` with the world from `startup.ts`.
 3. The worker registers the engine's entries, then the built-in pack, resolves references and runs the world checks. Any error comes back as `error` and reaches the error screen as "The world failed to load".
-4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the app sends one `spawn` per starting creature. The app then opens the species library and registers its species one at a time, spawning none ([ADR 0014](adr/0014-species-library.md)); development builds expose it as `window.livingDiorama.library`.
+4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the app sends one `spawn` per starting creature. The app then opens the species library and registers its species ([ADR 0014](adr/0014-species-library.md) §8); development builds expose it as `window.livingDiorama.library`. From then on the strip answers the Studio's requests.
 5. The worker sends a snapshot every tick, and the view draws it.
 
 ### Shutdown
 
-Tray → Quit asks the page to stop first: the app sends `shutdown` to the worker and disposes the view, then the host releases the reserved screen space and exits. The host waits at most one second for the page.
+Tray → Quit asks the page to stop first: the app sends `shutdown` to the worker and disposes the view, then the host releases the reserved screen space and exits. The host waits at most one second for the page. The Studio, if open, closes with the app.
 
 ## Messages
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws. Request commands (`register_species`, `spawn`, `despawn`) can fail in normal use; they carry a request ID and get a reply with it ([ADR 0012](adr/0012-runtime-species.md)).
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 4; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
-| Direction     | Message                        | Meaning                                                                                   |
-| ------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
-| main → worker | `init`                         | World ID, seed, tick rate and creature cap. Always first.                                 |
-|               | `register_species`             | Add a species and its appearance image, checked like pack content.                        |
-|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.          |
-|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                        |
-|               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                             |
-|               | `shutdown`                     | Stop the clock and close the worker.                                                      |
-| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.        |
-|               | `snapshot`                     | Every tick: creature positions and headings, plus the events since the previous snapshot. |
-|               | `species_registered`           | A species was registered: its summary, its appearance asset and where it doesn't fit.     |
-|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                              |
-|               | `rejected`                     | A request failed, with diagnostics. Not fatal: the world keeps running.                   |
-|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                      |
+Request commands (`register_species`, `spawn`, `despawn`, `check_limits`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8).
+
+| Direction     | Message                        | Meaning                                                                                            |
+| ------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| main → worker | `init`                         | World ID, seed, tick rate and creature cap. Always first.                                          |
+|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                      |
+|               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out.                   |
+|               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.       |
+|               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                 |
+|               | `set_debug`                    | Include each walking creature's remaining route in snapshots.                                      |
+|               | `shutdown`                     | Stop the clock and close the worker.                                                               |
+| worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                 |
+|               | `snapshot`                     | Every tick: creature positions and headings, plus the events since the previous snapshot.          |
+|               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                        |
+|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.   |
+|               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                       |
+|               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running. |
+|               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                               |
 
 Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also carries the resolved world position, so the renderer needs no surface lookups. See [world coordinates](world-coordinates.md).
 
-Events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`.
+Events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
+
+### Studio ↔ strip
+
+The window channel in [`packages/desktop-integration/src/channel.ts`](../packages/desktop-integration/src/channel.ts) carries typed requests over targeted Tauri events. [`apps/desktop/src/studio-protocol.ts`](../apps/desktop/src/studio-protocol.ts) defines what they hold and how the strip answers ([ADR 0015](adr/0015-creation-studio.md) §5, §12).
+
+- The Studio sends `studio-request` to `main` with `{ requestId, request }`. `main` answers with `studio-response` to `studio`, carrying `{ requestId, result }` or `{ requestId, error }`. A request with no answer in 5 seconds fails with a timeout.
+- `main` pushes `library-changed` with a library snapshot whenever the library changes, or the count of a species in the world does.
+- Each side listens with its own window label as the target, so it never hears events sent to the other window.
+
+| Request          | What the strip does                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `snapshot`       | Returns the library now: each species with its library UUID and count in the world, the world's total and its cap. |
+| `limits`         | Runs `check_limits` for a size class with the drawn species' capabilities.                                         |
+| `release`        | Saves the drawing as a species and adds one creature. Repeating a `releaseId` gets the first answer.               |
+| `addCreature`    | Adds a creature of a library species, unless the world is full.                                                    |
+| `removeCreature` | Takes the newest creature of a species out of the world.                                                           |
+| `deleteSpecies`  | Deletes a species from the library; its creatures leave the world.                                                 |
+
+Images don't travel in snapshots. The Studio loads each species' PNG itself with `load_library_image` and makes its own `blob:` URL.
 
 ### Page ↔ Rust host
 
-Defined by `DesktopShell` in [`packages/desktop-integration/src/shell.ts`](../packages/desktop-integration/src/shell.ts) and the commands registered in `apps/desktop/src-tauri/src/lib.rs`.
+Defined by `DesktopShell` and `LibraryStore` in [`packages/desktop-integration/src`](../packages/desktop-integration/src/) and the commands registered in `apps/desktop/src-tauri/src/lib.rs`.
 
-- Commands from the page: set the strip height, pause, expand, hide, confirm it is ready to quit, and record event counts; list, load, save and delete species library entries ([ADR 0014](adr/0014-species-library.md)).
-- Events from the host: paused changed, expanded changed, quit requested.
-- Log lines from the page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%\com.livingdiorama.desktop\logs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
+- Commands from the strip: set the strip height, pause, expand or collapse, enter or leave full screen, hide, open the Studio, confirm it is ready to quit, and record event counts.
+- Library commands: list, load the drawing, load the image, save and delete entries ([ADR 0014](adr/0014-species-library.md)). The image comes back as raw bytes.
+- Events from the host, sent to `main` only: paused changed, expanded changed, full screen changed, quit requested.
+- Log lines from either page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%\com.livingdiorama.desktop\logs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
 
 The tray and the page's controls both go through the host, so the host's state is the only one and both views of it stay in sync.
 
@@ -122,9 +194,29 @@ Content is data registered into typed registries, and the engine refers to it on
 2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, `core:walk`, `core:crossable`, the actions and the `core:wander` behavior.
 3. Each pack registers its entries. Registration validates each entry against its schema and rejects duplicates.
 4. `resolveReferences()` checks every reference between entries: the target exists, its version satisfies the declared range, and target-specific checks pass (surface params against the surface type's schema, a prop's model is a model asset).
-5. `checkWorld()` builds the world model and runs the semantic checks for each navigation profile: every region has walkable area in one piece, every portal and spawn point is usable, and no two regions are walkable at the same place and height.
+5. `checkWorld()` builds the world model and runs the semantic checks for each navigation profile (size class plus capabilities).
 
 [Adding content](adding-content.md) walks through writing a pack.
+
+### Species added while the world runs
+
+Drawn species go through the same schemas, registries and checks as pack content, and no engine code tells them apart ([ADR 0012](adr/0012-runtime-species.md)).
+
+1. `register_species` builds an image asset whose ID is the species' `appearance` and whose version is the species' version.
+2. `addEntries()` validates the species and its asset, resolves their references against what is registered, and registers both only if everything passes.
+3. If the species brings a new navigation profile, `checkNavigation()` builds that profile's navigation and runs the per-profile world checks. Errors reject the species; the profile is kept only if registration succeeds.
+4. The world holds at most `maxCreatures` creatures (20, from `startup.ts`). A spawn beyond that is rejected with `world_full`.
+
+The `user:` namespace for drawn species is the app's convention (`user-species.ts`). The engine doesn't reserve it.
+
+### Size limits
+
+A creature only goes where it fits ([ADR 0013](adr/0013-size-limits.md)). For each profile, a region's walkable cells split into connected areas, and wander only picks cells reachable from where the creature stands.
+
+- **Limits are warnings**: a region split into areas (`disconnected_region`), a portal with no room (`portal_unusable`, naming the structure), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`). Cut-off slivers up to 1 m² don't count.
+- **Broken geometry stays an error**: a portal whose surfaces don't meet, two regions walkable at the same place and height (`ambiguous_overlap`), or no usable spawn point at all (`no_spawn_point`).
+
+This holds for pack species at startup too. Each profile's limits come back with `species_registered` and `limits` as `Limit`s, diagnostics that name the structure they are about, and the Studio turns them into the player's words. In the Woodland Hollow, large creatures can't cross the wooden bridge; the other sizes go everywhere.
 
 ## Boundary rules
 
