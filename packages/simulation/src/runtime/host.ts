@@ -209,7 +209,9 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         return;
       }
       case "spawn": {
-        const spawned = sim.spawn(command.speciesId, command.spawnPointId);
+        const spawned = sim.spawn(command.speciesId, command.spawnPointId, {
+          released: command.released === true,
+        });
         if (!spawned.ok) {
           diagnostics = spawned.diagnostics;
           break;

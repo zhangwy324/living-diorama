@@ -14,7 +14,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -28,8 +28,17 @@ export type RequestCommand =
    * asset with the ID `species.appearance` and the species' version, served from `appearanceUrl`.
    */
   | { type: "register_species"; requestId?: string; species: unknown; appearanceUrl: string }
-  /** Adds a creature at the given spawn point, or a random one. */
-  | { type: "spawn"; requestId?: string; speciesId: string; spawnPointId?: string }
+  /**
+   * Adds a creature at the given spawn point, or a random one. `released`: it comes from the
+   * Studio, so it gets the release grace (ADR 0018 amendments, §13).
+   */
+  | {
+      type: "spawn";
+      requestId?: string;
+      speciesId: string;
+      spawnPointId?: string;
+      released?: boolean;
+    }
   | { type: "despawn"; requestId?: string; creatureId: string }
   /**
    * Where creatures of this size class and these capabilities wouldn't fit, without registering
@@ -166,7 +175,17 @@ export type ActionEvent =
    * A meal finished (ADR 0018 §17) at the placement. `hunger` is the creature's hunger after it.
    * An interrupted meal lowers hunger in part but emits nothing.
    */
-  { type: "ate"; placementId: string; hunger: number };
+  | { type: "ate"; placementId: string; hunger: number }
+  /**
+   * The creature fell asleep (ADR 0018 §13, §17), beside the shelter `placementId`, or where it
+   * stood (null). `tiredness` is its tiredness then.
+   */
+  | { type: "fell_asleep"; placementId: string | null; tiredness: number }
+  /**
+   * The creature woke: `rested` when its sleep ended by itself, `interrupted` when something
+   * more pressing (hunger) or the watchdog cut it short.
+   */
+  | { type: "woke_up"; reason: "rested" | "interrupted"; tiredness: number };
 
 /**
  * Events about one creature (roadmap M3 task 10, M9 task 5). Structures are identified by
@@ -195,6 +214,12 @@ export type CreatureEvent =
       reason: string;
     })
   | (CreatureEventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number })
+  /** The creature took `placementId` as its home (ADR 0018 §14); `previous` is the old one. */
+  | (CreatureEventBase & {
+      type: "new_home_selected";
+      placementId: string;
+      previous: string | null;
+    })
   | (CreatureEventBase & ActionEvent);
 
 /** Events about the world as a whole, with no creature (ADR 0018 §17). */

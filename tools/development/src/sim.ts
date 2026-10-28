@@ -82,6 +82,12 @@ function describe(e: SimulationEvent): string {
       return `stuck for ${e.ticksStuck} ticks in ${e.position.regionId}`;
     case "ate":
       return `ate at ${e.placementId}, hunger now ${e.hunger.toFixed(2)}`;
+    case "fell_asleep":
+      return `fell asleep ${e.placementId === null ? "where it stood" : `at ${e.placementId}`}, tiredness ${e.tiredness.toFixed(2)}`;
+    case "woke_up":
+      return `woke up (${e.reason}), tiredness ${e.tiredness.toFixed(2)}`;
+    case "new_home_selected":
+      return `new home ${e.placementId}${e.previous === null ? "" : ` (was ${e.previous})`}`;
     case "day_phase_changed":
       return `${e.from} → ${e.to}`;
   }

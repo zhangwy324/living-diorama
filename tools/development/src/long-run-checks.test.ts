@@ -206,7 +206,7 @@ describe("long-run checks", () => {
     expect(corrupted.violations).toEqual(["seed 1, tick 2: creature-1: test:corrupt is 1.5"]);
   });
 
-  it("holds mosslings to the meal check: they eat, but don't sleep yet", () => {
+  it("holds mosslings to the checks: they sleep the night, so they miss the meal check", () => {
     const hollow = {
       register: registerBuiltInContent,
       worldId: "hollow:woodland-hollow",
@@ -218,11 +218,15 @@ describe("long-run checks", () => {
       ticks: 4 * 3600 * 2,
     };
     const checked = runWithInvariants({ ...hollow, meals: {}, sleep: {} });
-    for (const c of Object.values(checked.creatures)) expect(c.meals).toBeGreaterThan(0);
-    // Sleep arrives in PR 5a.
+    // From PR 5a they go to bed at dusk and sleep the night through without eating, so the meal
+    // check as it stands fails overnight; PR 6 decides how it counts sleep.
+    for (const c of Object.values(checked.creatures)) {
+      expect(c.asleepAtNightTicks).toBe(c.nightTicks);
+      expect(c.meals).toBe(0);
+    }
     expect(checked.violations.map(withoutTick)).toEqual([
-      "creature-1: asleep 0% of the night (at least 50%)",
-      "creature-2: asleep 0% of the night (at least 50%)",
+      "creature-1: no meal for 3 h",
+      "creature-2: no meal for 3 h",
     ]);
 
     // Filters see the creature's state and the simulation, once per creature.
@@ -232,14 +236,12 @@ describe("long-run checks", () => {
       meals: {
         creatures: (c, simulation) => {
           seen.push(c.id);
-          return simulation.state.model.regions.has(c.position.regionId);
+          return simulation.state.model.regions.has(c.position.regionId) && c.id === "creature-2";
         },
       },
       sleep: { creatures: (c) => c.id === "creature-2" },
     });
     expect(seen).toEqual(["creature-1", "creature-2"]);
-    expect(filtered.violations.map(withoutTick)).toEqual([
-      "creature-2: asleep 0% of the night (at least 50%)",
-    ]);
+    expect(filtered.violations.map(withoutTick)).toEqual(["creature-2: no meal for 3 h"]);
   });
 });

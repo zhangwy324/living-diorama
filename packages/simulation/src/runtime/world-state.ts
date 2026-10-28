@@ -63,6 +63,11 @@ export interface CreatureState {
   asleep: boolean;
   /** The tick at which it reacts to the last day-phase change (ADR 0018 §7), if still to come. */
   phaseReactionTick?: number;
+  /**
+   * The tick it was released from the Studio at, if it was; behaviors read it, e.g. for the
+   * release grace (ADR 0018 amendments, §13).
+   */
+  releasedAtTick?: number;
 }
 
 export interface WorldStateOptions {

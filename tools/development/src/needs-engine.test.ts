@@ -201,8 +201,12 @@ describe("spawning", () => {
       },
     });
     const mossling = simulation.spawn("hollow:mossling");
-    // The mossling feeds (PR 4a), so it has hunger; the observer depends on no need.
-    expect(Object.keys(mossling.ok ? mossling.value.needs : {})).toEqual(["core:hunger"]);
+    // The mossling feeds (PR 4a) and rests (PR 5a), so it has hunger and tiredness; the observer
+    // depends on no need.
+    expect(Object.keys(mossling.ok ? mossling.value.needs : {})).toEqual([
+      "core:hunger",
+      "core:tiredness",
+    ]);
     const spawned = simulation.spawn("test:observant-mossling");
     if (!spawned.ok) throw new Error("spawn failed");
     const factor = spawned.value.variation.senses["core:vision"]!;

@@ -355,6 +355,8 @@ function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: numbe
     },
     face: (x, z) => faced.push({ x, z }),
     emit: (event) => emitted.push(event),
+    home: null,
+    setHome: () => {},
   };
   return { context, adjusted, emitted, walked: () => walked, needs, faced };
 }
@@ -597,6 +599,8 @@ describe("feeding in Woodland Hollow", () => {
     expect(first!.candidates).toEqual([
       { behavior: "core:wander", proposal: expect.objectContaining({ utility: 0.1 }) },
       { behavior: "core:feed", proposal: expect.objectContaining({ utility: 1.2 }) },
+      // Not tired, by day: no rest.
+      { behavior: "core:rest", proposal: null },
     ]);
     expect(first!.chosen!.behavior).toBe("core:feed");
     // 0.6 m/s × 0.8 × 0.1 s.
@@ -725,6 +729,8 @@ describe("feeding in Woodland Hollow", () => {
   it.each([1, 2])("over three hours, every mossling eats regularly (seed %i)", (seed) => {
     const { simulation, events, run } = setup(seed);
     for (let k = 0; k < 3; k++) simulation.spawn("hollow:mossling");
+    // Rested, so none naps in these three daytime hours (PR 5a); this is about feeding.
+    for (const c of simulation.state.creatures.values()) c.needs["core:tiredness"] = 0;
     let highest = 0;
     for (let t = 0; t < 3 * 36_000; t++) {
       run(1);
