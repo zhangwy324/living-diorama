@@ -4,7 +4,6 @@ import {
   type Drawing,
   type Stroke,
 } from "@living-diorama/content-schema";
-import { getStroke } from "perfect-freehand";
 
 // Strokes to pixels (ADR 0015 §9), one way for the Studio's editor and for the PNG the body is
 // built from, so the released image matches what the player saw.
@@ -12,11 +11,18 @@ import { getStroke } from "perfect-freehand";
 /** The drawing canvas's width and height in units: the body image's size (ADR 0011 §1). */
 export const CANVAS_SIZE = 256;
 
+/**
+ * Pressure is drawn in steps of 1/64, so a pen's varying pressure becomes a few runs of one
+ * width each rather than a line per point (ADR 0015 §9).
+ */
+export const PRESSURE_STEPS = 64;
+
 /** What drawing a stroke needs of a 2D context, on screen or offscreen. */
 export type StrokeContext = CanvasCompositing &
   CanvasFillStrokeStyles &
-  Pick<CanvasPath, "moveTo" | "quadraticCurveTo" | "closePath"> &
-  Pick<CanvasDrawPath, "beginPath" | "fill">;
+  Pick<CanvasPathDrawingStyles, "lineWidth" | "lineCap" | "lineJoin"> &
+  Pick<CanvasPath, "moveTo" | "lineTo" | "arc"> &
+  Pick<CanvasDrawPath, "beginPath" | "fill" | "stroke">;
 
 /** A drawing of `strokes` on the Studio's canvas. */
 export const toDrawing = (strokes: readonly Stroke[]): Drawing => ({
@@ -25,43 +31,108 @@ export const toDrawing = (strokes: readonly Stroke[]): Drawing => ({
   strokes: [...strokes],
 });
 
-/**
- * The outline polygon of `stroke`, in canvas units, from perfect-freehand. With `thinning` 1 and
- * `size` half the width, the stroke is `width × pressure` wide, as ADR 0014 defines. `last` is
- * false while the stroke is still being drawn.
- */
-export function strokeOutline(stroke: Stroke, last = true): number[][] {
-  const points: number[][] = [];
-  for (let i = 0; i < stroke.points.length; i += STROKE_POINT_STRIDE) {
-    points.push(stroke.points.slice(i, i + STROKE_POINT_STRIDE));
-  }
-  return getStroke(points, {
-    size: stroke.width / 2,
-    thinning: 1,
-    simulatePressure: false,
-    last,
-  });
+/** Consecutive points of a stroke drawn at one width, in canvas units. */
+export interface StrokeRun {
+  width: number;
+  points: [Point, ...Point[]];
 }
 
-/** Fills `stroke`'s outline: a pen with its colour, an eraser cutting out what is under it. */
-export function drawStroke(context: StrokeContext, stroke: Stroke, last = true): void {
-  const outline = strokeOutline(stroke, last) as [number, number][];
-  const [first, second] = outline;
-  if (!first || !second || outline.length < 3) return;
-  context.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-  context.fillStyle = stroke.color;
-  // A smooth closed curve through the midpoints, the outline's points as control points.
-  const mid = (a: [number, number], b: [number, number]) =>
-    [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const;
-  context.beginPath();
-  context.moveTo(...mid(first, second));
-  for (let i = 1; i <= outline.length; i++) {
-    const point = outline[i % outline.length] ?? first;
-    const next = outline[(i + 1) % outline.length] ?? first;
-    context.quadraticCurveTo(point[0], point[1], ...mid(point, next));
+type Point = [number, number];
+
+/**
+ * `stroke` split into runs of one width: `width × pressure`, the pressure in steps of
+ * 1/`PRESSURE_STEPS`. Between two points the pressure changes evenly; a run ends where it reaches
+ * the next step up or down, and the next run starts there. A step is left only once the pressure
+ * reaches the next one, so noise smaller than a step doesn't split the stroke into many runs.
+ */
+export function strokeRuns(stroke: Stroke): StrokeRun[] {
+  const runs: StrokeRun[] = [];
+  let step = 0;
+  let run: StrokeRun | undefined;
+  const startRun = (at: Point) => {
+    run = { width: (stroke.width * step) / PRESSURE_STEPS, points: [at] };
+    runs.push(run);
+    return run;
+  };
+  let previous: { point: Point; level: number } | undefined;
+  for (let i = 0; i + 2 < stroke.points.length; i += STROKE_POINT_STRIDE) {
+    const [x = 0, y = 0, pressure = 0] = stroke.points.slice(i, i + STROKE_POINT_STRIDE);
+    const point: Point = [x, y];
+    // The pressure in steps, not rounded.
+    const level = Math.min(1, Math.max(0, pressure)) * PRESSURE_STEPS;
+    if (!previous || !run) {
+      step = Math.round(level);
+      startRun(point);
+    } else {
+      const from = previous;
+      const direction = Math.sign(level - from.level);
+      // The steps this segment climbs or falls. The width changes at most once per canvas unit
+      // along it (once on a shorter one), several steps at a time if need be, so wildly varying
+      // pressure can't make thousands of runs.
+      const count = direction === 0 ? 0 : Math.floor((level - step) * direction);
+      const length = Math.hypot(point[0] - from.point[0], point[1] - from.point[1]);
+      const stride = Math.ceil(count / Math.max(1, Math.ceil(length)));
+      for (let taken = 0; taken < count;) {
+        const take = Math.min(stride, count - taken);
+        taken += take;
+        step += take * direction;
+        const t = (step - from.level) / (level - from.level);
+        const at: Point = [
+          from.point[0] + (point[0] - from.point[0]) * t,
+          from.point[1] + (point[1] - from.point[1]) * t,
+        ];
+        run.points.push(at);
+        run = startRun(at);
+      }
+      run.points.push(point);
+    }
+    previous = { point, level };
   }
-  context.closePath();
-  context.fill();
+  return runs;
+}
+
+/**
+ * Draws `stroke`: every point within half its width of the line through its points, with round
+ * ends and corners (ADR 0015 §9). The canvas's own line drawing does it, so the edge is exactly
+ * that, however unevenly the points are spaced. A pen stroke takes its colour; an eraser stroke
+ * cuts out what is under it.
+ */
+export function drawStroke(context: StrokeContext, stroke: Stroke): void {
+  context.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
+  context.fillStyle = context.strokeStyle = stroke.color;
+  context.lineCap = context.lineJoin = "round";
+  // One path per width, so a pen's pressure costs at most one line and one fill per step.
+  const byWidth = new Map<number, StrokeRun[]>();
+  for (const run of strokeRuns(stroke)) {
+    const runs = byWidth.get(run.width);
+    if (runs) runs.push(run);
+    else byWidth.set(run.width, [run]);
+  }
+  for (const [width, runs] of byWidth) {
+    if (width <= 0) continue;
+    // A run at a single point is a dot: a canvas may draw nothing for a line of no length.
+    const isDot = ([[x0, y0], ...rest]: StrokeRun["points"]) =>
+      rest.every(([x, y]) => x === x0 && y === y0);
+    const lines = runs.filter((run) => !isDot(run.points));
+    const dots = runs.filter((run) => isDot(run.points)).map((run) => run.points[0]);
+    if (lines.length > 0) {
+      context.beginPath();
+      for (const { points } of lines) {
+        const [first, ...rest] = points;
+        context.moveTo(...first);
+        for (const [x, y] of rest) context.lineTo(x, y);
+      }
+      context.lineWidth = width;
+      context.stroke();
+    }
+    if (dots.length === 0) continue;
+    context.beginPath();
+    for (const [x, y] of dots) {
+      context.moveTo(x + width / 2, y);
+      context.arc(x, y, width / 2, 0, Math.PI * 2);
+    }
+    context.fill();
+  }
   context.globalCompositeOperation = "source-over";
 }
 

@@ -5,7 +5,7 @@ import { LiveStroke, type Brush } from "./live-stroke";
 
 // The drawing editor's canvas, driven imperatively (ADR 0015 §11): React renders the toolbar
 // only. Finished strokes are baked into a bitmap, so a frame draws the bitmap and the live
-// stroke's outline; the stroke list in `StrokeHistory` is the only state.
+// stroke's round-capped lines; the stroke list in `StrokeHistory` is the only state.
 
 /** What the toolbar and the close dialog need to know. */
 export interface EditorState {
@@ -171,7 +171,7 @@ export class DrawingEditor {
     if (this.live) {
       const scale = this.scale();
       context.setTransform(scale, 0, 0, scale, 0, 0);
-      drawStroke(context, this.live.stroke.stroke, false);
+      drawStroke(context, this.live.stroke.stroke);
     }
   }
 
@@ -211,7 +211,6 @@ export class DrawingEditor {
     stroke.add(
       (event.clientX - box.left) * units,
       (event.clientY - box.top) * units,
-      event.timeStamp,
       event.pressure,
     );
   }

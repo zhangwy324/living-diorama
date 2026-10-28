@@ -16,7 +16,6 @@
     "@living-diorama/extension-api": "workspace:*",
     "@living-diorama/renderer": "workspace:*",
     "@living-diorama/simulation": "workspace:*",
-    "perfect-freehand": "^1.2.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
