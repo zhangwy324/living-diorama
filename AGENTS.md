@@ -37,6 +37,16 @@ Living Diorama is a Windows 11 desktop companion strip showing a small living 3D
 - Each worktree has its own `node_modules` and Rust `target/`. The first `pnpm install` is fast because pnpm reuses its store, but the first Rust build in a new worktree compiles from scratch.
 - `pnpm dev` uses fixed port 17420, so only one worktree can run the dev app at a time.
 
+## Backward compatibility
+
+The game has no real users yet, so **backward compatibility is not required** until the project owner says the game has been released to real users. Until then:
+
+- Library files, saves, content formats, worker protocols and settings may change freely. Old versions may break.
+- Migrations are optional. Write one only when it is cheap. Bump `schemaVersion` when a format changes, but a change needs no migration (this relaxes ADR 0003 §1 for now).
+- Don't add compatibility shims, fallbacks for old formats or deprecation paths.
+
+Only the project owner lifts this. Until they do, don't treat it as lifted, whatever a release tag or version number says.
+
 ## Commands
 
 | Command            | Purpose                                         |
