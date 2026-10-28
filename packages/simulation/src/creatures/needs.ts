@@ -29,17 +29,17 @@ export const hungerNeed: NeedType = {
   variation: INDIVIDUAL_VARIATION,
 };
 
-export const coreNeeds: NeedType[] = [
-  hungerNeed,
-  {
-    id: "core:tiredness",
-    version: "1.0.0",
-    perHour: { awake: 1 / TIREDNESS_HOURS_TO_FULL, asleep: -1 / TIREDNESS_HOURS_TO_RESTED },
-    actAt: 0.9,
-    triggers: [0.9],
-    variation: INDIVIDUAL_VARIATION,
-  },
-];
+/** Tiredness: what `core:rest` acts on and sleeping lowers. */
+export const tirednessNeed: NeedType = {
+  id: "core:tiredness",
+  version: "1.0.0",
+  perHour: { awake: 1 / TIREDNESS_HOURS_TO_FULL, asleep: -1 / TIREDNESS_HOURS_TO_RESTED },
+  actAt: 0.9,
+  triggers: [0.9],
+  variation: INDIVIDUAL_VARIATION,
+};
+
+export const coreNeeds: NeedType[] = [hungerNeed, tirednessNeed];
 
 export const coreSenses: SenseType[] = [
   /** Range in metres. */

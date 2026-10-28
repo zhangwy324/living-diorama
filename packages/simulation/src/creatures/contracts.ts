@@ -92,6 +92,13 @@ export interface ActionContext extends PlaceQueries {
   face(x: number, z: number): void;
   /** Emits an event about the creature; the engine adds the tick and the creature ID. */
   emit(event: ActionEvent): void;
+  /** The placement ID of the creature's home (ADR 0018 §14), or null if it has none. */
+  readonly home: string | null;
+  /**
+   * Makes the prop placement `placementId` the creature's home and emits `new_home_selected`.
+   * Does nothing if there is no such placement or it is home already.
+   */
+  setHome(placementId: string): void;
 }
 
 export type ActionStart =
@@ -126,6 +133,12 @@ export interface ActionProvider extends ActionType {
   start(params: unknown, context: ActionContext): ActionStart;
   /** Advances one tick. `state` is the value `start` returned, changed in place. */
   step(state: unknown, context: ActionContext): ActionStatus;
+  /**
+   * Called when the engine ends the action before `step` reported it finished: a challenger
+   * outranked it (`outranked`) or the watchdog stopped it (`stuck`). For what an action must
+   * do when cut short, e.g. a sleeper emitting `woke_up`. Not called on despawn.
+   */
+  interrupted?(state: unknown, context: ActionContext, reason: string): void;
 }
 
 export function isActionProvider(entry: ActionType): entry is ActionProvider {
@@ -183,6 +196,8 @@ export interface CreatureObservation {
     readonly speciesId: string;
     readonly position: Readonly<RegionPosition>;
     readonly heading: number;
+    /** The tick it was released from the Studio at, if it was (ADR 0018 amendments, §13). */
+    readonly releasedAtTick?: number;
   };
   /**
    * How the creature's last action ended, or how the last action chosen for it failed to start,

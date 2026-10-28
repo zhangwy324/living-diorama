@@ -150,6 +150,11 @@ export interface SnapshotOptions {
   debug?: boolean;
 }
 
+export interface SpawnOptions {
+  /** Released from the Studio (ADR 0018 amendments, §13). */
+  released?: boolean;
+}
+
 export interface SimulationOptions extends WorldStateOptions {
   /** Default 10. */
   tickRateHz?: number;
@@ -328,11 +333,19 @@ export class Simulation {
       : { ...diagnostic };
   }
 
-  /** Adds a creature; it makes its first decision on the next step. */
-  spawn(speciesId: string, spawnPointId?: string): Result<CreatureState> {
+  /**
+   * Adds a creature; it makes its first decision on the next step. `released`: it comes from the
+   * Studio, which behaviors see as `releasedAtTick` (ADR 0018 amendments, §13).
+   */
+  spawn(
+    speciesId: string,
+    spawnPointId?: string,
+    { released = false }: SpawnOptions = {},
+  ): Result<CreatureState> {
     const result = this.state.spawn(speciesId, spawnPointId);
     if (result.ok) {
       const creature = result.value;
+      if (released) creature.releasedAtTick = this.tick;
       const base = { tick: this.tick, creatureId: creature.id, speciesId };
       this.#emit({ ...base, type: "creature_spawned", regionId: creature.position.regionId });
       if (!this.state.introducedSpecies.has(speciesId)) {
@@ -501,17 +514,18 @@ export class Simulation {
     const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
     let cue: ActionCue | undefined;
-    let asleep = false;
+    // Awake unless the action says otherwise; an interruption below wakes it again.
+    creature.asleep = false;
     if (running) {
       const provider = this.#actions.get(running.id);
       const activity = { walked: false };
       const status: ActionStatus = provider
         ? provider.step(running.state, this.#actionContext(creature, profile, activity))
         : { status: "failed", reason: "unknown_action" };
-      asleep = status.asleep === true;
+      creature.asleep = status.asleep === true;
       if (status.status === "running") {
         // Standing still to eat or sleep is not being stuck (ADR 0018 amendments).
-        if (activity.walked) this.#watch(creature, running.id);
+        if (activity.walked) this.#watch(creature, profile, running.id);
         else if (status.cue !== undefined && status.cue === provider?.cue) cue = status.cue;
       } else {
         this.#finish(
@@ -522,7 +536,6 @@ export class Simulation {
         );
       }
     }
-    creature.asleep = asleep;
 
     const triggers = before ? this.#integrateNeeds(creature, profile, before) : [];
     if (creature.phaseReactionTick !== undefined && this.tick >= creature.phaseReactionTick) {
@@ -606,7 +619,7 @@ export class Simulation {
    * The stuck watchdog: interrupts an action that walks but has made no progress for a while.
    * Called only on ticks on which the action walked.
    */
-  #watch(creature: CreatureState, actionId: string) {
+  #watch(creature: CreatureState, profile: SpeciesProfile, actionId: string) {
     const { x, z } = creature.position;
     const anchor = creature.progress;
     if (Math.hypot(x - anchor.x, z - anchor.z) >= PROGRESS_DISTANCE) {
@@ -622,7 +635,24 @@ export class Simulation {
       position: { ...creature.position },
       ticksStuck,
     });
+    if (creature.action) this.#interrupted(creature, profile, creature.action, "stuck");
     this.#finish(creature, { action: actionId, outcome: "interrupted", reason: "stuck" });
+  }
+
+  /**
+   * Lets the running action react to being cut short (`ActionProvider.interrupted`), and wakes
+   * the creature: whatever replaces the action reports its own state from the next tick.
+   */
+  #interrupted(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    action: { id: string; state: unknown },
+    reason: string,
+  ) {
+    this.#actions
+      .get(action.id)
+      ?.interrupted?.(action.state, this.#actionContext(creature, profile), reason);
+    creature.asleep = false;
   }
 
   /** What a behavior sees: copies, so evaluating changes nothing about the creature. */
@@ -639,6 +669,9 @@ export class Simulation {
         speciesId: creature.speciesId,
         position: { ...creature.position },
         heading: creature.heading,
+        ...(creature.releasedAtTick === undefined
+          ? {}
+          : { releasedAtTick: creature.releasedAtTick }),
       },
       ...(creature.lastResult ? { lastResult: { ...creature.lastResult } } : {}),
       ...(action ? { action } : {}),
@@ -798,8 +831,15 @@ export class Simulation {
     this.#commit(creature, best);
     const { action, params } = best.proposal;
     trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
+    // Whether the challenger starts decides whether the running action is interrupted, so it is
+    // started first; on success the old action's `interrupted` events are moved before anything
+    // the start emitted, so e.g. `woke_up` precedes the new action's events.
+    const mark = this.#events.length;
     const start = this.#start(creature, profile, best);
     if (start.ok) {
+      const started = this.#events.splice(mark);
+      this.#interrupted(creature, profile, running, "outranked");
+      this.#events.push(...started);
       this.#paths.delete(creature.id);
       creature.lastResult = { action: running.id, outcome: "interrupted", reason: "outranked" };
       trace.result = "started";
@@ -870,6 +910,21 @@ export class Simulation {
         if (Math.hypot(dx, dz) > 1e-9) creature.heading = normalizeHeading(Math.atan2(dx, dz));
       },
       emit: (event) => this.#emit({ ...event, tick: this.tick, creatureId: creature.id }),
+      get home() {
+        return creature.home;
+      },
+      setHome: (placementId) => {
+        const previous = creature.home;
+        if (placementId === previous || !this.state.model.propsById.has(placementId)) return;
+        creature.home = placementId;
+        this.#emit({
+          type: "new_home_selected",
+          tick: this.tick,
+          creatureId: creature.id,
+          placementId,
+          previous,
+        });
+      },
     };
   }
 

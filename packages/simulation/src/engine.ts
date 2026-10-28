@@ -8,6 +8,7 @@ import type { Registries } from "@living-diorama/extension-api";
 import { coreActions } from "./creatures/core-actions";
 import { eatAction, feedBehavior } from "./creatures/feed";
 import { coreNeeds, coreSenses, coreTraits } from "./creatures/needs";
+import { restBehavior, sleepAction } from "./creatures/rest";
 import { coreBehaviors } from "./creatures/wander";
 import { coreSurfaces } from "./world/surfaces";
 
@@ -46,7 +47,11 @@ export function registerCoreEngine(registries: Registries): Result<unknown>[] {
     ...coreNeeds.map((need) => registries.needs.register(need)),
     ...coreSenses.map((sense) => registries.senses.register(sense)),
     ...coreTraits.map((trait) => registries.traits.register(trait)),
-    ...[...coreActions, eatAction].map((action) => registries.actions.register(action)),
-    ...[...coreBehaviors, feedBehavior].map((behavior) => registries.behaviors.register(behavior)),
+    ...[...coreActions, eatAction, sleepAction].map((action) =>
+      registries.actions.register(action),
+    ),
+    ...[...coreBehaviors, feedBehavior, restBehavior].map((behavior) =>
+      registries.behaviors.register(behavior),
+    ),
   ];
 }

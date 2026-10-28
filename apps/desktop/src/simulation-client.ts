@@ -48,8 +48,11 @@ export interface SimulationClient {
    * only for a size class or capability that doesn't exist.
    */
   checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Promise<Result<Limit[]>>;
-  /** Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added. */
-  spawn(speciesId: string): Promise<Result<string>>;
+  /**
+   * Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added.
+   * `released`: it comes from the Studio, so it gets the release grace (ADR 0018 amendments, §13).
+   */
+  spawn(speciesId: string, options?: { released?: boolean }): Promise<Result<string>>;
   /** Takes a creature out of the world. */
   despawn(creatureId: string): Promise<Result<string>>;
   /** Turns debug data (routes, needs, knowledge and home) in snapshots on or off. */
@@ -223,7 +226,8 @@ export function startSimulation(
       request({ type: "register_species", species, appearanceUrl }),
     checkLimits: (sizeClass, capabilities) =>
       request({ type: "check_limits", sizeClass, capabilities }),
-    spawn: (speciesId) => request({ type: "spawn", speciesId }),
+    spawn: (speciesId, { released = false } = {}) =>
+      request({ type: "spawn", speciesId, ...(released ? { released } : {}) }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
     setPaused: (paused) => {

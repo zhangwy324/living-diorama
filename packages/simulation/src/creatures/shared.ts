@@ -33,10 +33,23 @@ export interface PlaceChoice {
  * `skip`, get a route. Undefined if none can be reached.
  */
 export function chooseNearestByRoute(
+  observation: CreatureObservation,
+  affordanceId: string,
+  skip?: (placementId: string) => boolean,
+): PlaceChoice | undefined {
+  return routeNearest(observation, affordanceId, skip)[0];
+}
+
+/**
+ * The `PATHED_CANDIDATES` known places offering `affordanceId` nearest by straight line, leaving
+ * out `skip`, that the creature can reach, with their route lengths, shortest route first (the
+ * first in straight-line order on a tie).
+ */
+export function routeNearest(
   { creature, knowledge, world }: CreatureObservation,
   affordanceId: string,
   skip: (placementId: string) => boolean = () => false,
-): PlaceChoice | undefined {
+): PlaceChoice[] {
   const here = creature.position;
   const nearest = (knowledge.places[affordanceId] ?? [])
     .flatMap(({ placementId }) => {
@@ -47,11 +60,12 @@ export function chooseNearestByRoute(
     })
     .sort((a, b) => a.distance - b.distance)
     .slice(0, PATHED_CANDIDATES);
-  let best: PlaceChoice | undefined;
+  const routed: PlaceChoice[] = [];
   for (const { placementId } of nearest) {
     const spot = world.spotAt(placementId);
     const length = spot && world.routeLength(spot);
-    if (length !== undefined && (!best || length < best.length)) best = { placementId, length };
+    if (length !== undefined) routed.push({ placementId, length });
   }
-  return best;
+  // Stable, so equal routes keep their straight-line order.
+  return routed.sort((a, b) => a.length - b.length);
 }

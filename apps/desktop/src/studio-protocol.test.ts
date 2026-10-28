@@ -162,7 +162,7 @@ describe("releasing", () => {
     expect(stored.map((entry) => entry.id)).toEqual([RELEASE_ID]);
     expect(stored[0]?.entry).toMatchObject({ species: { body: { thickness: 0.25 } } });
     expect(await store.loadImage(RELEASE_ID)).toEqual(new Uint8Array(PNG));
-    expect(world.spawn).toHaveBeenCalledWith(speciesId);
+    expect(world.spawn).toHaveBeenCalledWith(speciesId, { released: true });
     expect(changed).toHaveBeenCalledOnce();
 
     const snapshot = await studio.request("snapshot", undefined);

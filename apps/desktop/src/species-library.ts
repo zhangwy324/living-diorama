@@ -60,7 +60,10 @@ export interface SpeciesLibrary {
     sizeClass: SizeClass,
     options?: SaveOptions,
   ): Promise<Result<LibrarySpecies>>;
-  /** Adds a creature of a registered species at a random spawn point. Resolves with its ID. */
+  /**
+   * Adds a creature of a registered species at a random spawn point, released from the Studio
+   * (ADR 0018 amendments, §13). Resolves with its ID.
+   */
   addCreature(speciesId: string): Promise<Result<string>>;
   removeCreature(creatureId: string): Promise<Result<string>>;
   /**
@@ -250,7 +253,7 @@ export async function openSpeciesLibrary(
     addCreature: (speciesId) =>
       unseen.has(speciesId)
         ? Promise.resolve(failure("species_deleted", `${speciesId} is not in the library`))
-        : world.spawn(speciesId),
+        : world.spawn(speciesId, { released: true }),
 
     removeCreature: (creatureId) => world.despawn(creatureId),
 
