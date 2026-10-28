@@ -5,7 +5,7 @@ import { limitCamera } from "./camera";
 import type { ImageReader } from "./body/pixels";
 import { CreatureBodies, type SpeciesResolver } from "./creatures";
 import { DebugStats } from "./debug-stats";
-import { createSkyLight, createSunLight, SUN_DIRECTION } from "./lighting";
+import { createSkyLight, createSunLight, lightingAt, SUN_DIRECTION } from "./lighting";
 import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
 import { createDebugOverlays, type DebugOverlays } from "./overlays";
@@ -52,6 +52,11 @@ export interface DioramaView {
   cameraState(): CameraState;
   /** Moves the camera to `state` at once, or to the default framing when it is undefined. */
   setCameraState(state: CameraState | undefined): void;
+  /**
+   * Lights the diorama for `minutes` since local midnight (ADR 0018 §6). Until it is called the
+   * diorama is in daylight.
+   */
+  setTimeOfDay(minutes: number): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
   setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
   /** Resolves once every prop model is placed (or replaced by its fallback). */
@@ -79,17 +84,30 @@ export function defaultFraming(scene: SceneData, aspect: number) {
   return { fov: THREE.MathUtils.radToDeg(vertical), position, target };
 }
 
-/** A sun whose shadow camera just covers the world's bounding box. */
-export function createSun(scene: SceneData): THREE.DirectionalLight {
+const boundingSphere = (scene: SceneData) => {
   const { min, max } = scene.bounds;
   const box = new THREE.Box3(
     new THREE.Vector3(min.x, min.y, min.z),
     new THREE.Vector3(max.x, max.y, max.z),
   );
-  const { center, radius } = box.getBoundingSphere(new THREE.Sphere());
-  const sun = createSunLight();
-  sun.position.copy(center).addScaledVector(SUN_DIRECTION, radius * 2);
+  return box.getBoundingSphere(new THREE.Sphere());
+};
+
+/**
+ * Puts the sun (or moon) towards `direction` from the world's centre. The shadow camera is a
+ * cube around the world's bounding sphere, so it covers the world from any direction.
+ */
+export function aimSun(sun: THREE.DirectionalLight, scene: SceneData, direction: THREE.Vector3) {
+  const { center, radius } = boundingSphere(scene);
+  sun.position.copy(center).addScaledVector(direction, radius * 2);
   sun.target.position.copy(center);
+}
+
+/** A sun whose shadow camera just covers the world's bounding box. */
+export function createSun(scene: SceneData): THREE.DirectionalLight {
+  const { radius } = boundingSphere(scene);
+  const sun = createSunLight();
+  aimSun(sun, scene, SUN_DIRECTION);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, {
@@ -113,6 +131,8 @@ export interface DioramaScene {
   overlays: DebugOverlays;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
+  /** Lights the scene for `minutes` since local midnight; it starts in daylight. */
+  setTimeOfDay(minutes: number): void;
 }
 
 /** Builds the whole scene graph. Needs no WebGL, so it runs in tests. */
@@ -121,10 +141,23 @@ export function buildDioramaScene(
   options: DioramaViewOptions = {},
 ): DioramaScene {
   const world = new THREE.Scene();
-  world.background = new THREE.Color("#cfe3ea");
-  world.add(createSkyLight());
+  const background = new THREE.Color("#cfe3ea");
+  world.background = background;
+  const sky = createSkyLight();
+  world.add(sky);
   const sun = createSun(scene);
   world.add(sun, sun.target);
+  const setTimeOfDay = (minutes: number) => {
+    const light = lightingAt(minutes);
+    sun.color.copy(light.keyColor);
+    sun.intensity = light.keyIntensity;
+    sun.shadow.intensity = light.shadowIntensity;
+    aimSun(sun, scene, light.keyDirection);
+    sky.color.copy(light.skyColor);
+    sky.groundColor.copy(light.groundColor);
+    sky.intensity = light.skyIntensity;
+    background.copy(light.background);
+  };
 
   const layers = createLayers(world);
   const water = createWaterMaterial();
@@ -149,7 +182,7 @@ export function buildDioramaScene(
     (objects) => layers.props.add(...objects),
     options.loadModel ?? loadGltf,
   );
-  return { world, layers, water, creatures, overlays, ready };
+  return { world, layers, water, creatures, overlays, ready, setTimeOfDay };
 }
 
 export function createDioramaView(
@@ -164,7 +197,10 @@ export function createDioramaView(
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const { world, layers, water, creatures, overlays, ready } = buildDioramaScene(scene, options);
+  const { world, layers, water, creatures, overlays, ready, setTimeOfDay } = buildDioramaScene(
+    scene,
+    options,
+  );
   const snapshots = new SnapshotInterpolator();
   const stats = new DebugStats(container.ownerDocument);
   container.appendChild(stats.element);
@@ -302,6 +338,11 @@ export function createDioramaView(
         frame();
       }
       moved = true;
+    },
+    setTimeOfDay(minutes) {
+      setTimeOfDay(minutes);
+      // A throttled loop would otherwise show the new light only on its next frame.
+      renderer.render(world, camera);
     },
     setClipping(layer, planes) {
       layers[layer].setClipping(planes);

@@ -9,6 +9,7 @@ import type { SpeciesLibrary } from "./species-library";
 //   await livingDiorama.library.saveSample("Puddle", "small")
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
 //   await livingDiorama.library.saveSamples()   // the twenty species measurements use
+//   livingDiorama.setTimeOfDay(23 * 60)         // night lighting preview (ADR 0018 §6)
 
 /** A round green critter with two eyes and a notch between its feet. */
 export const SAMPLE_DRAWING: Drawing = {
@@ -50,7 +51,7 @@ async function saveDrawn(
 
 declare global {
   interface Window {
-    livingDiorama?: { library?: unknown };
+    livingDiorama?: { library?: unknown; setTimeOfDay?: (minutes: number) => void };
   }
 }
 

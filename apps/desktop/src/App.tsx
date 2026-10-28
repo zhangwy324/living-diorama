@@ -162,6 +162,14 @@ export function App() {
           return;
         }
         view.current = created;
+        // Until the simulation sends the time of day (ADR 0018 §5), preview it from the console.
+        if (import.meta.env.DEV) {
+          const shown = created;
+          window.livingDiorama = {
+            ...window.livingDiorama,
+            setTimeOfDay: (m) => shown.setTimeOfDay(m),
+          };
+        }
         worldReady();
         openLibrary();
       },
