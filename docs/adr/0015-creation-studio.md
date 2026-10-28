@@ -32,6 +32,8 @@
    - `quit_ready` also takes the calling window and ignores any caller but `main`, since app commands are callable from every window regardless of capabilities;
    - shell events meant for the strip move to `emit_to("main", …)`, so a listener that names the Studio's label doesn't receive them. PR 2 found that a listener with no target (`listen`'s default) still hears events emitted to any window, so this holds because the Studio never subscribes to them and every channel listener names its own label.
 
+   **The library commands are open to every window too** (recorded in M12). For the same reason as `quit_ready`, the Studio can call `list_library`, `load_library_drawing`, `load_library_image`, `save_library_entry` and `delete_library_entry`, although it uses only `load_library_image`, and its capability file can't take the others away. This is accepted. The app loads only its own bundled pages, so nothing but the app's code can call them, and Rust still checks every ID and file size (ADR 0014 §4). If a window ever loads remote content or third-party plugins, revisit this: check the caller's label as `quit_ready` does, or put the commands behind permissions.
+
    Quitting closes the Studio with the app, and a drawing that wasn't released is lost. This is a known gap, accepted for M11: the close dialog (§10) only covers closing the Studio itself, and saving drafts closes the gap later.
 
 ### Preview and limits (PR 3)
