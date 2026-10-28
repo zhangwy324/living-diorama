@@ -188,14 +188,14 @@ Creation Studio window (once at 100% and once at 150% or 200%, with two monitors
 
 ## Releasing
 
-1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`, and merge it.
+1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`. Add the player-facing notes as `docs/release-notes/<version>.md` (for example `0.2.0.md`), and merge it. Every version needs its notes file before it is tagged: the workflow publishes it and fails without it. A release candidate tag such as `v0.2.0-rc.1` publishes `0.2.0.md`.
 2. Tag the merge commit on `main` and push the tag:
 
    ```bash
-   git tag v0.1.0 && git push origin v0.1.0
+   git tag v0.2.0 && git push origin v0.2.0
    ```
 
-3. The `Release` workflow checks that the tag matches all three versions, builds the NSIS installer and publishes it as a GitHub pre-release (ADR 0009 §10).
+3. The `Release` workflow checks that the tag matches all three versions and that the notes file exists, builds the NSIS installer and publishes it as a GitHub pre-release (ADR 0009 §10).
 4. Run the installer smoke test below on the published installer, along with the desktop shell checks above.
 
 ### Installer smoke test (manual)
