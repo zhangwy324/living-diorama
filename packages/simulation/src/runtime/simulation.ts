@@ -106,6 +106,7 @@ function implementationDiagnostics(registries: Registries): Diagnostic[] {
 }
 
 export class Simulation {
+  readonly tickRateHz: number;
   readonly tickSeconds: number;
   readonly #stuckTicks: number;
   readonly #retryTicks: number;
@@ -124,6 +125,7 @@ export class Simulation {
     tickRateHz: number,
     onTrace: ((trace: DecisionTrace) => void) | undefined,
   ) {
+    this.tickRateHz = tickRateHz;
     this.tickSeconds = 1 / tickRateHz;
     this.#stuckTicks = Math.round(STUCK_SECONDS * tickRateHz);
     this.#retryTicks = Math.max(1, Math.round(RETRY_SECONDS * tickRateHz));

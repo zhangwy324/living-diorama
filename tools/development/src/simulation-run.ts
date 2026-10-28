@@ -116,7 +116,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
   const startMinutes = options.startMinutes ?? DEFAULT_START_MINUTES;
   for (let t = 0; t < options.ticks; t++) {
     simulation.setTimeOfDay(
-      minutesAfter(startMinutes, simulation.tick * simulation.tickSeconds * 1000),
+      minutesAfter(startMinutes, (simulation.tick * 1000) / simulation.tickRateHz),
     );
     const events = simulation.step();
     for (const event of events) {

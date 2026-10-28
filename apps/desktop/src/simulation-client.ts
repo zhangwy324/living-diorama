@@ -154,6 +154,8 @@ export function startSimulation(
   };
 
   worker.onmessage = (event: MessageEvent) => {
+    // A message already queued when the client stopped must not start anything again.
+    if (stopped) return;
     const message = openEnvelope<SimulationMessage>(event.data);
     if (!message) {
       onFailure("The simulation stopped", ["The simulation worker uses another protocol version"]);

@@ -112,3 +112,17 @@ describe("time dev hook", () => {
     expect(client.setSpeed).not.toHaveBeenCalled();
   });
 });
+
+describe("time of day feed after stop", () => {
+  it("stays stopped: a late start adds no timer or listener", () => {
+    const fake = fakeClock(12 * 60);
+    const send = vi.fn();
+    const feed = timeOfDayFeed(send, fake.clock);
+    feed.stop();
+    feed.start();
+    expect(fake.listeners).toBe(0);
+    feed.resync();
+    feed.fix(6 * 60);
+    expect(send).not.toHaveBeenCalled();
+  });
+});

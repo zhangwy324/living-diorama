@@ -40,7 +40,10 @@ const JUMP_MS = 3 * CHECK_MS;
 export interface TimeOfDayFeed {
   /** The time of day to start the world at. */
   readonly minutes: number;
-  /** Starts sending: whenever the minute changes, on a wall-clock jump and when visible again. */
+  /**
+   * Starts sending: whenever the minute changes, on a wall-clock jump and when visible again.
+   * Does nothing once stopped.
+   */
   start(): void;
   /** Sends the time of day now, e.g. on unpausing. */
   resync(): void;
@@ -49,6 +52,7 @@ export interface TimeOfDayFeed {
    * the new time at once.
    */
   fix(minutes: number | undefined): void;
+  /** Stops sending for good. */
   stop(): void;
 }
 
@@ -59,6 +63,7 @@ export function timeOfDayFeed(
 ): TimeOfDayFeed {
   let fixed: number | undefined;
   let started = false;
+  let stopped = false;
   let stops: (() => void)[] = [];
   let lastCheck = clock.now();
   let sent: number | undefined;
@@ -79,7 +84,7 @@ export function timeOfDayFeed(
       return current();
     },
     start() {
-      if (started) return;
+      if (started || stopped) return;
       started = true;
       sent = current();
       lastCheck = clock.now();
@@ -92,6 +97,7 @@ export function timeOfDayFeed(
     },
     stop() {
       started = false;
+      stopped = true;
       for (const stop of stops) stop();
       stops = [];
     },

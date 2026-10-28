@@ -1,4 +1,4 @@
-import { runSimulationHost, type SimulationSnapshot } from "@living-diorama/simulation";
+import { envelope, runSimulationHost, type SimulationSnapshot } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
 import {
@@ -154,6 +154,32 @@ describe("simulation client", () => {
     tick(100);
     expect(shown()).toBe(6 * 60);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("ignores messages that arrive after it stopped", () => {
+    const worker: WorkerLike = {
+      onmessage: null,
+      onerror: null,
+      onmessageerror: null,
+      postMessage: () => {},
+      terminate: () => {},
+    };
+    let listeners = 0;
+    const clock: WallClock = {
+      ...stillClock({ now: 12 * 60 }),
+      every: () => (listeners++, () => listeners--),
+      onVisible: () => (listeners++, () => listeners--),
+    };
+    const onReady = vi.fn();
+    const callbacks = { onReady, onSnapshot: vi.fn(), onFailure: vi.fn() };
+    const client = startSimulation(callbacks, STARTUP, worker, 0, clock);
+    client.stop();
+    // A `ready` the worker sent before it was terminated.
+    worker.onmessage?.(
+      new MessageEvent("message", { data: envelope({ type: "ready", worldId: "x" }) }),
+    );
+    expect(onReady).not.toHaveBeenCalled();
+    expect(listeners).toBe(0);
   });
 
   it("checks the limits of a size without registering a species", async () => {
