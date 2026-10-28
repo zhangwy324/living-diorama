@@ -4,6 +4,8 @@
 - **Date:** 2026-10-27
 - **Context:** Roadmap M10. Drawn species (M11) have to survive a relaunch, while the world itself still resets on launch. The player's strokes are the source of truth, so later releases can add body plans without the player redrawing. Rust is the app's only filesystem boundary (ADR 0008), and drawn species go through the same schemas and registries as pack content (ADR 0012).
 
+**Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13 PR 2): the drawn image becomes the source of truth, with the strokes (and later fills) kept beside it as a record that is never replayed, and library files need no backward compatibility. Until that PR lands, this ADR describes the code.
+
 ## Decisions
 
 1. **One folder per species.** The library is `library/` in the app data directory (`%APPDATA%\com.livingdiorama.desktop\library`). Each species has a folder named by the UUID of its `user:<uuid>` ID, holding:

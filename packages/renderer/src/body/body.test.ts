@@ -1,9 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { BODY_DEPTH, buildBody, fallbackBody } from "./body";
-import { simplifyLoop, traceOutline } from "./outline";
 import type { Pixels } from "./pixels";
-import { capColours, outlineColour, sideColours } from "./textures";
 
 const COLOURS: Record<string, [number, number, number]> = {
   g: [0, 200, 0],
@@ -22,173 +20,6 @@ function art(...rows: string[]): Pixels {
   );
   return { width, height: rows.length, data };
 }
-
-/** A `size` × `size` image with a filled square from `from` to `to` (exclusive), outlined in `k`. */
-function square(size: number, from: number, to: number, outline = 0): Pixels {
-  const rows = Array.from({ length: size }, (_, y) =>
-    Array.from({ length: size }, (_, x) => {
-      if (x < from || y < from || x >= to || y >= to) return ".";
-      const edge = Math.min(x - from, y - from, to - 1 - x, to - 1 - y);
-      return edge < outline ? "k" : "g";
-    }).join(""),
-  );
-  return art(...rows);
-}
-
-const colourAt = (rgba: Uint8Array, width: number, x: number, y: number) => [
-  ...rgba.slice((y * width + x) * 4, (y * width + x) * 4 + 3),
-];
-
-describe("traceOutline", () => {
-  it("traces a rectangle as its four corners, clockwise on screen", () => {
-    const outline = traceOutline(art("......", ".gggg.", ".gggg.", "......"));
-    expect(outline.shapes).toEqual([
-      [
-        [1, 1],
-        [5, 1],
-        [5, 3],
-        [1, 3],
-      ],
-    ]);
-    expect(outline.bounds).toEqual({ minX: 1, minY: 1, maxX: 5, maxY: 3 });
-  });
-
-  it("keeps separate shapes, including ones touching only at a corner", () => {
-    const outline = traceOutline(art("gg....", "gg....", "..gg..", "..gg.."));
-    expect(outline.shapes).toHaveLength(2);
-    expect(outline.bounds).toEqual({ minX: 0, minY: 0, maxX: 4, maxY: 4 });
-  });
-
-  it("drops specks and leaves them out of the bounds", () => {
-    const pixels = square(30, 0, 20);
-    pixels.data.set([255, 0, 0, 255], (28 * 30 + 28) * 4); // 1 px against 400
-    const outline = traceOutline(pixels);
-    expect(outline.shapes).toHaveLength(1);
-    expect(outline.bounds).toEqual({ minX: 0, minY: 0, maxX: 20, maxY: 20 });
-  });
-
-  it("fills holes, covering any shape inside one", () => {
-    const outline = traceOutline(art("ggggggg", "g.....g", "g..r..g", "g.....g", "ggggggg"));
-    expect(outline.shapes).toEqual([
-      [
-        [0, 0],
-        [7, 0],
-        [7, 5],
-        [0, 5],
-      ],
-    ]);
-  });
-
-  it("follows concave outlines", () => {
-    // An L: the boundary turns at six corners.
-    const outline = traceOutline(art("gg......", "gg......", "gggggggg", "gggggggg"));
-    expect(outline.shapes[0]).toHaveLength(6);
-  });
-
-  it("finds nothing in a transparent image", () => {
-    expect(traceOutline(art("....", "....")).shapes).toEqual([]);
-  });
-});
-
-describe("simplifyLoop", () => {
-  it("straightens a staircase within a pixel", () => {
-    const stairs: [number, number][] = [[0, 0]];
-    for (let k = 1; k <= 10; k++) stairs.push([k, k - 1], [k, k]);
-    stairs.push([0, 10]);
-    const simplified = simplifyLoop(stairs);
-    expect(simplified.length).toBeLessThanOrEqual(4);
-    expect(simplified).toContainEqual([0, 0]);
-    expect(simplified).toContainEqual([0, 10]);
-  });
-});
-
-describe("body textures", () => {
-  it("gives transparent pixels on the faces the nearest drawn colour", () => {
-    const pixels = art("....", ".kg.", "....");
-    const colours = capColours(pixels);
-    expect(colourAt(colours, 4, 0, 0)).toEqual(COLOURS.k);
-    expect(colourAt(colours, 4, 3, 2)).toEqual(COLOURS.g);
-    expect(colours.every((_, i) => i % 4 !== 3 || colours[i] === 255)).toBe(true);
-  });
-
-  it("colours the sides from the interior, without the outline", () => {
-    // 100 px: a 3 px outline around an 80 px square; the blur radius is 2 px.
-    const pixels = square(100, 10, 90, 3);
-    expect(outlineColour(pixels)).toEqual(COLOURS.k);
-    const colours = sideColours(pixels);
-    for (const [x, y] of [
-      [10, 50],
-      [50, 10],
-      [5, 5],
-      [95, 95],
-    ] as const) {
-      expect(colourAt(colours, 100, x, y)).toEqual(COLOURS.g);
-    }
-  });
-
-  it("removes an outline running diagonally too", () => {
-    // A square turned 45°, outlined 3 px deep measured square to its edges: 4–5 px steps inwards.
-    const rows = Array.from({ length: 100 }, (_, y) =>
-      Array.from({ length: 100 }, (_, x) => {
-        const inside = 40 - Math.abs(x - 50) - Math.abs(y - 50);
-        return inside <= 0 ? "." : inside < 3 * Math.SQRT2 ? "k" : "g";
-      }).join(""),
-    );
-    const colours = sideColours(art(...rows));
-    for (const [x, y] of [
-      [30, 30], // on the outline
-      [5, 5],
-      [95, 50],
-    ] as const) {
-      expect(colourAt(colours, 100, x, y)).toEqual(COLOURS.g);
-    }
-  });
-
-  it("keeps a band thicker than a third of the drawing's depth as body", () => {
-    // 40 px deep at the centre, a 15 px band.
-    const pixels = square(100, 10, 90, 15);
-    expect(outlineColour(pixels)).toBeUndefined();
-    expect(colourAt(sideColours(pixels), 100, 50, 10)).toEqual(COLOURS.k);
-  });
-
-  it("keeps the colours of a drawing all in one colour", () => {
-    const pixels = square(100, 10, 90, 40);
-    expect(outlineColour(pixels)).toBeUndefined();
-    expect(colourAt(sideColours(pixels), 100, 50, 50)).toEqual(COLOURS.k);
-  });
-
-  it("keeps the colour of a drawing's edge when it has no outline", () => {
-    // Red left half, green right half.
-    const rows = Array.from({ length: 100 }, (_, y) =>
-      Array.from({ length: 100 }, (_, x) =>
-        x < 10 || y < 10 || x >= 90 || y >= 90 ? "." : x < 50 ? "r" : "g",
-      ).join(""),
-    );
-    const colours = sideColours(art(...rows));
-    expect(colourAt(colours, 100, 10, 50)).toEqual(COLOURS.r);
-    expect(colourAt(colours, 100, 89, 50)).toEqual(COLOURS.g);
-  });
-
-  it("ignores strokes of the outline's colour just inside it, like hair", () => {
-    // Two dark strokes along the top, 4–7 px deep, joined to the outline at one end.
-    const pixels = square(100, 10, 90, 3);
-    for (let x = 20; x < 80; x++) {
-      for (let y = 14; y < 17; y++) pixels.data.set([...COLOURS.k!, 255], (y * 100 + x) * 4);
-    }
-    for (let y = 10; y < 17; y++) pixels.data.set([...COLOURS.k!, 255], (y * 100 + 20) * 4);
-    const colours = sideColours(pixels);
-    for (const x of [20, 50, 79]) expect(colourAt(colours, 100, x, 10)).toEqual(COLOURS.g);
-  });
-
-  it("gives a thin part its own colour, not the body's", () => {
-    // A 4 px red arm sticking out right of an outlined green square.
-    const pixels = square(100, 10, 60, 2);
-    for (let x = 60; x < 95; x++) {
-      for (let y = 30; y < 34; y++) pixels.data.set([...COLOURS.r!, 255], (y * 100 + x) * 4);
-    }
-    expect(colourAt(sideColours(pixels), 100, 94, 31)).toEqual(COLOURS.r);
-  });
-});
 
 describe("buildBody", () => {
   const size = (geometry: THREE.BufferGeometry) => {
@@ -211,12 +42,13 @@ describe("buildBody", () => {
     expect(box.max.y).toBeCloseTo(0.8);
     expect(box.min.x).toBeCloseTo(-box.max.x);
     expect(box.min.z).toBeCloseTo(-box.max.z);
-    // The rounded edge (4% of the drawn height) grows outward on every side.
-    const scale = 0.8 / (80 * 1.08);
-    expect(box.max.x - box.min.x).toBeCloseTo((40 + 2 * 80 * 0.04) * scale);
+    // Straight walls: the silhouette is the drawing, 40 × 80 px, and the body 40% as deep as tall.
+    const scale = 0.8 / 80;
+    expect(box.max.x - box.min.x).toBeCloseTo(40 * scale);
     expect(box.max.z - box.min.z).toBeCloseTo(80 * BODY_DEPTH * scale);
+    // Faces and walls share one material.
     expect(body.geometry.groups.map((g) => g.materialIndex)).toEqual([0, 1]);
-    expect(body.material).toHaveLength(2);
+    expect(body.material).toBeInstanceOf(THREE.Material);
     body.dispose();
   });
 
@@ -233,6 +65,32 @@ describe("buildBody", () => {
       expect(uv.getY(i)).toBeGreaterThanOrEqual(0.25 - 1e-6);
       expect(uv.getY(i)).toBeLessThanOrEqual(0.75 + 1e-6);
     }
+    body.dispose();
+  });
+
+  it("leaves a ring's hole open, with walls inside it", () => {
+    // A 10 px square ring 2 px thick: its faces cover 64 px², not 100.
+    const rows = Array.from({ length: 12 }, (_, y) =>
+      Array.from({ length: 12 }, (_, x) => {
+        const edge = Math.min(x - 1, y - 1, 10 - x, 10 - y);
+        return edge >= 0 && edge < 2 ? "g" : ".";
+      }).join(""),
+    );
+    const body = buildBody(art(...rows), 1)!;
+    const position = body.geometry.getAttribute("position");
+    const index = body.geometry.index;
+    const vertex = (k: number) =>
+      new THREE.Vector3().fromBufferAttribute(position, index ? index.getX(k) : k);
+    const [faces, walls] = body.geometry.groups;
+    let faceArea = 0;
+    for (let k = faces!.start; k < faces!.start + faces!.count; k += 3) {
+      const [a, b, c] = [vertex(k), vertex(k + 1), vertex(k + 2)];
+      faceArea += new THREE.Triangle(a, b, c).getArea();
+    }
+    // Front and back, scaled from 10 px to a height of 1.
+    expect(faceArea).toBeCloseTo((2 * 64) / 100);
+    // Four walls outside and four inside, two triangles each.
+    expect(walls!.count / 3).toBe(16);
     body.dispose();
   });
 

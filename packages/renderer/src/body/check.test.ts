@@ -61,12 +61,25 @@ describe("checkBody", () => {
     expect(checkBody(image(BODY, [150, 60, 230, 63], [150, 160, 230, 163])).thinParts).toBe(2);
   });
 
-  it("sees a closed outline as solid, since holes are filled", () => {
+  it("sees a ring as it is built, with its hole: a thin wall is thin", () => {
     const ring = image(
       [30, 20, 230, 24],
       [30, 216, 230, 220],
       [30, 20, 34, 220],
       [226, 20, 230, 220],
+    );
+    const check = checkBody(ring);
+    expect(check).toMatchObject({ shapes: 1, thinParts: 1 });
+    expect(at(check.thin, 32, 120)).toBe(1);
+    expect(at(check.thin, 130, 120)).toBe(0); // the hole
+  });
+
+  it("finds nothing thin in a ring with thick walls", () => {
+    const ring = image(
+      [30, 20, 230, 40],
+      [30, 200, 230, 220],
+      [30, 20, 50, 220],
+      [210, 20, 230, 220],
     );
     expect(checkBody(ring)).toMatchObject({ shapes: 1, thinParts: 0 });
   });
@@ -79,7 +92,7 @@ describe("checkBody", () => {
     expect(count(check.loose)).toBe(50 * 50);
   });
 
-  it("leaves out specks and shapes inside another's hole, like the body does", () => {
+  it("leaves out specks, and counts a shape inside a hole as loose, like the body", () => {
     const ring: Rect[] = [
       [20, 20, 230, 40],
       [20, 210, 230, 230],
@@ -87,8 +100,9 @@ describe("checkBody", () => {
       [210, 20, 230, 230],
     ];
     const check = checkBody(image(...ring, [100, 100, 150, 150], [250, 250, 251, 251]));
-    expect(check.shapes).toBe(1);
-    expect(count(check.loose)).toBe(0);
+    expect(check.shapes).toBe(2);
+    expect(count(check.loose)).toBe(50 * 50);
+    expect(at(check.loose, 250, 250)).toBe(0);
   });
 
   it("treats shapes touching only at a corner as separate", () => {

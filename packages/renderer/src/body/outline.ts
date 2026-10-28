@@ -1,22 +1,33 @@
-import { isOpaque, type Pixels } from "./pixels";
+import { isOpaque, neighbours, type Pixels } from "./pixels";
 
-// Outlines of a drawing's opaque shapes (ADR 0011 §2).
+// Outlines of a drawing's solid shapes and of the holes in them (ADR 0011 §2, ADR 0017).
 
 /** A point in pixel-corner coordinates: x right, y down, (0, 0) the image's top-left corner. */
 export type Point = readonly [x: number, y: number];
 
+/** One slab of the body: its outer boundary and the boundaries of the holes through it. */
+export interface OutlineShape {
+  outer: Point[];
+  holes: Point[][];
+}
+
 export interface Outline {
-  /** One closed loop per kept shape, its outer boundary simplified. */
-  shapes: Point[][];
+  /** One entry per kept shape, its loops simplified. */
+  shapes: OutlineShape[];
   /** Bounds of the kept shapes, in the same coordinates. */
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 /** A shape under this share of the opaque area is a speck. */
 export const SPECK_SHARE = 0.005;
-const SIMPLIFY_TOLERANCE = 1;
+/**
+ * Simplification tolerances in pixels, tried in turn for a loop that would cross another loop or
+ * itself. The last, 0, keeps the traced loop as it is: loops along pixel edges never cross.
+ */
+const SIMPLIFY_TOLERANCES = [1, 0.5, 0] as const;
 
-interface Component {
+/** A shape of the drawing: 4-connected opaque pixels. */
+export interface Component {
   label: number;
   /** The first pixel in scan order: its top-left corner is on the outer boundary. */
   start: number;
@@ -27,39 +38,78 @@ interface Component {
   maxY: number;
 }
 
+export interface SolidShapes {
+  /** Each pixel's component label, 0 for transparent. Specks keep their labels. */
+  labels: Int32Array;
+  /** The kept components, specks left out, largest first. */
+  shapes: Component[];
+}
+
 /** Steps for the four directions: right, down, left, up. */
 const DX = [1, 0, -1, 0] as const;
 const DY = [0, 1, 0, -1] as const;
 
-/** Traces the outer boundary of each opaque shape, dropping specks and shapes inside others. */
-export function traceOutline(pixels: Pixels): Outline {
+/**
+ * The drawing's solid shapes: 4-connected opaque pixels, specks left out. The body and the Studio's
+ * hints both read the drawing through this, so they agree on what is solid.
+ */
+export function solidShapes(pixels: Pixels): SolidShapes {
   const { labels, components } = label(pixels);
   const total = components.reduce((sum, c) => sum + c.area, 0);
-  const candidates = components
+  const shapes = components
     .filter((c) => c.area >= total * SPECK_SHARE)
     .sort((a, b) => b.area - a.area);
+  return { labels, shapes };
+}
 
-  const kept: { component: Component; loop: Point[] }[] = [];
-  for (const component of candidates) {
-    const x = component.start % pixels.width;
-    const y = Math.floor(component.start / pixels.width);
-    // Holes are filled, so a shape inside another's hole is covered by it.
-    if (kept.some((k) => contains(k.loop, x + 0.5, y + 0.5))) continue;
-    kept.push({ component, loop: traceBoundary(labels, pixels.width, pixels.height, component) });
+/**
+ * Traces each solid shape's outer boundary and the boundary of every hole in it. A hole is any
+ * enclosed area that isn't solid, whatever its size. A shape inside a hole is a shape of its own.
+ */
+export function traceOutline(pixels: Pixels): Outline {
+  const { width, height } = pixels;
+  const { labels, shapes } = solidShapes(pixels);
+  const owner = new Map(shapes.map((c, i) => [c.label, i]));
+  const solid = new Uint8Array(width * height);
+  for (let i = 0; i < solid.length; i++) solid[i] = owner.has(labels[i] ?? 0) ? 1 : 0;
+
+  const raw: { outer: Point[]; holes: Point[][] }[] = shapes.map((component) => ({
+    outer: traceBoundary(
+      (x, y) => inside(x, y, width, height) && labels[y * width + x] === component.label,
+      component.start % width,
+      Math.floor(component.start / width),
+      false,
+    ),
+    holes: [],
+  }));
+  const holes = holeAreas(solid, width, height);
+  for (const hole of holes.areas) {
+    // The pixel above a hole's first pixel is solid, and of the shape around the hole: a shape
+    // inside the hole lies below that pixel.
+    const shape = owner.get(labels[hole.start - width] ?? 0);
+    if (shape === undefined) continue;
+    raw[shape]?.holes.push(
+      traceBoundary(
+        (x, y) => inside(x, y, width, height) && holes.labels[y * width + x] === hole.label,
+        hole.start % width,
+        Math.floor(hole.start / width),
+        true,
+      ),
+    );
   }
 
-  const simplified = kept
-    .map(({ component, loop }) => ({ component, loop: simplifyLoop(loop) }))
-    .filter(({ loop }) => loop.length >= 3);
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-  for (const { component } of simplified) {
+  for (const component of shapes) {
     bounds.minX = Math.min(bounds.minX, component.minX);
     bounds.minY = Math.min(bounds.minY, component.minY);
     bounds.maxX = Math.max(bounds.maxX, component.maxX + 1);
     bounds.maxY = Math.max(bounds.maxY, component.maxY + 1);
   }
-  return { shapes: simplified.map(({ loop }) => loop), bounds };
+  return { shapes: simplifyShapes(raw), bounds };
 }
+
+const inside = (x: number, y: number, width: number, height: number) =>
+  x >= 0 && y >= 0 && x < width && y < height;
 
 /** Groups opaque pixels into 4-connected components, numbered from 1 in scan order. */
 function label(pixels: Pixels): { labels: Int32Array; components: Component[] } {
@@ -92,11 +142,7 @@ function label(pixels: Pixels): { labels: Int32Array; components: Component[] } 
       component.minY = Math.min(component.minY, y);
       component.maxX = Math.max(component.maxX, x);
       component.maxY = Math.max(component.maxY, y);
-      for (let d = 0; d < 4; d++) {
-        const nx = x + (DX[d] ?? 0);
-        const ny = y + (DY[d] ?? 0);
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const n = ny * width + nx;
+      for (const n of neighbours(i, width, height)) {
         if (labels[n] || !isOpaque(pixels, n)) continue;
         labels[n] = component.label;
         queue[tail++] = n;
@@ -107,19 +153,58 @@ function label(pixels: Pixels): { labels: Int32Array; components: Component[] } 
 }
 
 /**
- * Follows a component's outer boundary along pixel edges, keeping the shape on the right
- * (clockwise on screen). Returns the corners where the boundary turns.
+ * The enclosed areas that aren't solid, numbered from 1. Shapes are 4-connected, so what lies
+ * between them is 8-connected: an area joined to the outside only through a diagonal gap between
+ * two pixels isn't enclosed.
  */
-function traceBoundary(
-  labels: Int32Array,
+function holeAreas(
+  solid: Uint8Array,
   width: number,
   height: number,
-  component: Component,
+): { labels: Int32Array; areas: { label: number; start: number }[] } {
+  const labels = new Int32Array(solid.length);
+  const areas: { label: number; start: number }[] = [];
+  const queue = new Int32Array(solid.length);
+  for (let start = 0; start < solid.length; start++) {
+    if (solid[start] || labels[start]) continue;
+    // The outside is labelled too, as -1, so it is flooded only once.
+    let enclosed = true;
+    const area = areas.length + 1;
+    labels[start] = area;
+    let tail = 0;
+    queue[tail++] = start;
+    for (let head = 0; head < tail; head++) {
+      const i = queue[head] ?? 0;
+      const x = i % width;
+      const y = (i - x) / width;
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) enclosed = false;
+      for (const n of neighbours(i, width, height, true)) {
+        if (solid[n] || labels[n]) continue;
+        labels[n] = area;
+        queue[tail++] = n;
+      }
+    }
+    if (enclosed) {
+      areas.push({ label: area, start });
+    } else {
+      for (let k = 0; k < tail; k++) labels[queue[k] ?? 0] = -1;
+    }
+  }
+  return { labels, areas };
+}
+
+/**
+ * Follows the outer boundary of the pixels `filled` holds, from the top-left corner of the first
+ * of them in scan order (x0, y0), along pixel edges, keeping them on the right (clockwise on
+ * screen). Returns the corners where the boundary turns. With `diagonals`, pixels touching only at
+ * a corner count as joined; otherwise the boundary turns away from them.
+ */
+function traceBoundary(
+  filled: (x: number, y: number) => boolean,
+  x0: number,
+  y0: number,
+  diagonals: boolean,
 ): Point[] {
-  const filled = (x: number, y: number) =>
-    x >= 0 && y >= 0 && x < width && y < height && labels[y * width + x] === component.label;
-  const x0 = component.start % width;
-  const y0 = (component.start - x0) / width;
   const loop: Point[] = [];
   let x = x0;
   let y = y0;
@@ -134,8 +219,8 @@ function traceBoundary(
           : d === 2
             ? [filled(x - 1, y), filled(x - 1, y - 1)]
             : [filled(x - 1, y - 1), filled(x, y - 1)];
-    // 4-connected: a pixel only diagonally ahead isn't part of the shape, so turn away from it.
-    const next = !right ? (d + 1) % 4 : left ? (d + 3) % 4 : d;
+    // A pixel only diagonally ahead is followed with `diagonals`, and turned away from without.
+    const next = left && (diagonals || right) ? (d + 3) % 4 : !right ? (d + 1) % 4 : d;
     if (next !== d) loop.push([x, y]);
     d = next;
     x += DX[d] ?? 0;
@@ -144,8 +229,49 @@ function traceBoundary(
   return loop;
 }
 
+/**
+ * Simplifies every loop, as much as it can without making it cross itself or another loop.
+ * Simplifying loops one at a time can make them cross where a wall is only a few pixels thick (a
+ * thin ring's hole and outer boundary), which breaks the body into slivers. A loop that crosses is
+ * simplified again with a smaller tolerance, down to none: traced loops never cross.
+ */
+function simplifyShapes(raw: { outer: Point[]; holes: Point[][] }[]): OutlineShape[] {
+  const traced = raw.flatMap(({ outer, holes }, shape) =>
+    [outer, ...holes].map((loop, k) => ({ shape, hole: k > 0, loop })),
+  );
+  const level = traced.map(() => 0);
+  const simplify = (k: number) => {
+    const { loop, hole } = traced[k] ?? { loop: [], hole: false };
+    const simplified = simplifyLoop(loop, SIMPLIFY_TOLERANCES[level[k] ?? 0]);
+    // A small hole is kept whatever its size, as traced if simplifying would leave no area.
+    return simplified.length >= 3 || !hole ? simplified : [...loop];
+  };
+  const loops = traced.map((_, k) => simplify(k));
+  const last = SIMPLIFY_TOLERANCES.length - 1;
+  for (;;) {
+    const crossing = crossingLoops(loops).filter((k) => (level[k] ?? last) < last);
+    if (!crossing.length) break;
+    for (const k of crossing) {
+      level[k] = (level[k] ?? 0) + 1;
+      loops[k] = simplify(k);
+    }
+  }
+  const shapes: OutlineShape[] = raw.map(() => ({ outer: [], holes: [] }));
+  traced.forEach(({ shape, hole }, k) => {
+    const loop = loops[k] ?? [];
+    const target = shapes[shape];
+    if (!target || loop.length < 3) return;
+    if (hole) target.holes.push(loop);
+    else target.outer = loop;
+  });
+  return shapes.filter((s) => s.outer.length >= 3);
+}
+
 /** Ramer–Douglas–Peucker on a closed loop, split at the point furthest from the first. */
-export function simplifyLoop(loop: readonly Point[], tolerance = SIMPLIFY_TOLERANCE): Point[] {
+export function simplifyLoop(
+  loop: readonly Point[],
+  tolerance: number = SIMPLIFY_TOLERANCES[0],
+): Point[] {
   const first = loop[0];
   if (!first || loop.length <= 3) return [...loop];
   let far = 0;
@@ -183,15 +309,80 @@ function distanceToSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Point): n
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-/** Even-odd point-in-polygon test. */
-function contains(loop: readonly Point[], x: number, y: number): boolean {
-  let inside = false;
-  let previous = loop.at(-1);
-  for (const point of loop) {
-    const [xi, yi] = point;
-    const [xj, yj] = previous ?? point;
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    previous = point;
+interface Segment {
+  loop: number;
+  a: Point;
+  b: Point;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/**
+ * The indices of the loops that cross themselves or another loop. Loops may touch at a shared
+ * corner, as traced loops do where two pixels meet only diagonally, but not cross or overlap.
+ */
+export function crossingLoops(loops: readonly (readonly Point[])[]): number[] {
+  const segments: Segment[] = [];
+  loops.forEach((loop, k) =>
+    loop.forEach((a, i) => {
+      const b = loop[(i + 1) % loop.length] ?? a;
+      segments.push({
+        loop: k,
+        a,
+        b,
+        minX: Math.min(a[0], b[0]),
+        maxX: Math.max(a[0], b[0]),
+        minY: Math.min(a[1], b[1]),
+        maxY: Math.max(a[1], b[1]),
+      });
+    }),
+  );
+  segments.sort((s, t) => s.minX - t.minX);
+  const crossing = new Set<number>();
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    if (!s) continue;
+    for (let j = i + 1; j < segments.length; j++) {
+      const t = segments[j];
+      if (!t || t.minX > s.maxX) break;
+      if (t.minY > s.maxY || t.maxY < s.minY) continue;
+      if (crosses(s, t)) {
+        crossing.add(s.loop);
+        crossing.add(t.loop);
+      }
+    }
   }
-  return inside;
+  return [...crossing].sort((a, b) => a - b);
+}
+
+const same = (p: Point, q: Point) => p[0] === q[0] && p[1] === q[1];
+const orient = (a: Point, b: Point, c: Point) =>
+  Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+/** Whether `p`, on the line through `a` and `b`, lies strictly between them. */
+const between = (p: Point, a: Point, b: Point) =>
+  !same(p, a) &&
+  !same(p, b) &&
+  p[0] >= Math.min(a[0], b[0]) &&
+  p[0] <= Math.max(a[0], b[0]) &&
+  p[1] >= Math.min(a[1], b[1]) &&
+  p[1] <= Math.max(a[1], b[1]);
+
+/**
+ * Whether two segments cross, overlap, or one ends on the other's middle. Segments that only
+ * share an end point don't.
+ */
+function crosses(s: Segment, t: Segment): boolean {
+  const o1 = orient(s.a, s.b, t.a);
+  const o2 = orient(s.a, s.b, t.b);
+  const o3 = orient(t.a, t.b, s.a);
+  const o4 = orient(t.a, t.b, s.b);
+  if (o1 * o2 < 0 && o3 * o4 < 0) return true;
+  return (
+    (o1 === 0 && between(t.a, s.a, s.b)) ||
+    (o2 === 0 && between(t.b, s.a, s.b)) ||
+    (o3 === 0 && between(s.a, t.a, t.b)) ||
+    (o4 === 0 && between(s.b, t.a, t.b))
+  );
 }
