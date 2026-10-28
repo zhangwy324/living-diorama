@@ -39,6 +39,8 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
+      # The published installer keeps the shipped creature count (ADR 0016 §10).
+      - run: tools/development/check-no-creature-count.sh
       - run: pnpm tauri build
       - name: Publish the pre-release
         env:

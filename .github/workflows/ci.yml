@@ -42,6 +42,9 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
+      # The release workflow's check, so a change that would break it shows up here first.
+      - run: tools/development/check-no-creature-count.sh
+        shell: bash
       - run: pnpm tauri build --no-bundle
       # After the build: the Tauri context needs the built frontend in dist/.
       - run: pnpm test:rust

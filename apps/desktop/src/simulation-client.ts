@@ -15,10 +15,19 @@ import {
 import { STARTUP, type StartupConfig } from "./startup";
 
 /**
- * Development builds may override every starting count with `VITE_CREATURE_COUNT` to check the
- * app with many creatures (ADR 0009 §4).
+ * The starting count `VITE_CREATURE_COUNT` gives every startup entry, or `undefined` when it is
+ * unset or empty. Any build honours it when it is set at build time, so a release build can be
+ * measured with many creatures or none (ADR 0016 §10); the release workflow checks it is unset.
  */
-const COUNT_OVERRIDE = (import.meta.env.DEV && Number(import.meta.env.VITE_CREATURE_COUNT)) || 0;
+export function parseCountOverride(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const count = Number(raw);
+  if (Number.isInteger(count) && count >= 0) return count;
+  console.warn(`Ignoring VITE_CREATURE_COUNT=${raw}: not a whole number from 0`);
+  return undefined;
+}
+
+const COUNT_OVERRIDE = parseCountOverride(import.meta.env.VITE_CREATURE_COUNT);
 
 /** A species the worker registered, and where its creatures don't fit in this world (ADR 0013). */
 export interface RegisteredSpecies {
@@ -76,9 +85,9 @@ export type WorkerLike = Pick<Worker, "postMessage" | "terminate"> & {
 const createWorker = (): WorkerLike =>
   new Worker(new URL("./simulation.worker.ts", import.meta.url), { type: "module" });
 
-/** Most creatures the world holds: the startup cap, raised by the development count override. */
+/** Most creatures the world holds: the startup cap, raised by a larger count override. */
 export function creatureCap(config: StartupConfig, countOverride = COUNT_OVERRIDE): number {
-  const starting = config.creatures.reduce((sum, c) => sum + (countOverride || c.count), 0);
+  const starting = config.creatures.reduce((sum, c) => sum + (countOverride ?? c.count), 0);
   return Math.max(config.maxCreatures, starting);
 }
 
@@ -93,6 +102,7 @@ export function startSimulation(
   { onReady, onSpeciesRegistered, onSnapshot, onFailure }: SimulationCallbacks,
   config: StartupConfig = STARTUP,
   worker: WorkerLike = createWorker(),
+  countOverride = COUNT_OVERRIDE,
 ): SimulationClient {
   let ready = false;
   let stopped = false;
@@ -117,7 +127,7 @@ export function startSimulation(
 
   const spawnStartingCreatures = () => {
     for (const { speciesId, count } of config.creatures) {
-      for (let i = 0; i < (COUNT_OVERRIDE || count); i++) {
+      for (let i = 0; i < (countOverride ?? count); i++) {
         void request<string>({ type: "spawn", speciesId }).then((result) => {
           if (!result.ok) {
             console.warn(
@@ -141,6 +151,8 @@ export function startSimulation(
     switch (message.type) {
       case "ready":
         console.info(`Simulation ready: ${message.worldId}, seed ${seed}`);
+        if (countOverride !== undefined)
+          console.info(`Starting count overridden: ${countOverride}`);
         ready = true;
         onReady(message);
         spawnStartingCreatures();
@@ -188,7 +200,7 @@ export function startSimulation(
     worldId: config.worldId,
     seed,
     tickRateHz: config.tickRateHz,
-    maxCreatures: creatureCap(config),
+    maxCreatures: creatureCap(config, countOverride),
   });
 
   return {

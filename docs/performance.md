@@ -1,6 +1,6 @@
 # Performance
 
-The measured cost of the running app, the starting budget for later changes (ADR 0009 §7). Measure with `pnpm measure` on a release build; [development.md](development.md) explains how.
+The measured cost of the running app, the starting budget for later changes (ADR 0009 §7). Measure with `pnpm measure` on a release build; [development.md](development.md) explains how, and how to measure with many creatures, drawn ones too.
 
 ## Reference machine
 

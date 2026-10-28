@@ -1,5 +1,6 @@
-import type { Drawing, SizeClass } from "@living-diorama/content-schema";
+import { formatDiagnostic, type Drawing, type SizeClass } from "@living-diorama/content-schema";
 import { rasterize } from "./drawing";
+import { sampleSpecies } from "./sample-species";
 import type { SpeciesLibrary } from "./species-library";
 
 // A development-only console hook to the species library (ADR 0014), for checks the Studio (M11)
@@ -7,6 +8,7 @@ import type { SpeciesLibrary } from "./species-library";
 //
 //   await livingDiorama.library.saveSample("Puddle", "small")
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
+//   await livingDiorama.library.saveSamples()   // the twenty species measurements use
 
 /** A round green critter with two eyes and a notch between its feet. */
 export const SAMPLE_DRAWING: Drawing = {
@@ -27,7 +29,23 @@ declare global {
   }
 }
 
-/** Puts the library on `window.livingDiorama.library`, with `saveSample` to add a drawn species. */
+/**
+ * Saves the twenty sample species (ADR 0016 §11) one after another, so they list in order, and
+ * resolves with the names that could not be saved and why.
+ */
+export async function saveSampleSpecies(library: SpeciesLibrary): Promise<string[]> {
+  const failed: string[] = [];
+  for (const { name, sizeClass, drawing } of sampleSpecies()) {
+    const saved = await library.save(drawing, await rasterize(drawing), name, sizeClass);
+    if (!saved.ok) failed.push([name, ...saved.diagnostics.map(formatDiagnostic)].join(": "));
+  }
+  return failed;
+}
+
+/**
+ * Puts the library on `window.livingDiorama.library`, with `saveSample` to add a drawn species
+ * and `saveSamples` to add the twenty sample species.
+ */
 export function installLibraryDevHook(library: SpeciesLibrary): void {
   window.livingDiorama = {
     ...window.livingDiorama,
@@ -35,6 +53,7 @@ export function installLibraryDevHook(library: SpeciesLibrary): void {
       ...library,
       saveSample: async (name = "Sample", sizeClass: SizeClass = "small") =>
         library.save(SAMPLE_DRAWING, await rasterize(SAMPLE_DRAWING), name, sizeClass),
+      saveSamples: () => saveSampleSpecies(library),
     },
   };
 }
