@@ -1,6 +1,6 @@
 // What a creature knows of the world (ADR 0018 §10, §16 and amendments): places it has seen that
 // offer an affordance it remembers, and the cells of a coarse grid it has visited recently.
-// Plain data, saved with the creature. Perception fills it from PR 4a; this file holds only the
+// Plain data, saved with the creature. Perception (`perception.ts`) fills it; this file holds the
 // shape and the bounded inserts.
 
 /** Side of the coarse exploration grid's cells, in metres (ADR 0018 amendments, §11). */

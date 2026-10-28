@@ -7,6 +7,6 @@
   "sizeClass": "medium",
   "capabilities": { "core:walk": 1 },
   "baseSpeed": 0.6,
-  "behaviors": ["core:wander"],
+  "behaviors": ["core:wander", "core:feed"],
   "senses": { "core:vision": 8 }
 }

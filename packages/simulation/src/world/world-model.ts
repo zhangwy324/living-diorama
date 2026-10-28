@@ -1,6 +1,6 @@
 import {
   error,
-  type Affordances,
+  validate,
   type ConnectionDefinition,
   type Diagnostic,
   type RegionKind,
@@ -39,8 +39,12 @@ export interface PropModel {
   transform: Transform;
   /** In world metres: the type's block radius × `transform.scale`. */
   blockRadius: number;
-  /** Affordance → params, as the type declares them. */
-  affordances: Readonly<Affordances>;
+  /**
+   * Affordance → params as the type declares them, parsed by each affordance type's
+   * `paramsSchema` (defaults applied), so engine code may read them typed: `core:food`'s are a
+   * `FoodAffordanceParams`.
+   */
+  affordances: Readonly<Record<string, unknown>>;
 }
 
 /** A world definition with its terrain decoded, surfaces instantiated and props resolved. */
@@ -51,6 +55,10 @@ export interface WorldModel {
   regions: ReadonlyMap<string, RegionModel>;
   connections: readonly ConnectionModel[];
   props: readonly PropModel[];
+  /** Props by placement ID. */
+  propsById: ReadonlyMap<string, PropModel>;
+  /** Per affordance ID, the props offering it, in placement order, for perception (ADR 0018 §10). */
+  propsByAffordance: ReadonlyMap<string, readonly PropModel[]>;
 }
 
 /** Builds the runtime model. Expects references to be resolved (`resolveReferences`) first. */
@@ -120,13 +128,21 @@ export function buildWorldModel(
       );
       return;
     }
+    const affordances: Record<string, unknown> = {};
+    for (const [id, params] of Object.entries(type.affordances)) {
+      const schema = registries.affordances.get(id)?.paramsSchema;
+      const parsed = schema && validate(schema, params);
+      // References were resolved first, so the params were already checked against the schema.
+      if (!parsed?.ok) throw new Error(`"${type.id}" has unchecked params for "${id}"`);
+      affordances[id] = parsed.value;
+    }
     props.push({
       id: placement.id,
       prop: type.id,
       model: type.model,
       transform: placement.transform,
       blockRadius: type.blockRadius * placement.transform.scale,
-      affordances: type.affordances,
+      affordances,
     });
   });
   if (diagnostics.length > 0) return { ok: false, diagnostics };
@@ -144,6 +160,20 @@ export function buildWorldModel(
       regions,
       connections,
       props,
+      propsById: new Map(props.map((p) => [p.id, p])),
+      propsByAffordance: indexByAffordance(props),
     },
   };
+}
+
+function indexByAffordance(props: readonly PropModel[]): Map<string, PropModel[]> {
+  const index = new Map<string, PropModel[]>();
+  for (const prop of props) {
+    for (const id of Object.keys(prop.affordances)) {
+      let list = index.get(id);
+      if (!list) index.set(id, (list = []));
+      list.push(prop);
+    }
+  }
+  return index;
 }

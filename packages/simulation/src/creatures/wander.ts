@@ -18,7 +18,8 @@ interface WanderMemory {
   walkNext?: boolean;
 }
 
-function pickWeighted(regions: readonly ReachableRegion[], rng: Rng): string | undefined {
+/** A region drawn with probability proportional to its walkable area. */
+export function pickWeighted(regions: readonly ReachableRegion[], rng: Rng): string | undefined {
   const total = regions.reduce((sum, r) => sum + r.walkableArea, 0);
   let roll = rng.next() * total;
   for (const region of regions) {

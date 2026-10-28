@@ -1,7 +1,7 @@
 import type { NeedType, SenseType, TraitType } from "@living-diorama/extension-api";
 
-// The core needs, senses and traits (ADR 0018 §1, §4 and its amendments). They are data only:
-// nothing reads them yet. All numbers are starting values, to tune once creatures use them.
+// The core needs, senses and traits (ADR 0018 §1, §4 and its amendments). They are data; the
+// engine and behaviors read them. All numbers are starting values, to tune.
 
 /** Rises from 0 to 1 in 90 minutes awake, at a tenth of that asleep, so creatures sleep the night. */
 const HUNGER_HOURS_TO_FULL = 1.5;
@@ -16,18 +16,21 @@ const TIREDNESS_HOURS_TO_RESTED = 8;
 /** Individuals differ by up to 15% in need rates and vision range (ADR 0018 §16). */
 const INDIVIDUAL_VARIATION = 0.15;
 
+/** Hunger: what `core:feed` acts on and `core:eat` lowers. */
+export const hungerNeed: NeedType = {
+  id: "core:hunger",
+  version: "1.0.0",
+  perHour: { awake: 1 / HUNGER_HOURS_TO_FULL, asleep: 1 / HUNGER_HOURS_TO_FULL / 10 },
+  actAt: 0.4,
+  triggers: [0.4, 0.9, 1],
+  cue: { cue: "hungry", from: 0.8 },
+  atMax: { speedFactor: 0.8 },
+  rateTrait: "core:appetite",
+  variation: INDIVIDUAL_VARIATION,
+};
+
 export const coreNeeds: NeedType[] = [
-  {
-    id: "core:hunger",
-    version: "1.0.0",
-    perHour: { awake: 1 / HUNGER_HOURS_TO_FULL, asleep: 1 / HUNGER_HOURS_TO_FULL / 10 },
-    actAt: 0.4,
-    triggers: [0.4, 0.9, 1],
-    cue: { cue: "hungry", from: 0.8 },
-    atMax: { speedFactor: 0.8 },
-    rateTrait: "core:appetite",
-    variation: INDIVIDUAL_VARIATION,
-  },
+  hungerNeed,
   {
     id: "core:tiredness",
     version: "1.0.0",

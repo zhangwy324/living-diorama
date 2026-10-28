@@ -157,7 +157,7 @@ Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also
 
 Each creature's `cues` say what it visibly shows, so the renderer needs no action or need IDs: its action's cue (`eating`, `sleeping`) while that action isn't walking, then each need's cue from the value the need declares (`hungry`) ([ADR 0018](adr/0018-living-behavior.md) §15).
 
-Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed` and `creature_stuck`; each carries a `creatureId`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
+Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed`, `creature_stuck` and `ate` (a finished meal, with the placement and the hunger after it); each carries a `creatureId`. Actions emit theirs through `ActionContext.emit`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
 
 World events carry no `creatureId`. So far there is only `day_phase_changed`, with the phase before and after (dawn, day, dusk or night). It is not sent for the time the world starts at, and a jump across several phases sends one.
 
@@ -196,7 +196,7 @@ The tray and the page's controls both go through the host, so the host's state i
 Content is data registered into typed registries, and the engine refers to it only by ID. The flow is the same for built-in and third-party content:
 
 1. `createRegistries()` makes empty registries: `worlds`, `structures`, `props`, `species`, `surfaces`, `actions`, `behaviors`, `capabilities`, `affordances`, `assets`, `needs`, `senses`, `traits`.
-2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, `core:walk`, `core:crossable`, the actions and the `core:wander` behavior.
+2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, `core:walk`, the affordances, needs, senses and traits, the actions (`core:idle`, `core:follow_path`, `core:eat`) and the behaviors (`core:wander`, `core:feed`).
 3. Each pack registers its entries. Registration validates each entry against its schema and rejects duplicates.
 4. `resolveReferences()` checks every reference between entries: the target exists, its version satisfies the declared range, and target-specific checks pass (surface params against the surface type's schema, a prop's model is a model asset).
 5. `checkWorld()` builds the world model and runs the semantic checks for each navigation profile (size class plus capabilities).

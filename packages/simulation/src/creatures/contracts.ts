@@ -1,6 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
+import type { ActionEvent } from "../protocol";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
 import type { CreatureKnowledge } from "./knowledge";
@@ -29,8 +30,38 @@ export interface PathPoint extends RegionPosition {
   connectionId?: string;
 }
 
+/**
+ * A prop placement as behaviors and actions see it (ADR 0018 §10–§11). Engine code finds places
+ * by their affordances, never by their prop type.
+ */
+export interface PlaceView {
+  /** Placement ID. */
+  readonly id: string;
+  /** World position. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** In world metres, scale applied. */
+  readonly blockRadius: number;
+  /** Affordance ID → params, parsed by the affordance type's schema. */
+  readonly affordances: Readonly<Record<string, unknown>>;
+}
+
+/** Queries about places that behaviors and actions share. */
+export interface PlaceQueries {
+  /** The prop placement with this ID, or undefined. */
+  place(placementId: string): PlaceView | undefined;
+  /**
+   * Where the creature stands to use a place (ADR 0018 §11 and amendments): at its own angle
+   * around the place, just clear of it (block radius + creature radius + 0.3 m), or else the
+   * nearest walkable point it can reach close to there. Undefined if there is none or no such
+   * place.
+   */
+  spotAt(placementId: string): RegionPosition | undefined;
+}
+
 /** What an action may do to the world. The engine applies every change itself. */
-export interface ActionContext {
+export interface ActionContext extends PlaceQueries {
   readonly tick: number;
   readonly tickSeconds: number;
   readonly position: Readonly<RegionPosition>;
@@ -54,6 +85,8 @@ export interface ActionContext {
    * amendments, §11). A need the creature doesn't have is ignored.
    */
   adjustNeed(id: string, delta: number): void;
+  /** Emits an event about the creature; the engine adds the tick and the creature ID. */
+  emit(event: ActionEvent): void;
 }
 
 export type ActionStart =
@@ -102,8 +135,11 @@ export interface ReachableRegion {
   walkableArea: number;
 }
 
-/** Read-only world queries for behaviors. Perception (ADR 0018 §10) narrows them from PR 4a. */
-export interface WorldQueries {
+/**
+ * Read-only world queries for behaviors. What a creature knows of places comes from
+ * `observation.knowledge`, which perception fills (ADR 0018 §10); `place` only looks one up.
+ */
+export interface WorldQueries extends PlaceQueries {
   /**
    * Regions with walkable area the creature can reach from where it stands, its own included. A
    * creature too big for a bridge or a gap never sees what lies beyond it (ADR 0013).
@@ -114,6 +150,11 @@ export interface WorldQueries {
    * can reach none.
    */
   randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
+  /**
+   * The length in metres of the route the creature would walk to `destination`, or undefined if
+   * it has none. Plans a route, so a behavior should ask for a few candidates only. Emits nothing.
+   */
+  routeLength(destination: RegionPosition): number | undefined;
 }
 
 /** The action a creature is running and the behavior that chose it. */

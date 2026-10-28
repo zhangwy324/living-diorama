@@ -27,12 +27,16 @@ import {
   type BehaviorProvider,
   type CreatureObservation,
   type PathState,
+  type PlaceQueries,
+  type PlaceView,
   type Proposal,
   type RunningAction,
   type WorldQueries,
 } from "../creatures/contracts";
 import { clamp01, speciesNeeds, speciesTraits } from "../creatures/individual";
 import { copyKnowledge } from "../creatures/knowledge";
+import { PERCEPTION_HZ, perceive, perceptionOffset, VISION_SENSE } from "../creatures/perception";
+import { findSpot } from "../creatures/spots";
 import type { Pathfinder } from "../navigation/pathfinder";
 import { navProfile, profileForSpecies } from "../navigation/profile";
 import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
@@ -197,6 +201,10 @@ export class Simulation {
   readonly #profiles = new Map<string, SpeciesProfile>();
   /** The action cue each creature showed on its last tick, if any. */
   readonly #actionCues = new Map<string, ActionCue>();
+  /** Prop placements as behaviors and actions see them, by placement ID. */
+  readonly #places: ReadonlyMap<string, PlaceView>;
+  /** Ticks between two perception scans of one creature. */
+  readonly #perceptionTicks: number;
   #events: SimulationEvent[] = [];
 
   private constructor(
@@ -216,6 +224,21 @@ export class Simulation {
       if (isBehaviorProvider(b)) this.#behaviors.set(b.id, b);
     }
     this.#connections = new Map(state.model.connections.map((c) => [c.id, c]));
+    this.#places = new Map(
+      state.model.props.map((p) => {
+        const { x, y, z } = p.transform.position;
+        const place: PlaceView = Object.freeze({
+          id: p.id,
+          x,
+          y,
+          z,
+          blockRadius: p.blockRadius,
+          affordances: p.affordances,
+        });
+        return [p.id, place];
+      }),
+    );
+    this.#perceptionTicks = Math.max(1, Math.round(tickRateHz / PERCEPTION_HZ));
   }
 
   /** Builds a simulation of a registered world. Expects `resolveReferences` to have passed. */
@@ -487,6 +510,7 @@ export class Simulation {
    */
   #stepCreature(creature: CreatureState) {
     const profile = this.#profile(creature.speciesId);
+    this.#perceive(creature, profile);
     const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
     let cue: ActionCue | undefined;
@@ -529,6 +553,27 @@ export class Simulation {
     // An action's cue shows while that action still runs after this tick.
     if (cue !== undefined && creature.action === running) this.#actionCues.set(creature.id, cue);
     else this.#actionCues.delete(creature.id);
+  }
+
+  /**
+   * Perception (ADR 0018 §10): once a second, at a tick offset of its own, the creature notes the
+   * places within sight or touch and the grid cell it is in. The engine writes its knowledge,
+   * since behaviors see only copies.
+   */
+  #perceive(creature: CreatureState, profile: SpeciesProfile) {
+    const period = this.#perceptionTicks;
+    if ((this.tick + perceptionOffset(creature.id, period)) % period !== 0) return;
+    const vision = profile.senses[VISION_SENSE];
+    perceive({
+      knowledge: creature.knowledge,
+      x: creature.position.x,
+      z: creature.position.z,
+      vision:
+        vision === undefined ? undefined : vision * (creature.variation.senses[VISION_SENSE] ?? 1),
+      tick: this.tick,
+      propsByAffordance: this.state.model.propsByAffordance,
+      affordance: (id) => this.state.registries.affordances.get(id),
+    });
   }
 
   /**
@@ -792,6 +837,7 @@ export class Simulation {
     activity?: { walked: boolean },
   ): ActionContext {
     return {
+      ...this.#placeQueries(creature),
       tick: this.tick,
       tickSeconds: this.tickSeconds,
       get position() {
@@ -824,15 +870,43 @@ export class Simulation {
         if (!Object.hasOwn(creature.needs, id) || !Number.isFinite(delta)) return;
         creature.needs[id] = clamp01((creature.needs[id] ?? 0) + delta);
       },
+      emit: (event) => this.#emit({ ...event, tick: this.tick, creatureId: creature.id }),
     };
   }
 
-  /** What wander may choose from: only cells the creature can reach from where it stands. */
+  /** Place lookups and the creature's own spot at a place (ADR 0018 §11). */
+  #placeQueries(creature: CreatureState): PlaceQueries {
+    return {
+      place: (placementId) => this.#places.get(placementId),
+      spotAt: (placementId) => {
+        const place = this.#places.get(placementId);
+        if (!place) return undefined;
+        const pathfinder = this.#pathfinder(creature);
+        return findSpot({
+          place,
+          radius: pathfinder.navigation.profile.radius,
+          angle: creature.spotAngle,
+          masks: pathfinder.navigation.masks,
+          reachable: pathfinder.reachableCells(creature.position),
+        });
+      },
+    };
+  }
+
+  /**
+   * What behaviors may query: cells the creature can reach from where it stands, places, and
+   * route lengths.
+   */
   #queries(creature: CreatureState): WorldQueries {
     const pathfinder = this.#pathfinder(creature);
     const reachable = pathfinder.reachableCells(creature.position);
     const { masks } = pathfinder.navigation;
     return {
+      ...this.#placeQueries(creature),
+      routeLength: (destination) => {
+        const result = pathfinder.findRoute(creature.position, destination);
+        return result.ok ? result.route.length : undefined;
+      },
       reachableRegions: () =>
         [...reachable].flatMap(([regionId, cells]) => {
           const mask = masks.get(regionId);

@@ -24,10 +24,14 @@ const river = {
   speciesId: "fixture:pebble",
 };
 
-/** Wander alternates rests of 3–12 s with walks to points at least 2 m away. */
+/**
+ * Wander alternates rests of 3–12 s with walks to points at least 2 m away. Only wander's own
+ * decisions count: meals (PR 4a) come in between.
+ */
 function expectWanderShape(traces: DecisionTrace[]) {
   const lastStarted = new Map<string, string>();
   for (const trace of traces) {
+    if (trace.chosen?.behavior !== "core:wander") continue;
     expect(trace.result).toBe("started");
     const { action, params } = trace.chosen!;
     expect(lastStarted.get(trace.creatureId) ?? "core:follow_path").not.toBe(action);

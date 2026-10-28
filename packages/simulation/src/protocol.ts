@@ -14,7 +14,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -158,6 +158,17 @@ interface CreatureEventBase extends WorldEventBase {
 }
 
 /**
+ * Events an action emits about its creature (`ActionContext.emit`), without the tick and creature
+ * ID, which the engine adds.
+ */
+export type ActionEvent =
+  /**
+   * A meal finished (ADR 0018 §17) at the placement. `hunger` is the creature's hunger after it.
+   * An interrupted meal lowers hunger in part but emits nothing.
+   */
+  { type: "ate"; placementId: string; hunger: number };
+
+/**
  * Events about one creature (roadmap M3 task 10, M9 task 5). Structures are identified by
  * placement ID.
  */
@@ -183,7 +194,8 @@ export type CreatureEvent =
       to: RegionPosition;
       reason: string;
     })
-  | (CreatureEventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number });
+  | (CreatureEventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number })
+  | (CreatureEventBase & ActionEvent);
 
 /** Events about the world as a whole, with no creature (ADR 0018 §17). */
 export type WorldEvent =

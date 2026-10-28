@@ -75,6 +75,8 @@ function describe(e: SimulationEvent): string {
       return `path failed (${e.reason}) to ${e.to.regionId} (${e.to.x.toFixed(1)}, ${e.to.z.toFixed(1)})`;
     case "creature_stuck":
       return `stuck for ${e.ticksStuck} ticks in ${e.position.regionId}`;
+    case "ate":
+      return `ate at ${e.placementId}, hunger now ${e.hunger.toFixed(2)}`;
     case "day_phase_changed":
       return `${e.from} → ${e.to}`;
   }

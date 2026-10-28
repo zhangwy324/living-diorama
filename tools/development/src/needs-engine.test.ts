@@ -201,7 +201,8 @@ describe("spawning", () => {
       },
     });
     const mossling = simulation.spawn("hollow:mossling");
-    expect(mossling.ok && mossling.value.needs).toEqual({});
+    // The mossling feeds (PR 4a), so it has hunger; the observer depends on no need.
+    expect(Object.keys(mossling.ok ? mossling.value.needs : {})).toEqual(["core:hunger"]);
     const spawned = simulation.spawn("test:observant-mossling");
     if (!spawned.ok) throw new Error("spawn failed");
     const factor = spawned.value.variation.senses["core:vision"]!;
@@ -213,7 +214,6 @@ describe("spawning", () => {
       needs: {},
       traits: { "core:nocturnal": 0, "core:appetite": 1 },
       senses: { "core:vision": 8 * factor },
-      knowledge: { places: {}, recentCells: [] },
       home: null,
     });
   });
@@ -607,7 +607,8 @@ describe("cues", () => {
     expect(plain).not.toHaveProperty("home");
     expect(simulation.snapshot({ debug: true }).creatures[0]).toMatchObject({
       needs: {},
-      knowledge: { places: {}, recentCells: [] },
+      // Perception has noted the cell it stands in; the fixture has no places to remember.
+      knowledge: { places: {}, recentCells: [{ x: expect.any(Number), z: expect.any(Number) }] },
       home: null,
     });
   });
