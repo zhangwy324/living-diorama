@@ -52,7 +52,7 @@ export interface SimulationClient {
   spawn(speciesId: string): Promise<Result<string>>;
   /** Takes a creature out of the world. */
   despawn(creatureId: string): Promise<Result<string>>;
-  /** Turns debug data (routes) in snapshots on or off. */
+  /** Turns debug data (routes, needs, knowledge and home) in snapshots on or off. */
   setDebug(enabled: boolean): void;
   /** Stops or restarts the simulation clock. */
   setPaused(paused: boolean): void;

@@ -45,8 +45,8 @@ export interface DioramaView {
    */
   pushSnapshot(snapshot: SimulationSnapshot): void;
   /**
-   * Shows or hides the debug overlays and stats. Routes appear only once the simulation sends
-   * them, which its own `set_debug` command turns on.
+   * Shows or hides the debug overlays and stats. Routes, needs, knowledge and home appear only
+   * once the simulation sends them, which its own `set_debug` command turns on.
    */
   setDebug(enabled: boolean): void;
   /** Animates back to the art-directed default framing. */
@@ -232,9 +232,10 @@ export function createDioramaView(
       }
     | undefined;
 
+  let height = 1;
   const resize = () => {
     const width = Math.max(1, container.clientWidth);
-    const height = Math.max(1, container.clientHeight);
+    height = Math.max(1, container.clientHeight);
     renderer.setSize(width, height);
     camera.aspect = width / height;
     camera.fov = defaultFraming(scene, camera.aspect).fov;
@@ -300,6 +301,11 @@ export function createDioramaView(
     creatures.update(poses);
     if (overlays.group.visible) {
       overlays.routes.update(poses);
+      // One screen pixel's height at one metre from the camera, so labels keep their pixel size.
+      overlays.labels.update(
+        poses,
+        (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / height,
+      );
       stats.frame(now, fullRate);
     }
     renderer.render(world, camera);
@@ -319,6 +325,7 @@ export function createDioramaView(
       timer.setTimescale(snapshot.paused ? 0 : 1);
       snapshots.push(snapshot, performance.now());
       overlays.routes.setRoutes(snapshot);
+      overlays.labels.setSnapshot(snapshot);
       // Relit only when the minute changes; the next frame is then drawn at full rate.
       if (setTimeOfDay(snapshot.timeOfDay)) moved = true;
       stats.snapshot(snapshot);
@@ -365,6 +372,7 @@ export function createDioramaView(
       controls.dispose();
       timer.dispose();
       creatures.dispose();
+      overlays.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       stats.element.remove();

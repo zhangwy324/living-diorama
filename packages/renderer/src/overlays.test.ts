@@ -57,6 +57,7 @@ const navigation: NavigationOverlay = {
 };
 
 const scene = {
+  props: [],
   surfaces: [
     {
       regionId: "river",

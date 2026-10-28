@@ -11,7 +11,7 @@ Three.js scene: terrain, water, structures, props, creatures, camera and debug o
 - The Creation Studio's body preview and its checks for thin parts and separate shapes ([ADR 0015](../../docs/adr/0015-creation-studio.md) §7): one body turning over a grid, lit like the diorama, in a WebGL context of its own.
 - Camera limits: the orbit target stays over the world and the camera above the terrain. The view hands out and takes back its camera state (`cameraState`, `setCameraState`), so the app can keep one camera per window shape (ADR 0016 §6).
 - Pixel density: the diorama view and the body preview follow `devicePixelRatio` when the window moves to a monitor with another scale, up to 2× (ADR 0016 §8, issue #55).
-- Debug overlays, hidden until `setDebug(true)`: walkability cells, the region graph and portals, creature routes, structure surfaces as wireframes, and an FPS and tick panel. Walkability and the graph come from the app as `NavigationOverlay` data; routes come in snapshots.
+- Debug overlays, hidden until `setDebug(true)`: walkability cells, the region graph and portals, creature routes, structure surfaces as wireframes, an FPS and tick panel, and per creature a label with its action, home, needs and knowledge, with lines to its home and known places and squares for its recent cells (ADR 0018 §15). Walkability and the graph come from the app as `NavigationOverlay` data; routes, needs, knowledge and home come in snapshots, and need and affordance IDs are shown generically by their name after the namespace.
 - Render throttling: the display rate while hovered or while the camera moves, about 30 fps otherwise, nothing while the page is hidden.
 
 ## Must not
