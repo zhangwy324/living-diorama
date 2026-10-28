@@ -52,13 +52,20 @@ function expectWanderShape(traces: DecisionTrace[]) {
   }
 }
 
+/** `pnpm check`'s short set runs a simulated day at 2 Hz; `pnpm soak` runs more at 10 Hz. */
+const CHECK_HZ = 2;
+const DAY_TICKS = 24 * 3600 * CHECK_HZ;
+
 describe("long randomized runs keep every invariant", () => {
-  it.each([1, 2, 3, 4])("Woodland Hollow, seed %i, 100k ticks", (seed) => {
+  // A day takes about 2 s locally and 7 s on the CI runner.
+  const slow = { timeout: 30_000 };
+  it.each([1, 2, 3])("Woodland Hollow, seed %i, a day at 2 Hz", slow, (seed) => {
     const traces: DecisionTrace[] = [];
     const report = runWithInvariants({
       ...hollow,
       seed,
-      ticks: 100_000,
+      ticks: DAY_TICKS,
+      tickRateHz: CHECK_HZ,
       creatures: 3,
       onTrace: (t) => traces.push(t),
     });
@@ -67,7 +74,7 @@ describe("long randomized runs keep every invariant", () => {
     expect(report.eventCounts.path_failed ?? 0).toBe(0);
     // Wander really explores: every creature crosses the bridge, the first within minutes.
     expect(report.eventCounts.first_use_of_structure).toBe(3);
-    expect(report.firstStructureUse).toBeLessThan(5_000);
+    expect((report.firstStructureUse ?? Infinity) / CHECK_HZ).toBeLessThan(500);
     expect(report.regionTicks["bridge-deck"]).toBeGreaterThan(0);
     expectWanderShape(traces);
   });
@@ -82,7 +89,14 @@ describe("long randomized runs keep every invariant", () => {
   });
 
   it.each([1, 2])("river-crossing fixture, seed %i, 50k ticks", (seed) => {
-    const report = runWithInvariants({ ...river, seed, ticks: 50_000, creatures: 2 });
+    // Short walks in a small world: wander decides about 1.3 times per 10 s here.
+    const report = runWithInvariants({
+      ...river,
+      seed,
+      ticks: 50_000,
+      creatures: 2,
+      maxDecisionsPer10Seconds: 2,
+    });
     expect(report.violations).toEqual([]);
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
     expect(report.eventCounts.first_use_of_structure).toBe(2);

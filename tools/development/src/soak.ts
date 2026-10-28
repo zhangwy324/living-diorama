@@ -1,12 +1,25 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
+import { parseArgs } from "node:util";
 import { runWithInvariants } from "./simulation-run";
 
-// `pnpm soak [seeds] [ticks]`: the long-run invariant check over many more seeds than
-// `pnpm check` runs (ADR 0006 §12). Defaults: 32 seeds × 100k ticks, 3 creatures each.
+// `pnpm soak`: the long-run invariant and living-behavior checks over many more seeds and a
+// higher tick rate than `pnpm check` runs (ADR 0006 §12, ADR 0018 §20). Defaults: 32 seeds × one
+// simulated day from noon at the app's 10 Hz, 3 creatures each.
 
-const seeds = Number(process.argv[2] ?? 32);
-const ticks = Number(process.argv[3] ?? 100_000);
+const { values } = parseArgs({
+  options: {
+    seeds: { type: "string", default: "32" },
+    hours: { type: "string", default: "24" },
+    hz: { type: "string", default: "10" },
+    creatures: { type: "string", default: "3" },
+  },
+});
+const seeds = Number(values.seeds);
+const tickRateHz = Number(values.hz);
+const ticks = Math.round(Number(values.hours) * 3600 * tickRateHz);
+const creatures = Number(values.creatures);
 let failed = 0;
+const started = performance.now();
 for (let seed = 1; seed <= seeds; seed++) {
   const report = runWithInvariants({
     register: registerBuiltInContent,
@@ -14,14 +27,17 @@ for (let seed = 1; seed <= seeds; seed++) {
     speciesId: "hollow:mossling",
     seed,
     ticks,
-    creatures: 3,
+    tickRateHz,
+    creatures,
   });
   const counts = report.eventCounts;
   const problems = [
     ...report.violations,
     ...(counts.creature_stuck ? [`${counts.creature_stuck} creature_stuck events`] : []),
     ...(counts.path_failed ? [`${counts.path_failed} path_failed events`] : []),
-    ...(counts.first_use_of_structure === 3 ? [] : ["not every creature crossed the bridge"]),
+    ...(counts.first_use_of_structure === creatures
+      ? []
+      : ["not every creature crossed the bridge"]),
   ];
   if (problems.length > 0) failed++;
   console.log(
@@ -30,5 +46,7 @@ for (let seed = 1; seed <= seeds; seed++) {
   );
   for (const problem of problems) console.log(`  ${problem}`);
 }
-console.log(`${seeds - failed}/${seeds} seeds clean`);
+console.log(
+  `${seeds - failed}/${seeds} seeds clean in ${((performance.now() - started) / 1000).toFixed(0)} s`,
+);
 process.exitCode = failed > 0 ? 1 : 0;

@@ -12,12 +12,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
-import { runWithInvariants } from "./simulation-run";
+import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
+import { runWithInvariants, type RunReport } from "./simulation-run";
 import { renderDebugMap } from "./worldgen/debug-map";
 
 // `pnpm sim`: the headless runner (ADR 0006 §12). Runs a world with the M3 invariants checked
-// every tick, prints its events and a summary, writes every decision and event as NDJSON and
-// draws the trajectories over the debug map. Exits with 1 on any invariant violation.
+// every tick, prints its events, a summary and a line per creature, writes every decision and
+// event as NDJSON and draws the trajectories over the debug map. Exits with 1 on any invariant
+// violation.
 
 const WORLDS = {
   hollow: {
@@ -29,6 +31,8 @@ const WORLDS = {
     register: registerRiverCrossing,
     worldId: "fixture:river-crossing",
     speciesId: "fixture:pebble",
+    // Short walks in a small world (see LongRunCheckOptions).
+    maxDecisionsPer10Seconds: 2,
   },
 };
 
@@ -38,6 +42,7 @@ const { values } = parseArgs({
     seed: { type: "string", default: "1" },
     ticks: { type: "string", default: "6000" },
     creatures: { type: "string", default: "1" },
+    hz: { type: "string", default: "10" },
     // The time of day the run starts at; it follows simulation time from there (ADR 0018 §5).
     start: { type: "string", default: "12:00" },
     "no-map": { type: "boolean", default: false },
@@ -50,7 +55,7 @@ const ticks = Number(values.ticks);
 const creatures = Number(values.creatures);
 const startMinutes = parseClockTime(values.start);
 if (startMinutes === undefined) throw new Error(`--start must be a time such as 21:30`);
-const TICK_RATE_HZ = 10; // runWithInvariants uses the simulation default
+const TICK_RATE_HZ = Number(values.hz);
 
 const outDir = resolve(dirname(fileURLToPath(import.meta.url)), "../out");
 const base = resolve(outDir, `sim-${values.world}-${seed}`);
@@ -88,6 +93,7 @@ const report = runWithInvariants({
   ticks,
   creatures,
   startMinutes,
+  tickRateHz: TICK_RATE_HZ,
   onTrace: (trace) => lines.push(JSON.stringify({ kind: "decision", ...trace })),
   onTick: (simulation, events) => {
     for (const event of events) {
@@ -133,7 +139,27 @@ console.log(
     .map(([region, n]) => `${region} ${((100 * n) / total).toFixed(1)}%`)
     .join(", ")}`,
 );
+console.log("  per creature:");
+for (const line of describeCreatures(report)) console.log(`    ${line}`);
 console.log(`  invariant violations: ${report.violations.length === 0 ? "none" : ""}`);
 for (const v of report.violations) console.log(`    ${v}`);
 console.log(`wrote ${base}.ndjson${!values["no-map"] && mapInputs ? ` and ${base}.png` : ""}`);
 process.exitCode = report.violations.length > 0 ? 1 : 0;
+
+/** Per creature: meals, sleep, time hungry, and decisions and interruptions (ADR 0018 §20). */
+function describeCreatures({ creatures, tickRateHz }: RunReport): string[] {
+  const hours = (ticks: number) => `${(ticks / tickRateHz / 3600).toFixed(1)} h`;
+  return Object.entries(creatures).map(([id, c]) => {
+    const night =
+      c.nightTicks > 0
+        ? ` (${((100 * c.asleepAtNightTicks) / c.nightTicks).toFixed(0)}% of the night)`
+        : "";
+    const per10s = (10 * tickRateHz * c.decisions) / Math.max(1, c.ticks);
+    return (
+      `${id}: ${c.meals} meals (${MEAL_EVENT}), asleep ${hours(c.asleepTicks)}${night}, ` +
+      `hungry ${hours(c.hungryTicks)} (cue or hunger ≥ ${HUNGRY_FROM}), ` +
+      `${c.decisions} decisions (${per10s.toFixed(2)} per 10 s), ` +
+      `${c.interruptions} interruptions (at most ${c.peakInterruptionsPerMinute} in a minute)`
+    );
+  });
+}
