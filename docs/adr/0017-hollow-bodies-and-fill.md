@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-28
-- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 builds §1–§7, PR 2 builds §8–§9 and PR 3 builds §10. The rest are settled here and built later; a PR that has to depart from this ADR updates it.
+- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 built §1–§7, PR 2 §8–§9, PR 3 §10 and PR 4 §11; where a PR departed from the plan it updated this ADR. All five landed and passed the manual Studio round on 2026-10-28.
 
 This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and ADR 0015 §7, §9 and §11 (see _Amendments_).
 
 ## Decisions
 
-### Hollow bodies (PR 1)
+### Hollow bodies (PR 1, implemented)
 
 1. **Anything left undrawn and enclosed is an opening, however small.** It passes right through the body. Accidents count too: thin crescents left between a colour fill and its outline, the two little gaps beneath the mossling's hairs, and one- or two-pixel pinholes along a soft stroke edge. The model is a faithful copy of the picture. No size threshold applies and gaps are never bridged; the prototype suggested both (a threshold near 5% of the height, bridging of 2 px), and both were turned down. To make a region solid, the player fills it (§9).
    - **Solid** means what it meant before: pixels with alpha ≥ 128, joined through their sides into shapes, with specks (under 0.5% of the opaque area) ignored. A speck sitting in an opening is counted as part of the opening.
@@ -59,7 +59,7 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
       - The colour is the palette colour selected for the pen. Picking a swatch keeps the fill tool selected; only the eraser switches back to the pen on a swatch click. The brush sizes are disabled while the fill tool is selected, since a fill has no width. The tools have no single-key shortcuts, so the fill has none either. Over the canvas the cursor is a small bucket outlined in white, whose drop marks the pixel filled.
       - It takes about 1 ms on a 256 px image in Node (inside a ring, and a whole empty canvas).
 
-### Thickness (PR 4)
+### Thickness (PR 4, implemented)
 
 11. **A per-creature depth control** sits next to the size picker in the Studio. Its default comes from the current rule, 40% of the height. The value is stored with the species and the preview reflects it immediately. Depth that follows local width, so that thin limbs are thinner, waits for part detection. _Built in PR 4 (issue #74):_
     - **Field:** the species definition has an optional `body` object whose `thickness` is the depth as a share of the drawn height, from 0.1 to 0.8, defaulting to 0.4 (`BODY_THICKNESS` in `content-schema`). Grouping it under `body` leaves room for later body settings without crowding the top level. Content that leaves it out, the mossling included, keeps the old depth, so no pack changes and the species schema version stays 1. The library stores the value explicitly with every species it saves.
