@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:mushroom",
+  "version": "1.0.0",
+  "name": "Mushroom",
+  "model": "hollow:models/mushroom.glb",
+  "blockRadius": 0,
+  "affordances": { "core:food": { "eatSeconds": 5 } }
+}

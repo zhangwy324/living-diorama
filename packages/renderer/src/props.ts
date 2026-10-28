@@ -1,4 +1,4 @@
-import type { PropPlacement } from "@living-diorama/content-schema";
+import type { SceneProp } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -27,7 +27,7 @@ function fallbackModel(): THREE.Object3D {
   );
 }
 
-const placementMatrix = (prop: PropPlacement, unitScale: number) => {
+const placementMatrix = (prop: SceneProp, unitScale: number) => {
   const { position, rotationY, scale } = prop.transform;
   return new THREE.Matrix4().compose(
     new THREE.Vector3(position.x, position.y, position.z),
@@ -64,12 +64,12 @@ export function instanceModel(
  * `blockRadius`, so a broken file never blanks the scene. Resolves when every model is placed.
  */
 export async function loadProps(
-  props: readonly PropPlacement[],
+  props: readonly SceneProp[],
   resolve: AssetResolver,
   add: (objects: THREE.Object3D[]) => void,
   load: ModelLoader = loadGltf,
 ): Promise<void> {
-  const byModel = new Map<string, PropPlacement[]>();
+  const byModel = new Map<string, SceneProp[]>();
   for (const prop of props) byModel.set(prop.model, [...(byModel.get(prop.model) ?? []), prop]);
   await Promise.all(
     [...byModel].map(async ([ref, placements]) => {
@@ -84,7 +84,7 @@ export async function loadProps(
       } else {
         console.warn(`No model asset for ${ref}`);
       }
-      // blockRadius is in world metres, not scaled by the placement (ADR 0005 §8).
+      // blockRadius is in world metres, already scaled by the placement (ADR 0018 §3).
       const matrices = placements.map((p) =>
         placementMatrix(
           p,

@@ -34,6 +34,8 @@
 
 8. **Prop `blockRadius` is in world metres** and is not scaled by `transform.scale`.
 
+   _Amended by [ADR 0018](0018-living-behavior.md) §3 (M14 PR 2b):_ `blockRadius` moved to the prop type and is in metres at scale 1. A placement blocks `blockRadius × transform.scale`.
+
 9. **A 3D preview is pulled forward from M4** so the layout can be judged in the strip:
    - `simulation` turns the world model into plain `SceneData` (terrain samples, surface meshes from each surface type, edge water, props), so the renderer never interprets surface types or parameters;
    - decks are drawn from their surface mesh, so the bridge's visuals cannot drift from its walkable surface (roadmap risk R2);

@@ -14,6 +14,7 @@ v1 has no runtime pack loading. A pack is a workspace package, wired into the ap
    export function registerMeadow(registries: Registries): Result<unknown>[] {
      return [
        ...assets.map((a) => registries.assets.register(a)),
+       ...props.map((p) => registries.props.register(p)),
        registries.species.register(hedgehog),
        registries.worlds.register(meadowWorld),
      ];
@@ -46,19 +47,34 @@ Write `new URL("…", import.meta.url)` literally, so Vite bundles the file. Mod
 
 ## Props
 
-A prop is not a registry type: it is a model asset placed in a world. Register the model (above), then add a placement to the world's `props`:
+A prop is a model placed in a world, such as a tree or a rock. Register its model (above) and a prop type in `props`, then place the type in a world ([ADR 0018](adr/0018-living-behavior.md) §3):
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "meadow:oak",
+  "version": "1.0.0",
+  "name": "Oak",
+  "model": "meadow:models/oak.glb",
+  "blockRadius": 0.35,
+  "affordances": { "core:shelter": {} }
+}
+```
+
+- `blockRadius` is where creatures can't walk, in metres at scale 1. A placement blocks `blockRadius × transform.scale`. Use 0 for something they walk through, like grass.
+- `affordances` (optional) maps what the prop offers to its parameters, checked against the affordance's params schema when references resolve. The engine registers `core:food` (`{ "eatSeconds": 5 }`: creatures may eat here, for that long) and `core:shelter` (`{}`: creatures may sleep beside it). Leave it out for a prop that offers nothing. Creatures find food and shelter by affordance, so a new food prop needs no engine change.
+
+A placement in the world's `props` names the type and says where it stands:
 
 ```json
 {
   "id": "oak-1",
-  "model": "meadow:models/oak.glb",
-  "transform": { "position": { "x": 3, "y": 0.4, "z": -2 }, "rotationY": 0.5, "scale": 1.2 },
-  "blockRadius": 0.4
+  "prop": "meadow:oak",
+  "transform": { "position": { "x": 3, "y": 0.4, "z": -2 }, "rotationY": 0.5, "scale": 1.2 }
 }
 ```
 
 - `transform.position` is in world metres; `y` should be the ground height there. `rotationY` uses the heading convention and `scale` is uniform.
-- `blockRadius` (world metres, not scaled) is where creatures can't walk. Use 0 for something they walk through, like grass.
 - A model that fails to load is drawn as a simple placeholder shape, so a broken file never blanks the scene.
 
 ## Species
@@ -123,8 +139,8 @@ A world is one definition with its terrain, regions, connections, structures, pr
 | `terrain`     | A heightfield (`columns × rows` samples, `cellSize` apart, inline or from a 16-bit PNG or raw asset) and material zones: a colour palette and one palette index per sample.                                                                                                       |
 | `regions`     | Areas creatures move in, each with a `kind` (`land`, `water`, `cave`, `air`), a `surface` and an XZ `footprint` polygon. Surfaces: `core:heightfield` follows the terrain, `core:flat` is a level plane (`y`), `core:deck` is a strip along a centerline (`centerline`, `width`). |
 | `connections` | How creatures pass between two regions: a `portal` segment both regions touch, the `requiredCapabilities`, an optional extra `cost` and `bidirectional` (default true). Regions can only be entered through portals.                                                              |
-| `structures`  | Placements of registered structure types, such as a bridge. A placement brings its own regions and connections, like the bridge deck and its two ends. A structure type is a small definition with `affordances` (`core:crossable`).                                              |
-| `props`       | Model placements, as above.                                                                                                                                                                                                                                                       |
+| `structures`  | Placements of registered structure types, such as a bridge. A placement brings its own regions and connections, like the bridge deck and its two ends. A structure type is a small definition with `affordances` (`{ "core:crossable": {} }`).                                    |
+| `props`       | Placements of registered prop types, as above.                                                                                                                                                                                                                                    |
 | `spawnPoints` | Named region positions where creatures appear. At least one.                                                                                                                                                                                                                      |
 
 All local IDs (regions, connections, structures, props, spawn points) share one namespace within the world.

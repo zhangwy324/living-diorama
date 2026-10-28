@@ -1,12 +1,11 @@
-import type { PropPlacement } from "@living-diorama/content-schema";
-import type { SceneData } from "@living-diorama/simulation";
+import type { SceneData, SceneProp } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { buildDioramaScene, createSun, defaultFraming } from "./index";
 import { SceneLayer } from "./layers";
 import { railingMeshes } from "./world-meshes";
 
-const prop = (id: string, model: string, x: number, scale = 1): PropPlacement => ({
+const prop = (id: string, model: string, x: number, scale = 1): SceneProp => ({
   id,
   model,
   transform: { position: { x, y: 0, z: 0 }, rotationY: 0, scale },

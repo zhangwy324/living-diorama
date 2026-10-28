@@ -6,6 +6,7 @@ import {
   formatDiagnostic,
   parseContentId,
   parseCreatureInstance,
+  parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
@@ -23,7 +24,7 @@ const rect = (x0: number, z0: number, x1: number, z1: number) => [
 /** 4 × 2 m world: north bank, river, south bank, and a bridge deck over the river. */
 function validWorld() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "test:tiny-world",
     version: "1.0.0",
     name: "Tiny world",
@@ -104,9 +105,8 @@ function validWorld() {
     props: [
       {
         id: "pine-1",
-        model: "core:models/pine.glb",
+        prop: "test:pine",
         transform: { position: { x: 1.5, y: 0, z: -0.8 } },
-        blockRadius: 0.2,
       },
     ],
     spawnPoints: [{ id: "spawn-north", position: { regionId: "north", x: -1, z: -0.7 } }],
@@ -155,11 +155,11 @@ describe("WorldDefinition", () => {
 
   it("rejects an unsupported schema version with a single clear diagnostic", () => {
     const result = parseWorldDefinition(
-      { ...validWorld(), schemaVersion: 2 },
+      { ...validWorld(), schemaVersion: 1 },
       "worlds/test:tiny-world",
     );
     expect(messages(result)).toEqual([
-      "error: worlds/test:tiny-world schemaVersion: world schema version 2 is not supported (supported: 1) (unsupported_schema_version)",
+      "error: worlds/test:tiny-world schemaVersion: world schema version 1 is not supported (supported: 2) (unsupported_schema_version)",
     ]);
   });
 
@@ -367,13 +367,52 @@ describe("SpeciesDefinition", () => {
 describe("StructureDefinition", () => {
   it("accepts a structure type with affordances", () => {
     const result = parseStructureDefinition({
-      schemaVersion: 1,
+      schemaVersion: 2,
+      id: "test:plank-bridge",
+      version: "1.0.0",
+      name: "Plank bridge",
+      affordances: { "core:crossable": {} },
+    });
+    expect(result).toMatchObject({ ok: true, value: { visualAssets: [] } });
+  });
+
+  it("rejects affordances given as a list", () => {
+    const result = parseStructureDefinition({
+      schemaVersion: 2,
       id: "test:plank-bridge",
       version: "1.0.0",
       name: "Plank bridge",
       affordances: ["core:crossable"],
     });
-    expect(result).toMatchObject({ ok: true, value: { visualAssets: [] } });
+    expect(diagnostics(result).map((d) => d.path)).toEqual([["affordances"]]);
+  });
+});
+
+describe("PropDefinition", () => {
+  const mushroom = {
+    schemaVersion: 1,
+    id: "test:mushroom",
+    version: "1.0.0",
+    name: "Mushroom",
+    model: "test:models/mushroom.glb",
+    blockRadius: 0,
+    affordances: { "core:food": { eatSeconds: 5 } },
+  };
+
+  it("accepts a prop type with affordance params, which resolving checks", () => {
+    expect(parsePropDefinition(mushroom)).toMatchObject({ ok: true, value: mushroom });
+  });
+
+  it("defaults to offering nothing", () => {
+    const pine = { ...mushroom, id: "test:pine", affordances: undefined };
+    expect(parsePropDefinition(pine)).toMatchObject({ ok: true, value: { affordances: {} } });
+  });
+
+  it("rejects a negative block radius and a bad affordance ID", () => {
+    const found = diagnostics(
+      parsePropDefinition({ ...mushroom, blockRadius: -1, affordances: { food: {} } }),
+    );
+    expect(found.map((d) => d.path)).toEqual([["blockRadius"], ["affordances", "food"]]);
   });
 });
 

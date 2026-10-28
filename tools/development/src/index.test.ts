@@ -8,6 +8,7 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import {
+  fixtureProps,
   plankBridge,
   registerFixtureAssets,
   registerRiverCrossing,
@@ -60,6 +61,7 @@ describe("river-crossing fixture", () => {
       failures([
         ...registerFixtureAssets(registries),
         registries.structures.register(plankBridge),
+        ...fixtureProps.map((p) => registries.props.register(p)),
         registries.worlds.register(world),
       ]),
     ).toEqual([]);

@@ -113,8 +113,16 @@ describe("walkability", () => {
       baseSpeed: 1,
       behaviors: ["core:wander"],
     });
-    const world = registries.worlds.register({
+    registries.props.register({
       schemaVersion: 1,
+      id: "test:rock",
+      version: "1.0.0",
+      name: "Rock",
+      model: "test:rock.glb",
+      blockRadius: 0.15,
+    });
+    const world = registries.worlds.register({
+      schemaVersion: 2,
       id: "test:plain",
       version: "1.0.0",
       name: "Plain",
@@ -152,10 +160,10 @@ describe("walkability", () => {
       ],
       props: [
         {
+          // Blocks 0.15 m × 2 = 0.3 m.
           id: "rock",
-          model: "test:rock.glb",
-          transform: { position: { x: 0, y: 1, z: 1 } },
-          blockRadius: 0.3,
+          prop: "test:rock",
+          transform: { position: { x: 0, y: 1, z: 1 }, scale: 2 },
         },
       ],
       spawnPoints: [{ id: "s", position: { regionId: "ground", x: 0, z: 0 } }],
@@ -181,6 +189,20 @@ describe("walkability", () => {
     expect(stateAt(3, 0.25)).toBe(CellState.walkable);
     // The cliff splits the ground into two walkable areas.
     expect(mask.components()).toHaveLength(2);
+  });
+
+  it("resolves each prop placement against its type, scaling the block radius", () => {
+    const { model } = setup();
+    expect(model.props).toEqual([
+      {
+        id: "rock",
+        prop: "test:rock",
+        model: "test:rock.glb",
+        transform: { position: { x: 0, y: 1, z: 1 }, rotationY: 0, scale: 2 },
+        blockRadius: 0.3,
+        affordances: {},
+      },
+    ]);
   });
 
   it("uses the most permissive locomotion rule a species has", () => {

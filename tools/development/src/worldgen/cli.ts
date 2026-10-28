@@ -1,5 +1,5 @@
 import { formatDiagnostic, type WorldDefinition } from "@living-diorama/content-schema";
-import { builtInDefinitions } from "@living-diorama/built-in-content";
+import { builtInAssets, builtInDefinitions } from "@living-diorama/built-in-content";
 import { createRegistries, resolveReferences } from "@living-diorama/extension-api";
 import { checkWorld, registerCoreEngine } from "@living-diorama/simulation";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -22,7 +22,9 @@ console.log(`wrote ${worldPath}`);
 const registries = createRegistries();
 const results = [
   ...registerCoreEngine(registries),
+  ...builtInAssets.map((a) => registries.assets.register(a)),
   ...builtInDefinitions.structures.map((d) => registries.structures.register(d)),
+  ...builtInDefinitions.props.map((d) => registries.props.register(d)),
   ...builtInDefinitions.species.map((d) => registries.species.register(d)),
   registries.worlds.register(world),
 ];

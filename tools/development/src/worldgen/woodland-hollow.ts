@@ -1,3 +1,4 @@
+import { builtInDefinitions } from "@living-diorama/built-in-content";
 import type { Vec2, Vec3 } from "@living-diorama/content-schema";
 import { distanceToPolyline, polylineSegments, Terrain } from "@living-diorama/simulation";
 import { createRng, fbm, lerp, mm, smoothstep } from "./noise";
@@ -221,25 +222,30 @@ function materialAt(x: number, z: number, h: number, slopeDeg: number): number {
 // ---- Props --------------------------------------------------------------------------------
 
 interface PropKind {
-  model: string;
+  /** The prop type, from the built-in pack (`built-in-content/src/woodland-hollow/props`). */
+  prop: string;
   scale: readonly [number, number];
-  /** Block radius at scale 1, in metres. Zero for props creatures walk through. */
-  radius: number;
 }
 
 const PROP_KINDS = {
-  pine: { model: "hollow:models/pine.glb", scale: [0.8, 1.3], radius: 0.3 },
-  roundTree: { model: "hollow:models/round-tree.glb", scale: [0.8, 1.25], radius: 0.35 },
-  rock: { model: "hollow:models/rock.glb", scale: [0.6, 1.4], radius: 0.5 },
-  bush: { model: "hollow:models/bush.glb", scale: [0.7, 1.2], radius: 0.4 },
-  mushroom: { model: "hollow:models/mushroom.glb", scale: [0.7, 1.3], radius: 0 },
+  pine: { prop: "hollow:pine", scale: [0.8, 1.3] },
+  roundTree: { prop: "hollow:round-tree", scale: [0.8, 1.25] },
+  rock: { prop: "hollow:rock", scale: [0.6, 1.4] },
+  bush: { prop: "hollow:bush", scale: [0.7, 1.2] },
+  mushroom: { prop: "hollow:mushroom", scale: [0.7, 1.3] },
 } satisfies Record<string, PropKind>;
+
+/** A prop type's block radius at scale 1, in metres, as its definition declares it. */
+function typeRadius(prop: string): number {
+  const type = builtInDefinitions.props.find((p) => p.id === prop);
+  if (!type) throw new Error(`No built-in prop type "${prop}"`);
+  return type.blockRadius;
+}
 
 interface PlacedProp {
   id: string;
-  model: string;
+  prop: string;
   transform: { position: Vec3; rotationY: number; scale: number };
-  blockRadius: number;
 }
 
 function scatterProps(terrain: Terrain): PlacedProp[] {
@@ -252,6 +258,9 @@ function scatterProps(terrain: Terrain): PlacedProp[] {
     { x: ramp.portalX, z: (ramp.southZ + LAYOUT.plateau.southZ) / 2 },
   ];
   const counters: Record<string, number> = {};
+  // Block radius of each placed prop, rounded as placements stored it before ADR 0018 §3 moved
+  // it to the type, so the scatter (and so the world) stays the same.
+  const radii: number[] = [];
 
   const tryPlace = (
     kind: keyof typeof PROP_KINDS,
@@ -260,6 +269,7 @@ function scatterProps(terrain: Terrain): PlacedProp[] {
     spacing: number,
   ) => {
     const spec: PropKind = PROP_KINDS[kind];
+    const radius = typeRadius(spec.prop);
     for (let attempt = 0, n = 0; n < count && attempt < count * 400; attempt++) {
       const x = lerp(bounds.min.x + 1.5, bounds.max.x - 1.5, rng());
       const z = lerp(bounds.min.z + 1.5, bounds.max.z - 1.5, rng());
@@ -274,26 +284,26 @@ function scatterProps(terrain: Terrain): PlacedProp[] {
         continue;
       if (PATHS.some((p) => distanceToPolyline(x, z, p) < 1.2)) continue;
       if (keepClear.some((p) => Math.hypot(p.x - x, p.z - z) < 3)) continue;
-      const blockRadius = mm(spec.radius * scale);
+      const blockRadius = mm(radius * scale);
       // Leave room for a medium creature (0.8 m) plus margin between any two props.
       const crowded = placed.some(
-        (p) =>
+        (p, i) =>
           Math.hypot(p.transform.position.x - x, p.transform.position.z - z) <
-          Math.max(spacing, p.blockRadius + blockRadius + 1.4),
+          Math.max(spacing, (radii[i] ?? 0) + blockRadius + 1.4),
       );
       if (crowded) continue;
       counters[kind] = (counters[kind] ?? 0) + 1;
       n++;
       placed.push({
         id: `${kind.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}-${counters[kind]}`,
-        model: spec.model,
+        prop: spec.prop,
         transform: {
           position: { x: mm(x), y: mm(terrain.heightAt(x, z)), z: mm(z) },
           rotationY,
           scale,
         },
-        blockRadius,
       });
+      radii.push(blockRadius);
     }
   };
 
@@ -401,7 +411,7 @@ export function generateWoodlandHollow() {
   const halfWidth = bridge.width / 2;
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "hollow:woodland-hollow",
     version: "1.0.0",
     name: "Woodland Hollow",

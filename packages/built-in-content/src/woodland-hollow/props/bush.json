@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:bush",
+  "version": "1.0.0",
+  "name": "Bush",
+  "model": "hollow:models/bush.glb",
+  "blockRadius": 0.4,
+  "affordances": { "core:food": { "eatSeconds": 10 } }
+}

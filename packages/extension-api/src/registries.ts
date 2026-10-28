@@ -2,13 +2,16 @@ import {
   error,
   isContentId,
   REGION_KINDS,
+  parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
   validate,
+  type Affordances,
   type ContentId,
   type Diagnostic,
   type DiagnosticPath,
+  type PropDefinition,
   type RegionKind,
   type Result,
   type Schema,
@@ -22,6 +25,7 @@ import { Registry, type Reference, type RegistryEntry } from "./registry";
 export const REGISTRY_NAMES = [
   "worlds",
   "structures",
+  "props",
   "species",
   "surfaces",
   "actions",
@@ -148,11 +152,12 @@ export interface AssetEntry extends CodeEntry {
 
 /**
  * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
- * needs, senses and traits (ADR 0018).
+ * prop types, needs, senses and traits (ADR 0018).
  */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
+  props: Registry<PropDefinition>;
   species: Registry<SpeciesDefinition>;
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
@@ -456,7 +461,7 @@ function worldReferences(world: WorldDefinition): Reference[] {
     path: ["structures", i, "structure"],
   }));
   world.props.forEach((prop, i) =>
-    refs.push(assetReference(prop.model, ["props", i, "model"], "model")),
+    refs.push({ registry: "props", id: prop.prop, path: ["props", i, "prop"] }),
   );
   const regions = [
     ...world.regions.map((region, i) => ({ region, regionPath: ["regions", i] })),
@@ -537,13 +542,31 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
   ...rangedReferences("traits", species.traits),
 ];
 
+/** References from an affordance map, each entry's params checked against the type's schema. */
+const affordanceReferences = (affordances: Affordances): Reference[] =>
+  Object.entries(affordances).map(([id, params]) => {
+    const path = ["affordances", id];
+    return {
+      registry: "affordances",
+      id,
+      path,
+      check: (target) => {
+        const result = validate((target as AffordanceType).paramsSchema, params);
+        return result.ok
+          ? []
+          : result.diagnostics.map((d) => ({ ...d, path: [...path, ...d.path] }));
+      },
+    };
+  });
+
 const structureReferences = (structure: StructureDefinition): Reference[] => [
-  ...structure.affordances.map((id, i) => ({
-    registry: "affordances",
-    id,
-    path: ["affordances", i],
-  })),
+  ...affordanceReferences(structure.affordances),
   ...structure.visualAssets.map((id, i) => assetReference(id, ["visualAssets", i])),
+];
+
+const propReferences = (prop: PropDefinition): Reference[] => [
+  assetReference(prop.model, ["model"], "model"),
+  ...affordanceReferences(prop.affordances),
 ];
 
 export function createRegistries(): Registries {
@@ -553,6 +576,7 @@ export function createRegistries(): Registries {
       validate: parseStructureDefinition,
       references: structureReferences,
     }),
+    props: new Registry("props", { validate: parsePropDefinition, references: propReferences }),
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,

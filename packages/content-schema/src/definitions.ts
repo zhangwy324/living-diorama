@@ -20,14 +20,39 @@ const header = <K extends keyof typeof SCHEMA_VERSIONS>(kind: K) => ({
   name: z.string().min(1),
 });
 
+/**
+ * What a structure or prop type offers: affordance → its params, e.g.
+ * `{ "core:food": { "eatSeconds": 5 } }` (ADR 0018 §2). The params are checked against the
+ * affordance type's params schema when references resolve.
+ */
+export const AffordancesSchema = z.record(ContentIdSchema, z.unknown()).default({});
+export type Affordances = z.output<typeof AffordancesSchema>;
+
 /** A registered structure type, e.g. a wooden bridge (ADR 0002 §5). */
 export const StructureDefinitionSchema = z.strictObject({
   ...header("structure"),
   visualAssets: z.array(AssetRefSchema).default([]),
-  /** What the structure offers, e.g. `core:crossable`. */
-  affordances: z.array(ContentIdSchema).default([]),
+  /** What the structure offers, e.g. `{ "core:crossable": {} }`. */
+  affordances: AffordancesSchema,
 });
 export type StructureDefinition = z.output<typeof StructureDefinitionSchema>;
+
+/**
+ * A registered prop type, e.g. a pine or a mushroom (ADR 0018 §3). A world's placements name it
+ * and add only where it stands.
+ */
+export const PropDefinitionSchema = z.strictObject({
+  ...header("prop"),
+  model: AssetRefSchema,
+  /**
+   * Creatures can't stand within this distance of a placement's position, in metres at scale 1:
+   * a placement blocks `blockRadius × transform.scale` (ADR 0018 §3, amending ADR 0005 §8).
+   */
+  blockRadius: z.number().nonnegative(),
+  /** What the prop offers, e.g. `{ "core:food": { "eatSeconds": 5 } }`. */
+  affordances: AffordancesSchema,
+});
+export type PropDefinition = z.output<typeof PropDefinitionSchema>;
 
 /** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */
 export const EmptyAffordanceParamsSchema = z.strictObject({});
@@ -110,14 +135,13 @@ export const StructurePlacementSchema = z.strictObject({
 export type StructurePlacement = z.output<typeof StructurePlacementSchema>;
 
 /**
- * Decorative prop: no affordances, but it blocks movement within `blockRadius` of its position.
- * `blockRadius` is in world metres; `transform.scale` does not change it.
+ * A prop in a world. Its type (`prop`) gives the model, block radius and affordances; the
+ * placement adds where it stands. `transform.scale` scales the type's block radius too.
  */
 export const PropPlacementSchema = z.strictObject({
   id: LocalIdSchema,
-  model: AssetRefSchema,
+  prop: ContentIdSchema,
   transform: TransformSchema,
-  blockRadius: z.number().nonnegative(),
 });
 export type PropPlacement = z.output<typeof PropPlacementSchema>;
 
