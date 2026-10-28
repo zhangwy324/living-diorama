@@ -1,32 +1,56 @@
 import type { Drawing } from "@living-diorama/content-schema";
-import { CANVAS_SIZE, drawStroke, toDrawing } from "../drawing";
-import { appendedStroke, StrokeHistory } from "./history";
+import { CANVAS_SIZE, drawRuns, drawStroke, encodePng, strokeRuns, toDrawing } from "../drawing";
+import { DrawingHistory, type Change } from "./history";
 import { LiveStroke, type Brush } from "./live-stroke";
 
 // The drawing editor's canvas, driven imperatively (ADR 0015 §11): React renders the toolbar
-// only. Finished strokes are baked into a bitmap, so a frame draws the bitmap and the live
-// stroke's round-capped lines; the stroke list in `StrokeHistory` is the only state.
+// only. The drawing is a 256 px image (ADR 0014 §5), shown scaled up to fit; a stroke is painted
+// into it when it ends, and `DrawingHistory` keeps the record and the pixels for undo.
 
 /** What the toolbar and the close dialog need to know. */
 export interface EditorState {
   canUndo: boolean;
   canRedo: boolean;
+  /** Nothing in the record: nothing drawn since the canvas was last empty. */
   empty: boolean;
+  /** No pixel is visible: nothing drawn, or all of it erased. */
+  blank: boolean;
+}
+
+/** A stroke being drawn, and how many of its runs are already in the working image. */
+interface Live {
+  stroke: LiveStroke;
+  pointerId: number;
+  box: DOMRect;
+  drawnRuns: number;
+}
+
+function context2d(canvas: OffscreenCanvas, options?: CanvasRenderingContext2DSettings) {
+  const context = canvas.getContext("2d", options);
+  if (!context) throw new Error("No 2D canvas");
+  return context;
 }
 
 export class DrawingEditor {
   brush: Brush = { tool: "pen", color: "#1e2a14", width: 10 };
 
   private readonly context: CanvasRenderingContext2D;
-  private readonly bitmap = new OffscreenCanvas(1, 1);
-  private readonly bitmapContext: OffscreenCanvasRenderingContext2D;
-  private readonly history = new StrokeHistory();
-  private live?: { stroke: LiveStroke; pointerId: number; box: DOMRect };
+  /** The drawing: one pixel per canvas unit, what the library keeps. */
+  private readonly image = new OffscreenCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  private readonly imageContext = context2d(this.image, { willReadFrequently: true });
+  /** While a stroke is drawn: the image with the live stroke's finished runs drawn in. */
+  private readonly working = new OffscreenCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  private readonly workingContext = context2d(this.working);
+  /** While a stroke is drawn: the working image with the live stroke's open run on top. */
+  private readonly composed = new OffscreenCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  private readonly composedContext = context2d(this.composed);
+  private readonly history = new DrawingHistory(CANVAS_SIZE, CANVAS_SIZE);
+  private live?: Live;
   private frame?: number;
   private readonly stop: () => void;
 
   /**
-   * `onChange` is called whenever the strokes change: a stroke ends, undo, redo or clear.
+   * `onChange` is called whenever the drawing changes: a stroke ends, undo, redo or clear.
    * `onStroke` is called when a stroke starts (true) and ends (false).
    */
   constructor(
@@ -37,13 +61,12 @@ export class DrawingEditor {
     // Not `desynchronized`: WebView2 takes it, but then shows the canvas's transparent pixels as
     // black instead of the page behind them (ADR 0015 §11).
     const context = canvas.getContext("2d");
-    const bitmapContext = this.bitmap.getContext("2d");
-    if (!context || !bitmapContext) throw new Error("No 2D canvas");
+    if (!context) throw new Error("No 2D canvas");
     this.context = context;
-    this.bitmapContext = bitmapContext;
 
-    // The backing store follows the canvas's size in device pixels, so it stays sharp on every
-    // monitor; this observer box also fires when only the device pixel ratio changes.
+    // The backing store follows the canvas's size in device pixels, so the image is scaled up
+    // once, smoothly, on every monitor; this observer box also fires when only the device pixel
+    // ratio changes.
     const resizer = new ResizeObserver(([entry]) => {
       const size = entry?.devicePixelContentBoxSize[0];
       if (size) this.resize(size.inlineSize, size.blockSize);
@@ -68,15 +91,17 @@ export class DrawingEditor {
     };
   }
 
+  /** The record of how the image was drawn (ADR 0014 §5), saved beside it. */
   get drawing(): Drawing {
-    return toDrawing(this.history.strokes);
+    return toDrawing(this.history.record);
   }
 
   get state(): EditorState {
     return {
       canUndo: this.history.canUndo,
       canRedo: this.history.canRedo,
-      empty: this.history.strokes.length === 0,
+      empty: this.history.record.length === 0,
+      blank: this.history.blank,
     };
   }
 
@@ -85,19 +110,29 @@ export class DrawingEditor {
     return this.live !== undefined;
   }
 
+  /** The image's pixels, one per canvas unit: what `png` encodes. */
+  pixels(): ImageData {
+    return this.imageContext.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  }
+
+  /** The image as PNG bytes: the drawing the library keeps. */
+  png(): Promise<Uint8Array> {
+    return encodePng(this.image);
+  }
+
   undo(): void {
-    this.replay(() => this.history.undo());
+    this.step(() => this.history.undo());
   }
 
   redo(): void {
-    this.replay(() => this.history.redo());
+    this.step(() => this.history.redo());
   }
 
   clear(): void {
-    this.replay(() => {
-      this.history.clear();
-      return true;
-    });
+    if (this.live || !this.history.clear()) return;
+    this.imageContext.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    this.requestFrame();
+    this.changed();
   }
 
   /** An empty canvas whose clearing can't be undone, for the next drawing after a release. */
@@ -110,7 +145,8 @@ export class DrawingEditor {
       this.onStroke(false);
     }
     this.history.reset();
-    this.rebuild();
+    this.imageContext.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    this.requestFrame();
     this.changed();
   }
 
@@ -118,40 +154,23 @@ export class DrawingEditor {
     this.stop();
   }
 
-  /** Applies a history step, then draws one stroke more onto the bitmap or rebuilds it. */
-  private replay(step: () => boolean) {
+  /** Applies an undo or redo, putting back the pixels it changed. */
+  private step(step: () => Change | undefined) {
     if (this.live) return;
-    const before = this.history.strokes;
-    if (!step()) return;
-    const added = appendedStroke(before, this.history.strokes);
-    if (added) this.bake(added);
-    else this.rebuild();
+    const change = step();
+    if (!change) return;
+    if (change.patch) {
+      const { x, y, width, height, data } = change.patch;
+      this.imageContext.putImageData(new ImageData(data, width, height), x, y);
+    }
+    this.requestFrame();
     this.changed();
   }
 
   private resize(width: number, height: number) {
     if (this.canvas.width === width && this.canvas.height === height) return;
-    this.canvas.width = this.bitmap.width = width;
-    this.canvas.height = this.bitmap.height = height;
-    this.rebuild();
-  }
-
-  private scale() {
-    return this.canvas.width / CANVAS_SIZE;
-  }
-
-  private rebuild() {
-    const context = this.bitmapContext;
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, this.bitmap.width, this.bitmap.height);
-    for (const stroke of this.history.strokes) this.bake(stroke);
-    this.requestFrame();
-  }
-
-  private bake(stroke: Drawing["strokes"][number]) {
-    const scale = this.scale();
-    this.bitmapContext.setTransform(scale, 0, 0, scale, 0, 0);
-    drawStroke(this.bitmapContext, stroke);
+    this.canvas.width = width;
+    this.canvas.height = height;
     this.requestFrame();
   }
 
@@ -162,17 +181,36 @@ export class DrawingEditor {
     });
   }
 
-  /** The bitmap, then the live stroke over it; a live eraser cuts into the bitmap's copy. */
+  /** The image, or while a stroke is drawn the image with the stroke, scaled to the canvas. */
   private draw() {
     const context = this.context;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    context.drawImage(this.bitmap, 0, 0);
-    if (this.live) {
-      const scale = this.scale();
-      context.setTransform(scale, 0, 0, scale, 0, 0);
-      drawStroke(context, this.live.stroke.stroke);
+    context.imageSmoothingEnabled = true;
+    const shown = this.live ? this.compose(this.live) : this.image;
+    context.drawImage(shown, 0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  /**
+   * The image with the live stroke, drawn a run at a time (ADR 0015 §11): runs the stroke has
+   * finished go into the working image once, and each frame draws only the open run, over a copy
+   * of it. A live eraser cuts into these copies, never into the image.
+   */
+  private compose(live: Live): OffscreenCanvas {
+    const stroke = live.stroke.stroke;
+    const runs = strokeRuns(stroke);
+    // Every run but the last is finished: points added later extend the last run or start new
+    // ones, and never change the runs before it.
+    const finished = Math.max(0, runs.length - 1);
+    if (finished > live.drawnRuns) {
+      drawRuns(this.workingContext, stroke, runs.slice(live.drawnRuns, finished));
+      live.drawnRuns = finished;
     }
+    const composed = this.composedContext;
+    composed.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    composed.drawImage(this.working, 0, 0);
+    drawRuns(composed, stroke, runs.slice(finished));
+    return this.composed;
   }
 
   private start(event: PointerEvent) {
@@ -182,7 +220,10 @@ export class DrawingEditor {
       stroke: new LiveStroke({ ...this.brush }, event.pointerType === "pen"),
       pointerId: event.pointerId,
       box: this.canvas.getBoundingClientRect(),
+      drawnRuns: 0,
     };
+    this.workingContext.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    this.workingContext.drawImage(this.image, 0, 0);
     this.sample(this.live, event);
     this.requestFrame();
     this.onStroke(true);
@@ -196,17 +237,20 @@ export class DrawingEditor {
     this.requestFrame();
   }
 
+  /** Paints the finished stroke into the image whole, as `drawStroke` draws it, and records it. */
   private end(event: PointerEvent) {
     const live = this.live;
     if (event.pointerId !== live?.pointerId) return;
     this.live = undefined;
-    this.history.add(live.stroke.stroke);
-    this.bake(live.stroke.stroke);
+    const stroke = live.stroke.stroke;
+    drawStroke(this.imageContext, stroke);
+    this.history.add(stroke, this.pixels().data);
+    this.requestFrame();
     this.onStroke(false);
     this.changed();
   }
 
-  private sample({ stroke, box }: { stroke: LiveStroke; box: DOMRect }, event: PointerEvent) {
+  private sample({ stroke, box }: Live, event: PointerEvent) {
     const units = CANVAS_SIZE / box.width;
     stroke.add(
       (event.clientX - box.left) * units,

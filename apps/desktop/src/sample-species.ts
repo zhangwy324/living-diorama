@@ -2,7 +2,7 @@ import type { Drawing, SizeClass, Stroke } from "@living-diorama/content-schema"
 import { CANVAS_SIZE, toDrawing } from "./drawing";
 
 // Twenty drawn species for measuring the app with many different bodies (ADR 0016 §11). Each is
-// built from strokes, as a player's drawing is, from a few body plans varied in shape, colour,
+// drawn with strokes, as a player's drawing is, from a few body plans varied in shape, colour,
 // size, outline and separate parts. Development only: the console hook saves them to the library.
 
 type Point = readonly [number, number];
@@ -39,6 +39,7 @@ const OUTLINE_COLOR = "#20201c";
 const OUTLINE_WIDTH = 10;
 
 const stroke = (tool: Stroke["tool"], color: string, width: number, points: Point[]): Stroke => ({
+  kind: "stroke",
   tool,
   color,
   width,

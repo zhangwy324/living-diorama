@@ -2,7 +2,7 @@ import { parseDrawing, type Stroke } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
 import { SAMPLE_DRAWING } from "./dev-library";
 import {
-  drawDrawing,
+  drawRuns,
   drawStroke,
   PRESSURE_STEPS,
   strokeRuns,
@@ -56,6 +56,7 @@ function recordingContext() {
 }
 
 const stroke = (width: number, points: number[][]): Stroke => ({
+  kind: "stroke",
   tool: "pen",
   color: "#112233",
   width,
@@ -82,7 +83,7 @@ const mouseLike = (width: number): Stroke =>
 describe("drawStroke", () => {
   it("draws a lone point as a dot as wide as the stroke", () => {
     const { context, ops } = recordingContext();
-    drawStroke(context, SAMPLE_DRAWING.strokes[0]!);
+    drawStroke(context, SAMPLE_DRAWING.history[0]!);
     expect(ops.filter((op) => op.kind === "fill")).toEqual([
       { kind: "fill", color: "#5a8f3c", mode: "source-over", dots: [[128, 145, 75]] },
     ]);
@@ -184,29 +185,46 @@ describe("strokeRuns", () => {
   });
 });
 
-describe("drawDrawing", () => {
-  it("draws each stroke in order, the eraser cutting out", () => {
-    const { context, ops } = recordingContext();
-    drawDrawing(context, SAMPLE_DRAWING);
-    const drawn = ops.map(({ color, mode }) => `${color} ${mode}`);
-    expect(drawn.filter((op, i) => op !== drawn[i - 1])).toEqual([
-      "#5a8f3c source-over",
-      "#1e2a14 source-over",
-      "#000000 destination-out",
-    ]);
-    expect(context.globalCompositeOperation).toBe("source-over");
-  });
+describe("drawRuns", () => {
+  it("draws a live stroke a few runs at a time with the lines drawStroke draws at once", () => {
+    // The editor draws each finished run once and the open run every frame (ADR 0015 §11).
+    const full = stroke(
+      30,
+      Array.from({ length: 80 }, (_, i) => [
+        10 + i * 3,
+        50 + (i % 4),
+        0.3 + 0.6 * Math.abs(Math.sin(i / 8)),
+      ]),
+    );
+    const linesByWidth = (ops: Op[]) => {
+      const byWidth = new Map<number, number[][][]>();
+      for (const op of ops) {
+        if (op.kind !== "stroke") continue;
+        byWidth.set(op.width, [...(byWidth.get(op.width) ?? []), ...op.lines]);
+      }
+      return new Map([...byWidth].sort(([a], [b]) => a - b));
+    };
+    const whole = recordingContext();
+    drawStroke(whole.context, full);
 
-  it("draws the same drawing the same way twice", () => {
-    const first = recordingContext();
-    const second = recordingContext();
-    drawDrawing(first.context, SAMPLE_DRAWING);
-    drawDrawing(second.context, structuredClone(SAMPLE_DRAWING));
-    expect(second.ops).toEqual(first.ops);
+    const live = recordingContext();
+    // The finished runs, drawn as the points come.
+    let drawn = 0;
+    for (let count = 1; count <= 80; count += 7) {
+      const runs = strokeRuns({ ...full, points: full.points.slice(0, count * 3) });
+      drawRuns(live.context, full, runs.slice(drawn, runs.length - 1));
+      drawn = runs.length - 1;
+    }
+    // Then what is left, and the open run.
+    const runs = strokeRuns(full);
+    expect(runs.length - drawn).toBeGreaterThan(1);
+    drawRuns(live.context, full, runs.slice(drawn, -1));
+    drawRuns(live.context, full, runs.slice(-1));
+    expect(linesByWidth(live.ops)).toEqual(linesByWidth(whole.ops));
   });
 });
 
-it("makes drawings the schema accepts", () => {
+it("makes drawing records the schema accepts", () => {
   expect(parseDrawing(toDrawing([])).ok).toBe(true);
   expect(parseDrawing(toDrawing([line(8, 0.3), { ...line(20, 1), tool: "eraser" }])).ok).toBe(true);
 });

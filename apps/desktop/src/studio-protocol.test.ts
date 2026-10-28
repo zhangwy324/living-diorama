@@ -37,9 +37,11 @@ const bridge: Limit = {
 };
 
 const DRAWING: Drawing = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   canvas: { width: 256, height: 256 },
-  strokes: [{ tool: "pen", color: "#336633", width: 12, points: [10, 10, 1, 20, 20, 0.5] }],
+  history: [
+    { kind: "stroke", tool: "pen", color: "#336633", width: 12, points: [10, 10, 1, 20, 20, 0.5] },
+  ],
 };
 const RELEASE_ID = "00000000-0000-4000-8000-00000000000a";
 const PNG = [137, 80, 78, 71];

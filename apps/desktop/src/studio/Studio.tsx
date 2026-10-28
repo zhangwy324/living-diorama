@@ -6,7 +6,6 @@ import {
 } from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { drawingPixels, rasterize } from "../drawing";
 import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
 import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
@@ -45,7 +44,7 @@ export const BRUSH_WIDTHS = [4, 10, 20, 40];
 /** The eraser's colour is stored but never drawn. */
 const ERASER_COLOR = "#000000";
 
-/** The preview and the drawing hints follow the strokes this long after they last changed. */
+/** The preview and the drawing hints follow the drawing this long after it last changed. */
 const REBUILD_DELAY_MS = 200;
 
 /** How long "… is off into the world!" stays. */
@@ -54,7 +53,15 @@ const CELEBRATION_MS = 4000;
 export function Studio() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const editor = useRef<DrawingEditor>(undefined);
-  const [state, setState] = useState<EditorState>({ canUndo: false, canRedo: false, empty: true });
+  const [state, setState] = useState<EditorState>({
+    canUndo: false,
+    canRedo: false,
+    empty: true,
+    blank: true,
+  });
+  // Whether the latest check of the image found a body to build. False from each change until
+  // the check after it, so an erased or faint drawing can't be released as an empty image.
+  const [hasBody, setHasBody] = useState(false);
   const [tool, setTool] = useState<Brush["tool"]>("pen");
   const [color, setColor] = useState(PALETTE[0] ?? "#000000");
   const [width, setWidth] = useState(BRUSH_WIDTHS[1] ?? 10);
@@ -104,21 +111,23 @@ export function Studio() {
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
-    // A short while after the strokes change, never during a stroke, so drawing stays smooth.
+    // A short while after the drawing changes, never during a stroke, so drawing stays smooth.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const rebuild = () => {
       timer = undefined;
       const current = editor.current;
       if (!current) return;
-      const pixels = drawingPixels(current.drawing);
+      const pixels = current.pixels();
       const check = checkBody(pixels);
       preview.current?.setDrawing(check.empty ? undefined : pixels, check);
       setShapeHints(drawingHints(check));
+      setHasBody(!check.empty);
     };
     const created = new DrawingEditor(
       element,
       (next) => {
         setState(next);
+        setHasBody(false);
         releaseId.current = undefined;
         setReleaseError(undefined);
         clearTimeout(timer);
@@ -171,7 +180,8 @@ export function Studio() {
   useEffect(
     () =>
       studioWindow.onCloseRequested(() => {
-        if (editor.current?.state.empty ?? true) return true;
+        // Nothing visible means nothing to lose.
+        if (editor.current?.state.blank ?? true) return true;
         setClosing(true);
         return false;
       }),
@@ -224,7 +234,7 @@ export function Studio() {
   }, [celebration]);
 
   const shownName = name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary));
-  const releasable = canRelease({ name: shownName, empty: state.empty, releasing });
+  const releasable = canRelease({ name: shownName, empty: !hasBody, releasing });
 
   const release = async () => {
     const current = editor.current;
@@ -238,7 +248,7 @@ export function Studio() {
       const released = await channel.request("release", {
         releaseId: releaseId.current,
         drawing,
-        image: Array.from(await rasterize(drawing)),
+        image: Array.from(await current.png()),
         name: shownName,
         sizeClass,
       });

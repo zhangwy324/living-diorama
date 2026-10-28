@@ -2,11 +2,12 @@ import {
   DRAWING_SCHEMA_VERSION,
   STROKE_POINT_STRIDE,
   type Drawing,
+  type DrawingOperation,
   type Stroke,
 } from "@living-diorama/content-schema";
 
-// Strokes to pixels (ADR 0015 §9), one way for the Studio's editor and for the PNG the body is
-// built from, so the released image matches what the player saw.
+// Strokes to pixels (ADR 0015 §9). The Studio's editor paints them into its 256 px image, which
+// is the drawing the library keeps (ADR 0014 §5).
 
 /** The drawing canvas's width and height in units: the body image's size (ADR 0011 §1). */
 export const CANVAS_SIZE = 256;
@@ -24,11 +25,11 @@ export type StrokeContext = CanvasCompositing &
   Pick<CanvasPath, "moveTo" | "lineTo" | "arc"> &
   Pick<CanvasDrawPath, "beginPath" | "fill" | "stroke">;
 
-/** A drawing of `strokes` on the Studio's canvas. */
-export const toDrawing = (strokes: readonly Stroke[]): Drawing => ({
+/** The record of a drawing on the Studio's canvas made by `history`, in order. */
+export const toDrawing = (history: readonly DrawingOperation[]): Drawing => ({
   schemaVersion: DRAWING_SCHEMA_VERSION,
   canvas: { width: CANVAS_SIZE, height: CANVAS_SIZE },
-  strokes: [...strokes],
+  history: [...history],
 });
 
 /** Consecutive points of a stroke drawn at one width, in canvas units. */
@@ -98,12 +99,24 @@ export function strokeRuns(stroke: Stroke): StrokeRun[] {
  * cuts out what is under it.
  */
 export function drawStroke(context: StrokeContext, stroke: Stroke): void {
+  drawRuns(context, stroke, strokeRuns(stroke));
+}
+
+/**
+ * Draws some of `stroke`'s runs (`strokeRuns`) as `drawStroke` draws them all: the editor draws a
+ * live stroke a few runs at a time (ADR 0015 §11).
+ */
+export function drawRuns(
+  context: StrokeContext,
+  stroke: Stroke,
+  strokeRuns: readonly StrokeRun[],
+): void {
   context.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
   context.fillStyle = context.strokeStyle = stroke.color;
   context.lineCap = context.lineJoin = "round";
   // One path per width, so a pen's pressure costs at most one line and one fill per step.
   const byWidth = new Map<number, StrokeRun[]>();
-  for (const run of strokeRuns(stroke)) {
+  for (const run of strokeRuns) {
     const runs = byWidth.get(run.width);
     if (runs) runs.push(run);
     else byWidth.set(run.width, [run]);
@@ -136,31 +149,21 @@ export function drawStroke(context: StrokeContext, stroke: Stroke): void {
   context.globalCompositeOperation = "source-over";
 }
 
-/** Draws every stroke of `drawing`, in order, at one pixel per unit. */
-export function drawDrawing(context: StrokeContext, drawing: Drawing): void {
-  for (const stroke of drawing.strokes) drawStroke(context, stroke);
-}
-
-function drawOffscreen(drawing: Drawing, options?: CanvasRenderingContext2DSettings) {
-  const canvas = new OffscreenCanvas(drawing.canvas.width, drawing.canvas.height);
-  const context = canvas.getContext("2d", options);
-  if (!context) throw new Error("No 2D canvas");
-  drawDrawing(context, drawing);
-  return { canvas, context };
-}
-
 /**
- * The pixels of `drawing`, one per canvas unit: what `rasterize` encodes, so a body built from
- * them (the Studio's preview) matches one built from the PNG (the world's).
+ * A new image of `strokes` drawn in order, one pixel per canvas unit. Only for drawings made by
+ * code (the development samples); a player's drawing is its image, and its record is never
+ * replayed (ADR 0014 §5).
  */
-export function drawingPixels(drawing: Drawing): ImageData {
-  const { context } = drawOffscreen(drawing, { willReadFrequently: true });
-  return context.getImageData(0, 0, drawing.canvas.width, drawing.canvas.height);
+export function paintStrokes(strokes: readonly Stroke[]): OffscreenCanvas {
+  const canvas = new OffscreenCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No 2D canvas");
+  for (const stroke of strokes) drawStroke(context, stroke);
+  return canvas;
 }
 
-/** Draws `drawing` to PNG bytes, one pixel per canvas unit. */
-export async function rasterize(drawing: Drawing): Promise<Uint8Array> {
-  const { canvas } = drawOffscreen(drawing);
-  const blob = await canvas.convertToBlob({ type: "image/png" });
+/** `image` as PNG bytes: what the library stores as the drawing. */
+export async function encodePng(image: OffscreenCanvas): Promise<Uint8Array> {
+  const blob = await image.convertToBlob({ type: "image/png" });
   return new Uint8Array(await blob.arrayBuffer());
 }

@@ -3,7 +3,10 @@ import { RequestTimeoutError } from "@living-diorama/desktop-integration";
 // Releasing a drawing (roadmap M11 task 6): when the button is available and what the Studio
 // says afterwards.
 
-/** Release needs a name and something drawn, and one release at a time. */
+/**
+ * Release needs a name and a body to build, and one release at a time. `empty` is true while the
+ * image has nothing a body is built from: nothing drawn, all of it erased, or only faint pixels.
+ */
 export const canRelease = ({
   name,
   empty,

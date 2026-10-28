@@ -4,7 +4,7 @@
 - **Date:** 2026-10-27
 - **Context:** Roadmap M10. Drawn species (M11) have to survive a relaunch, while the world itself still resets on launch. The player's strokes are the source of truth, so later releases can add body plans without the player redrawing. Rust is the app's only filesystem boundary (ADR 0008), and drawn species go through the same schemas and registries as pack content (ADR 0012).
 
-**Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13 PR 2): the drawn image becomes the source of truth, with the strokes (and later fills) kept beside it as a record that is never replayed, and library files need no backward compatibility. Until that PR lands, this ADR describes the code.
+**Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13 PR 2, implemented): the drawn image is the source of truth, with the strokes (and later fills) kept beside it as a record that is never replayed. The amendments in §1 and §5 below say what changed; the rest of this ADR still describes the code.
 
 ## Decisions
 
@@ -12,6 +12,8 @@
    - `entry.json`: the library entry;
    - `drawing.json`: the strokes;
    - `appearance.png`: the image the body is built from, derived from the strokes.
+
+   **Amendment (M13, issue #73):** `appearance.png` is now the drawing itself, the 256 px image the player drew in the Studio, and `drawing.json` is a record of how it was drawn (§5). Nothing derives the image from the strokes any more. ADR 0017 records the M13 decisions as a whole.
 
 2. **Saves are atomic and entries never change.** A save writes the three files to `<uuid>.tmp/`, then renames the folder into place, so an entry appears complete or not at all. A delete renames the folder to `<uuid>.tmp/` before removing it. Listing removes `.tmp` folders left by a crash. Saving over an existing ID is an error: a redraw is a new species, and editing comes later.
 
@@ -25,7 +27,14 @@
 
    Each has its own version constant (`DRAWING_SCHEMA_VERSION`, `LIBRARY_ENTRY_SCHEMA_VERSION`), separate from the definition versions in ADR 0003.
 
-6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Version 1 has no migrations. A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
+   **Amendment (M13, issue #73): the image is the drawing, the strokes a record.** A fill tool works on exact pixels. If the image were rebuilt by replaying operations, a fill replayed over strokes that now render a little differently (issue #59 changed how they render) could find a one-pixel gap and spill over the whole canvas. Keeping the image as the drawing avoids that: strokes are kept only as a record, never replayed:
+   - Drawing, version 2: `{ schemaVersion, canvas: { width, height }, history }`. `history` holds the operations that made the image, in order, since the canvas was last empty. An operation has a `kind`; the only kind so far is `stroke`, with the stroke fields above. The schema is a discriminated union on `kind` (`DrawingOperationSchema`), so the fill tool adds its kind beside it. Undone operations are not in the record: drawing after an undo drops them, from the record and the undo history alike, and Clear starts the record over (undoing Clear brings it back). So the record always tells how the image now shown was made.
+   - The record costs a few kilobytes and might help later work that finds a drawing's parts. Nothing depends on it: if it proves useless it can be dropped without touching the image.
+   - Version 1 files still read: a migration turns each stroke into a stroke operation, in order. It is cheap, and the app never reads a drawing at launch anyway (entries register from their image), so old entries load as before. No other migration is needed, since every entry already holds its image.
+   - Beyond that migration, nothing promises that older library files keep loading: a later format change may leave them unreadable, and they are skipped as §3 says rather than lost.
+   - Rust is unchanged: it never interprets `drawing.json`.
+
+6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Drawings have one migration, from version 1 to 2 (§5 amendment); library entries have none yet. A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
 
 7. **Images reach the renderer as `blob:` URLs.** `load_library_image` returns the PNG's bytes as raw binary (`ipc::Response`), and the frontend makes a `blob:` URL from them for `register_species`. The CSP already allows `blob:` images, so the asset protocol isn't needed. The URL is revoked when the species is deleted.
 

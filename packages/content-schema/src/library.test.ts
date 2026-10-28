@@ -6,11 +6,17 @@ const codes = (result: Result<unknown>) => (result.ok ? [] : result.diagnostics.
 
 function validDrawing() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     canvas: { width: 512, height: 512 },
-    strokes: [
-      { tool: "pen", color: "#3a7d5c", width: 12, points: [10, 20, 0.5, 30, 40, 1] },
-      { tool: "eraser", color: "#000000", width: 20, points: [15, 25, 0] },
+    history: [
+      {
+        kind: "stroke",
+        tool: "pen",
+        color: "#3a7d5c",
+        width: 12,
+        points: [10, 20, 0.5, 30, 40, 1],
+      },
+      { kind: "stroke", tool: "eraser", color: "#000000", width: 20, points: [15, 25, 0] },
     ],
   };
 }
@@ -38,8 +44,8 @@ describe("parseDrawing", () => {
     expect(parseDrawing(validDrawing())).toEqual({ ok: true, value: validDrawing() });
   });
 
-  it("accepts a drawing with no strokes", () => {
-    expect(parseDrawing({ ...validDrawing(), strokes: [] }).ok).toBe(true);
+  it("accepts a drawing with nothing in its history", () => {
+    expect(parseDrawing({ ...validDrawing(), history: [] }).ok).toBe(true);
   });
 
   it.each([
@@ -48,19 +54,52 @@ describe("parseDrawing", () => {
     ["negative pressure", [1, 2, -0.1]],
   ])("rejects %s", (_, points) => {
     const drawing = validDrawing();
-    drawing.strokes[0]!.points = points;
+    drawing.history[0]!.points = points;
     expect(parseDrawing(drawing).ok).toBe(false);
   });
 
   it("rejects a bad colour and an unknown tool", () => {
     const drawing = validDrawing();
-    drawing.strokes[0]!.color = "green";
-    drawing.strokes[1]!.tool = "spray";
+    drawing.history[0]!.color = "green";
+    drawing.history[1]!.tool = "spray";
     expect(parseDrawing(drawing).ok).toBe(false);
   });
 
+  it("rejects an operation of an unknown kind or with none", () => {
+    const [stroke] = validDrawing().history;
+    expect(parseDrawing({ ...validDrawing(), history: [{ ...stroke, kind: "spray" }] }).ok).toBe(
+      false,
+    );
+    const kindless: Record<string, unknown> = { ...stroke };
+    delete kindless.kind;
+    expect(parseDrawing({ ...validDrawing(), history: [kindless] }).ok).toBe(false);
+  });
+
+  it("rejects the strokes of version 1 under version 2", () => {
+    const { history, ...drawing } = validDrawing();
+    expect(parseDrawing({ ...drawing, strokes: history }).ok).toBe(false);
+  });
+
+  it("reads a version 1 drawing, its strokes as the record in the same order", () => {
+    const { history } = validDrawing();
+    const strokes = history.map((stroke) => {
+      const old: Record<string, unknown> = { ...stroke };
+      delete old.kind;
+      return old;
+    });
+    const result = parseDrawing({ schemaVersion: 1, canvas: { width: 512, height: 512 }, strokes });
+    expect(result).toEqual({ ok: true, value: validDrawing() });
+  });
+
+  it("rejects a version 1 drawing with bad strokes", () => {
+    const drawing = { schemaVersion: 1, canvas: { width: 256, height: 256 } };
+    expect(parseDrawing({ ...drawing, strokes: [{ tool: "pen" }] }).ok).toBe(false);
+    expect(parseDrawing({ ...drawing, strokes: [7] }).ok).toBe(false);
+    expect(parseDrawing({ ...drawing, strokes: "none" }).ok).toBe(false);
+  });
+
   it("rejects a newer version with one clear diagnostic", () => {
-    const result = parseDrawing({ ...validDrawing(), schemaVersion: 2 });
+    const result = parseDrawing({ ...validDrawing(), schemaVersion: 3 });
     expect(codes(result)).toEqual(["unsupported_schema_version"]);
   });
 });
