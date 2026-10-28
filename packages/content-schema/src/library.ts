@@ -12,7 +12,7 @@ import { HexColorSchema } from "./primitives";
 /** Current data-format version of a drawing. */
 export const DRAWING_SCHEMA_VERSION = 2;
 /** Current data-format version of a library entry. */
-export const LIBRARY_ENTRY_SCHEMA_VERSION = 1;
+export const LIBRARY_ENTRY_SCHEMA_VERSION = 2;
 
 const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 1 held the strokes as the source of truth. Version 2 holds a record of operations
@@ -27,7 +27,27 @@ const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
       : strokes,
   }),
 };
-const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
+const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {
+  // Version 2 gives a drawn species the mossling's living behavior (ADR 0018 §4): it feeds and
+  // rests, and sees 8 m. Entries saved since ADR 0018 PR 2a store `senses: {}`, so an empty map
+  // gains vision too. Anything malformed is left as it is, for validation to reject.
+  1: ({ species, ...data }) => ({ ...data, species: livingSpecies(species) }),
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function livingSpecies(species: unknown): unknown {
+  if (!isRecord(species)) return species;
+  const { behaviors, senses = {} } = species;
+  return {
+    ...species,
+    behaviors: Array.isArray(behaviors)
+      ? [...behaviors, ...["core:feed", "core:rest"].filter((id) => !behaviors.includes(id))]
+      : behaviors,
+    senses: isRecord(senses) ? { "core:vision": 8, ...senses } : senses,
+  };
+}
 
 /** Values per stroke point: x and y in canvas pixels, then pressure. */
 export const STROKE_POINT_STRIDE = 3;
