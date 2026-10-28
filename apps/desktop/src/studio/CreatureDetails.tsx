@@ -4,6 +4,9 @@ import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
 
 export const SIZES = Object.keys(SIZE_CLASSES) as SizeClass[];
 
+/** A new drawing's size: the mossling's, the size the built-in world is made for. */
+export const DEFAULT_SIZE_CLASS: SizeClass = "medium";
+
 /** "Creature N", N one more than the species in the library; names needn't be unique. */
 export const defaultName = (speciesInLibrary: number) => `Creature ${speciesInLibrary + 1}`;
 

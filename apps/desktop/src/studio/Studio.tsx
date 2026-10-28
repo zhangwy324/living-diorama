@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { drawingPixels } from "../drawing";
 import type { LibrarySnapshot, StudioRequests } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
-import { CreatureDetails, defaultName } from "./CreatureDetails";
+import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
 import { DrawingEditor, type EditorState } from "./editor";
 import { drawingHints, limitHints } from "./hints";
 import type { Brush } from "./live-stroke";
@@ -49,7 +49,7 @@ export function Studio() {
   const [closing, setClosing] = useState(false);
   const previewBox = useRef<HTMLDivElement>(null);
   const preview = useRef<BodyPreview>(undefined);
-  const [sizeClass, setSizeClass] = useState<SizeClass>("small");
+  const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
   // Undefined until the player types one, so the default follows the library.
   const [name, setName] = useState<string>();
   const [speciesInLibrary, setSpeciesInLibrary] = useState<number>();
