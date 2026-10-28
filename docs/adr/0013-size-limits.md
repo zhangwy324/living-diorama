@@ -23,9 +23,11 @@
 
 4. **Limits go back with the species.** `checkWorld` and `checkNavigation` return each profile's limits; the world state keeps them per profile. `species_registered` carries them (`limits`, as warnings), and `SimulationClient.registerSpecies` resolves with `{ speciesId, limits }`, so the Studio (M11) can tell the player "too big to cross the bridge". A species whose profile is already known gets the limits found when that profile was built. `PROTOCOL_VERSION` stays 4: v4 hasn't been released.
 
+5. **Slivers are not a limit** (amendment, M11). Cut-off areas of at most `MAX_IGNORED_ISLAND_AREA` (1 m², four 0.5 m cells) don't make a region count as split. They are slivers no creature can usefully stand in, and reporting them made every tiny or small drawn species start with a warning in the Woodland Hollow because of the edge pockets above. A region that also has a larger cut-off area still warns, and its message counts only the larger areas. Navigation is unchanged: wander still never picks a cell the creature can't reach, slivers included.
+
 ## Consequences
 
-- In the Woodland Hollow, tiny and small creatures wander everywhere except the edge pockets, over the bridge too, with no failed paths. Large creatures stay on the bank they appear on, and on their side of the rock. Tests run all three sizes through the invariant checks.
+- In the Woodland Hollow, tiny and small creatures wander everywhere except the edge pockets, over the bridge too, with no failed paths, and since decision 5 they have no limits. Large creatures stay on the bank they appear on, and on their side of the rock. Tests run all three sizes through the invariant checks.
 - A world author gets warnings instead of errors for sizes that don't fit, so a real mistake for a pack's own species can slip through as a warning. `docs/adding-content.md` says to check warnings for species that should go everywhere.
 - Limits are developer diagnostics. Turning them into the player's words is M11's job.
 - Spawning still picks any spawn point the creature can stand on. One in a small area would keep its creatures there.
