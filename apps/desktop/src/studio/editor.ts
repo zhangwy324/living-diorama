@@ -1,11 +1,13 @@
 import type { Drawing } from "@living-diorama/content-schema";
 import { CANVAS_SIZE, drawRuns, drawStroke, encodePng, strokeRuns, toDrawing } from "../drawing";
+import { floodFill } from "./fill";
 import { DrawingHistory, type Change } from "./history";
 import { LiveStroke, type Brush } from "./live-stroke";
 
 // The drawing editor's canvas, driven imperatively (ADR 0015 §11): React renders the toolbar
 // only. The drawing is a 256 px image (ADR 0014 §5), shown scaled up to fit; a stroke is painted
-// into it when it ends, and `DrawingHistory` keeps the record and the pixels for undo.
+// into it when it ends, a fill when clicked (ADR 0017 §10), and `DrawingHistory` keeps the record
+// and the pixels for undo.
 
 /** What the toolbar and the close dialog need to know. */
 export interface EditorState {
@@ -31,8 +33,13 @@ function context2d(canvas: OffscreenCanvas, options?: CanvasRenderingContext2DSe
   return context;
 }
 
+/** The toolbar's drawing tools: the brush's two, and the fill tool. */
+export type Tool = Brush["tool"] | "fill";
+
 export class DrawingEditor {
   brush: Brush = { tool: "pen", color: "#1e2a14", width: 10 };
+  /** Whether a click fills with the brush's colour (ADR 0017 §10) instead of starting a stroke. */
+  filling = false;
 
   private readonly context: CanvasRenderingContext2D;
   /** The drawing: one pixel per canvas unit, what the library keeps. */
@@ -50,7 +57,8 @@ export class DrawingEditor {
   private readonly stop: () => void;
 
   /**
-   * `onChange` is called whenever the drawing changes: a stroke ends, undo, redo or clear.
+   * `onChange` is called whenever the drawing changes: a stroke ends, a fill, undo, redo or
+   * clear.
    * `onStroke` is called when a stroke starts (true) and ends (false).
    */
   constructor(
@@ -215,6 +223,10 @@ export class DrawingEditor {
 
   private start(event: PointerEvent) {
     if (this.live || event.button !== 0) return;
+    if (this.filling) {
+      this.fill(event);
+      return;
+    }
     this.canvas.setPointerCapture(event.pointerId);
     this.live = {
       stroke: new LiveStroke({ ...this.brush }, event.pointerType === "pen"),
@@ -247,6 +259,26 @@ export class DrawingEditor {
     this.history.add(stroke, this.pixels().data);
     this.requestFrame();
     this.onStroke(false);
+    this.changed();
+  }
+
+  /**
+   * Fills from the clicked pixel and records it as one step. A click that changes nothing (on an
+   * area already of the colour) isn't recorded.
+   */
+  private fill(event: PointerEvent) {
+    const box = this.canvas.getBoundingClientRect();
+    const pixel = (offset: number, size: number) =>
+      Math.min(CANVAS_SIZE - 1, Math.max(0, Math.floor((offset / size) * CANVAS_SIZE)));
+    const x = pixel(event.clientX - box.left, box.width);
+    const y = pixel(event.clientY - box.top, box.height);
+    const color = this.brush.color;
+    const filled = floodFill(this.pixels(), x, y, color);
+    if (!filled) return;
+    this.imageContext.putImageData(new ImageData(filled, CANVAS_SIZE, CANVAS_SIZE), 0, 0);
+    // Read back, as after a stroke, so the history holds exactly what the canvas does.
+    this.history.add({ kind: "fill", x, y, color }, this.pixels().data);
+    this.requestFrame();
     this.changed();
   }
 

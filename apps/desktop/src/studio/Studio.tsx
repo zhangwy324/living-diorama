@@ -10,9 +10,8 @@ import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-p
 import { CloseDialog } from "./CloseDialog";
 import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
 import { DeleteDialog } from "./DeleteDialog";
-import { DrawingEditor, type EditorState } from "./editor";
+import { DrawingEditor, type EditorState, type Tool } from "./editor";
 import { drawingHints, limitHints } from "./hints";
-import type { Brush } from "./live-stroke";
 import { MyCreatures } from "./MyCreatures";
 import { canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
@@ -62,7 +61,7 @@ export function Studio() {
   // Whether the latest check of the image found a body to build. False from each change until
   // the check after it, so an erased or faint drawing can't be released as an empty image.
   const [hasBody, setHasBody] = useState(false);
-  const [tool, setTool] = useState<Brush["tool"]>("pen");
+  const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState(PALETTE[0] ?? "#000000");
   const [width, setWidth] = useState(BRUSH_WIDTHS[1] ?? 10);
   const [closing, setClosing] = useState(false);
@@ -174,7 +173,13 @@ export function Studio() {
 
   useEffect(() => {
     if (editor.current) {
-      editor.current.brush = { tool, color: tool === "eraser" ? ERASER_COLOR : color, width };
+      const erasing = tool === "eraser";
+      editor.current.brush = {
+        tool: erasing ? "eraser" : "pen",
+        color: erasing ? ERASER_COLOR : color,
+        width,
+      };
+      editor.current.filling = tool === "fill";
     }
   }, [tool, color, width]);
 
@@ -293,6 +298,10 @@ export function Studio() {
           <ToolButton label="Eraser" pressed={tool === "eraser"} onClick={() => setTool("eraser")}>
             <path className="stroke" d="M6 13.5h7.5M2.5 10l6-6.5 5 5-5 5.5H6z" />
           </ToolButton>
+          <ToolButton label="Fill" pressed={tool === "fill"} onClick={() => setTool("fill")}>
+            <path className="stroke" d="M2.5 6.5h8l-1 7h-6zM3.5 6.5a3 3.5 0 0 1 6 0" />
+            <path d="M13.5 11.2a1.3 1.3 0 0 1-2.6 0c0-1 1.3-2.7 1.3-2.7s1.3 1.7 1.3 2.7z" />
+          </ToolButton>
         </div>
         <div className="tool-group palette">
           {PALETTE.map((swatch) => (
@@ -302,11 +311,12 @@ export function Studio() {
               className="swatch"
               title={swatch}
               aria-label={`Colour ${swatch}`}
-              aria-pressed={tool === "pen" && color === swatch}
+              aria-pressed={tool !== "eraser" && color === swatch}
               style={{ background: swatch }}
               onClick={() => {
                 setColor(swatch);
-                setTool("pen");
+                // The fill tool keeps filling, in the new colour.
+                if (tool === "eraser") setTool("pen");
               }}
             />
           ))}
@@ -346,7 +356,7 @@ export function Studio() {
       <div className="workspace">
         <div className={releasing ? "sheet-area releasing" : "sheet-area"}>
           <div className="sheet">
-            <canvas ref={canvas} className="drawing" />
+            <canvas ref={canvas} className={tool === "fill" ? "drawing filling" : "drawing"} />
             {/* Not part of the drawing: the body's feet are the bottom of what is drawn. */}
             <div className="guide" aria-hidden="true">
               <span>facing right →, feet on this line</span>
