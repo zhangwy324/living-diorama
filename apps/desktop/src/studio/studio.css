@@ -271,6 +271,26 @@ body,
   outline-offset: 1px;
 }
 
+.thickness .thickness-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: inherit;
+}
+
+.thickness input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: rgb(110 160 90);
+}
+
+.thickness output {
+  min-width: 3.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .hints {
   display: flex;
   flex-direction: column;

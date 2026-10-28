@@ -6,8 +6,9 @@ import { neighbours, type Pixels } from "./pixels";
 // shapes the body is built from, holes included (ADR 0017): the wall of a ring can be thin.
 
 /**
- * A part is thin where it is narrower than this share of the drawing's height. The body is 0.4 of
- * its height deep (ADR 0011), so such a part is a fin over 13 times deeper than it is wide. For a
+ * A part is thin where it is narrower than this share of the drawing's height. A body is 0.4 of its
+ * height deep by default (ADR 0011, ADR 0017 §11), so such a part is a fin over 13 times deeper
+ * than it is wide (over 3 times at the thinnest setting). For a
  * drawing 230 px tall (the guide's height) that is 7 px; the measure scales with the drawing,
  * as the body does.
  */

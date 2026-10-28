@@ -1,3 +1,4 @@
+import { BODY_THICKNESS } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { traceOutline, type Outline, type Point } from "./outline";
@@ -6,8 +7,6 @@ import { bodyColours } from "./textures";
 
 // A solid body extruded from a drawing (ADR 0011, ADR 0017). The drawing faces +x, feet at y = 0.
 
-/** Thickness as a share of the body's height. */
-export const BODY_DEPTH = 0.4;
 /** The fallback block's rounded edge, as a share of its height. */
 const FALLBACK_RADIUS = 0.04;
 const EMISSIVE_INTENSITY = 0.35;
@@ -28,11 +27,18 @@ export interface Body {
   dispose(): void;
 }
 
-/** Builds a body `height` metres tall from a drawing, or nothing if it has no opaque shape. */
-export function buildBody(pixels: Pixels, height: number): Body | undefined {
+/**
+ * Builds a body `height` metres tall from a drawing, `thickness` of its height deep, or nothing if
+ * the drawing has no opaque shape.
+ */
+export function buildBody(
+  pixels: Pixels,
+  height: number,
+  thickness: number = BODY_THICKNESS.default,
+): Body | undefined {
   const outline = traceOutline(pixels);
   if (!outline.shapes.length) return undefined;
-  const geometry = bodyGeometry(outline, pixels, height);
+  const geometry = bodyGeometry(outline, pixels, height, thickness);
   // Faces and walls read the same texture, so a wall takes the colour of the rim it runs back from.
   const map = bodyTexture(bodyColours(pixels), pixels.width, pixels.height);
   const material = new THREE.MeshStandardMaterial({
@@ -55,13 +61,15 @@ export function buildBody(pixels: Pixels, height: number): Body | undefined {
 }
 
 /**
- * The extruded shapes with their holes, scaled to `height`, centred on x and z, feet at y = 0.
- * The walls run straight from the front face to the back, so the silhouette is the drawing's.
+ * The extruded shapes with their holes, scaled to `height` and `thickness` of it deep, centred on
+ * x and z, feet at y = 0. The walls run straight from the front face to the back, so the
+ * silhouette is the drawing's.
  */
 export function bodyGeometry(
   outline: Outline,
   image: { width: number; height: number },
   height: number,
+  thickness: number = BODY_THICKNESS.default,
 ): THREE.BufferGeometry {
   // Built in pixels with y up, then scaled. The texture's rows are top first, so v = -y / height.
   const drawn = outline.bounds.maxY - outline.bounds.minY;
@@ -82,7 +90,7 @@ export function bodyGeometry(
       -(vertices[index * 3 + 1] ?? 0) / image.height,
     );
   const geometry = new THREE.ExtrudeGeometry(shapes, {
-    depth: drawn * BODY_DEPTH,
+    depth: drawn * thickness,
     bevelEnabled: false,
     UVGenerator: {
       generateTopUV: (_geometry, vertices, a, b, c) => [a, b, c].map((i) => uv(vertices, i)),
@@ -130,12 +138,12 @@ export function triangulates(
   return Math.abs(total - expected) <= 1e-6 * Math.max(1, expected);
 }
 
-/** A neutral rounded block, shown while a drawing loads or if it fails. */
-export function fallbackBody(height: number): Body {
+/** A neutral rounded block `thickness` of its height deep, shown while a drawing loads or fails. */
+export function fallbackBody(height: number, thickness: number = BODY_THICKNESS.default): Body {
   const geometry = new RoundedBoxGeometry(
     height * FALLBACK_ASPECT,
     height,
-    height * BODY_DEPTH,
+    height * thickness,
     2,
     height * FALLBACK_RADIUS,
   ).translate(0, height / 2, 0);

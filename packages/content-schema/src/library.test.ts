@@ -31,6 +31,7 @@ function validEntry() {
       name: "Blob",
       appearance: "user:3f9c2a1e-0000-4000-8000-000000000000/appearance.png",
       sizeClass: "small",
+      body: { thickness: 0.3 },
       capabilities: { "core:walk": 1 },
       baseSpeed: 0.6,
       behaviors: ["core:wander"],

@@ -52,6 +52,7 @@ const releaseParams = (overrides: Partial<ReleaseParams> = {}): ReleaseParams =>
   image: PNG,
   name: "Puddle",
   sizeClass: "small",
+  thickness: 0.25,
   ...overrides,
 });
 
@@ -157,7 +158,9 @@ describe("releasing", () => {
       speciesId,
       name: "Puddle",
     });
-    expect((await store.list()).map((entry) => entry.id)).toEqual([RELEASE_ID]);
+    const stored = await store.list();
+    expect(stored.map((entry) => entry.id)).toEqual([RELEASE_ID]);
+    expect(stored[0]?.entry).toMatchObject({ species: { body: { thickness: 0.25 } } });
     expect(await store.loadImage(RELEASE_ID)).toEqual(new Uint8Array(PNG));
     expect(world.spawn).toHaveBeenCalledWith(speciesId);
     expect(changed).toHaveBeenCalledOnce();

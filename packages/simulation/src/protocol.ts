@@ -1,4 +1,10 @@
-import type { Diagnostic, RegionPosition, SizeClass, Vec3 } from "@living-diorama/content-schema";
+import type {
+  BodyShape,
+  Diagnostic,
+  RegionPosition,
+  SizeClass,
+  Vec3,
+} from "@living-diorama/content-schema";
 import type { AssetKind } from "@living-diorama/extension-api";
 import type { NavigationOverlay } from "./navigation/overlay";
 import type { SceneData } from "./world/scene";
@@ -6,7 +12,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
@@ -70,6 +76,8 @@ export interface SpeciesSummary {
   /** Asset ref of the appearance image. */
   appearance: string;
   sizeClass: SizeClass;
+  /** How its body is built from the appearance. */
+  body: BodyShape;
 }
 
 /**

@@ -52,7 +52,12 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 
 ### Thickness (PR 4)
 
-11. **A per-creature depth control** sits next to the size picker in the Studio. Its default comes from the current rule, 40% of the height. The value is stored with the species and the preview reflects it immediately. Depth that follows local width, so that thin limbs are thinner, waits for part detection.
+11. **A per-creature depth control** sits next to the size picker in the Studio. Its default comes from the current rule, 40% of the height. The value is stored with the species and the preview reflects it immediately. Depth that follows local width, so that thin limbs are thinner, waits for part detection. _Built in PR 4 (issue #74):_
+    - **Field:** the species definition has an optional `body` object whose `thickness` is the depth as a share of the drawn height, from 0.1 to 0.8, defaulting to 0.4 (`BODY_THICKNESS` in `content-schema`). Grouping it under `body` leaves room for later body settings without crowding the top level. Content that leaves it out, the mossling included, keeps the old depth, so no pack changes and the species schema version stays 1. The library stores the value explicitly with every species it saves.
+    - **Range:** 10% makes a flat card that still reads as a solid from the side (the thin-part hint's fin is then about 3 times deeper than wide); 80% makes a deep block, about as deep as most drawings are wide. Beyond that bodies stop looking like their drawing from the side. Values outside are refused, for pack content and library entries alike.
+    - **Control:** a native range slider labelled Thickness under the sizes, in whole percent with steps of 5, its value shown beside it and announced as "40% of the height". It goes back to 40% after a release, like the size goes back to Medium.
+    - **Preview:** the slider does not rebuild the body. The preview builds it as deep as it is tall and scales it in depth: with straight walls, normals and texture coordinates that don't depend on depth, that is the body a rebuild would make (a test checks it). A rebuild costs about 9–11 ms per fixture in Node, without the texture upload; the scale is a matrix change, so dragging stays smooth.
+    - **World:** the worker passes `body` in each species summary (protocol version 5) and the renderer builds each species' body, and its fallback block, at that depth.
 
 ### Order
 
@@ -65,7 +70,7 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 ## Amendments
 
 - **ADR 0011 §2:** openings are kept instead of filled (§1), and shapes inside them are kept too.
-- **ADR 0011 §4:** the bevel is removed in favour of straight walls through the full 40% (§2). The grey fallback block still has rounded edges.
+- **ADR 0011 §4:** the bevel is removed in favour of straight walls through the full 40% (§2). The grey fallback block still has rounded edges. From PR 4 the depth is the species' own (§11), 40% by default.
 - **ADR 0011 §5:** faces and walls use one texture, and walls take the colour of the adjacent edge (§3) instead of the #40 side texture.
 - **ADR 0011, Consequences:** "holes are filled" and "the silhouette is slightly larger than the drawing" are no longer true, and the description of the sides is replaced by §3.
 - **ADR 0014:** PR 2 makes the raster authoritative and keeps strokes only as a log (§8), drawing format version 2 with a migration from version 1.

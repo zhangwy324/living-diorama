@@ -1,6 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
+import { BODY_THICKNESS } from "@living-diorama/content-schema";
+import {
+  CreatureDetails,
+  DEFAULT_SIZE_CLASS,
+  defaultName,
+  thicknessLabel,
+} from "./CreatureDetails";
 
 it("starts a new creature at medium, the mossling's size", () => {
   expect(DEFAULT_SIZE_CLASS).toBe("medium");
@@ -11,7 +17,7 @@ it("names a new creature after the species already in the library", () => {
   expect(defaultName(3)).toBe("Creature 4");
 });
 
-it("shows the name, the four sizes with one chosen, and the hints", () => {
+it("shows the name, the four sizes with one chosen, the thickness and the hints", () => {
   const html = renderToStaticMarkup(
     <CreatureDetails
       name="Creature 2"
@@ -19,6 +25,8 @@ it("shows the name, the four sizes with one chosen, and the hints", () => {
       onName={() => {}}
       sizeClass={DEFAULT_SIZE_CLASS}
       onSizeClass={() => {}}
+      thickness={BODY_THICKNESS.default}
+      onThickness={() => {}}
       hints={["Nothing drawn yet."]}
     />,
   );
@@ -28,5 +36,19 @@ it("shows the name, the four sizes with one chosen, and the hints", () => {
     return input.includes("checked") ? `${size}*` : size;
   });
   expect(sizes).toEqual(["tiny", "small", "medium*", "large"]);
+  // The slider runs from 10% to 80% of the height in steps of 5, starting at 40%.
+  const slider = /<input type="range"[^>]*>/.exec(html)?.[0] ?? "";
+  expect(slider).toContain('min="10"');
+  expect(slider).toContain('max="80"');
+  expect(slider).toContain('step="5"');
+  expect(slider).toContain('value="40"');
+  expect(slider).toContain('aria-label="Thickness"');
+  expect(slider).toContain('aria-valuetext="40% of the height"');
+  expect(html).toContain("<output>40%</output>");
   expect(html).toContain("<li>Nothing drawn yet.</li>");
+});
+
+it("says the thickness in whole percent of the height", () => {
+  expect(thicknessLabel(0.1)).toBe("10% of the height");
+  expect(thicknessLabel(0.35000000000000003)).toBe("35% of the height");
 });

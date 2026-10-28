@@ -48,9 +48,10 @@ const summarizeAsset = ({ kind, url, scale }: AssetEntry): AssetSummary => ({
   ...(scale === undefined ? {} : { scale }),
 });
 
-const summarizeSpecies = ({ appearance, sizeClass }: SpeciesDefinition): SpeciesSummary => ({
+const summarizeSpecies = ({ appearance, sizeClass, body }: SpeciesDefinition): SpeciesSummary => ({
   appearance,
   sizeClass,
+  body: { ...body },
 });
 
 /** The world as the main thread draws it, as plain data so it survives `postMessage`. */
