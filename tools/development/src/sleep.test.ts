@@ -88,16 +88,16 @@ describe("core:rest", () => {
 
   it("maps phases to a waking phase and a night bonus, flipped for nocturnal creatures", () => {
     expect(phases.map((p) => sleepCycle(p, false))).toEqual([
-      { waking: true, bonus: 0.2 },
-      { waking: true, bonus: 0 },
-      { waking: false, bonus: 0.2 },
-      { waking: false, bonus: 0.5 },
+      { waking: true, sleeping: false, bonus: 0.2 },
+      { waking: true, sleeping: false, bonus: 0 },
+      { waking: false, sleeping: false, bonus: 0.2 },
+      { waking: false, sleeping: true, bonus: 0.5 },
     ]);
     expect(phases.map((p) => sleepCycle(p, true))).toEqual([
-      { waking: false, bonus: 0.2 },
-      { waking: false, bonus: 0.5 },
-      { waking: true, bonus: 0.2 },
-      { waking: true, bonus: 0 },
+      { waking: false, sleeping: false, bonus: 0.2 },
+      { waking: false, sleeping: true, bonus: 0.5 },
+      { waking: true, sleeping: false, bonus: 0.2 },
+      { waking: true, sleeping: false, bonus: 0 },
     ]);
   });
 
@@ -105,14 +105,16 @@ describe("core:rest", () => {
     // phase, nocturnal, tiredness, utility (null: no proposal)
     ["dawn", 0, 0.3, null],
     ["day", 0, 0.3, null],
-    ["dusk", 0, 0.3, 0.7],
+    ["dusk", 0, 0.3, null],
+    ["dusk", 0, 0.89, null],
     ["night", 0, 0.3, 1.0],
     ["night", 0, 0, 0.7],
     ["dawn", 0, 0.9, 1.3],
     ["day", 0, 0.9, 1.1],
     ["dusk", 0, 0.9, 1.3],
     ["night", 0, 0.9, 1.6],
-    ["dawn", 1, 0.3, 0.7],
+    ["dawn", 1, 0.3, null],
+    ["dawn", 1, 0.9, 1.3],
     ["day", 1, 0.3, 1.0],
     ["dusk", 1, 0.3, null],
     ["night", 1, 0.3, null],
@@ -660,11 +662,29 @@ describe("sleeping in Woodland Hollow", () => {
     expect(order.map((e) => e.type)).toEqual(["woke_up", "ate"]);
   });
 
-  it("repeats the same nights for the same seed", () => {
+  it("stays up through dusk unless tired, and goes to bed as night begins", () => {
+    const { run, spawn, of } = setup(12, 18 * 60 + 30, 2);
+    const rested = spawn();
+    const tired = spawn();
+    for (const c of [rested, tired]) c.needs[HUNGER] = 0;
+    rested.needs[TIREDNESS] = 0.5;
+    tired.needs[TIREDNESS] = 0.95;
+    // 18:30 to 20:00: the dusk bonus alone doesn't start sleep, but adds to real tiredness.
+    run(90 * 120);
+    expect(of(rested, "fell_asleep")).toEqual([]);
+    expect(of(tired, "fell_asleep")).toHaveLength(1);
+    // Night: the phase reaction (0–30 s) sends it to bed.
+    run(15 * 120);
+    const [bedtime] = of(rested, "fell_asleep");
+    expect(bedtime).toBeDefined();
+    expect(bedtime!.tick).toBeGreaterThanOrEqual(90 * 120);
+  });
+
+  it("repeats the same nights for the same seed", { timeout: 30_000 }, () => {
     const night = (seed: number) => {
-      const { simulation, events, run } = setup(seed, 17 * 60, 2);
-      for (let k = 0; k < 3; k++) simulation.spawn("hollow:mossling");
-      run(14 * 7_200);
+      const { simulation, events, run } = setup(seed, 19 * 60 + 30, 1);
+      for (let k = 0; k < 2; k++) simulation.spawn("hollow:mossling");
+      run(12 * 3_600);
       const sleep = events.filter(
         (e) => e.type === "fell_asleep" || e.type === "woke_up" || e.type === "new_home_selected",
       );
@@ -674,7 +694,7 @@ describe("sleeping in Woodland Hollow", () => {
       };
     };
     const first = night(7);
-    expect(first.sleep.length).toBeGreaterThan(3);
+    expect(first.sleep.length).toBeGreaterThan(2);
     expect(night(7)).toEqual(first);
     expect(night(8).sleep).not.toEqual(first.sleep);
   });

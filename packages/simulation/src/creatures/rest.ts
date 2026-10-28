@@ -41,15 +41,20 @@ export interface SleepCycle {
    * nocturnal one. Its first phase is the edge after its sleeping phase.
    */
   waking: boolean;
+  /**
+   * The creature's sleeping phase: night for one that sleeps at night, day for a nocturnal one.
+   * Only there does the night bonus start sleep on its own (ADR 0018 amendments, §13).
+   */
+  sleeping: boolean;
   /** The night bonus: 0.5 in the sleeping phase, 0.2 at either edge of it, otherwise 0. */
   bonus: number;
 }
 
 const DIURNAL: Record<DayPhase, SleepCycle> = {
-  dawn: { waking: true, bonus: EDGE_BONUS },
-  day: { waking: true, bonus: 0 },
-  dusk: { waking: false, bonus: EDGE_BONUS },
-  night: { waking: false, bonus: SLEEPING_PHASE_BONUS },
+  dawn: { waking: true, sleeping: false, bonus: EDGE_BONUS },
+  day: { waking: true, sleeping: false, bonus: 0 },
+  dusk: { waking: false, sleeping: false, bonus: EDGE_BONUS },
+  night: { waking: false, sleeping: true, bonus: SLEEPING_PHASE_BONUS },
 };
 /** The diurnal cycle two phases on: asleep by day, awake from dusk. */
 const NOCTURNAL_CYCLE: Record<DayPhase, SleepCycle> = {
@@ -114,13 +119,13 @@ export const restBehavior: BehaviorProvider = {
     }
     if (inReleaseGrace(observation)) return null;
     const tiredness = needs[TIREDNESS] ?? 0;
-    const { waking, bonus } = sleepCycle(dayPhase, isNocturnal(traits));
-    // Outside the waking phase the night bonus alone sends a creature to bed. In it (dawn), the
-    // bonus only adds to a tired creature's utility: a creature just woken there would otherwise
-    // lie down again at once.
-    if (waking && tiredness < tirednessNeed.actAt) return null;
+    const { waking, sleeping, bonus } = sleepCycle(dayPhase, isNocturnal(traits));
+    // Only in the sleeping phase does the night bonus alone send a creature to bed, so bedtime
+    // follows the start of night. At the edges (dusk and dawn) it only adds to a creature already
+    // tired enough to act: one just woken at dawn would otherwise lie down again at once.
+    if (!sleeping && tiredness < tirednessNeed.actAt) return null;
     const utility = REST_BASE_UTILITY + tiredness + bonus;
-    const why = waking ? "nap" : bonus === SLEEPING_PHASE_BONUS ? "night" : "bedtime";
+    const why = waking ? "nap" : sleeping ? "night" : "bedtime";
     // A shelter it couldn't get to: sleep where it stands this time.
     const missed =
       lastResult?.action === SLEEP &&

@@ -218,13 +218,13 @@ describe("long-run checks", () => {
       ticks: 4 * 3600 * 2,
     };
     const checked = runWithInvariants({ ...hollow, meals: {}, sleep: {} });
-    // From PR 5a they go to bed at dusk and sleep the night through without eating, so the meal
-    // check as it stands fails overnight; PR 6 decides how it counts sleep.
+    // From PR 5a they eat over dusk, go to bed as night begins and sleep it through without
+    // eating, so the meal check as it stands fails overnight; PR 6 decides how it counts sleep.
     for (const c of Object.values(checked.creatures)) {
-      expect(c.asleepAtNightTicks).toBe(c.nightTicks);
-      expect(c.meals).toBe(0);
+      expect(c.meals).toBeGreaterThan(0);
+      expect(c.asleepAtNightTicks / c.nightTicks).toBeGreaterThan(0.99);
     }
-    expect(checked.violations.map(withoutTick)).toEqual([
+    expect(checked.violations.map(withoutTick).sort()).toEqual([
       "creature-1: no meal for 3 h",
       "creature-2: no meal for 3 h",
     ]);
