@@ -189,11 +189,30 @@ pub fn delete(library: &Path, id: &str) -> Result<(), String> {
     remove().map_err(|error| format!("Could not delete library entry {id}: {error}"))
 }
 
+/// In development builds, the folder named by this variable holds the library instead of the app
+/// data directory, so manual checks never touch the player's own creatures. Release builds ignore it.
+const DEV_DATA_DIR_VAR: &str = "LIVING_DIORAMA_DEV_DATA_DIR";
+
 fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map(|dir| dir.join("library"))
-        .map_err(|error| format!("No app data directory for the library: {error}"))
+    let dev_override = cfg!(debug_assertions)
+        .then(|| std::env::var_os(DEV_DATA_DIR_VAR))
+        .flatten();
+    library_dir_in(dev_override.map(PathBuf::from), || {
+        app.path()
+            .app_data_dir()
+            .map_err(|error| format!("No app data directory for the library: {error}"))
+    })
+}
+
+/// `library/` under the override, if one is set and not empty, else under the app data directory.
+fn library_dir_in(
+    dev_override: Option<PathBuf>,
+    app_data: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    match dev_override.filter(|dir| !dir.as_os_str().is_empty()) {
+        Some(dir) => Ok(dir.join("library")),
+        None => app_data().map(|dir| dir.join("library")),
+    }
 }
 
 /// The frontend's library commands. They are async so file access runs off the main thread.
@@ -386,5 +405,22 @@ mod tests {
         fs::create_dir_all(&pending).unwrap();
         save_sample(&dir.0, ID);
         assert_eq!(list(&dir.0).len(), 1);
+    }
+
+    #[test]
+    fn a_development_data_dir_holds_the_library_instead_of_the_app_data_dir() {
+        let app_data = || Ok(PathBuf::from("app-data"));
+        assert_eq!(
+            library_dir_in(Some(PathBuf::from("dev-data")), app_data),
+            Ok(PathBuf::from("dev-data").join("library"))
+        );
+        assert_eq!(
+            library_dir_in(None, app_data),
+            Ok(PathBuf::from("app-data").join("library"))
+        );
+        assert_eq!(
+            library_dir_in(Some(PathBuf::new()), app_data),
+            Ok(PathBuf::from("app-data").join("library"))
+        );
     }
 }

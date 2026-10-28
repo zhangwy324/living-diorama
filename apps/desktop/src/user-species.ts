@@ -15,3 +15,6 @@ export function userSpeciesIds(uuid: string = crypto.randomUUID()): UserSpeciesI
   const speciesId = `user:${uuid}`;
   return { uuid, speciesId, appearanceId: `${speciesId}/appearance.png` };
 }
+
+/** The UUID a drawn species is stored under, from its species ID. */
+export const userSpeciesUuid = (speciesId: string): string => speciesId.replace(/^user:/, "");

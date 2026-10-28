@@ -99,6 +99,16 @@ describe("saving", () => {
     expect(library.list()).toEqual([saved]);
   });
 
+  it("keeps a species under the ID it is given, and refuses one already used", async () => {
+    const { library, registered } = await open();
+    const id = "00000000-0000-4000-8000-0000000000ff";
+    const saved = value(await library.save(DRAWING, PNG, "Puddle", "small", id));
+    expect(saved.speciesId).toBe(userSpeciesIds(id).speciesId);
+    const again = await library.save(DRAWING, PNG, "Puddle", "small", id);
+    expect(again.ok).toBe(false);
+    expect(registered).toHaveLength(1);
+  });
+
   it("stores nothing the world rejects", async () => {
     const { library, store } = await open();
     const result = await library.save(DRAWING, PNG, "Rejected", "small");

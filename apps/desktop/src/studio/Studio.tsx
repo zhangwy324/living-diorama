@@ -1,20 +1,29 @@
 import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
-import { connectStudioWindow, openStudioChannel } from "@living-diorama/desktop-integration";
+import {
+  connectLibraryStore,
+  connectStudioWindow,
+  openStudioChannel,
+} from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { drawingPixels } from "../drawing";
-import type { LibrarySnapshot, StudioRequests } from "../studio-protocol";
+import { drawingPixels, rasterize } from "../drawing";
+import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
 import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
+import { DeleteDialog } from "./DeleteDialog";
 import { DrawingEditor, type EditorState } from "./editor";
 import { drawingHints, limitHints } from "./hints";
 import type { Brush } from "./live-stroke";
+import { MyCreatures } from "./MyCreatures";
+import { canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
+import { Thumbnails } from "./thumbnails";
 
 // The Creation Studio's page (ADR 0015). It never starts a simulation and never creates a
 // DesktopShell, so the shell's events and quit_ready stay the strip's.
 
 const studioWindow = connectStudioWindow();
 const channel = openStudioChannel<StudioRequests, LibrarySnapshot>();
+const libraryStore = connectLibraryStore();
 
 export const PALETTE = [
   "#1e2a14",
@@ -39,6 +48,9 @@ const ERASER_COLOR = "#000000";
 /** The preview and the drawing hints follow the strokes this long after they last changed. */
 const REBUILD_DELAY_MS = 200;
 
+/** How long "… is off into the world!" stays. */
+const CELEBRATION_MS = 4000;
+
 export function Studio() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const editor = useRef<DrawingEditor>(undefined);
@@ -52,10 +64,23 @@ export function Studio() {
   const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
   // Undefined until the player types one, so the default follows the library.
   const [name, setName] = useState<string>();
-  const [speciesInLibrary, setSpeciesInLibrary] = useState<number>();
+  const [library, setLibrary] = useState<LibrarySnapshot>();
+  const speciesInLibrary = library?.species.length;
   const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
   const [sizeHints, setSizeHints] = useState<string[]>([]);
   const sizeHintCache = useRef(new Map<SizeClass, string[]>());
+  // Made once per drawing and kept while it is unchanged, so retrying a release whose answer was
+  // lost can't save it twice (ADR 0015 §5).
+  const releaseId = useRef<string>(undefined);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseError, setReleaseError] = useState<string>();
+  const [celebration, setCelebration] = useState<{ text: string; happy: boolean }>();
+  const [listOpen, setListOpen] = useState(true);
+  const [busySpecies, setBusySpecies] = useState<string>();
+  const [listMessage, setListMessage] = useState<string>();
+  const [deleting, setDeleting] = useState<StudioSpecies>();
+  const [, setThumbnailsLoaded] = useState(0);
+  const thumbnails = useRef<Thumbnails>(undefined);
 
   // The preview's WebGL context lives only while the Studio is open (ADR 0015 §7).
   useEffect(() => {
@@ -94,6 +119,8 @@ export function Studio() {
       element,
       (next) => {
         setState(next);
+        releaseId.current = undefined;
+        setReleaseError(undefined);
         clearTimeout(timer);
         timer = setTimeout(rebuild, REBUILD_DELAY_MS);
       },
@@ -169,22 +196,78 @@ export function Studio() {
 
   // The library lives in the strip's window: ask for it now, then hear about every change.
   useEffect(() => {
-    let library: LibrarySnapshot | undefined;
+    const created = new Thumbnails({
+      load: (libraryId) => libraryStore.loadImage(libraryId),
+      onChange: () => setThumbnailsLoaded((n) => n + 1),
+    });
+    thumbnails.current = created;
     const keep = (snapshot: LibrarySnapshot) => {
-      library = snapshot;
-      setSpeciesInLibrary(snapshot.species.length);
+      created.sync(snapshot.species);
+      setLibrary(snapshot);
     };
     const stop = channel.onLibraryChanged(keep);
     channel
       .request("snapshot", undefined)
       .then(keep)
       .catch((error: unknown) => console.warn("Could not read the species library", error));
-    // Until the Studio shows the library (PR 4), development builds reach it from the console.
-    if (import.meta.env.DEV) {
-      window.livingDiorama = { ...window.livingDiorama, studio: { library: () => library } };
-    }
-    return stop;
+    return () => {
+      stop();
+      created.dispose();
+      thumbnails.current = undefined;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!celebration) return;
+    const timer = setTimeout(() => setCelebration(undefined), CELEBRATION_MS);
+    return () => clearTimeout(timer);
+  }, [celebration]);
+
+  const shownName = name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary));
+  const releasable = canRelease({ name: shownName, empty: state.empty, releasing });
+
+  const release = async () => {
+    const current = editor.current;
+    if (!current || !releasable) return;
+    setReleasing(true);
+    setReleaseError(undefined);
+    setCelebration(undefined);
+    releaseId.current ??= crypto.randomUUID();
+    const drawing = current.drawing;
+    try {
+      const released = await channel.request("release", {
+        releaseId: releaseId.current,
+        drawing,
+        image: Array.from(await rasterize(drawing)),
+        name: shownName,
+        sizeClass,
+      });
+      // A fresh start for the next one.
+      current.reset();
+      releaseId.current = undefined;
+      setName(undefined);
+      setSizeClass(DEFAULT_SIZE_CLASS);
+      setCelebration(
+        released.notAdded === undefined
+          ? { text: releasedMessage(released.name), happy: true }
+          : { text: keptMessage(released.name, released.notAdded), happy: false },
+      );
+    } catch (error) {
+      // The drawing stays, so the player can try again.
+      setReleaseError(describeFailure(error));
+    } finally {
+      setReleasing(false);
+    }
+  };
+
+  /** Runs a My creatures request, one species at a time, saying what went wrong if it fails. */
+  const ask = (speciesId: string, request: () => Promise<unknown>) => {
+    setBusySpecies(speciesId);
+    setListMessage(undefined);
+    request()
+      .catch((error: unknown) => setListMessage(describeFailure(error)))
+      .finally(() => setBusySpecies(undefined));
+  };
 
   return (
     <div className="studio">
@@ -247,7 +330,7 @@ export function Studio() {
         </div>
       </div>
       <div className="workspace">
-        <div className="sheet-area">
+        <div className={releasing ? "sheet-area releasing" : "sheet-area"}>
           <div className="sheet">
             <canvas ref={canvas} className="drawing" />
             {/* Not part of the drawing: the body's feet are the bottom of what is drawn. */}
@@ -259,17 +342,73 @@ export function Studio() {
         <aside className="side-panel">
           <div ref={previewBox} className="preview" aria-label="3D preview" role="img" />
           <CreatureDetails
-            name={name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary))}
+            name={shownName}
             placeholder="Creature"
-            onName={setName}
+            onName={(next) => {
+              releaseId.current = undefined;
+              setName(next);
+            }}
             sizeClass={sizeClass}
-            onSizeClass={setSizeClass}
+            onSizeClass={(next) => {
+              releaseId.current = undefined;
+              setSizeClass(next);
+            }}
             hints={[...shapeHints, ...sizeHints]}
           />
-          {/* Release goes here (PR 4). */}
-          <div className="release-slot" />
+          <div className="release-slot">
+            {releaseError && (
+              <p className="release-error" role="alert">
+                {releaseError}
+              </p>
+            )}
+            <button
+              type="button"
+              className="release"
+              disabled={!releasable}
+              aria-busy={releasing}
+              title={shownName.trim() === "" ? "Give your creature a name first" : undefined}
+              onClick={() => void release()}
+            >
+              {releasing ? "Releasing…" : "Release"}
+            </button>
+          </div>
         </aside>
+        <MyCreatures
+          library={library}
+          thumbnail={(speciesId) => thumbnails.current?.get(speciesId)}
+          open={listOpen}
+          onToggle={() => setListOpen(!listOpen)}
+          busy={busySpecies}
+          message={listMessage}
+          onAdd={(speciesId) => ask(speciesId, () => channel.request("addCreature", { speciesId }))}
+          onRemove={(speciesId) =>
+            ask(speciesId, () => channel.request("removeCreature", { speciesId }))
+          }
+          onDelete={setDeleting}
+        />
       </div>
+      {celebration && (
+        <div
+          key={celebration.text}
+          className={celebration.happy ? "celebration" : "celebration quiet"}
+          role="status"
+        >
+          {celebration.happy && <span className="sparkles" aria-hidden="true" />}
+          {celebration.text}
+        </div>
+      )}
+      {deleting && (
+        <DeleteDialog
+          name={deleting.name}
+          inWorld={deleting.inWorld}
+          onDelete={() => {
+            const { speciesId } = deleting;
+            setDeleting(undefined);
+            ask(speciesId, () => channel.request("deleteSpecies", { speciesId }));
+          }}
+          onCancel={() => setDeleting(undefined)}
+        />
+      )}
       {closing && (
         <CloseDialog
           onDiscard={() => void studioWindow.close()}

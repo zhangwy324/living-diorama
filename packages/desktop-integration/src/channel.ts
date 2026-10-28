@@ -13,6 +13,17 @@ const LIBRARY_CHANGED = "library-changed";
 /** How long the Studio waits for an answer, so a reloading or busy strip shows an error. */
 export const REQUEST_TIMEOUT_MS = 5000;
 
+/**
+ * No answer came in time. The strip may still have done what was asked, so a retry should be
+ * safe to repeat.
+ */
+export class RequestTimeoutError extends Error {
+  constructor(kind: string) {
+    super(`No answer to ${kind} in time`);
+    this.name = "RequestTimeoutError";
+  }
+}
+
 /** Each kind of request's parameters and result. Both are JSON. */
 export type RequestMap = Record<string, { params: unknown; result: unknown }>;
 
@@ -111,10 +122,10 @@ export function openStudioChannel<R extends RequestMap, S>({
     request: (kind, params) =>
       new Promise((resolve, reject) => {
         const requestId = crypto.randomUUID();
-        const timer = setTimeout(
-          () => finish({ requestId, error: `No answer to ${kind} in time` }),
-          timeoutMs,
-        );
+        const timer = setTimeout(() => {
+          pending.delete(requestId);
+          reject(new RequestTimeoutError(kind));
+        }, timeoutMs);
         const finish = (response: ResponseMessage) => {
           clearTimeout(timer);
           pending.delete(requestId);

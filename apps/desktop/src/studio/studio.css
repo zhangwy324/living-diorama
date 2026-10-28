@@ -296,4 +296,261 @@ body,
 
 .release-slot {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.release {
+  padding: 10px 0;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: #5a8f3c;
+  cursor: pointer;
+}
+
+.release:hover:not(:disabled) {
+  background: #6aa448;
+}
+
+.release:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.release[aria-busy="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.release-error,
+.panel-message {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: rgb(200 67 58 / 30%);
+}
+
+/* No new strokes while a release is on its way: the canvas clears when it lands. */
+.sheet-area.releasing .drawing {
+  pointer-events: none;
+}
+
+.celebration {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e2a14;
+  background: #f2cf3c;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 35%);
+  transform: translateX(-50%);
+  animation: celebrate 4s ease-out forwards;
+  pointer-events: none;
+}
+
+.celebration.quiet {
+  color: #eef3e8;
+  background: #263026;
+  animation-name: fade-out;
+}
+
+.sparkles::before,
+.sparkles::after {
+  position: absolute;
+  top: -10px;
+  font-size: 18px;
+  color: #f2cf3c;
+  animation: sparkle 1s ease-out;
+  content: "✦";
+}
+
+.sparkles::before {
+  left: -6px;
+}
+
+.sparkles::after {
+  right: -6px;
+}
+
+@keyframes celebrate {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.6);
+  }
+  8% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.08);
+  }
+  14%,
+  85% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-12px);
+  }
+}
+
+@keyframes fade-out {
+  0%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes sparkle {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.my-creatures {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  font-size: 13px;
+  background: #263026;
+}
+
+.my-creatures.collapsed {
+  width: auto;
+  padding: 16px 4px;
+}
+
+.my-creatures.collapsed .my-creatures-toggle {
+  writing-mode: vertical-rl;
+  padding: 12px 6px;
+}
+
+.my-creatures-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.my-creatures h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.my-creatures button {
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+
+.my-creatures button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 16%);
+}
+
+.my-creatures button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.my-creatures-toggle {
+  padding: 2px 8px;
+}
+
+.world-count,
+.empty-list {
+  margin: 0;
+  color: rgb(238 243 232 / 70%);
+}
+
+.species-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.species {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.species .thumbnail {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #ece8dc;
+}
+
+.species-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.species-name,
+.species-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.species-count,
+.species-reason {
+  font-size: 12px;
+  color: rgb(238 243 232 / 65%);
+}
+
+.species.unavailable .thumbnail,
+.species.unavailable .species-name {
+  opacity: 0.5;
+}
+
+.species-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.species-buttons button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.species-buttons svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.close-dialog-buttons button.danger {
+  background: rgb(200 67 58 / 70%);
 }

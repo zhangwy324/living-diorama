@@ -100,6 +100,20 @@ export class DrawingEditor {
     });
   }
 
+  /** An empty canvas whose clearing can't be undone, for the next drawing after a release. */
+  reset(): void {
+    if (this.live) {
+      if (this.canvas.hasPointerCapture(this.live.pointerId)) {
+        this.canvas.releasePointerCapture(this.live.pointerId);
+      }
+      this.live = undefined;
+      this.onStroke(false);
+    }
+    this.history.reset();
+    this.rebuild();
+    this.changed();
+  }
+
   dispose(): void {
     this.stop();
   }
