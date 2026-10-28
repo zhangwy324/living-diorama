@@ -7,6 +7,7 @@ export * from "./creatures/individual";
 export * from "./creatures/knowledge";
 export * from "./creatures/needs";
 export * from "./creatures/perception";
+export * from "./creatures/shared";
 export * from "./creatures/spots";
 export * from "./creatures/wander";
 export * from "./engine";

@@ -11,6 +11,10 @@ import type { PlaceView } from "./contracts";
 export const SPOT_GAP = 0.3;
 /** How far from its preferred spot the fallback looks for a walkable point, in metres. */
 export const SPOT_SEARCH_RADIUS = 1.5;
+/** A spot more than this far above or below the place's base is not beside it, in metres. */
+export const SPOT_MAX_RISE = 0.75;
+/** Angles tried around a place, the creature's own first, then on in equal steps. */
+export const SPOT_ANGLES = 8;
 
 export interface SpotQuery {
   place: PlaceView;
@@ -52,16 +56,23 @@ function holds(cells: readonly number[], cell: number): boolean {
 /**
  * The creature's spot at a place: the point at its angle, `blockRadius + radius + SPOT_GAP` from
  * the place's centre, if a reachable walkable cell holds it; otherwise the centre of the nearest
- * reachable walkable cell within `SPOT_SEARCH_RADIUS` of that point. Where regions overlap (a
- * bridge deck over a river), the one whose surface is closest to the place's height wins.
+ * reachable walkable cell within `SPOT_SEARCH_RADIUS` of that point. If neither exists, the same
+ * at the angle a step of 2π / `SPOT_ANGLES` on, and so on round the place. Only cells whose
+ * surface is within `SPOT_MAX_RISE` of the place's base height count, and where regions overlap
+ * (a bridge deck over a path) the one whose surface is nearest that height wins.
  */
-export function findSpot({
-  place,
-  radius,
-  angle,
-  masks,
-  reachable,
-}: SpotQuery): RegionPosition | undefined {
+export function findSpot(query: SpotQuery): RegionPosition | undefined {
+  for (let k = 0; k < SPOT_ANGLES; k++) {
+    const spot = spotAt(query, query.angle + (2 * Math.PI * k) / SPOT_ANGLES);
+    if (spot) return spot;
+  }
+  return undefined;
+}
+
+function spotAt(
+  { place, radius, masks, reachable }: SpotQuery,
+  angle: number,
+): RegionPosition | undefined {
   const distance = place.blockRadius + radius + SPOT_GAP;
   const px = place.x + Math.sin(angle) * distance;
   const pz = place.z + Math.cos(angle) * distance;
@@ -70,12 +81,9 @@ export function findSpot({
     const mask = masks.get(regionId);
     if (!mask) continue;
     const cell = mask.cellAt(px, pz);
-    if (cell !== -1 && holds(cells, cell)) {
-      best = better(best, {
-        position: { regionId, x: px, z: pz },
-        distance: 0,
-        rise: Math.abs(mask.height(cell) - place.y),
-      });
+    const rise = cell === -1 ? NaN : Math.abs(mask.height(cell) - place.y);
+    if (rise <= SPOT_MAX_RISE && holds(cells, cell)) {
+      best = better(best, { position: { regionId, x: px, z: pz }, distance: 0, rise });
     }
   }
   if (best) return best.position;
@@ -92,12 +100,9 @@ export function findSpot({
         if (!holds(cells, cell)) continue;
         const { x, z } = mask.center(cell);
         const d = Math.hypot(x - px, z - pz);
-        if (d <= SPOT_SEARCH_RADIUS) {
-          best = better(best, {
-            position: { regionId, x, z },
-            distance: d,
-            rise: Math.abs(mask.height(cell) - place.y),
-          });
+        const rise = Math.abs(mask.height(cell) - place.y);
+        if (d <= SPOT_SEARCH_RADIUS && rise <= SPOT_MAX_RISE) {
+          best = better(best, { position: { regionId, x, z }, distance: d, rise });
         }
       }
     }

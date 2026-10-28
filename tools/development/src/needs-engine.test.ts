@@ -463,7 +463,12 @@ describe("interruption", () => {
       chosen: { behavior: "test:challenger", action: "test:nothing" },
     });
     expect(creature.action).toMatchObject({ id: "core:idle", behavior: "test:owner" });
-    expect(creature.lastResult).toBeUndefined();
+    // The challenger's behavior learns that its proposal failed (PR 4a).
+    expect(creature.lastResult).toEqual({
+      action: "test:nothing",
+      outcome: "failed",
+      reason: "unknown_action",
+    });
   });
 });
 

@@ -1,7 +1,8 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import type { AffordanceType, Registries } from "@living-diorama/extension-api";
 import {
-  chooseFood,
+  CellState,
+  chooseNearestByRoute,
   eatAction,
   emptyKnowledge,
   FEED_BASE_UTILITY,
@@ -9,17 +10,20 @@ import {
   findSpot,
   MEAL,
   perceive,
+  RegionMask,
   perceptionOffset,
   rememberPlace,
   Rng,
   SPOT_GAP,
   SPOT_SEARCH_RADIUS,
   type ActionContext,
+  type BehaviorProvider,
   type CreatureKnowledge,
   type CreatureObservation,
   type DecisionTrace,
   type PlaceView,
   type PropModel,
+  type RegionModel,
   type SimulationEvent,
   type WorldQueries,
 } from "@living-diorama/simulation";
@@ -158,6 +162,8 @@ interface Stub {
   /** Route length per placement; undefined means no route. */
   routes?: Record<string, number | undefined>;
   points?: { x: number; z: number }[];
+  /** Records the reach of each exploration draw. */
+  ranges?: number[];
 }
 
 /** An observation of a creature at the origin, with a world that answers from `stub`. */
@@ -185,7 +191,9 @@ function observe(
       return stub.routes?.[destination.regionId];
     },
     reachableRegions: () => [{ regionId: "r", walkableArea: 100 }],
-    randomWalkablePoint: () => {
+    randomWalkablePoint: () => undefined,
+    randomWalkablePointWithin: (maxDistance) => {
+      stub.ranges?.push(maxDistance);
       const p = stub.points?.[point++];
       return p && { regionId: "r", ...p };
     },
@@ -220,7 +228,9 @@ describe("core:feed", () => {
 
   it("routes only the three nearest by straight line, and takes the shortest route", () => {
     const { observation, pathed } = observe(stub, { knowledge: knowing("d", "c", "b", "a") });
-    expect(chooseFood(observation)).toEqual({ placementId: "b", length: 3 });
+    expect(chooseNearestByRoute(observation, FOOD)).toEqual({ placementId: "b", length: 3 });
+    // Only places offering the affordance asked for count.
+    expect(chooseNearestByRoute(observation, "core:shelter")).toBeUndefined();
     expect(pathed.sort()).toEqual(["a", "b", "c"]);
   });
 
@@ -269,11 +279,14 @@ describe("core:feed", () => {
       { x: 12, z: 2 }, // cell (1, 0), visited
       { x: 3, z: 12 }, // cell (0, 1), not visited
     ];
+    const ranges: number[] = [];
     const proposal = feedBehavior.evaluate(
-      observe({ places: {}, points }, { knowledge }).observation,
+      observe({ places: {}, points, ranges }, { knowledge }).observation,
       {},
       Rng.fromSeed(1),
     );
+    // Without vision a leg reaches at most 12 m.
+    expect(new Set(ranges)).toEqual(new Set([12]));
     expect(proposal).toMatchObject({
       action: "core:follow_path",
       params: { destination: { regionId: "r", x: 3, z: 12 } },
@@ -287,6 +300,23 @@ describe("core:feed", () => {
     );
     expect(visited).toMatchObject({ params: { destination: { x: 6, z: 6 } } });
   });
+
+  it("keeps exploration legs within twice the vision range, at least 8 m", () => {
+    const reach = (vision: number) => {
+      const ranges: number[] = [];
+      feedBehavior.evaluate(
+        observe(
+          { places: {}, points: [{ x: 5, z: 5 }], ranges },
+          { senses: { "core:vision": vision } },
+        ).observation,
+        {},
+        Rng.fromSeed(1),
+      );
+      return ranges[0];
+    };
+    expect(reach(8)).toBe(16);
+    expect(reach(2)).toBe(8);
+  });
 });
 
 // ---- core:eat --------------------------------------------------------------------------------
@@ -295,6 +325,7 @@ function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: numbe
   const adjusted: number[] = [];
   const emitted: unknown[] = [];
   let walked = 0;
+  const faced: { x: number; z: number }[] = [];
   const needs = { [HUNGER]: 0.9 };
   const context: ActionContext = {
     tick: 0,
@@ -322,9 +353,10 @@ function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: numbe
       adjusted.push(delta);
       needs[id as typeof HUNGER] = Math.max(0, needs[HUNGER] + delta);
     },
+    face: (x, z) => faced.push({ x, z }),
     emit: (event) => emitted.push(event),
   };
-  return { context, adjusted, emitted, walked: () => walked, needs };
+  return { context, adjusted, emitted, walked: () => walked, needs, faced };
 }
 
 describe("core:eat", () => {
@@ -338,8 +370,8 @@ describe("core:eat", () => {
     expect(eatAction.start({}, context)).toMatchObject({ ok: false, reason: "invalid_params" });
   });
 
-  it("walks to its spot, stops walking, and lowers hunger gradually by 0.8 over eatSeconds", () => {
-    const { context, adjusted, emitted, walked, needs } = eatContext(
+  it("walks to its spot, stops walking, faces the food and eats 0.8 of hunger over eatSeconds", () => {
+    const { context, adjusted, emitted, walked, needs, faced } = eatContext(
       ["moving", "arrived"],
       [{ x: 1.3, z: 0 }],
     );
@@ -348,12 +380,14 @@ describe("core:eat", () => {
     expect(eatAction.step(start.state, context)).toEqual({ status: "running" });
     expect(eatAction.step(start.state, context)).toEqual({ status: "running" });
     expect(walked()).toBe(2);
+    expect(faced).toEqual([]);
     // 5 s at 10 Hz: 50 ticks of eating. Half a meal counts as half.
     for (let t = 0; t < 25; t++) {
       expect(eatAction.step(start.state, context)).toEqual({ status: "running", cue: "eating" });
     }
     expect(walked()).toBe(2);
     expect(adjusted.reduce((a, b) => a + b, 0)).toBeCloseTo(-MEAL / 2, 9);
+    expect(faced.at(-1)).toEqual({ x: 2, z: 0 });
     for (let t = 0; t < 24; t++) eatAction.step(start.state, context);
     expect(eatAction.step(start.state, context)).toEqual({ status: "done", cue: "eating" });
     expect(adjusted).toHaveLength(50);
@@ -422,14 +456,86 @@ describe("eating spots", () => {
     expect(new Set(angles).size).toBe(4);
     for (const a of angles) expect(Math.abs(a)).toBeLessThanOrEqual(Math.PI);
   });
+
+  /** A 10 m × 10 m mask of 0.5 m cells centred on the origin, at one height. */
+  function flatMask(id: string, height: number, walkable: (x: number, z: number) => boolean) {
+    const n = 20;
+    const states = new Uint8Array(n * n);
+    const mask = new RegionMask(
+      { id } as RegionModel,
+      0,
+      0,
+      n,
+      n,
+      0.5,
+      -5,
+      -5,
+      states,
+      new Float64Array(n * n).fill(height),
+    );
+    for (let cell = 0; cell < n * n; cell++) {
+      const { x, z } = mask.center(cell);
+      states[cell] = walkable(x, z) ? CellState.walkable : CellState.outside;
+    }
+    return mask;
+  }
+  const spotsIn = (masks: RegionMask[], place: PlaceView, angle: number) =>
+    findSpot({
+      place,
+      radius: 0.2,
+      angle,
+      masks: new Map(masks.map((m) => [m.region.id, m])),
+      reachable: new Map(
+        masks.map((m) => [
+          m.region.id,
+          [...m.states.keys()].filter((c) => m.states[c] === CellState.walkable),
+        ]),
+      ),
+    });
+  const at = (x: number, y: number, z: number, blockRadius = 0.1): PlaceView => ({
+    id: "p",
+    x,
+    y,
+    z,
+    blockRadius,
+    affordances: {},
+  });
+
+  it("tries the next angles round the place when its own side is blocked", () => {
+    // Only the west is walkable, beyond the search radius of the east side.
+    const west = flatMask("west", 0, (x) => x < -3);
+    // Angle π/2 faces +X: 2.9 m east. Three quarters of a turn on faces west.
+    const spot = spotsIn([west], at(0, 0, 0, 2.4), Math.PI / 2)!;
+    expect(spot.regionId).toBe("west");
+    expect(spot.x).toBeLessThan(-3);
+    expect(spotsIn([flatMask("none", 0, () => false)], at(0, 0, 0), 0)).toBeUndefined();
+  });
+
+  it("takes only surfaces near the place's height, the nearest where regions overlap", () => {
+    const low = flatMask("low", 0, () => true);
+    const high = flatMask("high", 2, () => true);
+    expect(spotsIn([low, high], at(1, 0, 1), 0)!.regionId).toBe("low");
+    expect(spotsIn([low, high], at(1, 2, 1), 0)!.regionId).toBe("high");
+    expect(spotsIn([low, high], at(1, 1.6, 1), 0)!.regionId).toBe("high");
+    // More than 0.75 m from both: no spot.
+    expect(spotsIn([low, high], at(1, 1, 1), 0)).toBeUndefined();
+  });
 });
 
 // ---- In the simulation -----------------------------------------------------------------------
 
 describe("feeding in Woodland Hollow", () => {
-  function setup(seed: number) {
+  function setup(seed: number, extra?: (registries: Registries) => void) {
     const traces: DecisionTrace[] = [];
-    const simulation = createSimulation({ ...hollow, seed, onTrace: (t) => traces.push(t) });
+    const simulation = createSimulation({
+      ...hollow,
+      register: (r: Registries) => {
+        registerBuiltInContent(r);
+        extra?.(r);
+      },
+      seed,
+      onTrace: (t) => traces.push(t),
+    });
     const events: SimulationEvent[] = [];
     const run = (ticks: number) => {
       for (let t = 0; t < ticks; t++) events.push(...simulation.step());
@@ -495,6 +601,111 @@ describe("feeding in Woodland Hollow", () => {
     expect(first!.chosen!.behavior).toBe("core:feed");
     // 0.6 m/s × 0.8 × 0.1 s.
     expect(fastest).toBeCloseTo(0.048, 6);
+  });
+
+  /** The food props nearest the creature, nearest first. */
+  function nearestFood(
+    simulation: {
+      state: { model: { propsByAffordance: ReadonlyMap<string, readonly PropModel[]> } };
+    },
+    x: number,
+    z: number,
+  ) {
+    return [...simulation.state.model.propsByAffordance.get(FOOD)!].sort(
+      (a, b) =>
+        Math.hypot(a.transform.position.x - x, a.transform.position.z - z) -
+        Math.hypot(b.transform.position.x - x, b.transform.position.z - z),
+    );
+  }
+
+  it("counts an interrupted meal in part, without an `ate` event", () => {
+    // A test behavior that outranks a meal in progress by far.
+    const alarm: BehaviorProvider = {
+      id: "test:alarm",
+      version: "1.0.0",
+      dependencies: [{ registry: "actions", id: "core:idle" }],
+      evaluate: (observation) =>
+        observation.action?.id === "core:eat"
+          ? { action: "core:idle", params: { seconds: 1_000 }, utility: 5 }
+          : null,
+    };
+    const { simulation, events, run } = setup(3, (r) => {
+      r.behaviors.register(alarm);
+      r.species.register({
+        ...r.species.get("hollow:mossling")!,
+        id: "test:alarmed-mossling",
+        behaviors: ["core:wander", "core:feed", "test:alarm"],
+      });
+    });
+    const spawned = simulation.spawn("test:alarmed-mossling", "meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    const [food] = nearestFood(simulation, creature.position.x, creature.position.z);
+    rememberPlace(creature.knowledge, FOOD, food!.id, 0, 8);
+    creature.needs[HUNGER] = 0.6;
+    run(1);
+    for (let t = 0; t < 2_000 && !(creature.action?.state as { arrived: boolean }).arrived; t++) {
+      run(1);
+    }
+    const before = creature.needs[HUNGER]!;
+    run(20);
+    creature.phaseReactionTick = simulation.tick;
+    run(1);
+    expect(creature.action?.id).toBe("core:idle");
+    expect(creature.lastResult).toEqual({
+      action: "core:eat",
+      outcome: "interrupted",
+      reason: "outranked",
+    });
+    const eaten = before - creature.needs[HUNGER]!;
+    expect(eaten).toBeGreaterThan(0.1);
+    expect(eaten).toBeLessThan(MEAL - 0.1);
+    run(300);
+    expect(events.some((e) => e.type === "ate")).toBe(false);
+  });
+
+  it("skips food it got stuck on for 60 s and goes to other food", () => {
+    // So slow that walking never makes the watchdog's 5 cm of progress in 5 s.
+    const { simulation, traces, run } = setup(3, (r) => {
+      r.species.register({
+        ...r.species.get("hollow:mossling")!,
+        id: "test:sluggish-mossling",
+        baseSpeed: 0.001,
+      });
+    });
+    const spawned = simulation.spawn("test:sluggish-mossling", "meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    const [first, second] = nearestFood(simulation, creature.position.x, creature.position.z);
+    rememberPlace(creature.knowledge, FOOD, first!.id, 0, 8);
+    rememberPlace(creature.knowledge, FOOD, second!.id, 0, 8);
+    creature.needs[HUNGER] = 0.5;
+    const eats = () =>
+      traces.flatMap((t) =>
+        t.chosen?.action === "core:eat" && t.result === "started"
+          ? [
+              {
+                tick: t.tick,
+                placementId: (t.chosen.params as { placementId: string }).placementId,
+              },
+            ]
+          : [],
+      );
+    for (let t = 0; t < 200 && eats().length < 2; t++) run(1);
+    const [stuckOn, then] = eats();
+    expect(stuckOn).toBeDefined();
+    expect(then).toBeDefined();
+    expect(traces.find((t) => t.tick === then!.tick)!.lastResult).toEqual({
+      action: "core:eat",
+      outcome: "interrupted",
+      reason: "stuck",
+    });
+    expect(then!.placementId).not.toBe(stuckOn!.placementId);
+    expect(
+      (creature.memory["core:feed"] as { avoid: Record<string, number> }).avoid[
+        stuckOn!.placementId
+      ],
+    ).toBe(then!.tick + 600);
   });
 
   it("repeats the same meals for the same seed", () => {
@@ -594,5 +805,60 @@ describe("a species without vision", () => {
     expect(events.filter((e) => e.type === "ate")).toEqual([
       expect.objectContaining({ placementId: berry.id }),
     ]);
+  });
+});
+
+describe("exploring for food", () => {
+  it("finds and eats food it discovers in a sparse Woodland Hollow, in short legs", () => {
+    const traces: DecisionTrace[] = [];
+    let kept: string[] = [];
+    const simulation = createSimulation({
+      worldId: "test:sparse-hollow",
+      seed: 2,
+      onTrace: (t) => traces.push(t),
+      register: (r: Registries) => {
+        registerBuiltInContent(r);
+        const world = r.worlds.get("hollow:woodland-hollow")!;
+        const meadow = world.spawnPoints.find((p) => p.id === "meadow")!.position;
+        const isFood = (prop: string) => Object.hasOwn(r.props.get(prop)!.affordances, FOOD);
+        // Only the two food props farthest from the meadow are left.
+        kept = world.props
+          .filter((p) => isFood(p.prop))
+          .sort(
+            (a, b) =>
+              Math.hypot(b.transform.position.x - meadow.x, b.transform.position.z - meadow.z) -
+              Math.hypot(a.transform.position.x - meadow.x, a.transform.position.z - meadow.z),
+          )
+          .slice(0, 2)
+          .map((p) => p.id);
+        r.worlds.register({
+          ...world,
+          id: "test:sparse-hollow",
+          props: world.props.filter((p) => !isFood(p.prop) || kept.includes(p.id)),
+        });
+      },
+    });
+    const spawned = simulation.spawn("hollow:mossling", "meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    creature.needs[HUNGER] = 0.5;
+    const events: SimulationEvent[] = [];
+    for (let t = 0; t < 2 * 36_000 && !events.some((e) => e.type === "ate"); t++) {
+      events.push(...simulation.step());
+    }
+    const explored = traces.filter(
+      (t) => t.chosen?.behavior === "core:feed" && t.chosen.action === "core:follow_path",
+    );
+    expect(explored.length).toBeGreaterThan(1);
+    // Twice the vision range (8 m, ±15%), plus up to half a cell for the point within its cell.
+    const reach = 2 * 8 * creature.variation.senses["core:vision"]! + 0.5;
+    for (const t of explored) {
+      const { destination } = t.chosen!.params as { destination: { x: number; z: number } };
+      expect(Math.hypot(destination.x - t.position.x, destination.z - t.position.z)).toBeLessThan(
+        reach,
+      );
+    }
+    const [meal] = events.filter((e) => e.type === "ate");
+    expect(kept).toContain(meal && "placementId" in meal ? meal.placementId : undefined);
   });
 });

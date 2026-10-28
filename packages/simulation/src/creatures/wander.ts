@@ -1,6 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Rng } from "../runtime/rng";
-import type { BehaviorProvider, CreatureObservation, ReachableRegion } from "./contracts";
+import type { BehaviorProvider, CreatureObservation } from "./contracts";
+import { pickWeighted } from "./shared";
 
 // `core:wander` (roadmap M3 task 7, ADR 0006 §9): alternate idling with walking to a random
 // reachable point, sometimes in another region so that structures like bridges get used.
@@ -16,17 +17,6 @@ const UTILITY = 0.1;
 interface WanderMemory {
   /** Alternates, so a walk is always followed by a rest and the creature doesn't jitter. */
   walkNext?: boolean;
-}
-
-/** A region drawn with probability proportional to its walkable area. */
-export function pickWeighted(regions: readonly ReachableRegion[], rng: Rng): string | undefined {
-  const total = regions.reduce((sum, r) => sum + r.walkableArea, 0);
-  let roll = rng.next() * total;
-  for (const region of regions) {
-    roll -= region.walkableArea;
-    if (roll < 0) return region.regionId;
-  }
-  return regions.at(-1)?.regionId;
 }
 
 function pickDestination(

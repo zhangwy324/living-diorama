@@ -1,10 +1,11 @@
 import type { FoodAffordanceParams, RegionPosition } from "@living-diorama/content-schema";
 import type { Rng } from "../runtime/rng";
-import { isRecord, pathFromRoute } from "./core-actions";
+import { pathFromRoute } from "./core-actions";
 import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState } from "./contracts";
 import { gridCellAt } from "./knowledge";
 import { hungerNeed } from "./needs";
-import { pickWeighted } from "./wander";
+import { VISION_SENSE } from "./perception";
+import { chooseNearestByRoute, isRecord } from "./shared";
 
 // `core:feed` and `core:eat` (ADR 0018 §11, §12 and amendments). A hungry creature goes to the
 // remembered food with the shortest route, stands at its own spot beside it and eats, which
@@ -21,13 +22,20 @@ const HUNGER = hungerNeed.id;
 export const FEED_BASE_UTILITY = 0.2;
 /** How much a whole meal lowers hunger. */
 export const MEAL = 0.8;
-/** Known food is ranked by straight-line distance and only the nearest few get a route. */
-export const PATHED_CANDIDATES = 3;
 /** Food a creature failed to reach is skipped for this long. */
 const AVOID_SECONDS = 60;
 const EXPLORE_ATTEMPTS = 8;
 /** An exploration target closer than this is not worth walking to. */
 const MIN_EXPLORE_DISTANCE = 4;
+/**
+ * An exploration leg ends within this many times the creature's vision range, so a hungry
+ * explorer decides again often and goes for food it has seen on the way.
+ */
+const EXPLORE_VISION_FACTOR = 2;
+/** The shortest reach of an exploration leg. */
+const MIN_EXPLORE_RANGE = 8;
+/** The reach of an exploration leg for a creature without vision. */
+const BLIND_EXPLORE_RANGE = 12;
 
 interface FeedMemory {
   /** The food the last proposed meal was at, to skip it if the meal failed to get there. */
@@ -36,56 +44,30 @@ interface FeedMemory {
   avoid?: Record<string, number>;
 }
 
-/** The food the creature remembers, with routes, best first: what `core:feed` chooses from. */
-export interface FoodChoice {
-  placementId: string;
-  /** Route length in metres. */
-  length: number;
+/** How far an exploration leg may reach: twice the vision range, at least 8 m; 12 m blind. */
+export function explorationRange(senses: Readonly<Record<string, number>>): number {
+  const vision = senses[VISION_SENSE];
+  return vision === undefined
+    ? BLIND_EXPLORE_RANGE
+    : Math.max(MIN_EXPLORE_RANGE, EXPLORE_VISION_FACTOR * vision);
 }
 
 /**
- * The remembered food with the shortest route (ADR 0018 amendments, §10): the nearest
- * `PATHED_CANDIDATES` by straight line, leaving out `skip`, get a route to the creature's spot.
- */
-export function chooseFood(
-  { creature, knowledge, world }: CreatureObservation,
-  skip: (placementId: string) => boolean = () => false,
-): FoodChoice | undefined {
-  const here = creature.position;
-  const nearest = (knowledge.places[FOOD] ?? [])
-    .flatMap(({ placementId }) => {
-      const place = skip(placementId) ? undefined : world.place(placementId);
-      return place && Object.hasOwn(place.affordances, FOOD)
-        ? [{ placementId, distance: Math.hypot(place.x - here.x, place.z - here.z) }]
-        : [];
-    })
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, PATHED_CANDIDATES);
-  let best: FoodChoice | undefined;
-  for (const { placementId } of nearest) {
-    const spot = world.spotAt(placementId);
-    const length = spot && world.routeLength(spot);
-    if (length !== undefined && (!best || length < best.length)) best = { placementId, length };
-  }
-  return best;
-}
-
-/**
- * A random reachable point, preferring one in a grid cell the creature hasn't visited recently
- * (ADR 0018 amendments, §11), else the one whose cell it visited longest ago.
+ * A random reachable point within `explorationRange`, preferring one in a grid cell the creature
+ * hasn't visited recently (ADR 0018 amendments, §11), else the one whose cell it visited longest
+ * ago.
  */
 export function explorationTarget(
-  { creature, knowledge, world }: CreatureObservation,
+  { creature, knowledge, senses, world }: CreatureObservation,
   rng: Rng,
 ): RegionPosition | undefined {
-  const regions = world.reachableRegions();
+  const range = explorationRange(senses);
   const visited = new Map(knowledge.recentCells.map((c) => [`${c.x},${c.z}`, c.tick]));
   const here = creature.position;
   let best: { point: RegionPosition; tick: number } | undefined;
   for (let attempt = 0; attempt < EXPLORE_ATTEMPTS; attempt++) {
-    const regionId = pickWeighted(regions, rng);
-    const point = regionId === undefined ? undefined : world.randomWalkablePoint(regionId, rng);
-    if (!point) return best?.point;
+    const point = world.randomWalkablePointWithin(range, rng);
+    if (!point) continue;
     if (Math.hypot(point.x - here.x, point.z - here.z) < MIN_EXPLORE_DISTANCE) continue;
     const cell = gridCellAt(point.x, point.z);
     const tick = visited.get(`${cell.x},${cell.z}`);
@@ -125,7 +107,7 @@ export const feedBehavior: BehaviorProvider = {
     state.avoid = avoid;
     delete state.target;
 
-    const food = chooseFood(observation, (id) => Object.hasOwn(avoid, id));
+    const food = chooseNearestByRoute(observation, FOOD, (id) => Object.hasOwn(avoid, id));
     if (food) {
       state.target = food.placementId;
       return {
@@ -144,6 +126,9 @@ export const feedBehavior: BehaviorProvider = {
 
 interface EatState {
   placementId: string;
+  /** Where the food stands, to face it while eating. */
+  x: number;
+  z: number;
   path: PathState;
   /** Set once the creature stands at its spot; it then stops walking. */
   arrived: boolean;
@@ -167,8 +152,9 @@ export const eatAction: ActionProvider = {
     if (typeof placementId !== "string") {
       return { ok: false, reason: "invalid_params", detail: { expected: "{ placementId }" } };
     }
-    const food = context.place(placementId)?.affordances[FOOD] as FoodAffordanceParams | undefined;
-    if (!food) return { ok: false, reason: "not_food", detail: { placementId } };
+    const place = context.place(placementId);
+    const food = place?.affordances[FOOD] as FoodAffordanceParams | undefined;
+    if (!place || !food) return { ok: false, reason: "not_food", detail: { placementId } };
     const spot = context.spotAt(placementId);
     if (!spot) return { ok: false, reason: "no_spot", detail: { placementId } };
     const route = context.planRoute(spot);
@@ -177,6 +163,8 @@ export const eatAction: ActionProvider = {
     const ticks = Math.max(1, Math.round(food.eatSeconds / context.tickSeconds));
     const state: EatState = {
       placementId,
+      x: place.x,
+      z: place.z,
       path,
       arrived: path.points.length === 0,
       ticksLeft: ticks,
@@ -190,6 +178,7 @@ export const eatAction: ActionProvider = {
       eat.arrived = context.walk(eat.path) === "arrived";
       return { status: "running" };
     }
+    context.face(eat.x, eat.z);
     context.adjustNeed(HUNGER, -eat.perTick);
     eat.ticksLeft--;
     if (eat.ticksLeft > 0) return { status: "running", cue: "eating" };

@@ -1,6 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Route } from "../navigation/pathfinder";
 import type { ActionProvider, PathPoint, PathState } from "./contracts";
+import { isRecord } from "./shared";
 
 // `core:idle` and `core:follow_path` (roadmap M3 task 6). Preconditions are checked in `start`,
 // progress in `step`; completion is a `done` status. An interrupted action's state is dropped.
@@ -8,9 +9,6 @@ import type { ActionProvider, PathPoint, PathState } from "./contracts";
 interface IdleState {
   remainingTicks: number;
 }
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 
 const isPosition = (value: unknown): value is RegionPosition =>
   isRecord(value) &&

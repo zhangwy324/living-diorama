@@ -41,7 +41,7 @@ export interface PropModel {
   blockRadius: number;
   /**
    * Affordance → params as the type declares them, parsed by each affordance type's
-   * `paramsSchema` (defaults applied), so engine code may read them typed: `core:food`'s are a
+   * `paramsSchema` (defaults applied) and frozen, so engine code may read them typed: `core:food`'s are a
    * `FoodAffordanceParams`.
    */
   affordances: Readonly<Record<string, unknown>>;
@@ -134,7 +134,7 @@ export function buildWorldModel(
       const parsed = schema && validate(schema, params);
       // References were resolved first, so the params were already checked against the schema.
       if (!parsed?.ok) throw new Error(`"${type.id}" has unchecked params for "${id}"`);
-      affordances[id] = parsed.value;
+      affordances[id] = deepFreeze(parsed.value);
     }
     props.push({
       id: placement.id,
@@ -142,7 +142,7 @@ export function buildWorldModel(
       model: type.model,
       transform: placement.transform,
       blockRadius: type.blockRadius * placement.transform.scale,
-      affordances,
+      affordances: Object.freeze(affordances),
     });
   });
   if (diagnostics.length > 0) return { ok: false, diagnostics };
@@ -176,4 +176,13 @@ function indexByAffordance(props: readonly PropModel[]): Map<string, PropModel[]
     }
   }
   return index;
+}
+
+/** Freezes plain data all the way down, so it can be handed to behaviors without copying. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }

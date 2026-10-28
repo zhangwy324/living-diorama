@@ -85,6 +85,11 @@ export interface ActionContext extends PlaceQueries {
    * amendments, §11). A need the creature doesn't have is ignored.
    */
   adjustNeed(id: string, delta: number): void;
+  /**
+   * Turns the creature to face world point (x, z) at once, e.g. the food it eats. Does nothing if
+   * it stands there. Walking turns it to its direction of travel again.
+   */
+  face(x: number, z: number): void;
   /** Emits an event about the creature; the engine adds the tick and the creature ID. */
   emit(event: ActionEvent): void;
 }
@@ -151,6 +156,11 @@ export interface WorldQueries extends PlaceQueries {
    */
   randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
   /**
+   * A uniformly random point on a cell the creature can reach, in any region, whose centre lies
+   * within `maxDistance` metres (straight line) of the creature; undefined if there is none.
+   */
+  randomWalkablePointWithin(maxDistance: number, rng: Rng): RegionPosition | undefined;
+  /**
    * The length in metres of the route the creature would walk to `destination`, or undefined if
    * it has none. Plans a route, so a behavior should ask for a few candidates only. Emits nothing.
    */
@@ -174,6 +184,10 @@ export interface CreatureObservation {
     readonly position: Readonly<RegionPosition>;
     readonly heading: number;
   };
+  /**
+   * How the creature's last action ended, or how the last action chosen for it failed to start,
+   * also when that was a challenger and the running action carried on (ADR 0018 §8).
+   */
   readonly lastResult?: Readonly<ActionResult>;
   /**
    * The running action, when behaviors are evaluated on a trigger while it runs (ADR 0018 §8).
