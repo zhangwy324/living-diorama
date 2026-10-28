@@ -29,6 +29,14 @@ export const StructureDefinitionSchema = z.strictObject({
 });
 export type StructureDefinition = z.output<typeof StructureDefinitionSchema>;
 
+/** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */
+export const EmptyAffordanceParamsSchema = z.strictObject({});
+export type EmptyAffordanceParams = z.output<typeof EmptyAffordanceParamsSchema>;
+
+/** Params of `core:food` (ADR 0018 §2): how long a creature eats there, in seconds. */
+export const FoodAffordanceParamsSchema = z.strictObject({ eatSeconds: z.number().positive() });
+export type FoodAffordanceParams = z.output<typeof FoodAffordanceParamsSchema>;
+
 export const SizeClassSchema = z.enum(
   Object.keys(SIZE_CLASSES) as [keyof typeof SIZE_CLASSES, ...(keyof typeof SIZE_CLASSES)[]],
 );
@@ -69,6 +77,13 @@ export const SpeciesDefinitionSchema = z.strictObject({
   /** Metres per second at capability factor 1. */
   baseSpeed: z.number().positive(),
   behaviors: z.array(ContentIdSchema).min(1, { error: "A species needs at least one behavior" }),
+  /**
+   * Sense → strength, e.g. `core:vision` → range in metres (ADR 0018 §4). A sense left out is one
+   * the creature lacks. Values are checked against the sense's registered range.
+   */
+  senses: z.record(ContentIdSchema, z.number()).default({}),
+  /** Trait → value. A trait left out takes the default its registry entry declares. */
+  traits: z.record(ContentIdSchema, z.number()).default({}),
 });
 export type SpeciesDefinition = z.output<typeof SpeciesDefinitionSchema>;
 

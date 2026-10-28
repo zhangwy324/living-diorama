@@ -28,4 +28,7 @@ export const DRAWN_SPECIES_DEFAULTS = {
   capabilities: { "core:walk": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander"],
+  // Drawn species get vision 8 with core:feed and core:rest in PR 5b (ADR 0018 §4).
+  senses: {},
+  traits: {},
 };

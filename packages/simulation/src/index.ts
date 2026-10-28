@@ -4,6 +4,7 @@ export * from "./creatures/contracts";
 export * from "./creatures/core-actions";
 export * from "./creatures/wander";
 export * from "./engine";
+export type { ActionCue, Cue, NeedCue } from "@living-diorama/extension-api";
 export * from "./navigation/grid-path";
 export * from "./navigation/overlay";
 export * from "./navigation/pathfinder";
