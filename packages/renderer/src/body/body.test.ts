@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BODY_DEPTH, buildBody, fallbackBody } from "./body";
 import { simplifyLoop, traceOutline } from "./outline";
 import type { Pixels } from "./pixels";
-import { capColours, sideColours } from "./textures";
+import { capColours, outlineColour, sideColours } from "./textures";
 
 const COLOURS: Record<string, [number, number, number]> = {
   g: [0, 200, 0],
@@ -112,8 +112,9 @@ describe("body textures", () => {
   });
 
   it("colours the sides from the interior, without the outline", () => {
-    // 100 px: a band of 3 px is removed and the blur radius is 2 px.
+    // 100 px: a 3 px outline around an 80 px square; the blur radius is 2 px.
     const pixels = square(100, 10, 90, 3);
+    expect(outlineColour(pixels)).toEqual(COLOURS.k);
     const colours = sideColours(pixels);
     for (const [x, y] of [
       [10, 50],
@@ -143,9 +144,49 @@ describe("body textures", () => {
     }
   });
 
-  it("keeps the colours of a drawing thinner than the outline band", () => {
-    const pixels = square(100, 10, 14, 1); // 4 px wide: no pixel is deeper than the band
-    expect(colourAt(sideColours(pixels), 100, 50, 50)).toEqual([20, 20, 20]);
+  it("keeps a band thicker than a third of the drawing's depth as body", () => {
+    // 40 px deep at the centre, a 15 px band.
+    const pixels = square(100, 10, 90, 15);
+    expect(outlineColour(pixels)).toBeUndefined();
+    expect(colourAt(sideColours(pixels), 100, 50, 10)).toEqual(COLOURS.k);
+  });
+
+  it("keeps the colours of a drawing all in one colour", () => {
+    const pixels = square(100, 10, 90, 40);
+    expect(outlineColour(pixels)).toBeUndefined();
+    expect(colourAt(sideColours(pixels), 100, 50, 50)).toEqual(COLOURS.k);
+  });
+
+  it("keeps the colour of a drawing's edge when it has no outline", () => {
+    // Red left half, green right half.
+    const rows = Array.from({ length: 100 }, (_, y) =>
+      Array.from({ length: 100 }, (_, x) =>
+        x < 10 || y < 10 || x >= 90 || y >= 90 ? "." : x < 50 ? "r" : "g",
+      ).join(""),
+    );
+    const colours = sideColours(art(...rows));
+    expect(colourAt(colours, 100, 10, 50)).toEqual(COLOURS.r);
+    expect(colourAt(colours, 100, 89, 50)).toEqual(COLOURS.g);
+  });
+
+  it("ignores strokes of the outline's colour just inside it, like hair", () => {
+    // Two dark strokes along the top, 4–7 px deep, joined to the outline at one end.
+    const pixels = square(100, 10, 90, 3);
+    for (let x = 20; x < 80; x++) {
+      for (let y = 14; y < 17; y++) pixels.data.set([...COLOURS.k!, 255], (y * 100 + x) * 4);
+    }
+    for (let y = 10; y < 17; y++) pixels.data.set([...COLOURS.k!, 255], (y * 100 + 20) * 4);
+    const colours = sideColours(pixels);
+    for (const x of [20, 50, 79]) expect(colourAt(colours, 100, x, 10)).toEqual(COLOURS.g);
+  });
+
+  it("gives a thin part its own colour, not the body's", () => {
+    // A 4 px red arm sticking out right of an outlined green square.
+    const pixels = square(100, 10, 60, 2);
+    for (let x = 60; x < 95; x++) {
+      for (let y = 30; y < 34; y++) pixels.data.set([...COLOURS.r!, 255], (y * 100 + x) * 4);
+    }
+    expect(colourAt(sideColours(pixels), 100, 94, 31)).toEqual(COLOURS.r);
   });
 });
 
