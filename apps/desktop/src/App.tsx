@@ -211,7 +211,7 @@ export function App() {
   return (
     <div className="app">
       <main className="diorama" ref={container} onDoubleClick={() => view.current?.resetCamera()} />
-      {/* The shell ignores height changes while expanded (ADR 0008 §8). */}
+      {/* The shell ignores height changes while expanded (ADR 0016 §1). */}
       {!expanded && <StripResizeHandle shell={shell} />}
       <ControlsOverlay
         paused={paused}
