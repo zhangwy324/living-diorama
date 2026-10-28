@@ -57,7 +57,9 @@ const CHECK_HZ = 2;
 const DAY_TICKS = 24 * 3600 * CHECK_HZ;
 
 describe("long randomized runs keep every invariant", () => {
-  it.each([1, 2, 3])("Woodland Hollow, seed %i, a day at 2 Hz", (seed) => {
+  // A day takes about 2 s locally and 7 s on the CI runner.
+  const slow = { timeout: 30_000 };
+  it.each([1, 2, 3])("Woodland Hollow, seed %i, a day at 2 Hz", slow, (seed) => {
     const traces: DecisionTrace[] = [];
     const report = runWithInvariants({
       ...hollow,
