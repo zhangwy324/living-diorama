@@ -40,6 +40,7 @@ export class DrawingHistory {
   private past: Step[] = [];
   private future: Step[] = [];
   private bytes = 0;
+  private blankImage: boolean | undefined = true;
 
   constructor(
     readonly width: number,
@@ -57,12 +58,21 @@ export class DrawingHistory {
     return this.future.length > 0;
   }
 
+  /** Whether no pixel of the image is visible at all: nothing drawn, or all of it erased. */
+  get blank(): boolean {
+    this.blankImage ??= this.pixels.every((value, i) => i % 4 !== 3 || value === 0);
+    return this.blankImage;
+  }
+
   /** The bytes of pixels undo and redo keep. */
   get size(): number {
     return this.bytes;
   }
 
-  /** Records that `operation` turned the image into `pixels` (RGBA, the image's size). */
+  /**
+   * Records that `operation` turned the image into `pixels` (RGBA, the image's size). The history
+   * keeps `pixels` as its copy of the image, so the caller must not change them afterwards.
+   */
   add(operation: DrawingOperation, pixels: Uint8ClampedArray): void {
     this.change([...this.record, operation], pixels);
   }
@@ -81,6 +91,7 @@ export class DrawingHistory {
   reset(): void {
     this.record = [];
     this.pixels = new Uint8ClampedArray(this.pixels.length);
+    this.blankImage = true;
     this.past = [];
     this.future = [];
     this.bytes = 0;
@@ -106,6 +117,7 @@ export class DrawingHistory {
     this.record = step.records[side];
     const patch = step.patches?.[side];
     if (patch) putPatch(this.pixels, this.width, patch);
+    this.blankImage = undefined;
     return { patch };
   }
 
@@ -119,6 +131,9 @@ export class DrawingHistory {
       cutPatch(pixels, this.width, box),
     ];
     const bytes = patches ? patches[0].data.length * 2 : 0;
+    // The budget counts pixels only. Each step also holds the record before and after it: arrays
+    // of references to the same operations, a few bytes per operation, which stay small next to
+    // the pixels for any drawing a player makes.
     this.past.push({ records: [this.record, record], patches, bytes });
     this.bytes += bytes;
     // The newest step is always kept, however big.
@@ -126,7 +141,8 @@ export class DrawingHistory {
       this.bytes -= this.past.shift()?.bytes ?? 0;
     }
     this.record = record;
-    this.pixels = pixels.slice();
+    this.pixels = pixels;
+    this.blankImage = undefined;
   }
 }
 

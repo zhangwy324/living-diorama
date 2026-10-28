@@ -180,3 +180,29 @@ describe("changedBox", () => {
     expect(changedBox(before, before.slice(), SIZE)).toBeUndefined();
   });
 });
+
+describe("blank", () => {
+  it("is true until something shows, and again once all of it is erased", () => {
+    const { image, history } = drawn();
+    expect(history.blank).toBe(true);
+    history.add(a, image.paint(2, 2, 2, 10));
+    expect(history.blank).toBe(false);
+    // An eraser stroke over all of it: in the record, but nothing left to see.
+    image.pixels.fill(0);
+    history.add({ ...b, tool: "eraser" }, image.pixels.slice());
+    expect(history.record).toHaveLength(2);
+    expect(history.blank).toBe(true);
+    image.put(history.undo());
+    expect(history.blank).toBe(false);
+    history.reset();
+    expect(history.blank).toBe(true);
+  });
+
+  it("counts a barely visible pixel as something", () => {
+    const { history } = drawn();
+    const pixels = new Uint8ClampedArray(SIZE * SIZE * 4);
+    pixels[3] = 1;
+    history.add(a, pixels);
+    expect(history.blank).toBe(false);
+  });
+});

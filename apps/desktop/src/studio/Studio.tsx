@@ -53,7 +53,15 @@ const CELEBRATION_MS = 4000;
 export function Studio() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const editor = useRef<DrawingEditor>(undefined);
-  const [state, setState] = useState<EditorState>({ canUndo: false, canRedo: false, empty: true });
+  const [state, setState] = useState<EditorState>({
+    canUndo: false,
+    canRedo: false,
+    empty: true,
+    blank: true,
+  });
+  // Whether the latest check of the image found a body to build. False from each change until
+  // the check after it, so an erased or faint drawing can't be released as an empty image.
+  const [hasBody, setHasBody] = useState(false);
   const [tool, setTool] = useState<Brush["tool"]>("pen");
   const [color, setColor] = useState(PALETTE[0] ?? "#000000");
   const [width, setWidth] = useState(BRUSH_WIDTHS[1] ?? 10);
@@ -113,11 +121,13 @@ export function Studio() {
       const check = checkBody(pixels);
       preview.current?.setDrawing(check.empty ? undefined : pixels, check);
       setShapeHints(drawingHints(check));
+      setHasBody(!check.empty);
     };
     const created = new DrawingEditor(
       element,
       (next) => {
         setState(next);
+        setHasBody(false);
         releaseId.current = undefined;
         setReleaseError(undefined);
         clearTimeout(timer);
@@ -170,7 +180,8 @@ export function Studio() {
   useEffect(
     () =>
       studioWindow.onCloseRequested(() => {
-        if (editor.current?.state.empty ?? true) return true;
+        // Nothing visible means nothing to lose.
+        if (editor.current?.state.blank ?? true) return true;
         setClosing(true);
         return false;
       }),
@@ -223,7 +234,7 @@ export function Studio() {
   }, [celebration]);
 
   const shownName = name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary));
-  const releasable = canRelease({ name: shownName, empty: state.empty, releasing });
+  const releasable = canRelease({ name: shownName, empty: !hasBody, releasing });
 
   const release = async () => {
     const current = editor.current;

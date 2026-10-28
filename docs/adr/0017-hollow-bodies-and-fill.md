@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-28
-- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 builds §1–§7. The rest are settled here and built later; a PR that has to depart from this ADR updates it.
+- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 builds §1–§7 and PR 2 builds §8–§9. The rest are settled here and built later; a PR that has to depart from this ADR updates it.
 
 This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and ADR 0015 §7, §9 and §11 (see _Amendments_).
 
@@ -30,12 +30,12 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 
 7. **The mossling is not a special case.** It is built like any drawing, so the two gaps beneath its hairs become openings, along with a handful of pinholes. A 256 px raster of its SVG is now a test fixture (`packages/renderer/src/body/fixtures/mossling.png`). The README has no screenshots yet, only TODO markers from the v0.2 round, so nothing needs redoing now; when they are taken they should show the hollow body.
 
-### The drawing (PR 2)
+### The drawing (PR 2, implemented)
 
-8. **The bitmap is the drawing.** This overturns ADR 0014, where the strokes were authoritative and the picture was produced from them. From PR 2 the drawing is the 256 px raster on the Studio canvas. Strokes, and later fills, are painted straight into that raster, and undo and redo store whole raster copies (roughly 256 KB each). The library saves the raster and, beside it, an ordered log of the strokes and fills; the log is informational and is never used to rebuild the raster.
+8. **The bitmap is the drawing.** This overturns ADR 0014, where the strokes were authoritative and the picture was produced from them. From PR 2 the drawing is the 256 px raster on the Studio canvas. Strokes, and later fills, are painted straight into that raster. Undo and redo put pixels back: as built, each step keeps only the rectangle of pixels it changed, before and after, within a 32 MB budget, rather than a whole 256 KB copy (ADR 0015 §11 amendment). The library saves the raster and, beside it, an ordered log of the strokes and fills; the log is informational and is never used to rebuild the raster.
    - **Reasons:** bucket fills and recolouring are exact operations on pixels. Replaying them on top of strokes is fragile: any change to how strokes are rasterised (#59 is one) can open a one-pixel leak, and an old fill would then spill across the canvas. Later work that finds a creature's parts, for animation or traits, is expected to look at the picture (through shape analysis, a vision model, or parts the player marks by hand); strokes are a poor guide to parts because players switch between parts while drawing.
    - **The log** adds only kilobytes. Should nothing ever use it, removing it later breaks nothing.
-   - **Old library files are not migrated.** Their format may change without a migration path (ADR 0014 §6 isn't used for this). Every stored entry already contains its picture.
+   - **No backward compatibility is owed to old library files.** Every stored entry already contains its picture. As built, the drawing format went to version 2 (`history`, a list of operations told apart by `kind`), and a small migration still reads version 1 drawings, because it cost a few lines (ADR 0014 §5 amendment).
 
 9. **Strokes stay anti-aliased as the canvas draws them.** Thresholding each stroke at 50% alpha was tried: it gives exact fills, but at the Studio's zoom (one canvas pixel is roughly 2.3 screen pixels) curves become visibly stair-stepped, the opposite of what #59 is after. The bucket deals with soft edges on its own terms (§10).
 
@@ -68,8 +68,8 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 - **ADR 0011 §4:** the bevel is removed in favour of straight walls through the full 40% (§2). The grey fallback block still has rounded edges.
 - **ADR 0011 §5:** faces and walls use one texture, and walls take the colour of the adjacent edge (§3) instead of the #40 side texture.
 - **ADR 0011, Consequences:** "holes are filled" and "the silhouette is slightly larger than the drawing" are no longer true, and the description of the sides is replaced by §3.
-- **ADR 0014:** PR 2 makes the raster authoritative and keeps strokes only as a log (§8), without migrating old files.
-- **ADR 0015 §7:** the hints now run on the real shapes, openings included (§1). **§9 and §11:** PR 2 has the editor paint into a raster with whole-raster undo instead of replaying strokes (§8).
+- **ADR 0014:** PR 2 makes the raster authoritative and keeps strokes only as a log (§8), drawing format version 2 with a migration from version 1.
+- **ADR 0015 §7:** the hints now run on the real shapes, openings included (§1). **§9 and §11:** PR 2 has the editor paint into a raster, with undo by changed-pixel patches instead of replaying strokes, and draws the live stroke a run at a time (§8).
 
 ## Consequences
 

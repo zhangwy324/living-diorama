@@ -11,7 +11,10 @@ import { LiveStroke, type Brush } from "./live-stroke";
 export interface EditorState {
   canUndo: boolean;
   canRedo: boolean;
+  /** Nothing in the record: nothing drawn since the canvas was last empty. */
   empty: boolean;
+  /** No pixel is visible: nothing drawn, or all of it erased. */
+  blank: boolean;
 }
 
 /** A stroke being drawn, and how many of its runs are already in the working image. */
@@ -98,6 +101,7 @@ export class DrawingEditor {
       canUndo: this.history.canUndo,
       canRedo: this.history.canRedo,
       empty: this.history.record.length === 0,
+      blank: this.history.blank,
     };
   }
 
