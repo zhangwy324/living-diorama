@@ -2,8 +2,13 @@ export const packageName = "@living-diorama/simulation";
 
 export * from "./creatures/contracts";
 export * from "./creatures/core-actions";
+export * from "./creatures/feed";
 export * from "./creatures/individual";
 export * from "./creatures/knowledge";
+export * from "./creatures/needs";
+export * from "./creatures/perception";
+export * from "./creatures/shared";
+export * from "./creatures/spots";
 export * from "./creatures/wander";
 export * from "./engine";
 export type { ActionCue, Cue, NeedCue } from "@living-diorama/extension-api";

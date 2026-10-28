@@ -54,6 +54,11 @@ export interface CreatureState {
   home: string | null;
   /** Factors drawn once at spawn (ADR 0018 §16). */
   variation: IndividualVariation;
+  /**
+   * Radians, drawn once at spawn: where around a place it stands to eat or sleep, so creatures at
+   * one place spread out (ADR 0018 amendments, §11). 0 is +Z of the place, π/2 is +X.
+   */
+  spotAngle: number;
   /** Whether its action reported it asleep on the last tick, which selects the need rates. */
   asleep: boolean;
   /** The tick at which it reacts to the last day-phase change (ADR 0018 §7), if still to come. */
@@ -270,6 +275,7 @@ export class WorldState {
       knowledge: emptyKnowledge(),
       home: null,
       variation: individual.variation,
+      spotAngle: individual.spotAngle,
       asleep: false,
     };
     this.creatures.set(id, creature);

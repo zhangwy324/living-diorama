@@ -27,12 +27,16 @@ import {
   type BehaviorProvider,
   type CreatureObservation,
   type PathState,
+  type PlaceQueries,
+  type PlaceView,
   type Proposal,
   type RunningAction,
   type WorldQueries,
 } from "../creatures/contracts";
 import { clamp01, speciesNeeds, speciesTraits } from "../creatures/individual";
 import { copyKnowledge } from "../creatures/knowledge";
+import { PERCEPTION_HZ, perceive, perceptionOffset, VISION_SENSE } from "../creatures/perception";
+import { findSpot } from "../creatures/spots";
 import type { Pathfinder } from "../navigation/pathfinder";
 import { navProfile, profileForSpecies } from "../navigation/profile";
 import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
@@ -197,6 +201,10 @@ export class Simulation {
   readonly #profiles = new Map<string, SpeciesProfile>();
   /** The action cue each creature showed on its last tick, if any. */
   readonly #actionCues = new Map<string, ActionCue>();
+  /** Each creature's perception offset within the scan period. */
+  readonly #perceptionOffsets = new Map<string, number>();
+  /** Ticks between two perception scans of one creature. */
+  readonly #perceptionTicks: number;
   #events: SimulationEvent[] = [];
 
   private constructor(
@@ -216,6 +224,7 @@ export class Simulation {
       if (isBehaviorProvider(b)) this.#behaviors.set(b.id, b);
     }
     this.#connections = new Map(state.model.connections.map((c) => [c.id, c]));
+    this.#perceptionTicks = Math.max(1, Math.round(tickRateHz / PERCEPTION_HZ));
   }
 
   /** Builds a simulation of a registered world. Expects `resolveReferences` to have passed. */
@@ -341,6 +350,7 @@ export class Simulation {
       const creature = result.value;
       this.#paths.delete(creatureId);
       this.#actionCues.delete(creatureId);
+      this.#perceptionOffsets.delete(creatureId);
       this.#emit({
         type: "creature_despawned",
         tick: this.tick,
@@ -487,6 +497,7 @@ export class Simulation {
    */
   #stepCreature(creature: CreatureState) {
     const profile = this.#profile(creature.speciesId);
+    this.#perceive(creature, profile);
     const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
     let cue: ActionCue | undefined;
@@ -529,6 +540,32 @@ export class Simulation {
     // An action's cue shows while that action still runs after this tick.
     if (cue !== undefined && creature.action === running) this.#actionCues.set(creature.id, cue);
     else this.#actionCues.delete(creature.id);
+  }
+
+  /**
+   * Perception (ADR 0018 §10): once a second, at a tick offset of its own, the creature notes the
+   * places within sight or touch and the grid cell it is in. The engine writes its knowledge,
+   * since behaviors see only copies.
+   */
+  #perceive(creature: CreatureState, profile: SpeciesProfile) {
+    const period = this.#perceptionTicks;
+    let offset = this.#perceptionOffsets.get(creature.id);
+    if (offset === undefined) {
+      offset = perceptionOffset(creature.id, period);
+      this.#perceptionOffsets.set(creature.id, offset);
+    }
+    if ((this.tick + offset) % period !== 0) return;
+    const vision = profile.senses[VISION_SENSE];
+    perceive({
+      knowledge: creature.knowledge,
+      x: creature.position.x,
+      z: creature.position.z,
+      vision:
+        vision === undefined ? undefined : vision * (creature.variation.senses[VISION_SENSE] ?? 1),
+      tick: this.tick,
+      propsByAffordance: this.state.model.propsByAffordance,
+      affordance: (id) => this.state.registries.affordances.get(id),
+    });
   }
 
   /**
@@ -767,6 +804,8 @@ export class Simulation {
       creature.lastResult = { action: running.id, outcome: "interrupted", reason: "outranked" };
       trace.result = "started";
     } else {
+      // The running action carries on, but the chosen behavior learns its proposal failed.
+      creature.lastResult = { action, outcome: "failed", reason: start.reason };
       trace.result = "rejected";
       trace.reason = start.reason;
     }
@@ -792,6 +831,7 @@ export class Simulation {
     activity?: { walked: boolean },
   ): ActionContext {
     return {
+      ...this.#placeQueries(creature),
       tick: this.tick,
       tickSeconds: this.tickSeconds,
       get position() {
@@ -824,15 +864,71 @@ export class Simulation {
         if (!Object.hasOwn(creature.needs, id) || !Number.isFinite(delta)) return;
         creature.needs[id] = clamp01((creature.needs[id] ?? 0) + delta);
       },
+      face: (x, z) => {
+        const dx = x - creature.position.x;
+        const dz = z - creature.position.z;
+        if (Math.hypot(dx, dz) > 1e-9) creature.heading = normalizeHeading(Math.atan2(dx, dz));
+      },
+      emit: (event) => this.#emit({ ...event, tick: this.tick, creatureId: creature.id }),
     };
   }
 
-  /** What wander may choose from: only cells the creature can reach from where it stands. */
+  /** A prop placement as behaviors and actions see it. Its affordances are frozen. */
+  #placeView(placementId: string): PlaceView | undefined {
+    const prop = this.state.model.propsById.get(placementId);
+    if (!prop) return undefined;
+    const { x, y, z } = prop.transform.position;
+    return { id: prop.id, x, y, z, blockRadius: prop.blockRadius, affordances: prop.affordances };
+  }
+
+  /** Place lookups and the creature's own spot at a place (ADR 0018 §11). */
+  #placeQueries(creature: CreatureState): PlaceQueries {
+    return {
+      place: (placementId) => this.#placeView(placementId),
+      spotAt: (placementId) => {
+        const place = this.#placeView(placementId);
+        if (!place) return undefined;
+        const pathfinder = this.#pathfinder(creature);
+        return findSpot({
+          place,
+          radius: pathfinder.navigation.profile.radius,
+          angle: creature.spotAngle,
+          masks: pathfinder.navigation.masks,
+          reachable: pathfinder.reachableCells(creature.position),
+        });
+      },
+    };
+  }
+
+  /**
+   * What behaviors may query: cells the creature can reach from where it stands, places, and
+   * route lengths.
+   */
   #queries(creature: CreatureState): WorldQueries {
     const pathfinder = this.#pathfinder(creature);
     const reachable = pathfinder.reachableCells(creature.position);
     const { masks } = pathfinder.navigation;
+    const here = creature.position;
+    /** Per distance asked for, the reachable cells whose centres lie within it. */
+    const near = new Map<number, { regionId: string; cell: number }[]>();
+    const point = (regionId: string, cell: number, rng: Rng): RegionPosition | undefined => {
+      const mask = masks.get(regionId);
+      if (!mask) return undefined;
+      // Anywhere inside the cell, kept off its edges so the point stays in it.
+      const { x, z } = mask.center(cell);
+      const spread = mask.cellSize * 0.9;
+      return {
+        regionId,
+        x: x + (rng.next() - 0.5) * spread,
+        z: z + (rng.next() - 0.5) * spread,
+      };
+    };
     return {
+      ...this.#placeQueries(creature),
+      routeLength: (destination) => {
+        const result = pathfinder.findRoute(creature.position, destination);
+        return result.ok ? result.route.length : undefined;
+      },
       reachableRegions: () =>
         [...reachable].flatMap(([regionId, cells]) => {
           const mask = masks.get(regionId);
@@ -841,17 +937,25 @@ export class Simulation {
             : [];
         }),
       randomWalkablePoint: (regionId, rng) => {
-        const mask = masks.get(regionId);
         const cell = rng.pick(reachable.get(regionId) ?? []);
-        if (!mask || cell === undefined) return undefined;
-        // Anywhere inside the cell, kept off its edges so the point stays in it.
-        const { x, z } = mask.center(cell);
-        const spread = mask.cellSize * 0.9;
-        return {
-          regionId,
-          x: x + (rng.next() - 0.5) * spread,
-          z: z + (rng.next() - 0.5) * spread,
-        };
+        return cell === undefined ? undefined : point(regionId, cell, rng);
+      },
+      randomWalkablePointWithin: (maxDistance, rng) => {
+        let cells = near.get(maxDistance);
+        if (!cells) {
+          cells = [];
+          for (const [regionId, list] of reachable) {
+            const mask = masks.get(regionId);
+            if (!mask) continue;
+            for (const cell of list) {
+              const { x, z } = mask.center(cell);
+              if (Math.hypot(x - here.x, z - here.z) <= maxDistance) cells.push({ regionId, cell });
+            }
+          }
+          near.set(maxDistance, cells);
+        }
+        const picked = rng.pick(cells);
+        return picked && point(picked.regionId, picked.cell, rng);
       },
     };
   }
