@@ -56,7 +56,7 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 
 ### Order
 
-12. **#59 (spiky stroke edges) goes first,** ahead of every other M13 PR. After PR 2, drawings are saved as pixels, so a later change to stroke rendering could no longer clean up drawings already in the library. The defect is sharp points sticking out of a stroke's edge, probably caused by the pressure the Studio derives from mouse speed (ADR 0015 §11); it is not about pixel stepping or anti-aliasing. The staircase visible on 3D walls is unrelated: it is a product of following the outline pixel by pixel.
+12. **#59 (spiky stroke edges) goes first,** ahead of every other M13 PR. After PR 2, drawings are saved as pixels, so a later change to stroke rendering could no longer clean up drawings already in the library. The defect is sharp points sticking out of a stroke's edge, not pixel stepping or anti-aliasing. It was first blamed on the pressure derived from mouse speed; PR 0 traced it to perfect-freehand's outline and now draws strokes with the canvas's own round-capped `stroke()` (ADR 0015 §9 and §11, as amended there). Done before this PR. The staircase visible on 3D walls is unrelated: it is a product of following the outline pixel by pixel.
 
 ### Deferred
 
