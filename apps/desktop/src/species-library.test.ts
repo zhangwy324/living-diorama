@@ -52,13 +52,14 @@ function fakeWorld() {
   return { world, creatures, registered };
 }
 
-async function open(store: LibraryStore = createMemoryLibraryStore()) {
+async function open(store: LibraryStore = createMemoryLibraryStore(), onChange = () => {}) {
   const { world, creatures, registered } = fakeWorld();
   const uuids = [...UUIDS];
   let minutes = 0;
   const library = await openSpeciesLibrary(store, world, {
     uuid: () => uuids.shift() ?? "",
     now: () => new Date(Date.UTC(2026, 9, 27, 12, minutes++)),
+    onChange,
   });
   return { library, world, creatures, registered, store };
 }
@@ -221,4 +222,15 @@ describe("creatures", () => {
     });
     expect(await library.deleteSpecies(puddle.speciesId)).toMatchObject({ ok: false });
   });
+});
+
+it("tells when the list changes", async () => {
+  const onChange = vi.fn();
+  const { library } = await open(createMemoryLibraryStore(), onChange);
+  expect(onChange).not.toHaveBeenCalled();
+  const { speciesId } = value(await library.save(DRAWING, PNG, "Puddle", "small"));
+  await library.save(DRAWING, PNG, "Rejected", "small");
+  expect(onChange).toHaveBeenCalledTimes(1);
+  value(await library.deleteSpecies(speciesId));
+  expect(onChange).toHaveBeenCalledTimes(2);
 });

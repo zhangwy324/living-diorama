@@ -75,6 +75,8 @@ export interface LibraryOptions {
   now?: () => Date;
   /** A fresh lowercase UUID for each saved species. */
   uuid?: () => string;
+  /** Called after the list changes: a species saved or deleted. */
+  onChange?: () => void;
 }
 
 const failure = (code: string, message: string): { ok: false; diagnostics: Diagnostic[] } => ({
@@ -128,7 +130,11 @@ interface Kept {
 export async function openSpeciesLibrary(
   store: LibraryStore,
   world: LibraryWorld,
-  { now = () => new Date(), uuid = () => crypto.randomUUID() }: LibraryOptions = {},
+  {
+    now = () => new Date(),
+    uuid = () => crypto.randomUUID(),
+    onChange = () => {},
+  }: LibraryOptions = {},
 ): Promise<SpeciesLibrary> {
   const entries = new Map<string, Kept>();
   /** Deleted, or never stored, this run but still registered: no new creatures. */
@@ -220,6 +226,7 @@ export async function openSpeciesLibrary(
         unseen.add(ids.speciesId);
         return failure("library_io", `Could not save ${name}: ${describeError(cause)}`);
       }
+      onChange();
       return registered;
     },
 
@@ -243,6 +250,7 @@ export async function openSpeciesLibrary(
       }
       entries.delete(speciesId);
       unseen.add(speciesId);
+      onChange();
       const leaving = world.creatures().filter((creature) => creature.speciesId === speciesId);
       await Promise.all(leaving.map((creature) => world.despawn(creature.id)));
       if (found.url) URL.revokeObjectURL(found.url);

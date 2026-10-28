@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { STRIP_WINDOW, subscribeAs } from "./events";
 
 /**
  * What the app can ask of the desktop shell it runs in, and hear from it (ADR 0008 §1). The shell
@@ -16,6 +16,8 @@ export interface DesktopShell {
   setExpanded(expanded: boolean): Promise<void>;
   /** Hides the window. The simulation keeps running (ADR 0008 §12). */
   hide(): Promise<void>;
+  /** Opens the Creation Studio's window, or shows and focuses it if it is open (ADR 0015 §1). */
+  openStudio(): Promise<void>;
   /** Calls `listener` whenever the simulation is paused or resumed. Returns a function that stops listening. */
   onPausedChanged(listener: (paused: boolean) => void): () => void;
   /** Calls `listener` whenever the window is expanded or collapsed. Returns a function that stops listening. */
@@ -45,23 +47,23 @@ export const noopShell: DesktopShell = {
   setPaused: () => Promise.resolve(),
   setExpanded: () => Promise.resolve(),
   hide: () => Promise.resolve(),
+  openStudio: () => Promise.resolve(),
   onPausedChanged: () => () => {},
   onExpandedChanged: () => () => {},
   onQuitRequested: () => () => {},
   recordEventCounts: () => Promise.resolve(),
 };
 
-/** Listens to a shell event; the returned function stops listening even before `listen` resolves. */
-function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
-  const unlisten = listen<T>(event, (e) => listener(e.payload));
-  return () => void unlisten.then((stop) => stop());
-}
+/** Listens to a shell event, which the shell sends to the strip only (ADR 0015 §6). */
+const subscribe = <T>(event: string, listener: (payload: T) => void) =>
+  subscribeAs(STRIP_WINDOW, event, listener);
 
 const tauriShell: DesktopShell = {
   setStripHeight: (height) => invoke("set_strip_height", { height }),
   setPaused: (paused) => invoke("set_paused", { paused }),
   setExpanded: (expanded) => invoke("set_expanded", { expanded }),
   hide: () => invoke("hide"),
+  openStudio: () => invoke("open_studio"),
   onPausedChanged: (listener) => subscribe("paused-changed", listener),
   onExpandedChanged: (listener) => subscribe("expanded-changed", listener),
   onQuitRequested: (listener) =>

@@ -11,16 +11,20 @@ use std::sync::Mutex;
 use tauri::WebviewWindow;
 use windows::Wdk::System::SystemServices::RtlGetVersion;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Shell::{
     ABE_BOTTOM, ABM_ACTIVATE, ABM_GETAUTOHIDEBAREX, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
     ABM_WINDOWPOSCHANGED, ABN_FULLSCREENAPP, ABN_POSCHANGED, APPBARDATA, DefSubclassProc,
     RemoveWindowSubclass, SHAppBarMessage, SetWindowSubclass,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, PostMessageW, SPI_SETWORKAREA, STYLESTRUCT, SetWindowLongPtrW,
-    WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_NCDESTROY, WM_SETTINGCHANGE,
-    WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId,
+    IsIconic, IsWindow, IsWindowVisible, PostMessageW, SPI_SETWORKAREA, STYLESTRUCT,
+    SetForegroundWindow, SetWindowLongPtrW, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE,
+    WM_DPICHANGED, WM_NCDESTROY, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGED,
+    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 use super::{DisplayEvent, Platform};
@@ -50,6 +54,9 @@ const WM_DISPLAYS_CHANGED: u32 = WM_APP + 1;
 const WM_APPBAR: u32 = WM_APP + 2;
 /// Posted to ourselves for `ABN_FULLSCREENAPP`, for the same reason; `wParam` is the new state.
 const WM_FULL_SCREEN: u32 = WM_APP + 3;
+/// Posted to ourselves when the strip is activated, to hand activation on once that is done;
+/// `lParam` is the window that lost it.
+const WM_HAND_BACK: u32 = WM_APP + 4;
 /// Physical pixels left uncovered at the bottom when an auto-hide taskbar shares the strip's edge,
 /// so the pointer can still reach the hidden taskbar's sliver and reveal it.
 const AUTO_HIDE_MARGIN: i32 = 2;
@@ -248,12 +255,93 @@ unsafe extern "system" fn strip_style_proc(
             let change = unsafe { &mut *(lparam.0 as *mut STYLESTRUCT) };
             change.styleNew = strip_ex_style(change.styleNew);
         }
+        // `WS_EX_NOACTIVATE` keeps clicks from activating the strip over other apps, but not over
+        // the Studio: its webview, in the same input queue, activates the strip when clicked. The
+        // strip never stays active: it hands activation back (ADR 0015 §1).
+        WM_ACTIVATE if wparam.0 & 0xFFFF != WA_INACTIVE as usize => unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_HAND_BACK, WPARAM(0), lparam);
+        },
+        WM_HAND_BACK => {
+            unsafe { hand_back(hwnd, HWND(lparam.0 as _)) };
+            return LRESULT(0);
+        }
         WM_NCDESTROY => unsafe {
             let _ = RemoveWindowSubclass(hwnd, Some(strip_style_proc), id);
         },
         _ => {}
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// Activates the window the strip took activation from, or, if that is gone (the Studio just
+/// closed), the topmost window that could have been active instead. Does nothing if the strip is
+/// no longer the foreground window.
+unsafe fn hand_back(strip: HWND, previous: HWND) {
+    unsafe {
+        if GetForegroundWindow() != strip {
+            return;
+        }
+        let target = if !previous.is_invalid() && IsWindow(Some(previous)).as_bool() {
+            Some(previous)
+        } else {
+            topmost_activatable()
+        };
+        if let Some(target) = target {
+            let _ = SetForegroundWindow(target);
+        }
+    }
+}
+
+/// What decides whether a window can take activation from the strip.
+struct Candidate {
+    own_process: bool,
+    visible: bool,
+    minimized: bool,
+    cloaked: bool,
+    ex_style: u32,
+}
+
+/// A window of another app the user could have been using: shown, not minimized, not on another
+/// virtual desktop, not a tool window and not one that refuses activation.
+fn can_take_activation(window: &Candidate) -> bool {
+    !window.own_process
+        && window.visible
+        && !window.minimized
+        && !window.cloaked
+        && window.ex_style & (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) == 0
+}
+
+/// The first window, in z-order from the top, that can take activation.
+fn topmost_activatable() -> Option<HWND> {
+    unsafe extern "system" fn visit(hwnd: HWND, found: LPARAM) -> windows::core::BOOL {
+        let mut pid = 0;
+        let mut cloaked = 0u32;
+        let candidate = unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let _ = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                (&raw mut cloaked).cast(),
+                size_of::<u32>() as u32,
+            );
+            Candidate {
+                own_process: pid == GetCurrentProcessId(),
+                visible: IsWindowVisible(hwnd).as_bool(),
+                minimized: IsIconic(hwnd).as_bool(),
+                cloaked: cloaked != 0,
+                ex_style: GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32,
+            }
+        };
+        if can_take_activation(&candidate) {
+            unsafe { *(found.0 as *mut Option<HWND>) = Some(hwnd) };
+            return false.into();
+        }
+        true.into()
+    }
+    let mut found: Option<HWND> = None;
+    // Stopping early reports an error; `found` says whether a window was found.
+    let _ = unsafe { EnumWindows(Some(visit), LPARAM((&raw mut found) as isize)) };
+    found
 }
 
 unsafe extern "system" fn display_proc(
@@ -326,6 +414,46 @@ mod tests {
     fn strip_style_is_a_tool_window_without_app_window() {
         let style = strip_ex_style(WS_EX_APPWINDOW.0 | 0x0800_0000);
         assert_eq!(style, WS_EX_TOOLWINDOW.0 | 0x0800_0000);
+    }
+
+    #[test]
+    fn hands_activation_only_to_other_apps_ordinary_windows() {
+        let window = || Candidate {
+            own_process: false,
+            visible: true,
+            minimized: false,
+            cloaked: false,
+            ex_style: 0,
+        };
+        assert!(can_take_activation(&window()));
+        for other in [
+            Candidate {
+                own_process: true,
+                ..window()
+            },
+            Candidate {
+                visible: false,
+                ..window()
+            },
+            Candidate {
+                minimized: true,
+                ..window()
+            },
+            Candidate {
+                cloaked: true,
+                ..window()
+            },
+            Candidate {
+                ex_style: WS_EX_TOOLWINDOW.0,
+                ..window()
+            },
+            Candidate {
+                ex_style: WS_EX_NOACTIVATE.0,
+                ..window()
+            },
+        ] {
+            assert!(!can_take_activation(&other));
+        }
     }
 
     #[test]

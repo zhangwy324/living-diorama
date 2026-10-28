@@ -1,4 +1,8 @@
-import { connectDesktopShell, connectLibraryStore } from "@living-diorama/desktop-integration";
+import {
+  connectDesktopShell,
+  connectLibraryStore,
+  serveStudio,
+} from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
 import type { AssetSummary, SimulationSnapshot, SpeciesSummary } from "@living-diorama/simulation";
 import { useEffect, useRef, useState } from "react";
@@ -7,8 +11,9 @@ import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
 import { EventCounter } from "./event-counts";
 import { startSimulation, type SimulationClient } from "./simulation-client";
-import { openSpeciesLibrary } from "./species-library";
+import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { StripResizeHandle } from "./StripResizeHandle";
+import type { LibrarySnapshot, StudioRequests } from "./studio-protocol";
 
 const shell = connectDesktopShell();
 const libraryStore = connectLibraryStore();
@@ -68,16 +73,31 @@ export function App() {
     const assets = new Map<string, AssetSummary>();
     const species = new Map<string, SpeciesSummary>();
     let latest: SimulationSnapshot | undefined;
+    // The Studio talks to the world here (ADR 0015 §5); it is told whenever the library changes.
+    let library: SpeciesLibrary | undefined;
+    const snapshot = (): LibrarySnapshot => ({ species: library?.list() ?? [] });
+    const studio = serveStudio<StudioRequests, LibrarySnapshot>({ snapshot });
+    const pushLibrary = () =>
+      void studio
+        .pushLibrary(snapshot())
+        .catch((error: unknown) => console.warn("Could not update the Studio", error));
     // The library registers its species once the world is ready (ADR 0014 §8). Until the Studio
     // gives it a UI, development builds reach it from the console.
     const openLibrary = () =>
-      void openSpeciesLibrary(libraryStore, {
-        registerSpecies: client.registerSpecies,
-        spawn: client.spawn,
-        despawn: client.despawn,
-        creatures: () => latest?.creatures ?? [],
-      }).then((library) => {
-        if (import.meta.env.DEV && !stopped) installLibraryDevHook(library);
+      void openSpeciesLibrary(
+        libraryStore,
+        {
+          registerSpecies: client.registerSpecies,
+          spawn: client.spawn,
+          despawn: client.despawn,
+          creatures: () => latest?.creatures ?? [],
+        },
+        { onChange: pushLibrary },
+      ).then((opened) => {
+        if (stopped) return;
+        library = opened;
+        pushLibrary();
+        if (import.meta.env.DEV) installLibraryDevHook(opened);
       });
     const client = startSimulation({
       onReady: ({ scene, navigations, ...content }) => {
@@ -116,6 +136,7 @@ export function App() {
       view.current = undefined;
       simulation.current = undefined;
       client.stop();
+      studio.close();
       created?.dispose();
     };
     return stop;
@@ -152,6 +173,7 @@ export function App() {
         onResetCamera={() => view.current?.resetCamera()}
         onToggleDebug={toggleDebug}
         onHide={() => void shell.hide()}
+        onOpenStudio={() => void shell.openStudio()}
       />
     </div>
   );

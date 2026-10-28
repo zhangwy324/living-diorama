@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "studio",
+  "description": "Creation Studio window (ADR 0015 §3). Grants only what it uses: talking to the strip over targeted events, closing itself after the close dialog and writing to the diagnostics log.",
+  "windows": ["studio"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "core:window:allow-destroy",
+    "log:default"
+  ]
+}

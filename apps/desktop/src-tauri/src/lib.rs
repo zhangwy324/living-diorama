@@ -5,6 +5,7 @@ mod placement;
 mod platform;
 mod settings;
 mod shell;
+mod studio;
 mod tray;
 
 pub fn run() {
@@ -17,6 +18,7 @@ pub fn run() {
             shell::commands::set_expanded,
             shell::commands::hide,
             shell::commands::quit_ready,
+            studio::commands::open_studio,
             event_counts::record_event_counts,
             library::commands::list_library,
             library::commands::load_library_drawing,

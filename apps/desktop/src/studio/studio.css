@@ -1,0 +1,174 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #2f3b2f;
+  color: #eef3e8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.studio {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #263026;
+}
+
+.tool-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.toolbar button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #f4f7ee;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 16%);
+}
+
+.toolbar button[aria-pressed="true"] {
+  background: rgb(110 160 90 / 80%);
+}
+
+.toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbar svg {
+  fill: currentColor;
+}
+
+.toolbar svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.palette .swatch {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgb(0 0 0 / 30%);
+  border-radius: 50%;
+}
+
+.palette .swatch[aria-pressed="true"] {
+  outline: 2px solid #eef3e8;
+  outline-offset: 2px;
+}
+
+.sheet-area {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  container-type: size;
+  display: grid;
+  place-items: center;
+}
+
+/* Square, as large as the area allows. */
+.sheet {
+  position: relative;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+}
+
+.drawing {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  background: #ece8dc;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* 230 of the canvas's 256 units down. */
+.guide {
+  position: absolute;
+  top: calc(100% * 230 / 256);
+  right: 0;
+  left: 0;
+  border-top: 2px dashed rgb(47 59 47 / 35%);
+  pointer-events: none;
+}
+
+.guide span {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  font-size: 12px;
+  color: rgb(47 59 47 / 60%);
+  user-select: none;
+}
+
+.close-dialog {
+  max-width: 360px;
+  padding: 20px;
+  border: 0;
+  border-radius: 8px;
+  color: #eef3e8;
+  background: #263026;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 50%);
+}
+
+.close-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.close-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.close-dialog p {
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+
+.close-dialog-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.close-dialog-buttons button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: rgb(255 255 255 / 12%);
+  cursor: pointer;
+}
+
+.close-dialog-buttons button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
