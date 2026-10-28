@@ -155,8 +155,11 @@ describe("Registry", () => {
       triggers: [0.4, 0.9, 1],
       cue: { cue: "hungry", from: 0.8 },
       atMax: { speedFactor: 0.8 },
+      rateTrait: "core:appetite",
+      variation: 0.15,
     };
     expectOk(registries.needs.validate(hunger));
+    expectOk(registries.needs.validate({ ...hunger, cue: undefined }));
     expectOk(
       registries.needs.validate({
         id: "core:tiredness",
@@ -170,8 +173,10 @@ describe("Registry", () => {
       ...hunger,
       perHour: { awake: "fast" },
       triggers: [0.9, 0.5, 1.5],
-      cue: { cue: "starving", from: 0 },
+      cue: { cue: "eating", from: 0 },
       atMax: { speedFactor: 2 },
+      rateTrait: "appetite",
+      variation: 1,
     });
     expect(bad.ok ? [] : bad.diagnostics.map((d) => `${d.path.join(".")}: ${d.message}`)).toEqual([
       "perHour.awake: Expected the change per hour awake",
@@ -179,10 +184,51 @@ describe("Registry", () => {
       "triggers.1: Triggers must be in ascending order",
       "triggers.2: A trigger must be a number in (0, 1]",
       "triggers: Triggers must include actAt",
-      'cue.cue: Unknown cue "starving" (expected one of eating, sleeping, hungry)',
+      'cue.cue: Unknown need cue "eating" (expected one of hungry)',
       "cue.from: A cue's from must be a number in (0, 1]",
       "atMax.speedFactor: speedFactor must be a number in (0, 1]",
+      'rateTrait: Expected a namespaced content ID like "core:appetite"',
+      "variation: variation must be a number in [0, 1)",
     ]);
+    // A null cue is reported, not thrown on.
+    const nullCue = registries.needs.validate({ ...hunger, cue: null });
+    expect(nullCue.ok ? [] : nullCue.diagnostics.map((d) => d.path.join("."))).toEqual(["cue"]);
+  });
+
+  it("validates action cues against the action cue list", () => {
+    const registries = createRegistries();
+    expectOk(registries.actions.validate({ id: "core:eat", version: "1.0.0", cue: "eating" }));
+    const result = registries.actions.validate({ id: "core:eat", version: "1.0.0", cue: "hungry" });
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.message)).toEqual([
+      'Unknown action cue "hungry" (expected one of eating, sleeping)',
+    ]);
+  });
+
+  it("resolves a need's rate trait", () => {
+    const registries = createRegistries();
+    expectOk(
+      registries.needs.register({
+        id: "core:hunger",
+        version: "1.0.0",
+        perHour: { awake: 0.6, asleep: 0.06 },
+        actAt: 0.4,
+        triggers: [0.4],
+        rateTrait: "core:appetite",
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: needs/core:hunger rateTrait: "core:appetite" is not registered in traits (unresolved_reference)',
+    ]);
+    expectOk(
+      registries.traits.register({
+        id: "core:appetite",
+        version: "1.0.0",
+        default: 1,
+        min: 0.5,
+        max: 2,
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
   });
 
   it("validates senses and traits: a default within [min, max]", () => {
@@ -208,6 +254,50 @@ describe("Registry", () => {
     expect(missing.ok ? [] : missing.diagnostics.map((d) => d.path.join("."))).toEqual([
       "default",
       "max",
+    ]);
+    const odd = registries.traits.validate({
+      id: "core:nocturnal",
+      version: "1.0.0",
+      default: 0.5,
+      min: 0,
+      max: 1,
+      integer: true,
+    });
+    expect(odd.ok ? [] : odd.diagnostics.map((d) => d.message)).toEqual([
+      "default must be a whole number",
+    ]);
+    const varied = registries.senses.validate({
+      id: "core:vision",
+      version: "1.0.0",
+      default: 8,
+      min: 1,
+      max: 30,
+      variation: -0.1,
+      integer: "yes",
+    });
+    expect(varied.ok ? [] : varied.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "integer",
+      "variation",
+    ]);
+  });
+
+  it("checks that an integer trait's species value is a whole number", () => {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(
+      registries.traits.register({
+        id: "core:nocturnal",
+        version: "1.0.0",
+        default: 0,
+        min: 0,
+        max: 1,
+        integer: true,
+      }),
+    );
+    expectOk(registries.species.register({ ...species, traits: { "core:nocturnal": 0.5 } }));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: species/test:pebble traits.core:nocturnal: "core:nocturnal" is 0.5, expected a whole number (invalid_value)',
     ]);
   });
 });

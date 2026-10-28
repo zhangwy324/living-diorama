@@ -87,13 +87,15 @@ Agreed with the owner before implementation. Where these and the decisions above
 
 - **§1, tiredness:** `actAt` is 0.9 and tiredness rises from 0 to 1 in 18 hours awake, so dusk (§13), not a nap at 17:00, sends a creature to bed. It still falls to 0 in 8 hours asleep.
 - **§1, hunger asleep:** hunger rises at a tenth of its awake rate while asleep, not half, so a creature sleeps through the night.
-- **§1 and §7, triggers:** a need declares a list of trigger values, ascending and including `actAt` (`core:hunger`: 0.4, 0.9, 1). Rising across any of them starts an evaluation.
-- **§1, §15 and §18, need data:** a need also declares its cue (`core:hunger`: `"hungry"` from 0.8) and its effect at 1 (`core:hunger`: `atMax: { speedFactor: 0.8 }`), so §18's slower walk is data, not code.
+- **§1 and §7, triggers:** a need declares a list of trigger values, ascending and including `actAt` (`core:hunger`: 0.4, 0.9, 1). Rising across any of them starts an evaluation. A crossing of `t` is `previous < t && current >= t`, so the trigger at 1 fires even though the value is clamped to 1.
+- **§1, §15 and §18, need data:** a need also declares its cue (`core:hunger`: `"hungry"` from 0.8) and its effect at 1 (`core:hunger`: `atMax: { speedFactor: 0.8 }`), so §18's slower walk is data, not code. Need cues (`hungry`) and action cues (`eating`, `sleeping`) are separate lists, so a need can't declare an action's cue.
 - **§2, affordance entries:** `AffordanceType` gains `paramsSchema`, as a surface type has, and an optional `remember` cap. `core:food` remembers 8 and `core:shelter` 4, so §10's caps come from the entries, not from IDs.
 - **§3, block radius:** `blockRadius` lives on the prop type and is multiplied by the placement's `transform.scale` (amends ADR 0005 §8). Navigation is otherwise unchanged.
 - **§3, prop types:** the registry is named `props`. The five types are `hollow:pine`, `hollow:round-tree`, `hollow:rock`, `hollow:bush` and `hollow:mushroom`, with display names. `eatSeconds` is about 5 for a mushroom and 10 for a bush.
 - **§3 and §4, schema versions:** the world and structure schemas go to version 2 and `prop` starts at 1. A species gains optional `senses` and `traits` (default `{}`) without a species version bump.
-- **§4, ranges:** a sense or trait entry declares `default`, `min` and `max`, and a species' values are checked against them when references resolve. `core:nocturnal` takes only 0 or 1 for now.
+- **§4, ranges:** a sense or trait entry declares `default`, `min` and `max`, and a species' values are checked against them when references resolve. An entry may also declare `integer: true`, and then a species value must be a whole number: `core:nocturnal` takes only 0 or 1.
+- **§4, appetite:** a need may declare `rateTrait`, a registered trait whose value scales both of its rates. `core:hunger` declares `core:appetite`. The engine reads the link from the need, never from the trait's ID.
+- **§16, variation as data:** a need or sense may declare `variation`. Each individual's rates (need) or value (sense) are scaled by a factor drawn once in [1 − variation, 1 + variation]. `core:hunger`, `core:tiredness` and `core:vision` declare 0.15. The engine applies it to whichever entries declare it, without branching on IDs.
 - **§4, drawn species:** the library entry migration from version 1 to 2 adds `core:feed`, `core:rest` and `senses: { "core:vision": 8 }` to stored drawn species.
 
 ### Time and decisions
@@ -129,11 +131,11 @@ Agreed with the owner before implementation. Where these and the decisions above
 - **§20, decision bound:** on average at most about one decision per creature per 10 simulated seconds, and at most 3 interruptions per minute.
 - **Exit:** step 5 is done when eating bobs, hungry bubbles, creatures sleeping with z's near round trees and homes are visible; dusk and dawn change smoothly and the Studio stays in daylight; the debug overlay shows needs, knowledge and home; `pnpm check` and `pnpm soak` pass with the §20 checks; a 20-creature spot check shows no regression against [performance](../performance.md); a manual checklist entry is added and run by the owner; and this ADR records every departure.
 - **Open:** whether step 5 ships as v0.3, decided before PR 6.
-- **PRs:** step 5 lands as 2a needs, senses and traits registries; 2b prop types; 3a time of day and 3b night lighting, in parallel; 3c the needs engine; 4a food, 4b cue rendering, 4c the long-run harness and 4d the debug overlay, in parallel; 5a shelter, sleep and home; 5b drawn species defaults, the library migration and the release grace; 6 tuning, the §20 checks, docs, the manual checklist and performance.
+- **PRs:** step 5 lands as 2a needs, senses and traits registries; 2b prop types; 3a time of day and 3b night lighting, in parallel; 3c the needs engine, which also defines the snapshot's cues (`CreatureSnapshot.cues`); 4a food, 4b cue rendering, 4c the long-run harness and 4d the debug overlay, in parallel; 5a shelter, sleep and home; 5b drawn species defaults, the library migration and the release grace; 6 tuning, the §20 checks, docs, the manual checklist and performance.
 
 ### As built
 
-- **PR 2a:** a need's rates are `perHour: { awake, asleep }`, signed, so tiredness asleep is −1/8. Cues are a fixed vocabulary in `extension-api` (`eating`, `sleeping`, `hungry`). `core:vision` ranges over 1–30 m and `core:appetite` over 0.5–2. The affordance params schemas live in `content-schema`, and `core:crossable` gets an empty one. Structures still list their affordances, so params are checked only from PR 2b. Drawn species get empty `senses` and `traits` until PR 5b. All starting values.
+- **PR 2a:** a need's rates are `perHour: { awake, asleep }`, signed, so tiredness asleep is −1/8. Cues are fixed vocabularies in `extension-api`, `ACTION_CUES` and `NEED_CUES`, and `simulation` re-exports their types so the renderer needs no `extension-api` dependency. `ActionType` gains an optional `cue`. `core:vision` ranges over 1–30 m and `core:appetite` over 0.5–2. The affordance params schemas live in `content-schema`, and `core:crossable` gets an empty one. Structures still list their affordances, so params are checked only from PR 2b. Drawn species get empty `senses` and `traits` until PR 5b. All starting values.
 
 ## Consequences
 

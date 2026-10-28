@@ -13,6 +13,9 @@ const HUNGER_HOURS_TO_FULL = 1.5;
 const TIREDNESS_HOURS_TO_FULL = 18;
 const TIREDNESS_HOURS_TO_RESTED = 8;
 
+/** Individuals differ by up to 15% in need rates and vision range (ADR 0018 §16). */
+const INDIVIDUAL_VARIATION = 0.15;
+
 export const coreNeeds: NeedType[] = [
   {
     id: "core:hunger",
@@ -22,6 +25,8 @@ export const coreNeeds: NeedType[] = [
     triggers: [0.4, 0.9, 1],
     cue: { cue: "hungry", from: 0.8 },
     atMax: { speedFactor: 0.8 },
+    rateTrait: "core:appetite",
+    variation: INDIVIDUAL_VARIATION,
   },
   {
     id: "core:tiredness",
@@ -29,17 +34,25 @@ export const coreNeeds: NeedType[] = [
     perHour: { awake: 1 / TIREDNESS_HOURS_TO_FULL, asleep: -1 / TIREDNESS_HOURS_TO_RESTED },
     actAt: 0.9,
     triggers: [0.9],
+    variation: INDIVIDUAL_VARIATION,
   },
 ];
 
 export const coreSenses: SenseType[] = [
   /** Range in metres. */
-  { id: "core:vision", version: "1.0.0", default: 8, min: 1, max: 30 },
+  {
+    id: "core:vision",
+    version: "1.0.0",
+    default: 8,
+    min: 1,
+    max: 30,
+    variation: INDIVIDUAL_VARIATION,
+  },
 ];
 
 export const coreTraits: TraitType[] = [
-  /** 0 sleeps at night, 1 sleeps by day. Only 0 and 1 are used for now. */
-  { id: "core:nocturnal", version: "1.0.0", default: 0, min: 0, max: 1 },
+  /** 0 sleeps at night, 1 sleeps by day. */
+  { id: "core:nocturnal", version: "1.0.0", default: 0, min: 0, max: 1, integer: true },
   /** Scales how fast hunger rises. */
   { id: "core:appetite", version: "1.0.0", default: 1, min: 0.5, max: 2 },
 ];

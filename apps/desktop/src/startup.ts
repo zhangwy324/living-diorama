@@ -28,7 +28,7 @@ export const DRAWN_SPECIES_DEFAULTS = {
   capabilities: { "core:walk": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander"],
-  // The mossling's senses arrive with the drawn species' feed and rest behaviors (ADR 0018 §4).
+  // Drawn species get vision 8 with core:feed and core:rest in PR 5b (ADR 0018 §4).
   senses: {},
   traits: {},
 };
