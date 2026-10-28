@@ -11,6 +11,7 @@ it("falls back to the no-op shell outside Tauri", async () => {
   await expect(shell.setStripHeight(200)).resolves.toBeUndefined();
   await expect(shell.setPaused(true)).resolves.toBeUndefined();
   await expect(shell.setExpanded(true)).resolves.toBeUndefined();
+  await expect(shell.setFullScreen(true)).resolves.toBeUndefined();
   await expect(shell.hide()).resolves.toBeUndefined();
   await expect(
     shell.recordEventCounts({ stuck: 0, recovered: 0, pathFailed: 0 }),
@@ -24,6 +25,7 @@ it("never reports a change from the no-op shell", () => {
   for (const stop of [
     noopShell.onPausedChanged(unexpected),
     noopShell.onExpandedChanged(unexpected),
+    noopShell.onFullScreenChanged(unexpected),
     noopShell.onQuitRequested(unexpected),
   ]) {
     expect(stop).toBeTypeOf("function");

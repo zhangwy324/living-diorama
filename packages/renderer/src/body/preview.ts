@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
+import { followPixelRatio } from "../pixel-ratio";
 import { FrameThrottle } from "../throttle";
 import { buildBody, type Body } from "./body";
 import type { Pixels } from "./pixels";
@@ -55,7 +56,6 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   container.appendChild(canvas);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
@@ -126,6 +126,11 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
     dirty = true;
   });
   resizer.observe(canvas);
+  // Sharp on every monitor the Studio is moved to (issue #55).
+  const stopPixelRatio = followPixelRatio(window, (ratio) => {
+    renderer.setPixelRatio(ratio);
+    dirty = true;
+  });
 
   return {
     setDrawing(pixels, highlights = {}) {
@@ -156,6 +161,7 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
     dispose() {
       cancelAnimationFrame(request);
       resizer.disconnect();
+      stopPixelRatio();
       clearBody();
       grid.dispose();
       renderer.dispose();

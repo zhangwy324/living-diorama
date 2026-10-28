@@ -7,11 +7,15 @@ use std::cell::Cell;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::WebviewWindow;
 use windows::Wdk::System::SystemServices::RtlGetVersion;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CLOAK, DWMWA_CLOAKED, DWMWA_TRANSITIONS_FORCEDISABLED, DwmGetWindowAttribute,
+    DwmSetWindowAttribute,
+};
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Shell::{
@@ -22,7 +26,8 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId,
     IsIconic, IsWindow, IsWindowVisible, PostMessageW, SPI_SETWORKAREA, STYLESTRUCT,
-    SetForegroundWindow, SetWindowLongPtrW, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+    SetWindowLongPtrW, SetWindowPos, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE,
     WM_DPICHANGED, WM_NCDESTROY, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGED,
     WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
@@ -44,6 +49,10 @@ struct AppBar {
     /// work-area change our own reservation causes doesn't start another round.
     reserved: Option<Rect>,
 }
+
+/// Whether the window has the normal shape, so the strip's style subclass stands aside. There is
+/// one strip window, and the subclass procedure is a plain function, so the flag is global.
+static NORMAL_SHAPE: AtomicBool = AtomicBool::new(false);
 
 const STRIP_STYLE_SUBCLASS: usize = 1;
 const DISPLAY_SUBCLASS: usize = 2;
@@ -70,6 +79,46 @@ impl Platform for Windows {
             // Tauri rewrites the extended style when some window flags change; keep ours.
             subclass(hwnd, Some(strip_style_proc), STRIP_STYLE_SUBCLASS, 0)
         }
+    }
+
+    /// Tauri has no call for `WS_EX_TOOLWINDOW` (ADR 0016 §8), so it is set here, with
+    /// `SWP_FRAMECHANGED` for the frame to follow.
+    fn set_normal_window(&self, window: &WebviewWindow, normal: bool) -> tauri::Result<()> {
+        let hwnd = hwnd(window)?;
+        unsafe {
+            // Before the style changes, so the strip's subclass lets the change through.
+            NORMAL_SHAPE.store(normal, Ordering::SeqCst);
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            let style = if normal {
+                normal_ex_style(style)
+            } else {
+                strip_ex_style(style)
+            };
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style as isize);
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .map_err(|error| tauri::Error::Io(error.into()))?;
+            if !normal {
+                // The normal window was active; the strip never stays so.
+                hand_back(hwnd, HWND::default());
+            }
+        }
+        Ok(())
+    }
+
+    fn set_window_animations(&self, window: &WebviewWindow, on: bool) -> tauri::Result<()> {
+        set_dwm_flag(window, DWMWA_TRANSITIONS_FORCEDISABLED, !on)
+    }
+
+    fn set_cloaked(&self, window: &WebviewWindow, cloaked: bool) -> tauri::Result<()> {
+        set_dwm_flag(window, DWMWA_CLOAK, cloaked)
     }
 
     fn watch_displays(
@@ -181,9 +230,32 @@ impl Platform for Windows {
     }
 }
 
+/// Sets a window attribute that DWM takes as a `BOOL`.
+fn set_dwm_flag(
+    window: &WebviewWindow,
+    attribute: windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE,
+    value: bool,
+) -> tauri::Result<()> {
+    let value = windows::core::BOOL::from(value);
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd(window)?,
+            attribute,
+            (&raw const value).cast(),
+            size_of::<windows::core::BOOL>() as u32,
+        )
+    }
+    .map_err(|error| tauri::Error::Io(error.into()))
+}
+
 /// A tool window has no taskbar button and no Alt+Tab entry; `WS_EX_APPWINDOW` would force both.
 fn strip_ex_style(style: u32) -> u32 {
     (style | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0
+}
+
+/// The normal window has both.
+fn normal_ex_style(style: u32) -> u32 {
+    (style | WS_EX_APPWINDOW.0) & !WS_EX_TOOLWINDOW.0
 }
 
 /// An `APPBARDATA` for the strip's window on the bottom edge.
@@ -250,6 +322,10 @@ unsafe extern "system" fn strip_style_proc(
     id: usize,
     _data: usize,
 ) -> LRESULT {
+    // The normal window keeps its own style and may stay active (ADR 0016 §8).
+    if NORMAL_SHAPE.load(Ordering::SeqCst) && msg != WM_NCDESTROY {
+        return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    }
     match msg {
         WM_STYLECHANGING if wparam.0 as i32 == GWL_EXSTYLE.0 => {
             let change = unsafe { &mut *(lparam.0 as *mut STYLESTRUCT) };
@@ -414,6 +490,14 @@ mod tests {
     fn strip_style_is_a_tool_window_without_app_window() {
         let style = strip_ex_style(WS_EX_APPWINDOW.0 | 0x0800_0000);
         assert_eq!(style, WS_EX_TOOLWINDOW.0 | 0x0800_0000);
+    }
+
+    #[test]
+    fn normal_style_is_an_app_window_and_switches_back() {
+        let strip = WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        let normal = normal_ex_style(strip);
+        assert_eq!(normal, WS_EX_APPWINDOW.0 | WS_EX_NOACTIVATE.0);
+        assert_eq!(strip_ex_style(normal), strip);
     }
 
     #[test]

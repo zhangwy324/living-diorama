@@ -16,6 +16,7 @@ pub fn run() {
             shell::set_strip_height,
             shell::commands::set_paused,
             shell::commands::set_expanded,
+            shell::commands::set_full_screen,
             shell::commands::hide,
             shell::commands::quit_ready,
             studio::commands::open_studio,

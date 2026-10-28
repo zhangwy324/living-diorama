@@ -68,13 +68,12 @@ Repeat at 100%, 150% and 200% scaling (Settings → System → Display → Scale
 - [ ] Changing the scale or the resolution of the strip's monitor re-places it at the same logical height.
 - [ ] Two monitors: disconnecting the strip's monitor moves the strip to the primary.
 
-Tray, expanded mode and settings (once, at any scale):
+Tray and settings (once, at any scale):
 
 - [ ] The tray menu reads Creation Studio, Hide, Expand, Pause, Always on top, Reserve screen space, Monitor ▸, Open log folder, Quit right after launch, and its labels and checks follow every change (Show/Hide, Expand/Collapse, Pause/Resume, the always-on-top and reserve-space checks, the current monitor's check).
 - [ ] Left-clicking the tray icon several times in a row hides and shows the strip each time.
 - [ ] Pause freezes the creatures and Resume restarts them; hiding and showing does not pause.
 - [ ] Several menu actions in a row each take effect (e.g. Expand, Collapse, Always on top on and off, Monitor ▸ Display 2 and back).
-- [ ] Expand covers about 70% of the strip's monitor, centred; the camera keeps its view; Collapse returns the strip to where it was. Expanded mode has no resize handle along the top edge.
 - [ ] With Always on top on, a maximized window does not cover the strip; with it off, it does (Reserve screen space off).
 - [ ] After Quit and relaunch, the height, monitor, always-on-top and reserve-space choices are as they were. Deleting or corrupting `%APPDATA%\com.livingdiorama.desktop\settings.json` starts with the defaults.
 
@@ -83,7 +82,7 @@ Reserved screen space (once, at any scale; two monitors where noted):
 - [ ] With Reserve screen space on, a maximized window stops at the strip's top edge, and the strip sits directly above the taskbar, not above its own reserved band.
 - [ ] Dragging the height handle neither flickers nor blanks the strip. Half a second after letting go, the maximized window's bottom edge meets the strip's new top edge; the strip doesn't creep up the screen.
 - [ ] Hiding the strip lets the maximized window grow to the taskbar; showing it shrinks the window again.
-- [ ] Expand and Collapse don't move or resize the maximized window.
+- [ ] Expand gives the band back, so the maximized window grows to the taskbar; Collapse takes it again and the window shrinks back, once per switch, with no flicker.
 - [ ] Turning Reserve screen space off gives the space back at once; turning it on takes it again.
 - [ ] Two monitors: Monitor ▸ Display 2 moves the reservation with the strip; the first monitor's maximized windows grow back.
 - [ ] Moving the taskbar to the left or top edge keeps the strip at the bottom, spanning the work area's width.
@@ -94,10 +93,27 @@ Reserved screen space (once, at any scale; two monitors where noted):
 Controls overlay and lifecycle (once, at any scale):
 
 - [ ] Moving the pointer over the strip fades in the buttons in the top-right corner; moving it away fades them out. Clicking them never takes focus from the other app.
-- [ ] Pause/Resume, Expand/Collapse, Reset camera, debug overlays and Hide each work, and the overlay and the tray menu always agree (e.g. pause from the tray, resume from the overlay).
+- [ ] Pause/Resume, Expand/Collapse, Reset camera, debug overlays and Hide each work in the strip, and the overlay and the tray menu always agree (e.g. pause from the tray, resume from the overlay).
 - [ ] Hide from the overlay hides the strip; the tray icon brings it back with the creatures having moved on.
 - [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
 - [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
+
+Expanded window (at 100%, 150% and 200%, with two monitors; ADR 0016 §9). Expanding turns the strip's own window into a normal window. Before the first check, delete `expanded` from `settings.json`, or the whole file:
+
+- [ ] The first Expand opens maximized on the strip's monitor, filling the space the band gave back down to the taskbar. Un-maximizing gives a window of about 70% of the monitor, centred.
+- [ ] The normal window has a frame, resizes, moves, has a taskbar button and an Alt+Tab entry, and takes focus when clicked. It has no resize handle along the top edge.
+- [ ] Expand and Collapse several times in a row: the band goes and comes back once per switch, the strip returns to the same place and height, and it still never takes focus (click it, orbit, use its overlay: the other app stays active and typing goes to it). After Collapse, typing goes to the app that was in front before Expand, not to the strip.
+- [ ] Each shape has its own camera: orbit in the strip, expand (the default view), orbit there, collapse (the strip's view is back), expand again (the normal window's view is back). A relaunch starts both at the default view.
+- [ ] F11 enters and leaves full screen, covering the whole monitor including the taskbar; Esc leaves it; Esc outside full screen does nothing and never collapses. Home resets the camera, in and out of full screen.
+- [ ] The overlay offers Creation Studio, Pause/Resume, Collapse, Reset camera, debug overlays and Full screen (no Hide), and each works. Creation Studio opens or focuses the Studio.
+- [ ] The frame's X, the overlay's Collapse and the tray's Collapse each turn the window back into the strip; the app keeps running.
+- [ ] Minimizing is an ordinary minimize. On a minimized normal window the tray reads Show; Show and a left-click on the tray icon restore it in front. Left-clicking the tray icon on a normal window in view brings it to the front rather than hiding it.
+- [ ] Tray Hide hides the window in either shape and Show brings it back in the same shape. Always on top applies to the strip only. Monitor ▸ moves the strip, not the normal window: collapsing then puts the strip on the chosen monitor.
+- [ ] Full screen on each monitor, and back.
+- [ ] Drag the normal window onto a monitor with another scale (it neither jumps back nor flickers), collapse, expand: it comes back at the same place and size. The canvas stays sharp on each monitor (issue #55): in the dev tools console `document.querySelector("canvas").width / innerWidth` equals `devicePixelRatio` (capped at 2). The Studio's preview stays sharp when moved too.
+- [ ] Maximized, full screen and plain normal windows each come back that way after Collapse and Expand, and after Quit and relaunch (the app itself always starts as the strip). With the saved monitor unplugged, or its scale changed, Expand opens maximized on the strip's monitor instead.
+- [ ] Quit while expanded, then relaunch: the strip appears, without taking focus; Expand restores the saved geometry.
+- [ ] With a content error (e.g. a broken pack in development), the strip's Details opens the normal window listing every problem; it can be resized and closed back to the strip.
 
 Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015). M11 checked the overlay, single instance, focus, the close dialog, release, My creatures and the cap in the dev app with synthetic input; the tray item, quitting with the Studio open, real pen and mouse pressure, other scale factors and two-monitor sharpness are run in M12:
 
