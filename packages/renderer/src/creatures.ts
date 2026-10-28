@@ -1,4 +1,4 @@
-import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
+import { SIZE_CLASSES, type BodyShape, type SizeClass } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { buildBody, fallbackBody, type Body } from "./body/body";
 import { readImage, type ImageReader } from "./body/pixels";
@@ -14,6 +14,8 @@ export interface RenderSpecies {
   /** Asset ref of an image drawn facing right, feet at the bottom of the drawing. */
   appearance: string;
   sizeClass: SizeClass;
+  /** How the body is built from the image: how deep it is. */
+  body: BodyShape;
 }
 
 export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;
@@ -99,7 +101,8 @@ export class CreatureBodies {
       return undefined;
     }
     const { height } = SIZE_CLASSES[species.sizeClass];
-    const look: SpeciesLook = { body: fallbackBody(height) };
+    const { thickness } = species.body;
+    const look: SpeciesLook = { body: fallbackBody(height, thickness) };
     this.#bodies.push(look.body);
     this.#looks.set(speciesId, look);
 
@@ -111,7 +114,7 @@ export class CreatureBodies {
     this.#loads.push(
       this.#readImage(asset.url).then(
         (pixels) => {
-          const body = buildBody(pixels, height);
+          const body = buildBody(pixels, height, thickness);
           if (!body) {
             console.warn(`No opaque shape in ${species.appearance}`);
             return;

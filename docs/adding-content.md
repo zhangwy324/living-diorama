@@ -71,6 +71,7 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
   "name": "Hedgehog",
   "appearance": "meadow:sprites/hedgehog.svg",
   "sizeClass": "small",
+  "body": { "thickness": 0.3 },
   "capabilities": { "core:walk": 0.8 },
   "baseSpeed": 0.6,
   "behaviors": ["core:wander"]
@@ -87,6 +88,7 @@ A prop is not a registry type: it is a model asset placed in a world. Register t
   | `medium`   |        0.4 |        0.8 |
   | `large`    |        0.8 |        1.6 |
 
+- `body.thickness` (optional) is how deep the body is from front to back, as a share of its height: from 0.1 to 0.8, 0.4 if left out. The Studio's Thickness slider sets it for drawn creatures.
 - `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. v1 has one locomotion capability, `core:walk` (land and cave regions, slopes up to 35°). A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
 - `behaviors` lists what decides the creature's next action. v1 has `core:wander`. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
 
@@ -94,7 +96,7 @@ The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](
 
 ### Drawing an appearance
 
-The renderer traces the drawing's outline, with any holes in it, and extrudes it into a slab with straight walls, 40% of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md), [ADR 0017](adr/0017-hollow-bodies-and-fill.md)). The front shows the drawing, the back shows it mirrored, and the walls are coloured like the edge of the drawing beside them.
+The renderer traces the drawing's outline, with any holes in it, and extrudes it into a slab with straight walls, `body.thickness` of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md), [ADR 0017](adr/0017-hollow-bodies-and-fill.md)). The front shows the drawing, the back shows it mirrored, and the walls are coloured like the edge of the drawing beside them.
 
 - **Draw the creature facing right, side on,** with its feet at the bottom. The body turns to the creature's heading, so the drawing is what you see from the side.
 - **Use a transparent background.** A pixel counts as part of the body at 50% opacity or more. Padding around the drawing is ignored: the body is sized to what is drawn.

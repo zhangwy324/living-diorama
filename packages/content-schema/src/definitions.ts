@@ -33,10 +33,33 @@ export const SizeClassSchema = z.enum(
   Object.keys(SIZE_CLASSES) as [keyof typeof SIZE_CLASSES, ...(keyof typeof SIZE_CLASSES)[]],
 );
 
+/**
+ * The range of a body's depth from front to back, as a share of its drawn height (ADR 0017 §11).
+ * The default is the depth every body had before it could be chosen.
+ */
+export const BODY_THICKNESS = { min: 0.1, max: 0.8, default: 0.4 } as const;
+
+/** How a species' body is built from its appearance (ADR 0011, ADR 0017). */
+export const BodyShapeSchema = z.strictObject({
+  /** Depth from front to back as a share of the drawn height. */
+  thickness: z
+    .number()
+    .gte(BODY_THICKNESS.min, {
+      error: `Thickness must be at least ${BODY_THICKNESS.min} of the height`,
+    })
+    .lte(BODY_THICKNESS.max, {
+      error: `Thickness must be at most ${BODY_THICKNESS.max} of the height`,
+    })
+    .default(BODY_THICKNESS.default),
+});
+export type BodyShape = z.output<typeof BodyShapeSchema>;
+
 export const SpeciesDefinitionSchema = z.strictObject({
   ...header("species"),
   appearance: AssetRefSchema,
   sizeClass: SizeClassSchema,
+  /** Left out, every setting takes its default. */
+  body: BodyShapeSchema.prefault({}),
   /** Locomotion and other capabilities → speed factor relative to `baseSpeed` (ADR 0004). */
   capabilities: z
     .record(ContentIdSchema, z.number().positive())

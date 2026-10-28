@@ -1,6 +1,7 @@
+import { BODY_THICKNESS } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { BODY_DEPTH, bodyGeometry, buildBody, fallbackBody, triangulates } from "./body";
+import { bodyGeometry, buildBody, fallbackBody, triangulates } from "./body";
 import { traceOutline, type Point } from "./outline";
 import type { Pixels } from "./pixels";
 
@@ -122,11 +123,36 @@ describe("buildBody", () => {
     // Straight walls: the silhouette is the drawing, 40 × 80 px, and the body 40% as deep as tall.
     const scale = 0.8 / 80;
     expect(box.max.x - box.min.x).toBeCloseTo(40 * scale);
-    expect(box.max.z - box.min.z).toBeCloseTo(80 * BODY_DEPTH * scale);
+    expect(box.max.z - box.min.z).toBeCloseTo(80 * BODY_THICKNESS.default * scale);
     // Faces and walls share one material.
     expect(body.geometry.groups.map((g) => g.materialIndex)).toEqual([0, 1]);
     expect(body.material).toBeInstanceOf(THREE.Material);
     body.dispose();
+  });
+
+  it("makes the body as deep as the thickness asks, the same shape otherwise", () => {
+    const pixels = art("......", ".gggg.", ".gggg.", ".gg...", ".gg...", "......");
+    const depth = (body: { geometry: THREE.BufferGeometry }) => {
+      const box = size(body.geometry);
+      return box.max.z - box.min.z;
+    };
+    const thin = buildBody(pixels, 1, BODY_THICKNESS.min)!;
+    const thick = buildBody(pixels, 1, BODY_THICKNESS.max)!;
+    expect(depth(thin)).toBeCloseTo(BODY_THICKNESS.min);
+    expect(depth(thick)).toBeCloseTo(BODY_THICKNESS.max);
+    expect(depth(buildBody(pixels, 1)!)).toBeCloseTo(BODY_THICKNESS.default);
+    // The preview scales one body in z instead of rebuilding it: that must be the same body.
+    const position = (body: { geometry: THREE.BufferGeometry }) =>
+      body.geometry.getAttribute("position");
+    const scaled = buildBody(pixels, 1, 1)!;
+    scaled.geometry.scale(1, 1, BODY_THICKNESS.min);
+    expect(Array.from(position(scaled).array)).toEqual(
+      Array.from(position(thin).array).map((v) => expect.closeTo(v, 6) as unknown as number),
+    );
+    expect(Array.from(scaled.geometry.getAttribute("uv").array)).toEqual(
+      Array.from(thin.geometry.getAttribute("uv").array),
+    );
+    for (const body of [thin, thick, scaled]) body.dispose();
   });
 
   it("maps the faces onto the drawing's pixels", () => {
@@ -188,12 +214,19 @@ describe("buildBody", () => {
     expect(buildBody(art("...", "..."), 1)).toBeUndefined();
   });
 
+  it("makes the fallback block as thick as asked", () => {
+    const block = fallbackBody(1, BODY_THICKNESS.max);
+    const box = size(block.geometry);
+    expect(box.max.z - box.min.z).toBeCloseTo(BODY_THICKNESS.max);
+    block.dispose();
+  });
+
   it("has a neutral block of the same proportions as a fallback", () => {
     const block = fallbackBody(0.4);
     const box = size(block.geometry);
     expect(box.min.y).toBeCloseTo(0);
     expect(box.max.y).toBeCloseTo(0.4);
-    expect(box.max.z - box.min.z).toBeCloseTo(0.4 * BODY_DEPTH);
+    expect(box.max.z - box.min.z).toBeCloseTo(0.4 * BODY_THICKNESS.default);
     block.dispose();
   });
 });

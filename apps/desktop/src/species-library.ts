@@ -1,4 +1,5 @@
 import {
+  BODY_THICKNESS,
   error,
   formatDiagnostic,
   LIBRARY_ENTRY_SCHEMA_VERSION,
@@ -47,15 +48,17 @@ export interface SpeciesLibrary {
   /** Every species in the library, oldest first. */
   list(): LibrarySpecies[];
   /**
-   * Makes a species from a drawing and its image (PNG bytes), registers it and stores it. `id` is
-   * the lowercase UUID to keep it under, a fresh one by default; one already used is refused.
+   * Makes a species from a drawing and its image (PNG bytes), registers it and stores it.
+   * `options.id` is the lowercase UUID to keep it under, a fresh one by default; one already used
+   * is refused. `options.thickness` is the body's depth as a share of its height, the default
+   * one if left out.
    */
   save(
     drawing: Drawing,
     image: Uint8Array,
     name: string,
     sizeClass: SizeClass,
-    id?: string,
+    options?: SaveOptions,
   ): Promise<Result<LibrarySpecies>>;
   /** Adds a creature of a registered species at a random spawn point. Resolves with its ID. */
   addCreature(speciesId: string): Promise<Result<string>>;
@@ -65,6 +68,11 @@ export interface SpeciesLibrary {
    * unseen, until the next launch (ADR 0014 §9).
    */
   deleteSpecies(speciesId: string): Promise<Result<void>>;
+}
+
+export interface SaveOptions {
+  id?: string;
+  thickness?: number;
 }
 
 /** What the library needs of the running world. */
@@ -200,7 +208,7 @@ export async function openSpeciesLibrary(
         .map(({ species }) => species)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
 
-    async save(drawingInput, image, name, sizeClass, id = uuid()) {
+    async save(drawingInput, image, name, sizeClass, { id = uuid(), thickness } = {}) {
       const drawing = parseDrawing(drawingInput);
       if (!drawing.ok) return drawing;
       const ids = userSpeciesIds(id);
@@ -214,6 +222,7 @@ export async function openSpeciesLibrary(
         name,
         appearance: ids.appearanceId,
         sizeClass,
+        body: { thickness: thickness ?? BODY_THICKNESS.default },
         ...structuredClone(DRAWN_SPECIES_DEFAULTS),
       };
       const entry = parseLibraryEntry({

@@ -1,3 +1,4 @@
+import { BODY_THICKNESS } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
 import { followPixelRatio } from "../pixel-ratio";
@@ -21,6 +22,8 @@ export interface BodyPreview {
   setDrawing(pixels: Pixels | undefined, highlights?: BodyHighlights): void;
   /** The body's height in metres: its size class's. */
   setHeight(height: number): void;
+  /** The body's depth as a share of its height. It changes at once, without a rebuild. */
+  setThickness(thickness: number): void;
   /** While true nothing turns or renders, e.g. while a stroke is drawn, so drawing stays smooth. */
   setPaused(paused: boolean): void;
   dispose(): void;
@@ -70,17 +73,20 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.01, 50);
   let height = 1;
+  let thickness: number = BODY_THICKNESS.default;
+  /** The body's extent from its axis at a height of 1, before the depth is scaled. */
+  let extent = { x: 0.25, z: 0.5 };
   /** How far the body reaches from its axis while turning, at a height of 1. */
-  let reach = 0.5;
+  const reach = () => Math.hypot(extent.x, extent.z * thickness);
   // Wide or tall drawings get more room, so a turning body never leaves the view.
   const frame = () => {
     const view = Math.max(
       sizedView(height),
       height * HEIGHT_MARGIN,
-      (height * reach * REACH_MARGIN) / Math.min(1, camera.aspect),
+      (height * reach() * REACH_MARGIN) / Math.min(1, camera.aspect),
     );
     // `view` is what fits at the body's nearest point while it turns, which is closest.
-    const distance = view / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2)) + height * reach;
+    const distance = view / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2)) + height * reach();
     // Feet low in the view, but a body much smaller than the view not lost at its bottom.
     const target = new THREE.Vector3(0, Math.min(view * 0.42, height * 0.6), 0);
     camera.position
@@ -90,7 +96,7 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   };
   frame();
 
-  let body: { body: Body; highlight?: Highlight } | undefined;
+  let body: { body: Body; mesh: THREE.Mesh; highlight?: Highlight } | undefined;
   const clearBody = () => {
     if (!body) return;
     turntable.clear();
@@ -136,21 +142,31 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
     setDrawing(pixels, highlights = {}) {
       clearBody();
       dirty = true;
-      const built = pixels && buildBody(pixels, 1);
+      // Built as deep as it is tall and scaled to the thickness, so the slider needn't rebuild it.
+      // Walls are straight and their normals and texture coordinates don't depend on depth, so
+      // the scaled body is the one buildBody would make at that thickness.
+      const built = pixels && buildBody(pixels, 1, 1);
       if (!pixels || !built) return;
       const mesh = new THREE.Mesh(built.geometry, built.material);
+      mesh.scale.z = thickness;
       turntable.add(mesh);
       const highlight = createHighlight(pixels, highlights);
       if (highlight) mesh.add(new THREE.Mesh(built.geometry, highlight.material));
       built.geometry.computeBoundingBox();
       const box = built.geometry.boundingBox ?? new THREE.Box3();
-      reach = Math.hypot(Math.max(-box.min.x, box.max.x), Math.max(-box.min.z, box.max.z));
+      extent = { x: Math.max(-box.min.x, box.max.x), z: Math.max(-box.min.z, box.max.z) };
       frame();
-      body = highlight ? { body: built, highlight } : { body: built };
+      body = highlight ? { body: built, mesh, highlight } : { body: built, mesh };
     },
     setHeight(next) {
       height = next;
       turntable.scale.setScalar(height);
+      frame();
+      dirty = true;
+    },
+    setThickness(next) {
+      thickness = next;
+      if (body) body.mesh.scale.z = thickness;
       frame();
       dirty = true;
     },

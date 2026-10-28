@@ -35,6 +35,8 @@ export interface ReleaseParams {
   image: number[];
   name: string;
   sizeClass: SizeClass;
+  /** The body's depth as a share of its height. */
+  thickness: number;
 }
 
 export interface Released {
@@ -128,6 +130,7 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     image,
     name,
     sizeClass,
+    thickness,
   }: ReleaseParams): Promise<Released> => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Give your creature a name first.");
@@ -138,13 +141,10 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     let species = library.list().find((kept) => kept.speciesId === speciesId);
     if (!species) {
       makeRoom();
-      const saved = await library.save(
-        drawing,
-        Uint8Array.from(image),
-        trimmed,
-        sizeClass,
-        releaseId,
-      );
+      const saved = await library.save(drawing, Uint8Array.from(image), trimmed, sizeClass, {
+        id: releaseId,
+        thickness,
+      });
       if (!saved.ok)
         throw new Error(`${trimmed} couldn't be released: ${describe(saved.diagnostics)}`);
       species = saved.value;

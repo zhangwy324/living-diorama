@@ -130,7 +130,9 @@ describe("CreatureBodies", () => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
       resolveSpecies: (id) =>
-        id === "test:critter" ? { appearance: "test:img", sizeClass: "medium" } : undefined,
+        id === "test:critter"
+          ? { appearance: "test:img", sizeClass: "medium", body: { thickness: 0.25 } }
+          : undefined,
       resolveAsset: (ref) =>
         ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined,
       readImage,
@@ -143,12 +145,13 @@ describe("CreatureBodies", () => {
     return mesh.geometry.boundingBox!;
   };
 
-  it("shows a block until the drawing loads, then the body built once per species", async () => {
+  it("shows a block until the drawing loads, then the body built once per species, as thick as the species says", async () => {
     const { layer, bodies, readImage } = make();
     const poses = [creature("a", { x: 0, y: 0, z: 0 }), creature("b", { x: 1, y: 0, z: 0 })];
     bodies.update(poses);
     const block = bodyOf(layer, "a").geometry;
     expect(block.type).toBe("RoundedBoxGeometry");
+    expect(boxOf(bodyOf(layer, "a")).max.z * 2).toBeCloseTo(0.8 * 0.25);
     await bodies.ready;
     bodies.update(poses);
     expect(readImage).toHaveBeenCalledTimes(1);
@@ -158,6 +161,7 @@ describe("CreatureBodies", () => {
     expect(bodyOf(layer, "b").geometry).toBe(body.geometry);
     expect(bodyOf(layer, "b").position.toArray()).toEqual([1, 0, 0]);
     expect(boxOf(body).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
+    expect(boxOf(body).max.z - boxOf(body).min.z).toBeCloseTo(0.8 * 0.25);
     expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
   });
 

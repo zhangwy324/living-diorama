@@ -98,7 +98,7 @@ describe("simulation client", () => {
     });
     expect(callbacks.onSpeciesRegistered).toHaveBeenCalledWith(
       "user:puddle",
-      { appearance: drawn.appearance, sizeClass: "medium" },
+      { appearance: drawn.appearance, sizeClass: "medium", body: { thickness: 0.4 } },
       { kind: "image", url: "blob:http://localhost/puddle" },
     );
 

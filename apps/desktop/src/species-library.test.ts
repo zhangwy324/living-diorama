@@ -92,6 +92,7 @@ describe("saving", () => {
       species: {
         id: speciesId,
         appearance: appearanceId,
+        body: { thickness: 0.4 },
         capabilities: { "core:walk": 1 },
         baseSpeed: 0.6,
         behaviors: ["core:wander"],
@@ -104,11 +105,26 @@ describe("saving", () => {
   it("keeps a species under the ID it is given, and refuses one already used", async () => {
     const { library, registered } = await open();
     const id = "00000000-0000-4000-8000-0000000000ff";
-    const saved = value(await library.save(DRAWING, PNG, "Puddle", "small", id));
+    const saved = value(await library.save(DRAWING, PNG, "Puddle", "small", { id }));
     expect(saved.speciesId).toBe(userSpeciesIds(id).speciesId);
-    const again = await library.save(DRAWING, PNG, "Puddle", "small", id);
+    const again = await library.save(DRAWING, PNG, "Puddle", "small", { id });
     expect(again.ok).toBe(false);
     expect(registered).toHaveLength(1);
+  });
+
+  it("keeps the thickness it is given through a relaunch, and refuses one out of range", async () => {
+    const first = await open();
+    value(await first.library.save(DRAWING, PNG, "Puddle", "small", { thickness: 0.15 }));
+    const thickness = (world: { registerSpecies: { mock: { calls: unknown[][] } } }) =>
+      world.registerSpecies.mock.calls.map(([species]) => (species as SpeciesDefinition).body);
+    expect(thickness(first.world)).toEqual([{ thickness: 0.15 }]);
+
+    const relaunched = await open(first.store);
+    expect(thickness(relaunched.world)).toEqual([{ thickness: 0.15 }]);
+
+    const tooThick = await first.library.save(DRAWING, PNG, "Slab", "small", { thickness: 2 });
+    expect(tooThick.ok).toBe(false);
+    expect(await first.store.list()).toHaveLength(1);
   });
 
   it("stores nothing the world rejects", async () => {

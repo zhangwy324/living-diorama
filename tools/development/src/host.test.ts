@@ -88,7 +88,12 @@ describe("simulation host", () => {
     expect(ready.scene.terrain.heights.length).toBeGreaterThan(0);
     expect(ready.navigations).toHaveLength(1);
     const mossling = ready.species[SPECIES_ID];
-    expect(mossling).toEqual({ appearance: expect.any(String), sizeClass: expect.any(String) });
+    // The built-in mossling says no thickness, so it gets the default.
+    expect(mossling).toEqual({
+      appearance: expect.any(String),
+      sizeClass: expect.any(String),
+      body: { thickness: 0.4 },
+    });
     expect(ready.assets[mossling!.appearance]).toMatchObject({ kind: "image" });
     for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
   });
@@ -192,6 +197,7 @@ describe("simulation host", () => {
       name: "Puddle",
       appearance: "user:puddle/appearance.png",
       sizeClass: "medium",
+      body: { thickness: 0.6 },
       capabilities: { "core:walk": 1 },
       baseSpeed: 0.5,
       behaviors: ["core:wander"],
@@ -206,7 +212,11 @@ describe("simulation host", () => {
         type: "species_registered",
         requestId: "r1",
         speciesId: "user:puddle",
-        species: { appearance: species.appearance, sizeClass: "medium" },
+        species: {
+          appearance: species.appearance,
+          sizeClass: "medium",
+          body: { thickness: 0.6 },
+        },
         asset: { kind: "image", url: appearanceUrl },
         limits: [],
       },

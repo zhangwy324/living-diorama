@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allConnections,
+  BODY_THICKNESS,
   allRegions,
   formatDiagnostic,
   parseContentId,
@@ -269,6 +270,37 @@ describe("SpeciesDefinition", () => {
 
   it("accepts a minimal walker", () => {
     expect(parseSpeciesDefinition(species).ok).toBe(true);
+  });
+
+  it("gives a body the default thickness when it says none", () => {
+    expect(BODY_THICKNESS.default).toBe(0.4);
+    expect(parseSpeciesDefinition(species)).toMatchObject({
+      ok: true,
+      value: { body: { thickness: BODY_THICKNESS.default } },
+    });
+    expect(parseSpeciesDefinition({ ...species, body: {} })).toMatchObject({
+      ok: true,
+      value: { body: { thickness: BODY_THICKNESS.default } },
+    });
+  });
+
+  it("keeps a thickness within its range and rejects one outside it", () => {
+    for (const thickness of [BODY_THICKNESS.min, 0.25, BODY_THICKNESS.max]) {
+      expect(parseSpeciesDefinition({ ...species, body: { thickness } })).toMatchObject({
+        ok: true,
+        value: { body: { thickness } },
+      });
+    }
+    expect(messages(parseSpeciesDefinition({ ...species, body: { thickness: 0.05 } }))).toEqual([
+      "error: body.thickness: Thickness must be at least 0.1 of the height (too_small)",
+    ]);
+    expect(messages(parseSpeciesDefinition({ ...species, body: { thickness: 0.9 } }))).toEqual([
+      "error: body.thickness: Thickness must be at most 0.8 of the height (too_big)",
+    ]);
+    const odd = parseSpeciesDefinition({ ...species, body: { thickness: "thin", depth: 1 } });
+    expect(diagnostics(odd).map((d) => d.path)).toEqual(
+      expect.arrayContaining([["body", "thickness"], ["body"]]),
+    );
   });
 
   it("rejects bad versions, sizes, capabilities and empty behaviors", () => {

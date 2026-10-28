@@ -1,4 +1,4 @@
-import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
+import { BODY_THICKNESS, SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
 import {
   connectLibraryStore,
   connectStudioWindow,
@@ -69,6 +69,7 @@ export function Studio() {
   const previewBox = useRef<HTMLDivElement>(null);
   const preview = useRef<BodyPreview>(undefined);
   const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
+  const [thickness, setThickness] = useState<number>(BODY_THICKNESS.default);
   // Undefined until the player types one, so the default follows the library.
   const [name, setName] = useState<string>();
   const [library, setLibrary] = useState<LibrarySnapshot>();
@@ -147,6 +148,7 @@ export function Studio() {
   }, []);
 
   useEffect(() => preview.current?.setHeight(SIZE_CLASSES[sizeClass].height), [sizeClass]);
+  useEffect(() => preview.current?.setThickness(thickness), [thickness]);
 
   // The size's limits in the world follow the size picker (ADR 0015 §8). The world doesn't change
   // while the app runs, so each size is asked about once.
@@ -251,12 +253,14 @@ export function Studio() {
         image: Array.from(await current.png()),
         name: shownName,
         sizeClass,
+        thickness,
       });
       // A fresh start for the next one.
       current.reset();
       releaseId.current = undefined;
       setName(undefined);
       setSizeClass(DEFAULT_SIZE_CLASS);
+      setThickness(BODY_THICKNESS.default);
       setCelebration(
         released.notAdded === undefined
           ? { text: releasedMessage(released.name), happy: true }
@@ -362,6 +366,11 @@ export function Studio() {
             onSizeClass={(next) => {
               releaseId.current = undefined;
               setSizeClass(next);
+            }}
+            thickness={thickness}
+            onThickness={(next) => {
+              releaseId.current = undefined;
+              setThickness(next);
             }}
             hints={[...shapeHints, ...sizeHints]}
           />
