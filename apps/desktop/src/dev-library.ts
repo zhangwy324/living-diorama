@@ -2,8 +2,8 @@ import type { Drawing, SizeClass } from "@living-diorama/content-schema";
 import { rasterize } from "./drawing";
 import type { SpeciesLibrary } from "./species-library";
 
-// A development-only console hook to the species library (ADR 0014), until the Studio (M11)
-// gives it a UI. In the dev app's console:
+// A development-only console hook to the species library (ADR 0014), for checks the Studio (M11)
+// doesn't cover. In the dev app's console:
 //
 //   await livingDiorama.library.saveSample("Puddle", "small")
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
@@ -23,7 +23,7 @@ export const SAMPLE_DRAWING: Drawing = {
 
 declare global {
   interface Window {
-    livingDiorama?: { library?: unknown; studio?: unknown };
+    livingDiorama?: { library?: unknown };
   }
 }
 

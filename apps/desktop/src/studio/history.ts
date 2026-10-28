@@ -26,6 +26,13 @@ export class StrokeHistory {
     if (this.strokes.length > 0) this.change([]);
   }
 
+  /** Starts over with no strokes and nothing to undo or redo, as after a release. */
+  reset(): void {
+    this.strokes = [];
+    this.past = [];
+    this.future = [];
+  }
+
   /** Returns whether there was something to undo. */
   undo(): boolean {
     const previous = this.past.pop();

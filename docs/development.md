@@ -28,6 +28,7 @@ gh repo clone zhangwy324/living-diorama-design docs/design
 - Keep the repo on a local NTFS path (not a network or WSL path) for fast file watching and Rust builds.
 - Rust build output (`target/`) can grow to several GB; exclude it from antivirus real-time scanning if builds are slow.
 - To run `pnpm dev` with more creatures than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). Production builds ignore it (ADR 0009 §4).
+- To keep `pnpm dev` away from your own drawn creatures, set `LIVING_DIORAMA_DEV_DATA_DIR` to a folder before starting it (PowerShell: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMPdiorama-dev"; pnpm dev`). The species library then lives in `library/` under that folder instead of `%APPDATA%com.livingdiorama.desktoplibrary`. Release builds ignore it; settings and logs stay where they are.
 - `pnpm measure` samples the running app's CPU, GPU and memory into a CSV under `tools/development/out/measurements/` (ADR 0009 §5–7). Start a release build first (`pnpm tauri build --no-bundle`, then `apps\desktop\src-tauri\target\release\living-diorama.exe`). With no arguments it measures the four baseline states, 5 minutes each, and says how to put the app in each one. For the soak test run `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`; it ends with the stuck and path-failed counts the app writes to `%LOCALAPPDATA%\com.livingdiorama.desktop\event-counts.json`. Results go in [performance.md](performance.md).
 
 ## Troubleshooting
@@ -98,7 +99,7 @@ Controls overlay and lifecycle (once, at any scale):
 - [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
 - [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
 
-Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015). M11 checked the overlay, single instance, focus and the close dialog in the dev app with synthetic input; the tray item, quitting with the Studio open, real pen and mouse pressure, other scale factors and two-monitor sharpness are run in M12:
+Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015). M11 checked the overlay, single instance, focus, the close dialog, release, My creatures and the cap in the dev app with synthetic input; the tray item, quitting with the Studio open, real pen and mouse pressure, other scale factors and two-monitor sharpness are run in M12:
 
 - [ ] The pencil button in the controls overlay and the tray's Creation Studio each open the Studio in front, focused, with a taskbar button and an Alt+Tab entry.
 - [ ] Opening it again, from either, focuses the open Studio instead of opening a second one; a minimized Studio is restored.
@@ -109,6 +110,11 @@ Creation Studio window (once at 100% and once at 150% or 200%, with two monitors
 - [ ] Beside the canvas, the 3D preview shows the drawing as a body turning slowly, rebuilt a moment after each stroke, undo, redo or clear, and drawing stays smooth meanwhile. Changing the size makes the body bigger or smaller against the grid; a wide drawing still stays in view while it turns. Closing the Studio frees the preview's WebGL context (Task Manager's GPU memory for the app drops back).
 - [ ] The name starts as "Creature N", N one more than the species in the library, and the size as Medium.
 - [ ] Hints under the preview: an empty canvas says nothing is drawn yet; a body with a whisker drawn with the smallest brush says a part is very thin and tints it orange in the preview; two separate blobs say parts aren't joined and tint the smaller one blue; a single line on its own is not called thin. Choosing Large says it is too big to cross the wooden bridge (Woodland Hollow); Medium has no size hints. Switching sizes back and forth updates the hints at once.
+- [ ] Release is disabled while nothing is drawn or the name is empty (or only spaces). Releasing shows "Releasing…", then a short "<name> is off into the world!" and the creature appears in the strip within a few seconds. The canvas is empty with nothing to undo, the name is the next "Creature N" and the size Medium.
+- [ ] My creatures, beside the preview, folds away and back. It lists each released species with its picture, name and count in the world, and the world's total of 20. + adds one, − takes one out (disabled at 0), and the counts follow.
+- [ ] Delete asks first, saying how many leave the world; Cancel (or Escape) keeps it, Delete removes it from the list and its creatures from the strip.
+- [ ] With 20 creatures in the world, + says the world is full instead of adding one, and Release says the same and keeps the drawing. Taking one out makes room again.
+- [ ] After quitting and relaunching, released species are listed again with their pictures and can be added back.
 - [ ] Closing an empty Studio closes it at once. Closing it with something drawn asks: Cancel (or Escape) keeps the drawing, Save draft is disabled, Discard closes it.
 - [ ] Quit from the tray with the Studio open closes both within a second, with no "did not shut down in time" line.
 

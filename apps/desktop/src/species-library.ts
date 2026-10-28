@@ -46,12 +46,16 @@ export type LibrarySpecies = LibrarySpeciesBase &
 export interface SpeciesLibrary {
   /** Every species in the library, oldest first. */
   list(): LibrarySpecies[];
-  /** Makes a species from a drawing and its image (PNG bytes), registers it and stores it. */
+  /**
+   * Makes a species from a drawing and its image (PNG bytes), registers it and stores it. `id` is
+   * the lowercase UUID to keep it under, a fresh one by default; one already used is refused.
+   */
   save(
     drawing: Drawing,
     image: Uint8Array,
     name: string,
     sizeClass: SizeClass,
+    id?: string,
   ): Promise<Result<LibrarySpecies>>;
   /** Adds a creature of a registered species at a random spawn point. Resolves with its ID. */
   addCreature(speciesId: string): Promise<Result<string>>;
@@ -196,10 +200,13 @@ export async function openSpeciesLibrary(
         .map(({ species }) => species)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
 
-    async save(drawingInput, image, name, sizeClass) {
+    async save(drawingInput, image, name, sizeClass, id = uuid()) {
       const drawing = parseDrawing(drawingInput);
       if (!drawing.ok) return drawing;
-      const ids = userSpeciesIds(uuid());
+      const ids = userSpeciesIds(id);
+      if (entries.has(ids.speciesId) || unseen.has(ids.speciesId)) {
+        return failure("species_exists", `${ids.speciesId} is already in the library`);
+      }
       const species: SpeciesDefinition = {
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,

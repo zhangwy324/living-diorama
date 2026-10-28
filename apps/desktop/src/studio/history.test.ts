@@ -58,3 +58,14 @@ it("tells when a change only appends a stroke", () => {
   expect(appendedStroke([a, b], [a])).toBeUndefined();
   expect(appendedStroke([a, b], [])).toBeUndefined();
 });
+
+it("starts over with nothing to undo or redo", () => {
+  const history = new StrokeHistory();
+  history.add(a);
+  history.add(b);
+  history.undo();
+  history.reset();
+  expect(history.strokes).toEqual([]);
+  expect(history.canUndo).toBe(false);
+  expect(history.canRedo).toBe(false);
+});

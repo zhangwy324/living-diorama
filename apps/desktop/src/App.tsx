@@ -10,10 +10,18 @@ import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
 import { EventCounter } from "./event-counts";
-import { startSimulation, type SimulationClient } from "./simulation-client";
+import { creatureCap, startSimulation, type SimulationClient } from "./simulation-client";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { StripResizeHandle } from "./StripResizeHandle";
-import { studioHandlers, type LibrarySnapshot, type StudioRequests } from "./studio-protocol";
+import { STARTUP } from "./startup";
+import {
+  countBySpecies,
+  librarySnapshot,
+  studioHandlers,
+  type LibrarySnapshot,
+  type StudioRequests,
+  type StudioServices,
+} from "./studio-protocol";
 
 const shell = connectDesktopShell();
 const libraryStore = connectLibraryStore();
@@ -75,23 +83,31 @@ export function App() {
     let latest: SimulationSnapshot | undefined;
     // The Studio talks to the world here (ADR 0015 §5); it is told whenever the library changes.
     let library: SpeciesLibrary | undefined;
-    const snapshot = (): LibrarySnapshot => ({ species: library?.list() ?? [] });
     // Commands sent before the world is ready would be misuse (ADR 0009 §2), so queries wait.
     let worldReady = () => {};
     const ready = new Promise<void>((resolve) => (worldReady = resolve));
-    const studio = serveStudio<StudioRequests, LibrarySnapshot>(
-      studioHandlers({
-        library: snapshot,
-        checkLimits: (sizeClass, capabilities) =>
-          ready.then(() => client.checkLimits(sizeClass, capabilities)),
-      }),
-    );
+    const services: StudioServices = {
+      library: () => library,
+      creatures: () => latest?.creatures ?? [],
+      maxCreatures: creatureCap(STARTUP),
+      checkLimits: (sizeClass, capabilities) =>
+        ready.then(() => client.checkLimits(sizeClass, capabilities)),
+    };
+    const studio = serveStudio<StudioRequests, LibrarySnapshot>(studioHandlers(services));
     const pushLibrary = () =>
       void studio
-        .pushLibrary(snapshot())
+        .pushLibrary(librarySnapshot(services))
         .catch((error: unknown) => console.warn("Could not update the Studio", error));
-    // The library registers its species once the world is ready (ADR 0014 §8). Until the Studio
-    // gives it a UI, development builds reach it from the console.
+    // The Studio shows how many of each species are in the world, so it hears when that changes.
+    let counted = "";
+    const countChanged = (snapshot: SimulationSnapshot) => {
+      const counts = JSON.stringify([...countBySpecies(snapshot.creatures)].sort());
+      if (counts === counted) return false;
+      counted = counts;
+      return true;
+    };
+    // The library registers its species once the world is ready (ADR 0014 §8). Development
+    // builds also reach it from the console.
     const openLibrary = () =>
       void openSpeciesLibrary(
         libraryStore,
@@ -134,6 +150,7 @@ export function App() {
       onSnapshot: (snapshot, events) => {
         latest = snapshot;
         created?.pushSnapshot(snapshot);
+        if (countChanged(snapshot) && library) pushLibrary();
         if (counter.observe(snapshot, events)) recordCounts();
       },
       onFailure: (summary, details) => fail({ summary, details }),
