@@ -187,6 +187,9 @@ describe("parseLibraryEntry", () => {
     ["senses", { senses: [] }],
   ])("leaves malformed version 1 %s for validation to reject", (_, species) => {
     expect(parseLibraryEntry(version1Entry(species)).ok).toBe(false);
+  });
+
+  it("leaves a version 1 species that isn't an object for validation to reject", () => {
     expect(parseLibraryEntry({ ...version1Entry(), species: "blob" }).ok).toBe(false);
   });
 });

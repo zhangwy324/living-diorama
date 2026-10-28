@@ -132,7 +132,7 @@ Agreed with the owner before implementation. Where these and the decisions above
 - **§20, decision bound:** on average at most about one decision per creature per 10 simulated seconds, and at most 3 interruptions per minute.
 - **Exit:** step 5 is done when eating bobs, hungry bubbles, creatures sleeping with z's near round trees and homes are visible; dusk and dawn change smoothly and the Studio stays in daylight; the debug overlay shows needs, knowledge and home; `pnpm check` and `pnpm soak` pass with the §20 checks; a 20-creature spot check shows no regression against [performance](../performance.md); a manual checklist entry is added and run by the owner; and this ADR records every departure.
 - **Open:** whether step 5 ships as v0.3, decided before PR 6.
-- **PRs:** step 5 lands as 2a needs, senses and traits registries; 2b prop types; 3a time of day and 3b night lighting, in parallel; 3c the needs engine, which also defines the snapshot's cues (`CreatureSnapshot.cues`); 4a food, 4b cue rendering, 4c the long-run harness and 4d the debug overlay, in parallel; 5a shelter, sleep and home; 5b drawn species defaults, the library migration and the release grace; 6 tuning, the §20 checks, docs, the manual checklist and performance.
+- **PRs:** step 5 lands as 2a needs, senses and traits registries; 2b prop types; 3a time of day and 3b night lighting, in parallel; 3c the needs engine, which also defines the snapshot's cues (`CreatureSnapshot.cues`); 4a food, 4b cue rendering, 4c the long-run harness and 4d the debug overlay, in parallel; 5a shelter, sleep, home and the release grace; 5b drawn species defaults and the library migration; 6 tuning, the §20 checks, docs, the manual checklist and performance.
 
 ### As built
 

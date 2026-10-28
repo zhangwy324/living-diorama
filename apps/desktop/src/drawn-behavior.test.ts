@@ -114,21 +114,29 @@ describe("drawn creatures released from the Studio", () => {
       const homes = new Map<string, string>();
       for (const [size, c] of creatures) {
         expect({ size, asleep: c.asleep }).toEqual({ size, asleep: true });
-        const [fell] = of(c, "fell_asleep") as { placementId: string | null }[];
+        const [fell] = of(c, "fell_asleep") as { placementId: string | null; tick: number }[];
+        // Within a minute of the grace ending.
+        expect({ size, tick: fell!.tick, inTime: fell!.tick <= 11 * MINUTE }).toMatchObject({
+          size,
+          inTime: true,
+        });
         expect({ size, home: c.home }).toEqual({ size, home: fell!.placementId });
         expect(c.home).not.toBeNull();
         homes.set(c.id, c.home!);
         const prop = simulation.state.model.propsById.get(c.home!)!;
+        expect(Object.keys(prop.affordances)).toContain("core:shelter");
         const { x, z } = prop.transform.position;
         // At its spot: reach plus the fallback's 1.5 m at most.
         const reach = prop.blockRadius + SIZE_CLASSES[size].radius + 0.3 + 1.5;
         expect(Math.hypot(c.position.x - x, c.position.z - z)).toBeLessThanOrEqual(reach);
       }
-      for (const snapshot of simulation.snapshot().creatures) {
-        expect(snapshot.cues).toContain("sleeping");
-      }
+      const drawn = new Set(creatures.map(([, c]) => c.id));
+      const snapshots = simulation.snapshot().creatures.filter((s) => drawn.has(s.id));
+      expect(snapshots).toHaveLength(creatures.length);
+      for (const snapshot of snapshots) expect(snapshot.cues).toContain("sleeping");
 
-      // Hunger at 0.9 wakes each to eat; then it goes back to sleep at home.
+      // Hunger at 0.9 wakes each to eat; then it goes back to sleep at home. Hunger is set just
+      // below the trigger rather than left to rise asleep (about 9 hours), to keep the test short.
       for (const [, c] of creatures) c.needs[HUNGER] = 0.8999;
       run(
         120 * MINUTE,
