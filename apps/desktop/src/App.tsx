@@ -195,6 +195,7 @@ export function App() {
       client.stop();
       studio.close();
       created?.dispose();
+      if (import.meta.env.DEV && window.livingDiorama) delete window.livingDiorama.setTimeOfDay;
     };
     return stop;
   }, []);

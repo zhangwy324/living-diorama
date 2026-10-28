@@ -123,8 +123,12 @@ const blend = (a: Lighting, b: Lighting, t: number): Lighting => ({
 /** Daylight: the diorama's look when no time of day is set, and the Studio preview's always. */
 export const daylight = (): Lighting => toLighting(DAY);
 
-/** The light at `minutes` since local midnight; any value wraps into one day. */
+/**
+ * The light at `minutes` since local midnight; any finite value wraps into one day, and a
+ * non-finite one gives daylight.
+ */
 export function lightingAt(minutes: number): Lighting {
+  if (!Number.isFinite(minutes)) return daylight();
   const m = ((minutes % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
   // Before the first key or after the last, blend across midnight from the last key to the first.
   let a = KEYS[KEYS.length - 1] as Key;

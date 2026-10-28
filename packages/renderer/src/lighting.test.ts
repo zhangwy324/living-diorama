@@ -47,12 +47,35 @@ describe("lightingAt", () => {
     expect(noon.keyDirection.distanceTo(SUN_DIRECTION)).toBe(0);
   });
 
-  it("hits every key exactly", () => {
+  it("reaches every key without a jump", () => {
     for (const at of LIGHTING_KEYS) {
       // Just before a key the light is still blending towards it.
       expect(distance(lightingAt(at), lightingAt(at - 1e-9))).toBeLessThan(1e-6);
     }
-    expect(distance(lightingAt(LIGHTING_KEYS[0]!), lightingAt(MIDNIGHT))).toBe(0);
+  });
+
+  it.each([
+    ["dawn", 7 * 60, "ffc9a3", 1.6, [-40, 14, 26], 0.85, "e9d6dc", "4f5a3c", 1, "e6cdc6"],
+    ["dusk", 19 * 60, "ffab73", 1.5, [40, 14, 26], 0.85, "d9b9c4", "4a4a3c", 0.95, "d9a993"],
+    ["night", 5 * 60, "b4c4ec", 0.9, [30, 40, 22], 0.6, "7d8db4", "363d4a", 1.25, "3a4a66"],
+    ["night", 20.5 * 60, "b4c4ec", 0.9, [30, 40, 22], 0.6, "7d8db4", "363d4a", 1.25, "3a4a66"],
+  ] as const)(
+    "hits the %s key at minute %d exactly",
+    (_, at, key, keyIntensity, direction, shadow, sky, ground, skyIntensity, background) => {
+      const light = lightingAt(at);
+      expect(light.keyColor.getHexString()).toBe(key);
+      expect(light.keyIntensity).toBe(keyIntensity);
+      expect(light.keyDirection.distanceTo(new THREE.Vector3(...direction).normalize())).toBe(0);
+      expect(light.shadowIntensity).toBe(shadow);
+      expect(light.skyColor.getHexString()).toBe(sky);
+      expect(light.groundColor.getHexString()).toBe(ground);
+      expect(light.skyIntensity).toBe(skyIntensity);
+      expect(light.background.getHexString()).toBe(background);
+    },
+  );
+
+  it("gives daylight for a non-finite time", () => {
+    for (const m of [NaN, Infinity, -Infinity]) expect(distance(lightingAt(m), daylight())).toBe(0);
   });
 
   it("changes continuously through the whole day", () => {
@@ -121,6 +144,9 @@ describe("buildDioramaScene time of day", () => {
       intensity: before.sun.intensity,
       background: before.background.getHex(),
       sky: before.sky.color.getHex(),
+      ground: before.sky.groundColor.getHex(),
+      skyIntensity: before.sky.intensity,
+      shadow: before.sun.shadow.intensity,
     };
     expect(snapshot.background).toBe(0xcfe3ea);
     built.setTimeOfDay(NOON);
@@ -130,6 +156,20 @@ describe("buildDioramaScene time of day", () => {
     expect(after.sun.intensity).toBe(snapshot.intensity);
     expect(after.background.getHex()).toBe(snapshot.background);
     expect(after.sky.color.getHex()).toBe(snapshot.sky);
+    expect(after.sky.groundColor.getHex()).toBe(snapshot.ground);
+    expect(after.sky.intensity).toBe(snapshot.skyIntensity);
+    expect(after.sun.shadow.intensity).toBe(snapshot.shadow);
+  });
+
+  it("ignores non-finite times and repeats within the same minute", () => {
+    const built = buildDioramaScene(scene);
+    expect(built.setTimeOfDay(NaN)).toBe(false);
+    expect(lights(built).background.getHex()).toBe(0xcfe3ea);
+    expect(built.setTimeOfDay(MIDNIGHT + 0.2)).toBe(true);
+    expect(built.setTimeOfDay(MIDNIGHT + 0.9)).toBe(false);
+    expect(built.setTimeOfDay(Infinity)).toBe(false);
+    expect(lights(built).background.getHex()).toBe(lightingAt(MIDNIGHT).background.getHex());
+    expect(built.setTimeOfDay(MIDNIGHT + 1)).toBe(true);
   });
 
   it("moves the key light and darkens the background at night", () => {

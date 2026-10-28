@@ -97,17 +97,19 @@ const boundingSphere = (scene: SceneData) => {
  * Puts the sun (or moon) towards `direction` from the world's centre. The shadow camera is a
  * cube around the world's bounding sphere, so it covers the world from any direction.
  */
-export function aimSun(sun: THREE.DirectionalLight, scene: SceneData, direction: THREE.Vector3) {
-  const { center, radius } = boundingSphere(scene);
-  sun.position.copy(center).addScaledVector(direction, radius * 2);
-  sun.target.position.copy(center);
-}
+const aimSun = (sun: THREE.DirectionalLight, world: THREE.Sphere, direction: THREE.Vector3) => {
+  sun.position.copy(world.center).addScaledVector(direction, world.radius * 2);
+  sun.target.position.copy(world.center);
+};
 
 /** A sun whose shadow camera just covers the world's bounding box. */
-export function createSun(scene: SceneData): THREE.DirectionalLight {
-  const { radius } = boundingSphere(scene);
+export function createSun(
+  scene: SceneData,
+  sphere: THREE.Sphere = boundingSphere(scene),
+): THREE.DirectionalLight {
+  const { radius } = sphere;
   const sun = createSunLight();
-  aimSun(sun, scene, SUN_DIRECTION);
+  aimSun(sun, sphere, SUN_DIRECTION);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, {
@@ -131,8 +133,11 @@ export interface DioramaScene {
   overlays: DebugOverlays;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
-  /** Lights the scene for `minutes` since local midnight; it starts in daylight. */
-  setTimeOfDay(minutes: number): void;
+  /**
+   * Lights the scene for `minutes` since local midnight; it starts in daylight. Returns whether
+   * the light changed: it ignores non-finite minutes and changes only once per whole minute.
+   */
+  setTimeOfDay(minutes: number): boolean;
 }
 
 /** Builds the whole scene graph. Needs no WebGL, so it runs in tests. */
@@ -145,18 +150,25 @@ export function buildDioramaScene(
   world.background = background;
   const sky = createSkyLight();
   world.add(sky);
-  const sun = createSun(scene);
+  const sphere = boundingSphere(scene);
+  const sun = createSun(scene, sphere);
   world.add(sun, sun.target);
+  let shownMinute: number | undefined;
   const setTimeOfDay = (minutes: number) => {
-    const light = lightingAt(minutes);
+    if (!Number.isFinite(minutes)) return false;
+    const minute = Math.floor(minutes);
+    if (minute === shownMinute) return false;
+    shownMinute = minute;
+    const light = lightingAt(minute);
     sun.color.copy(light.keyColor);
     sun.intensity = light.keyIntensity;
     sun.shadow.intensity = light.shadowIntensity;
-    aimSun(sun, scene, light.keyDirection);
+    aimSun(sun, sphere, light.keyDirection);
     sky.color.copy(light.skyColor);
     sky.groundColor.copy(light.groundColor);
     sky.intensity = light.skyIntensity;
     background.copy(light.background);
+    return true;
   };
 
   const layers = createLayers(world);
@@ -340,9 +352,8 @@ export function createDioramaView(
       moved = true;
     },
     setTimeOfDay(minutes) {
-      setTimeOfDay(minutes);
-      // A throttled loop would otherwise show the new light only on its next frame.
-      renderer.render(world, camera);
+      // The next frame is drawn at full rate, as after a camera move.
+      if (setTimeOfDay(minutes)) moved = true;
     },
     setClipping(layer, planes) {
       layers[layer].setClipping(planes);
