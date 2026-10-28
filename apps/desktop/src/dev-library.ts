@@ -1,5 +1,5 @@
 import { formatDiagnostic, type Drawing, type SizeClass } from "@living-diorama/content-schema";
-import { rasterize } from "./drawing";
+import { encodePng, paintStrokes } from "./drawing";
 import { sampleSpecies } from "./sample-species";
 import type { SpeciesLibrary } from "./species-library";
 
@@ -12,16 +12,41 @@ import type { SpeciesLibrary } from "./species-library";
 
 /** A round green critter with two eyes and a notch between its feet. */
 export const SAMPLE_DRAWING: Drawing = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   canvas: { width: 256, height: 256 },
-  strokes: [
-    { tool: "pen", color: "#5a8f3c", width: 150, points: [128, 145, 1] },
-    { tool: "pen", color: "#5a8f3c", width: 60, points: [85, 80, 1, 128, 62, 0.9, 171, 80, 1] },
-    { tool: "pen", color: "#1e2a14", width: 16, points: [104, 128, 1] },
-    { tool: "pen", color: "#1e2a14", width: 16, points: [152, 128, 1] },
-    { tool: "eraser", color: "#000000", width: 26, points: [128, 200, 1, 128, 225, 1] },
+  history: [
+    { kind: "stroke", tool: "pen", color: "#5a8f3c", width: 150, points: [128, 145, 1] },
+    {
+      kind: "stroke",
+      tool: "pen",
+      color: "#5a8f3c",
+      width: 60,
+      points: [85, 80, 1, 128, 62, 0.9, 171, 80, 1],
+    },
+    { kind: "stroke", tool: "pen", color: "#1e2a14", width: 16, points: [104, 128, 1] },
+    { kind: "stroke", tool: "pen", color: "#1e2a14", width: 16, points: [152, 128, 1] },
+    {
+      kind: "stroke",
+      tool: "eraser",
+      color: "#000000",
+      width: 26,
+      points: [128, 200, 1, 128, 225, 1],
+    },
   ],
 };
+
+/**
+ * Saves a drawing made by code: its strokes are painted once into the image the library keeps,
+ * as a player's are in the Studio.
+ */
+async function saveDrawn(
+  library: SpeciesLibrary,
+  drawing: Drawing,
+  name: string,
+  sizeClass: SizeClass,
+) {
+  return library.save(drawing, await encodePng(paintStrokes(drawing.history)), name, sizeClass);
+}
 
 declare global {
   interface Window {
@@ -36,7 +61,7 @@ declare global {
 export async function saveSampleSpecies(library: SpeciesLibrary): Promise<string[]> {
   const failed: string[] = [];
   for (const { name, sizeClass, drawing } of sampleSpecies()) {
-    const saved = await library.save(drawing, await rasterize(drawing), name, sizeClass);
+    const saved = await saveDrawn(library, drawing, name, sizeClass);
     if (!saved.ok) failed.push([name, ...saved.diagnostics.map(formatDiagnostic)].join(": "));
   }
   return failed;
@@ -51,8 +76,8 @@ export function installLibraryDevHook(library: SpeciesLibrary): void {
     ...window.livingDiorama,
     library: {
       ...library,
-      saveSample: async (name = "Sample", sizeClass: SizeClass = "small") =>
-        library.save(SAMPLE_DRAWING, await rasterize(SAMPLE_DRAWING), name, sizeClass),
+      saveSample: (name = "Sample", sizeClass: SizeClass = "small") =>
+        saveDrawn(library, SAMPLE_DRAWING, name, sizeClass),
       saveSamples: () => saveSampleSpecies(library),
     },
   };

@@ -10,11 +10,23 @@ import { HexColorSchema } from "./primitives";
 // data (body plans, for one) by adding a migration (ADR 0014).
 
 /** Current data-format version of a drawing. */
-export const DRAWING_SCHEMA_VERSION = 1;
+export const DRAWING_SCHEMA_VERSION = 2;
 /** Current data-format version of a library entry. */
 export const LIBRARY_ENTRY_SCHEMA_VERSION = 1;
 
-const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {};
+const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
+  // Version 1 held the strokes as the source of truth. Version 2 holds a record of operations
+  // beside the image, which is the drawing (ADR 0014 §5 amendment): each stroke becomes a stroke
+  // operation, in the same order.
+  1: ({ strokes, ...data }) => ({
+    ...data,
+    history: Array.isArray(strokes)
+      ? strokes.map((stroke: unknown) =>
+          typeof stroke === "object" && stroke !== null ? { kind: "stroke", ...stroke } : stroke,
+        )
+      : strokes,
+  }),
+};
 const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
 
 /** Values per stroke point: x and y in canvas pixels, then pressure. */
@@ -22,6 +34,7 @@ export const STROKE_POINT_STRIDE = 3;
 
 /** One stroke as drawn. An eraser stroke removes what is under it. */
 export const StrokeSchema = z.strictObject({
+  kind: z.literal("stroke"),
   tool: z.enum(["pen", "eraser"]),
   color: HexColorSchema,
   /** Width in canvas pixels at full pressure. */
@@ -41,12 +54,27 @@ export const StrokeSchema = z.strictObject({
 });
 export type Stroke = z.output<typeof StrokeSchema>;
 
-/** A drawing's editable strokes, the source of truth its image is made from (roadmap §2.2). */
+/**
+ * One operation of the drawing record, told apart by `kind`. Strokes only for now; the fill tool
+ * adds its own kind to this union.
+ */
+export const DrawingOperationSchema = z.discriminatedUnion("kind", [StrokeSchema]);
+export type DrawingOperation = z.output<typeof DrawingOperationSchema>;
+
+/**
+ * How a drawing was made. The image stored beside it is the drawing itself (ADR 0014 §5
+ * amendment); this is a record only and is never replayed to make the image, so a change to how
+ * strokes are drawn can't change a saved creature.
+ */
 export const DrawingSchema = z.strictObject({
   schemaVersion: z.literal(DRAWING_SCHEMA_VERSION),
+  /** The image's size; operations are in its pixels. */
   canvas: z.strictObject({ width: z.int().positive(), height: z.int().positive() }),
-  /** In drawing order. */
-  strokes: z.array(StrokeSchema),
+  /**
+   * The operations that made the image, in order, since the canvas was last empty. Undone
+   * operations are not in it.
+   */
+  history: z.array(DrawingOperationSchema),
 });
 export type Drawing = z.output<typeof DrawingSchema>;
 

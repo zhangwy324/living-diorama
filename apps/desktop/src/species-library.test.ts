@@ -12,9 +12,11 @@ import { userSpeciesIds } from "./user-species";
 const UUIDS = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"];
 const PNG = new Uint8Array([137, 80, 78, 71]);
 const DRAWING: Drawing = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   canvas: { width: 256, height: 256 },
-  strokes: [{ tool: "pen", color: "#336633", width: 12, points: [10, 10, 1, 20, 20, 0.5] }],
+  history: [
+    { kind: "stroke", tool: "pen", color: "#336633", width: 12, points: [10, 10, 1, 20, 20, 0.5] },
+  ],
 };
 
 /** A world that registers every species but those named "Rejected". */
@@ -120,7 +122,7 @@ describe("saving", () => {
   it("checks the name and the drawing before registering", async () => {
     const { library, world } = await open();
     expect((await library.save(DRAWING, PNG, "", "small")).ok).toBe(false);
-    const broken = { ...DRAWING, strokes: [{ ...DRAWING.strokes[0], points: [1, 2] }] } as Drawing;
+    const broken = { ...DRAWING, history: [{ ...DRAWING.history[0], points: [1, 2] }] } as Drawing;
     expect((await library.save(broken, PNG, "Puddle", "small")).ok).toBe(false);
     expect(world.registerSpecies).not.toHaveBeenCalled();
   });

@@ -9,7 +9,7 @@ it("keeps a pen's pressure", () => {
   const live = new LiveStroke(brush, true);
   live.add(10, 10, 0.2);
   live.add(12.345, 10, 1.4);
-  expect(live.stroke).toEqual({ ...brush, points: [10, 10, 0.2, 12.35, 10, 1] });
+  expect(live.stroke).toEqual({ kind: "stroke", ...brush, points: [10, 10, 0.2, 12.35, 10, 1] });
 });
 
 it("draws any other pointer at full pressure, however fast it moves", () => {

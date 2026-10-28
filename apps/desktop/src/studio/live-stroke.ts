@@ -22,7 +22,7 @@ export class LiveStroke {
     brush: Brush,
     private readonly pen: boolean,
   ) {
-    this.stroke = { ...brush, points: [] };
+    this.stroke = { kind: "stroke", ...brush, points: [] };
   }
 
   /**

@@ -13,6 +13,8 @@
    - `drawing.json`: the strokes;
    - `appearance.png`: the image the body is built from, derived from the strokes.
 
+   **Amendment (M13, issue #73):** `appearance.png` is now the drawing itself, the 256 px image the player drew in the Studio, and `drawing.json` is a record of how it was drawn (§5). Nothing derives the image from the strokes any more. ADR 0017 records the M13 decisions as a whole.
+
 2. **Saves are atomic and entries never change.** A save writes the three files to `<uuid>.tmp/`, then renames the folder into place, so an entry appears complete or not at all. A delete renames the folder to `<uuid>.tmp/` before removing it. Listing removes `.tmp` folders left by a crash. Saving over an existing ID is an error: a redraw is a new species, and editing comes later.
 
 3. **Rust stores, TypeScript checks.** `apps/desktop/src-tauri/src/library.rs` lists, saves, loads and deletes entries, and doesn't interpret their contents. It skips, with a warning in the log, folders that aren't entries and entries it can't read: a missing file, JSON that doesn't parse, a file over its size limit. The schemas and migrations live in `content-schema`, so they exist once. An entry that fails them, comes from a newer version, or holds a species other than `user:<its folder>` with the image `user:<its folder>/appearance.png`, is skipped with a diagnostic, and its files are left alone, so a newer build can still read them. A bad entry never stops the app.
@@ -24,6 +26,13 @@
    - Drawing: `{ schemaVersion, canvas: { width, height }, strokes }`. A stroke has a `tool` (`pen` or `eraser`), a `color`, a `width` at full pressure, and flat `points`: `[x, y, pressure, …]` in canvas pixels, pressure from 0 to 1. Eraser strokes are kept, so the strokes alone reproduce the drawing.
 
    Each has its own version constant (`DRAWING_SCHEMA_VERSION`, `LIBRARY_ENTRY_SCHEMA_VERSION`), separate from the definition versions in ADR 0003.
+
+   **Amendment (M13, issue #73): the image is the drawing, the strokes a record.** Replaying strokes to make the image stops working once the Studio has a fill tool: a fill is exact on pixels, and replayed over strokes drawn even slightly differently (as after the stroke rendering change of issue #59) it can flood the canvas. So the drawing is the image, and the strokes become a record that is never replayed:
+   - Drawing, version 2: `{ schemaVersion, canvas: { width, height }, history }`. `history` holds the operations that made the image, in order, since the canvas was last empty. An operation has a `kind`; the only kind so far is `stroke`, with the stroke fields above. The schema is a discriminated union on `kind` (`DrawingOperationSchema`), so the fill tool adds its kind beside it. Undone operations are not in the record: drawing after an undo drops them, from the record and the undo history alike, and Clear starts the record over (undoing Clear brings it back). So the record always tells how the image now shown was made.
+   - The record costs a few kilobytes and might help later work that finds a drawing's parts. Nothing depends on it: if it proves useless it can be dropped without touching the image.
+   - Version 1 files still read: a migration turns each stroke into a stroke operation, in order. It is cheap, and the app never reads a drawing at launch anyway (entries register from their image), so old entries load as before. No other migration is needed, since every entry already holds its image.
+   - Library files may change freely in this release: no backward compatibility is promised beyond that migration.
+   - Rust is unchanged: it never interprets `drawing.json`.
 
 6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Version 1 has no migrations. A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
 

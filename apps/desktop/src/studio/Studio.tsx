@@ -6,7 +6,6 @@ import {
 } from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { drawingPixels, rasterize } from "../drawing";
 import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
 import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
@@ -45,7 +44,7 @@ export const BRUSH_WIDTHS = [4, 10, 20, 40];
 /** The eraser's colour is stored but never drawn. */
 const ERASER_COLOR = "#000000";
 
-/** The preview and the drawing hints follow the strokes this long after they last changed. */
+/** The preview and the drawing hints follow the drawing this long after it last changed. */
 const REBUILD_DELAY_MS = 200;
 
 /** How long "… is off into the world!" stays. */
@@ -104,13 +103,13 @@ export function Studio() {
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
-    // A short while after the strokes change, never during a stroke, so drawing stays smooth.
+    // A short while after the drawing changes, never during a stroke, so drawing stays smooth.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const rebuild = () => {
       timer = undefined;
       const current = editor.current;
       if (!current) return;
-      const pixels = drawingPixels(current.drawing);
+      const pixels = current.pixels();
       const check = checkBody(pixels);
       preview.current?.setDrawing(check.empty ? undefined : pixels, check);
       setShapeHints(drawingHints(check));
@@ -238,7 +237,7 @@ export function Studio() {
       const released = await channel.request("release", {
         releaseId: releaseId.current,
         drawing,
-        image: Array.from(await rasterize(drawing)),
+        image: Array.from(await current.png()),
         name: shownName,
         sizeClass,
       });

@@ -14,7 +14,7 @@ it("has twenty valid drawings", () => {
 it("varies names, colours and sizes", () => {
   const names = new Set(SAMPLE_SPECIES.map(({ name }) => name));
   const palettes = new Set(
-    SAMPLE_SPECIES.map(({ drawing }) => [...new Set(drawing.strokes.map((s) => s.color))].join()),
+    SAMPLE_SPECIES.map(({ drawing }) => [...new Set(drawing.history.map((s) => s.color))].join()),
   );
   const sizes = new Set(SAMPLE_SPECIES.map(({ sizeClass }) => sizeClass));
   expect(names.size).toBe(20);
