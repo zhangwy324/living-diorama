@@ -25,9 +25,14 @@ export class DrawingEditor {
   private frame?: number;
   private readonly stop: () => void;
 
+  /**
+   * `onChange` is called whenever the strokes change: a stroke ends, undo, redo or clear.
+   * `onStroke` is called when a stroke starts (true) and ends (false).
+   */
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly onChange: (state: EditorState) => void,
+    private readonly onStroke: (drawing: boolean) => void = () => {},
   ) {
     // Not `desynchronized`: WebView2 takes it, but then shows the canvas's transparent pixels as
     // black instead of the page behind them (ADR 0015 §11).
@@ -166,6 +171,7 @@ export class DrawingEditor {
     };
     this.sample(this.live, event);
     this.requestFrame();
+    this.onStroke(true);
   }
 
   private move(event: PointerEvent) {
@@ -182,6 +188,7 @@ export class DrawingEditor {
     this.live = undefined;
     this.history.add(live.stroke.stroke);
     this.bake(live.stroke.stroke);
+    this.onStroke(false);
     this.changed();
   }
 

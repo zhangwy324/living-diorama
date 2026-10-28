@@ -22,7 +22,17 @@ export type RequestCommand =
   | { type: "register_species"; requestId?: string; species: unknown; appearanceUrl: string }
   /** Adds a creature at the given spawn point, or a random one. */
   | { type: "spawn"; requestId?: string; speciesId: string; spawnPointId?: string }
-  | { type: "despawn"; requestId?: string; creatureId: string };
+  | { type: "despawn"; requestId?: string; creatureId: string }
+  /**
+   * Where creatures of this size class and these capabilities wouldn't fit, without registering
+   * anything (ADR 0015 §8). Answered by `limits`.
+   */
+  | {
+      type: "check_limits";
+      requestId?: string;
+      sizeClass: SizeClass;
+      capabilities: Record<string, number>;
+    };
 
 export type SimulationCommand =
   /**
@@ -45,6 +55,14 @@ export interface AssetSummary {
   kind: AssetKind;
   url: string;
   scale?: number;
+}
+
+/**
+ * Where a navigation profile's creatures don't fit in the world (ADR 0013): a diagnostic, and the
+ * structure it is about, if any, so the player can be told its name.
+ */
+export interface Limit extends Diagnostic {
+  structure?: { id: string; name: string };
 }
 
 /** What the renderer needs of a registered species. */
@@ -129,8 +147,13 @@ export type SimulationMessage =
       speciesId: string;
       species: SpeciesSummary;
       asset: AssetSummary;
-      limits: Diagnostic[];
+      limits: Limit[];
     }
+  /**
+   * The answer to `check_limits`: warnings where the profile's creatures don't fit, or the
+   * errors that keep it out of the world entirely (e.g. `no_spawn_point`).
+   */
+  | { type: "limits"; requestId?: string; limits: Limit[] }
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }
   /** A request command could not be applied. Not a fault: the world keeps running. */

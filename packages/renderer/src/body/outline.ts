@@ -13,7 +13,7 @@ export interface Outline {
 }
 
 /** A shape under this share of the opaque area is a speck. */
-const SPECK_SHARE = 0.005;
+export const SPECK_SHARE = 0.005;
 const SIMPLIFY_TOLERANCE = 1;
 
 interface Component {

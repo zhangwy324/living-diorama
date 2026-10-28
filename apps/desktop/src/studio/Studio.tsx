@@ -1,8 +1,13 @@
+import { SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
 import { connectStudioWindow, openStudioChannel } from "@living-diorama/desktop-integration";
+import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { drawingPixels } from "../drawing";
 import type { LibrarySnapshot, StudioRequests } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
+import { CreatureDetails, defaultName } from "./CreatureDetails";
 import { DrawingEditor, type EditorState } from "./editor";
+import { drawingHints, limitHints } from "./hints";
 import type { Brush } from "./live-stroke";
 
 // The Creation Studio's page (ADR 0015). It never starts a simulation and never creates a
@@ -31,6 +36,9 @@ export const BRUSH_WIDTHS = [4, 10, 20, 40];
 /** The eraser's colour is stored but never drawn. */
 const ERASER_COLOR = "#000000";
 
+/** The preview and the drawing hints follow the strokes this long after they last changed. */
+const REBUILD_DELAY_MS = 200;
+
 export function Studio() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const editor = useRef<DrawingEditor>(undefined);
@@ -39,17 +47,92 @@ export function Studio() {
   const [color, setColor] = useState(PALETTE[0] ?? "#000000");
   const [width, setWidth] = useState(BRUSH_WIDTHS[1] ?? 10);
   const [closing, setClosing] = useState(false);
+  const previewBox = useRef<HTMLDivElement>(null);
+  const preview = useRef<BodyPreview>(undefined);
+  const [sizeClass, setSizeClass] = useState<SizeClass>("small");
+  // Undefined until the player types one, so the default follows the library.
+  const [name, setName] = useState<string>();
+  const [speciesInLibrary, setSpeciesInLibrary] = useState<number>();
+  const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
+  const [sizeHints, setSizeHints] = useState<string[]>([]);
+  const sizeHintCache = useRef(new Map<SizeClass, string[]>());
+
+  // The preview's WebGL context lives only while the Studio is open (ADR 0015 §7).
+  useEffect(() => {
+    const element = previewBox.current;
+    if (!element) return;
+    let created: BodyPreview;
+    try {
+      created = createBodyPreview(element);
+    } catch (error) {
+      // Drawing works without it; the hints still come.
+      console.warn("The preview could not start", error);
+      return;
+    }
+    preview.current = created;
+    return () => {
+      created.dispose();
+      preview.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
-    const created = new DrawingEditor(element, setState);
+    // A short while after the strokes change, never during a stroke, so drawing stays smooth.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const rebuild = () => {
+      timer = undefined;
+      const current = editor.current;
+      if (!current) return;
+      const pixels = drawingPixels(current.drawing);
+      const check = checkBody(pixels);
+      preview.current?.setDrawing(check.empty ? undefined : pixels, check);
+      setShapeHints(drawingHints(check));
+    };
+    const created = new DrawingEditor(
+      element,
+      (next) => {
+        setState(next);
+        clearTimeout(timer);
+        timer = setTimeout(rebuild, REBUILD_DELAY_MS);
+      },
+      (stroking) => {
+        preview.current?.setPaused(stroking);
+        if (stroking) clearTimeout(timer);
+      },
+    );
     editor.current = created;
     return () => {
+      clearTimeout(timer);
       created.dispose();
       editor.current = undefined;
     };
   }, []);
+
+  useEffect(() => preview.current?.setHeight(SIZE_CLASSES[sizeClass].height), [sizeClass]);
+
+  // The size's limits in the world follow the size picker (ADR 0015 §8). The world doesn't change
+  // while the app runs, so each size is asked about once.
+  useEffect(() => {
+    const cached = sizeHintCache.current.get(sizeClass);
+    setSizeHints(cached ?? []);
+    if (cached) return;
+    let current = true;
+    channel
+      .request("limits", { sizeClass })
+      .then((limits) => {
+        const hints = limitHints(limits);
+        sizeHintCache.current.set(sizeClass, hints);
+        if (current) setSizeHints(hints);
+      })
+      .catch((error: unknown) =>
+        console.warn(`Could not check the limits for ${sizeClass}`, error),
+      );
+    return () => {
+      current = false;
+    };
+  }, [sizeClass]);
 
   useEffect(() => {
     if (editor.current) {
@@ -87,7 +170,10 @@ export function Studio() {
   // The library lives in the strip's window: ask for it now, then hear about every change.
   useEffect(() => {
     let library: LibrarySnapshot | undefined;
-    const keep = (snapshot: LibrarySnapshot) => (library = snapshot);
+    const keep = (snapshot: LibrarySnapshot) => {
+      library = snapshot;
+      setSpeciesInLibrary(snapshot.species.length);
+    };
     const stop = channel.onLibraryChanged(keep);
     channel
       .request("snapshot", undefined)
@@ -160,14 +246,29 @@ export function Studio() {
           </ToolButton>
         </div>
       </div>
-      <div className="sheet-area">
-        <div className="sheet">
-          <canvas ref={canvas} className="drawing" />
-          {/* Not part of the drawing: the body's feet are the bottom of what is drawn. */}
-          <div className="guide" aria-hidden="true">
-            <span>facing right →, feet on this line</span>
+      <div className="workspace">
+        <div className="sheet-area">
+          <div className="sheet">
+            <canvas ref={canvas} className="drawing" />
+            {/* Not part of the drawing: the body's feet are the bottom of what is drawn. */}
+            <div className="guide" aria-hidden="true">
+              <span>facing right →, feet on this line</span>
+            </div>
           </div>
         </div>
+        <aside className="side-panel">
+          <div ref={previewBox} className="preview" aria-label="3D preview" role="img" />
+          <CreatureDetails
+            name={name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary))}
+            placeholder="Creature"
+            onName={setName}
+            sizeClass={sizeClass}
+            onSizeClass={setSizeClass}
+            hints={[...shapeHints, ...sizeHints]}
+          />
+          {/* Release goes here (PR 4). */}
+          <div className="release-slot" />
+        </aside>
       </div>
       {closing && (
         <CloseDialog

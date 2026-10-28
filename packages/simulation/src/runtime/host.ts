@@ -150,6 +150,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "register_species":
       case "spawn":
       case "despawn":
+      case "check_limits":
         request(sim, command);
         break;
       case "shutdown":
@@ -193,6 +194,15 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           break;
         }
         send({ type: "spawned", ...requestId, creatureId: spawned.value.id });
+        return;
+      }
+      case "check_limits": {
+        const checked = sim.checkLimits(command.sizeClass, command.capabilities);
+        if (!checked.ok) {
+          diagnostics = checked.diagnostics;
+          break;
+        }
+        send({ type: "limits", ...requestId, limits: checked.value });
         return;
       }
       case "despawn": {

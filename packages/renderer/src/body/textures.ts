@@ -1,4 +1,4 @@
-import { isOpaque, type Pixels } from "./pixels";
+import { isOpaque, neighbours, type Pixels } from "./pixels";
 
 // The two textures of a body (ADR 0011 §5). Both are fully opaque RGBA, rows top first.
 
@@ -87,28 +87,6 @@ function spread(pixels: Pixels, seeds: Uint8Array): Uint8Array {
     }
   }
   return out;
-}
-
-function* neighbours(
-  i: number,
-  width: number,
-  height: number,
-  diagonals = false,
-): Generator<number> {
-  const x = i % width;
-  const left = x > 0;
-  const right = x < width - 1;
-  const up = i >= width;
-  const down = i < width * (height - 1);
-  if (left) yield i - 1;
-  if (right) yield i + 1;
-  if (up) yield i - width;
-  if (down) yield i + width;
-  if (!diagonals) return;
-  if (up && left) yield i - width - 1;
-  if (up && right) yield i - width + 1;
-  if (down && left) yield i + width - 1;
-  if (down && right) yield i + width + 1;
 }
 
 /** Separable box blur of the colour channels, clamped at the edges. */

@@ -3,12 +3,11 @@ import {
   type Diagnostic,
   type RegionPosition,
   type Result,
-  type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
 import { Pathfinder } from "../navigation/pathfinder";
-import { profileForSpecies } from "../navigation/profile";
+import { profileForSpecies, type NavProfile } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
 import { checkNavigation, checkWorld } from "../world/integrity";
 import type { WorldModel } from "../world/world-model";
@@ -74,6 +73,8 @@ export class WorldState {
   readonly #pathfinders: Map<string, Pathfinder>;
   /** Per profile key, where its creatures don't fit (ADR 0013). */
   readonly #limits: Map<string, Diagnostic[]>;
+  /** Per profile key, the errors of a profile that does not work in this world. */
+  readonly #failed = new Map<string, Diagnostic[]>();
   readonly #rng: Rng;
   readonly #root: Rng;
   #nextCreature = 1;
@@ -137,13 +138,13 @@ export class WorldState {
   }
 
   /**
-   * The navigation for a species' profile, registered or not, and where its creatures don't fit.
-   * If the world has none for the profile yet, it is built and checked like the profiles of the
-   * species registered when the world was created (ADR 0012), and errors are returned. New
-   * navigation is only used once passed to `addNavigation`.
+   * The navigation for a profile, whether a species has it or not, and where its creatures don't
+   * fit. If the world has none for the profile yet, it is built and checked like the profiles of
+   * the species registered when the world was created (ADR 0012), and errors are returned (and
+   * kept, since the world doesn't change). New navigation is only used once passed to
+   * `addNavigation`.
    */
-  planNavigation(species: SpeciesDefinition): Result<PlannedNavigation> {
-    const profile = profileForSpecies(species, this.registries);
+  planNavigation(profile: NavProfile): Result<PlannedNavigation> {
     const existing = this.#pathfinders.get(profile.key);
     if (existing) {
       return {
@@ -151,9 +152,14 @@ export class WorldState {
         value: { pathfinder: existing, limits: this.#limits.get(profile.key) ?? [] },
       };
     }
+    const failed = this.#failed.get(profile.key);
+    if (failed) return { ok: false, diagnostics: failed };
     const check = checkNavigation(this.model.definition, this.model, profile);
     const errors = check.diagnostics.filter((d) => d.severity === "error");
-    if (errors.length > 0) return { ok: false, diagnostics: errors };
+    if (errors.length > 0) {
+      this.#failed.set(profile.key, errors);
+      return { ok: false, diagnostics: errors };
+    }
     return {
       ok: true,
       value: { pathfinder: new Pathfinder(this.model, check.navigation), limits: check.limits },

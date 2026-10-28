@@ -5,6 +5,7 @@ import { limitCamera } from "./camera";
 import type { ImageReader } from "./body/pixels";
 import { CreatureBodies, type SpeciesResolver } from "./creatures";
 import { DebugStats } from "./debug-stats";
+import { createSkyLight, createSunLight, SUN_DIRECTION } from "./lighting";
 import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
 import { createDebugOverlays, type DebugOverlays } from "./overlays";
@@ -18,8 +19,6 @@ const HORIZONTAL_FOV = (40 * Math.PI) / 180;
 const PITCH = (16 * Math.PI) / 180;
 /** The default view looks this fraction of the world's depth behind its centre. */
 const TARGET_DEPTH_OFFSET = 0.1;
-/** Direction the sunlight comes from: high, from the front left. */
-const SUN_DIRECTION = new THREE.Vector3(-30, 45, 28).normalize();
 
 export interface DioramaViewOptions {
   /** Looks up asset refs (prop models). Without it every prop is drawn as a fallback. */
@@ -77,7 +76,7 @@ export function createSun(scene: SceneData): THREE.DirectionalLight {
     new THREE.Vector3(max.x, max.y, max.z),
   );
   const { center, radius } = box.getBoundingSphere(new THREE.Sphere());
-  const sun = new THREE.DirectionalLight("#fff3dc", 2.2);
+  const sun = createSunLight();
   sun.position.copy(center).addScaledVector(SUN_DIRECTION, radius * 2);
   sun.target.position.copy(center);
   sun.castShadow = true;
@@ -112,7 +111,7 @@ export function buildDioramaScene(
 ): DioramaScene {
   const world = new THREE.Scene();
   world.background = new THREE.Color("#cfe3ea");
-  world.add(new THREE.HemisphereLight("#f4f7ff", "#5b6b3a", 1.1));
+  world.add(createSkyLight());
   const sun = createSun(scene);
   world.add(sun, sun.target);
 
