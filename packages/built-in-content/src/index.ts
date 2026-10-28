@@ -1,6 +1,11 @@
 import type { Result } from "@living-diorama/content-schema";
 import type { AssetEntry, Registries } from "@living-diorama/extension-api";
 import mossling from "./woodland-hollow/mossling.json";
+import bush from "./woodland-hollow/props/bush.json";
+import mushroom from "./woodland-hollow/props/mushroom.json";
+import pine from "./woodland-hollow/props/pine.json";
+import rock from "./woodland-hollow/props/rock.json";
+import roundTree from "./woodland-hollow/props/round-tree.json";
 import woodenBridge from "./woodland-hollow/wooden-bridge.json";
 import woodlandHollow from "./woodland-hollow/world.json";
 
@@ -15,9 +20,10 @@ export const BUILT_IN_NAMESPACE = "hollow";
  */
 export const builtInDefinitions = {
   structures: [woodenBridge],
+  props: [pine, roundTree, rock, bush, mushroom],
   species: [mossling],
   worlds: [woodlandHollow],
-} as const satisfies Record<"structures" | "species" | "worlds", readonly unknown[]>;
+} as const satisfies Record<"structures" | "props" | "species" | "worlds", readonly unknown[]>;
 
 const asset = (id: string, kind: AssetEntry["kind"], url: URL, scale?: number): AssetEntry => ({
   id,
@@ -79,6 +85,7 @@ export function registerBuiltInContent(registries: Registries): Result<unknown>[
   return [
     ...builtInAssets.map((a) => registries.assets.register(a)),
     ...builtInDefinitions.structures.map((d) => registries.structures.register(d)),
+    ...builtInDefinitions.props.map((d) => registries.props.register(d)),
     ...builtInDefinitions.species.map((d) => registries.species.register(d)),
     ...builtInDefinitions.worlds.map((d) => registries.worlds.register(d)),
   ];

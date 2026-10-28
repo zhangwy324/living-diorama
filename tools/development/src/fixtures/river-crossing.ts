@@ -24,7 +24,7 @@ const materials = heights.map((h) => (h < 0 ? 1 : 0));
 const walk = ["core:walk"];
 
 export const riverCrossingWorld = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:river-crossing",
   version: "1.0.0",
   name: "River crossing (fixture)",
@@ -103,15 +103,14 @@ export const riverCrossingWorld = {
   props: [
     {
       id: "pine-1",
-      model: "fixture:models/pine.glb",
+      prop: "fixture:pine",
       transform: { position: { x: -3, y: 0.5, z: -2 } },
-      blockRadius: 0.3,
     },
     {
+      // Blocks 0.4 m × 0.5 = 0.2 m.
       id: "rock-1",
-      model: "fixture:models/rock.glb",
+      prop: "fixture:rock",
       transform: { position: { x: 2.5, y: 0.5, z: 2 }, scale: 0.5 },
-      blockRadius: 0.2,
     },
   ],
   spawnPoints: [
@@ -125,12 +124,32 @@ export const riverCrossingWorld = {
 };
 
 export const plankBridge = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:plank-bridge",
   version: "1.0.0",
   name: "Plank bridge",
-  affordances: ["core:crossable"],
+  affordances: { "core:crossable": {} },
 };
+
+/** The fixture world's prop types. */
+export const fixtureProps = [
+  {
+    schemaVersion: 1,
+    id: "fixture:pine",
+    version: "1.0.0",
+    name: "Pine",
+    model: "fixture:models/pine.glb",
+    blockRadius: 0.3,
+  },
+  {
+    schemaVersion: 1,
+    id: "fixture:rock",
+    version: "1.0.0",
+    name: "Rock",
+    model: "fixture:models/rock.glb",
+    blockRadius: 0.4,
+  },
+];
 
 export const pebble = {
   schemaVersion: 1,
@@ -146,7 +165,7 @@ export const pebble = {
 
 /** Registers the files the fixture refers to. They are never loaded: the fixture is only simulated. */
 export function registerFixtureAssets(registries: Registries) {
-  const models = new Set(riverCrossingWorld.props.map((p) => p.model));
+  const models = new Set(fixtureProps.map((p) => p.model));
   return [
     registries.assets.register({
       id: pebble.appearance,
@@ -165,6 +184,7 @@ export function registerRiverCrossing(registries: Registries) {
   return [
     ...registerFixtureAssets(registries),
     registries.structures.register(plankBridge),
+    ...fixtureProps.map((p) => registries.props.register(p)),
     registries.species.register(pebble),
     registries.worlds.register(riverCrossingWorld),
   ];

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "hollow:woodland-hollow",
   "version": "1.0.0",
   "name": "Woodland Hollow",
@@ -1059,7 +1059,7 @@
   "props": [
     {
       "id": "pine-1",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -24.261,
@@ -1068,12 +1068,11 @@
         },
         "rotationY": 1.316,
         "scale": 1.086
-      },
-      "blockRadius": 0.326
+      }
     },
     {
       "id": "pine-2",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -24.797,
@@ -1082,12 +1081,11 @@
         },
         "rotationY": -3.019,
         "scale": 1.014
-      },
-      "blockRadius": 0.304
+      }
     },
     {
       "id": "pine-3",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -20.483,
@@ -1096,12 +1094,11 @@
         },
         "rotationY": -0.717,
         "scale": 0.906
-      },
-      "blockRadius": 0.272
+      }
     },
     {
       "id": "pine-4",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -18.579,
@@ -1110,12 +1107,11 @@
         },
         "rotationY": 1.873,
         "scale": 1.05
-      },
-      "blockRadius": 0.315
+      }
     },
     {
       "id": "pine-5",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -18.84,
@@ -1124,12 +1120,11 @@
         },
         "rotationY": 2.413,
         "scale": 1.149
-      },
-      "blockRadius": 0.345
+      }
     },
     {
       "id": "pine-6",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -28.161,
@@ -1138,12 +1133,11 @@
         },
         "rotationY": -2.363,
         "scale": 1.155
-      },
-      "blockRadius": 0.347
+      }
     },
     {
       "id": "pine-7",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -28.212,
@@ -1152,12 +1146,11 @@
         },
         "rotationY": -2.163,
         "scale": 1.187
-      },
-      "blockRadius": 0.356
+      }
     },
     {
       "id": "pine-8",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -26.57,
@@ -1166,12 +1159,11 @@
         },
         "rotationY": 1.341,
         "scale": 1.207
-      },
-      "blockRadius": 0.362
+      }
     },
     {
       "id": "pine-9",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -12.899,
@@ -1180,12 +1172,11 @@
         },
         "rotationY": -0.627,
         "scale": 1.167
-      },
-      "blockRadius": 0.35
+      }
     },
     {
       "id": "pine-10",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -23.792,
@@ -1194,12 +1185,11 @@
         },
         "rotationY": 0.117,
         "scale": 1.192
-      },
-      "blockRadius": 0.358
+      }
     },
     {
       "id": "pine-11",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -29.379,
@@ -1208,12 +1198,11 @@
         },
         "rotationY": -0.314,
         "scale": 1.253
-      },
-      "blockRadius": 0.376
+      }
     },
     {
       "id": "pine-12",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -16.262,
@@ -1222,12 +1211,11 @@
         },
         "rotationY": 2.615,
         "scale": 0.996
-      },
-      "blockRadius": 0.299
+      }
     },
     {
       "id": "pine-13",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -29.832,
@@ -1236,12 +1224,11 @@
         },
         "rotationY": 1.491,
         "scale": 0.958
-      },
-      "blockRadius": 0.287
+      }
     },
     {
       "id": "pine-14",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -25.739,
@@ -1250,12 +1237,11 @@
         },
         "rotationY": -2.068,
         "scale": 1.111
-      },
-      "blockRadius": 0.333
+      }
     },
     {
       "id": "pine-15",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -15.969,
@@ -1264,12 +1250,11 @@
         },
         "rotationY": -1.637,
         "scale": 0.926
-      },
-      "blockRadius": 0.278
+      }
     },
     {
       "id": "pine-16",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -23.288,
@@ -1278,12 +1263,11 @@
         },
         "rotationY": -1.182,
         "scale": 0.851
-      },
-      "blockRadius": 0.255
+      }
     },
     {
       "id": "pine-17",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -23.883,
@@ -1292,12 +1276,11 @@
         },
         "rotationY": -0.651,
         "scale": 0.825
-      },
-      "blockRadius": 0.247
+      }
     },
     {
       "id": "pine-18",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -25.585,
@@ -1306,12 +1289,11 @@
         },
         "rotationY": 0.647,
         "scale": 1.248
-      },
-      "blockRadius": 0.374
+      }
     },
     {
       "id": "pine-19",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -18.081,
@@ -1320,12 +1302,11 @@
         },
         "rotationY": 2.973,
         "scale": 1.265
-      },
-      "blockRadius": 0.379
+      }
     },
     {
       "id": "pine-20",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -23.709,
@@ -1334,12 +1315,11 @@
         },
         "rotationY": -1.814,
         "scale": 0.989
-      },
-      "blockRadius": 0.297
+      }
     },
     {
       "id": "pine-21",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 23.287,
@@ -1348,12 +1328,11 @@
         },
         "rotationY": 1.903,
         "scale": 0.905
-      },
-      "blockRadius": 0.272
+      }
     },
     {
       "id": "pine-22",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -20.914,
@@ -1362,12 +1341,11 @@
         },
         "rotationY": -1.728,
         "scale": 0.971
-      },
-      "blockRadius": 0.291
+      }
     },
     {
       "id": "pine-23",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 26.631,
@@ -1376,12 +1354,11 @@
         },
         "rotationY": 0.015,
         "scale": 1
-      },
-      "blockRadius": 0.3
+      }
     },
     {
       "id": "pine-24",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -27.04,
@@ -1390,12 +1367,11 @@
         },
         "rotationY": -0.226,
         "scale": 0.965
-      },
-      "blockRadius": 0.29
+      }
     },
     {
       "id": "pine-25",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -22.38,
@@ -1404,12 +1380,11 @@
         },
         "rotationY": -2.055,
         "scale": 0.878
-      },
-      "blockRadius": 0.263
+      }
     },
     {
       "id": "pine-26",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -14.332,
@@ -1418,12 +1393,11 @@
         },
         "rotationY": 0.391,
         "scale": 1.031
-      },
-      "blockRadius": 0.309
+      }
     },
     {
       "id": "pine-27",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -20.169,
@@ -1432,12 +1406,11 @@
         },
         "rotationY": -1.655,
         "scale": 1.106
-      },
-      "blockRadius": 0.332
+      }
     },
     {
       "id": "pine-28",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -13.875,
@@ -1446,12 +1419,11 @@
         },
         "rotationY": -1.743,
         "scale": 1.06
-      },
-      "blockRadius": 0.318
+      }
     },
     {
       "id": "pine-29",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 24.143,
@@ -1460,12 +1432,11 @@
         },
         "rotationY": -2.359,
         "scale": 1.08
-      },
-      "blockRadius": 0.324
+      }
     },
     {
       "id": "pine-30",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -27.735,
@@ -1474,12 +1445,11 @@
         },
         "rotationY": 1.321,
         "scale": 1.045
-      },
-      "blockRadius": 0.313
+      }
     },
     {
       "id": "pine-31",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -26.272,
@@ -1488,12 +1458,11 @@
         },
         "rotationY": 1.808,
         "scale": 1.215
-      },
-      "blockRadius": 0.365
+      }
     },
     {
       "id": "pine-32",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -20.178,
@@ -1502,12 +1471,11 @@
         },
         "rotationY": -1.606,
         "scale": 0.97
-      },
-      "blockRadius": 0.291
+      }
     },
     {
       "id": "pine-33",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -21.665,
@@ -1516,12 +1484,11 @@
         },
         "rotationY": -2.481,
         "scale": 1.251
-      },
-      "blockRadius": 0.375
+      }
     },
     {
       "id": "pine-34",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": -24.696,
@@ -1530,12 +1497,11 @@
         },
         "rotationY": -0.855,
         "scale": 0.999
-      },
-      "blockRadius": 0.3
+      }
     },
     {
       "id": "round-tree-1",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -13.924,
@@ -1544,12 +1510,11 @@
         },
         "rotationY": 1.208,
         "scale": 1.068
-      },
-      "blockRadius": 0.374
+      }
     },
     {
       "id": "round-tree-2",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -8.937,
@@ -1558,12 +1523,11 @@
         },
         "rotationY": -2.93,
         "scale": 1.176
-      },
-      "blockRadius": 0.412
+      }
     },
     {
       "id": "round-tree-3",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -2.915,
@@ -1572,12 +1536,11 @@
         },
         "rotationY": -2.435,
         "scale": 1.038
-      },
-      "blockRadius": 0.363
+      }
     },
     {
       "id": "round-tree-4",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -5.353,
@@ -1586,12 +1549,11 @@
         },
         "rotationY": 1.398,
         "scale": 1.236
-      },
-      "blockRadius": 0.433
+      }
     },
     {
       "id": "round-tree-5",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -20.068,
@@ -1600,12 +1562,11 @@
         },
         "rotationY": 0.28,
         "scale": 1.246
-      },
-      "blockRadius": 0.436
+      }
     },
     {
       "id": "round-tree-6",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -5.947,
@@ -1614,12 +1575,11 @@
         },
         "rotationY": -3.029,
         "scale": 1.023
-      },
-      "blockRadius": 0.358
+      }
     },
     {
       "id": "round-tree-7",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": -17.218,
@@ -1628,12 +1588,11 @@
         },
         "rotationY": -1.948,
         "scale": 0.886
-      },
-      "blockRadius": 0.31
+      }
     },
     {
       "id": "round-tree-8",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 1.121,
@@ -1642,12 +1601,11 @@
         },
         "rotationY": -2.619,
         "scale": 1.15
-      },
-      "blockRadius": 0.402
+      }
     },
     {
       "id": "pine-35",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 7.462,
@@ -1656,12 +1614,11 @@
         },
         "rotationY": 1.566,
         "scale": 1.099
-      },
-      "blockRadius": 0.33
+      }
     },
     {
       "id": "pine-36",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 9.829,
@@ -1670,12 +1627,11 @@
         },
         "rotationY": 3.033,
         "scale": 1.038
-      },
-      "blockRadius": 0.311
+      }
     },
     {
       "id": "pine-37",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 25.812,
@@ -1684,12 +1640,11 @@
         },
         "rotationY": 0.3,
         "scale": 0.966
-      },
-      "blockRadius": 0.29
+      }
     },
     {
       "id": "pine-38",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 18.573,
@@ -1698,12 +1653,11 @@
         },
         "rotationY": 1.989,
         "scale": 0.804
-      },
-      "blockRadius": 0.241
+      }
     },
     {
       "id": "pine-39",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 14.484,
@@ -1712,12 +1666,11 @@
         },
         "rotationY": 1.511,
         "scale": 0.975
-      },
-      "blockRadius": 0.293
+      }
     },
     {
       "id": "pine-40",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 29.914,
@@ -1726,12 +1679,11 @@
         },
         "rotationY": -1.983,
         "scale": 1.054
-      },
-      "blockRadius": 0.316
+      }
     },
     {
       "id": "pine-41",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 22.078,
@@ -1740,12 +1692,11 @@
         },
         "rotationY": -2.833,
         "scale": 0.803
-      },
-      "blockRadius": 0.241
+      }
     },
     {
       "id": "pine-42",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 11.094,
@@ -1754,12 +1705,11 @@
         },
         "rotationY": -1.096,
         "scale": 1.21
-      },
-      "blockRadius": 0.363
+      }
     },
     {
       "id": "pine-43",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 26.554,
@@ -1768,12 +1718,11 @@
         },
         "rotationY": 0.319,
         "scale": 1.215
-      },
-      "blockRadius": 0.365
+      }
     },
     {
       "id": "pine-44",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 16.851,
@@ -1782,12 +1731,11 @@
         },
         "rotationY": -1.508,
         "scale": 0.851
-      },
-      "blockRadius": 0.255
+      }
     },
     {
       "id": "pine-45",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 22.886,
@@ -1796,12 +1744,11 @@
         },
         "rotationY": 1.187,
         "scale": 1.058
-      },
-      "blockRadius": 0.317
+      }
     },
     {
       "id": "pine-46",
-      "model": "hollow:models/pine.glb",
+      "prop": "hollow:pine",
       "transform": {
         "position": {
           "x": 30.044,
@@ -1810,12 +1757,11 @@
         },
         "rotationY": -0.099,
         "scale": 1.004
-      },
-      "blockRadius": 0.301
+      }
     },
     {
       "id": "round-tree-9",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 19.83,
@@ -1824,12 +1770,11 @@
         },
         "rotationY": -1.496,
         "scale": 0.917
-      },
-      "blockRadius": 0.321
+      }
     },
     {
       "id": "round-tree-10",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 12.241,
@@ -1838,12 +1783,11 @@
         },
         "rotationY": -2.177,
         "scale": 0.832
-      },
-      "blockRadius": 0.291
+      }
     },
     {
       "id": "round-tree-11",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 3.155,
@@ -1852,12 +1796,11 @@
         },
         "rotationY": 2.203,
         "scale": 1.083
-      },
-      "blockRadius": 0.379
+      }
     },
     {
       "id": "round-tree-12",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 27.696,
@@ -1866,12 +1809,11 @@
         },
         "rotationY": -0.187,
         "scale": 0.925
-      },
-      "blockRadius": 0.324
+      }
     },
     {
       "id": "round-tree-13",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 8.857,
@@ -1880,12 +1822,11 @@
         },
         "rotationY": 2.757,
         "scale": 0.871
-      },
-      "blockRadius": 0.305
+      }
     },
     {
       "id": "round-tree-14",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 8.967,
@@ -1894,12 +1835,11 @@
         },
         "rotationY": 1.533,
         "scale": 0.874
-      },
-      "blockRadius": 0.306
+      }
     },
     {
       "id": "round-tree-15",
-      "model": "hollow:models/round-tree.glb",
+      "prop": "hollow:round-tree",
       "transform": {
         "position": {
           "x": 20.42,
@@ -1908,12 +1848,11 @@
         },
         "rotationY": 0.917,
         "scale": 0.985
-      },
-      "blockRadius": 0.345
+      }
     },
     {
       "id": "rock-1",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -9.752,
@@ -1922,12 +1861,11 @@
         },
         "rotationY": -2.85,
         "scale": 0.818
-      },
-      "blockRadius": 0.409
+      }
     },
     {
       "id": "rock-2",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 0.297,
@@ -1936,12 +1874,11 @@
         },
         "rotationY": 2.302,
         "scale": 0.946
-      },
-      "blockRadius": 0.473
+      }
     },
     {
       "id": "rock-3",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -0.344,
@@ -1950,12 +1887,11 @@
         },
         "rotationY": 0.607,
         "scale": 1.103
-      },
-      "blockRadius": 0.552
+      }
     },
     {
       "id": "rock-4",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -7.725,
@@ -1964,12 +1900,11 @@
         },
         "rotationY": -2.598,
         "scale": 0.606
-      },
-      "blockRadius": 0.303
+      }
     },
     {
       "id": "rock-5",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 2.835,
@@ -1978,12 +1913,11 @@
         },
         "rotationY": 2.451,
         "scale": 1.055
-      },
-      "blockRadius": 0.528
+      }
     },
     {
       "id": "rock-6",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -8.956,
@@ -1992,12 +1926,11 @@
         },
         "rotationY": 0.906,
         "scale": 0.868
-      },
-      "blockRadius": 0.434
+      }
     },
     {
       "id": "rock-7",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -2.212,
@@ -2006,12 +1939,11 @@
         },
         "rotationY": 3.058,
         "scale": 0.634
-      },
-      "blockRadius": 0.317
+      }
     },
     {
       "id": "rock-8",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": -3.266,
@@ -2020,12 +1952,11 @@
         },
         "rotationY": 1.621,
         "scale": 0.765
-      },
-      "blockRadius": 0.383
+      }
     },
     {
       "id": "rock-9",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 22.423,
@@ -2034,12 +1965,11 @@
         },
         "rotationY": -1.243,
         "scale": 0.797
-      },
-      "blockRadius": 0.399
+      }
     },
     {
       "id": "rock-10",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 28.603,
@@ -2048,12 +1978,11 @@
         },
         "rotationY": 1.293,
         "scale": 0.807
-      },
-      "blockRadius": 0.404
+      }
     },
     {
       "id": "rock-11",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 26.054,
@@ -2062,12 +1991,11 @@
         },
         "rotationY": 1.507,
         "scale": 0.731
-      },
-      "blockRadius": 0.366
+      }
     },
     {
       "id": "rock-12",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 20.13,
@@ -2076,12 +2004,11 @@
         },
         "rotationY": -0.906,
         "scale": 1.153
-      },
-      "blockRadius": 0.577
+      }
     },
     {
       "id": "rock-13",
-      "model": "hollow:models/rock.glb",
+      "prop": "hollow:rock",
       "transform": {
         "position": {
           "x": 25.484,
@@ -2090,12 +2017,11 @@
         },
         "rotationY": 1.169,
         "scale": 0.855
-      },
-      "blockRadius": 0.428
+      }
     },
     {
       "id": "bush-1",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -13.968,
@@ -2104,12 +2030,11 @@
         },
         "rotationY": -1.39,
         "scale": 1.014
-      },
-      "blockRadius": 0.406
+      }
     },
     {
       "id": "bush-2",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 24.469,
@@ -2118,12 +2043,11 @@
         },
         "rotationY": 2.149,
         "scale": 1.038
-      },
-      "blockRadius": 0.415
+      }
     },
     {
       "id": "bush-3",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 17.388,
@@ -2132,12 +2056,11 @@
         },
         "rotationY": -1.774,
         "scale": 1.19
-      },
-      "blockRadius": 0.476
+      }
     },
     {
       "id": "bush-4",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 12.351,
@@ -2146,12 +2069,11 @@
         },
         "rotationY": -2.442,
         "scale": 0.913
-      },
-      "blockRadius": 0.365
+      }
     },
     {
       "id": "bush-5",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -23.239,
@@ -2160,12 +2082,11 @@
         },
         "rotationY": -2.218,
         "scale": 1.2
-      },
-      "blockRadius": 0.48
+      }
     },
     {
       "id": "bush-6",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -9.019,
@@ -2174,12 +2095,11 @@
         },
         "rotationY": -0.741,
         "scale": 1.145
-      },
-      "blockRadius": 0.458
+      }
     },
     {
       "id": "bush-7",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 28.719,
@@ -2188,12 +2108,11 @@
         },
         "rotationY": 0.675,
         "scale": 1.189
-      },
-      "blockRadius": 0.476
+      }
     },
     {
       "id": "bush-8",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 28.851,
@@ -2202,12 +2121,11 @@
         },
         "rotationY": 0.293,
         "scale": 0.835
-      },
-      "blockRadius": 0.334
+      }
     },
     {
       "id": "bush-9",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -10.748,
@@ -2216,12 +2134,11 @@
         },
         "rotationY": -2.918,
         "scale": 0.941
-      },
-      "blockRadius": 0.376
+      }
     },
     {
       "id": "bush-10",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -15.514,
@@ -2230,12 +2147,11 @@
         },
         "rotationY": 0.011,
         "scale": 1.062
-      },
-      "blockRadius": 0.425
+      }
     },
     {
       "id": "bush-11",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -30.006,
@@ -2244,12 +2160,11 @@
         },
         "rotationY": 2.347,
         "scale": 0.883
-      },
-      "blockRadius": 0.353
+      }
     },
     {
       "id": "bush-12",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -13.042,
@@ -2258,12 +2173,11 @@
         },
         "rotationY": -1.598,
         "scale": 0.707
-      },
-      "blockRadius": 0.283
+      }
     },
     {
       "id": "bush-13",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -29.802,
@@ -2272,12 +2186,11 @@
         },
         "rotationY": -1.114,
         "scale": 1.095
-      },
-      "blockRadius": 0.438
+      }
     },
     {
       "id": "bush-14",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 18.051,
@@ -2286,12 +2199,11 @@
         },
         "rotationY": -1.2,
         "scale": 1.124
-      },
-      "blockRadius": 0.45
+      }
     },
     {
       "id": "bush-15",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": 16.824,
@@ -2300,12 +2212,11 @@
         },
         "rotationY": 1.694,
         "scale": 0.912
-      },
-      "blockRadius": 0.365
+      }
     },
     {
       "id": "bush-16",
-      "model": "hollow:models/bush.glb",
+      "prop": "hollow:bush",
       "transform": {
         "position": {
           "x": -12.224,
@@ -2314,12 +2225,11 @@
         },
         "rotationY": 0.332,
         "scale": 0.785
-      },
-      "blockRadius": 0.314
+      }
     },
     {
       "id": "mushroom-1",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -17.702,
@@ -2328,12 +2238,11 @@
         },
         "rotationY": 2.439,
         "scale": 0.917
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-2",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -28.977,
@@ -2342,12 +2251,11 @@
         },
         "rotationY": -2.609,
         "scale": 0.98
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-3",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -16.474,
@@ -2356,12 +2264,11 @@
         },
         "rotationY": 0.161,
         "scale": 0.873
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-4",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -19.164,
@@ -2370,12 +2277,11 @@
         },
         "rotationY": 1.749,
         "scale": 1.188
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-5",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -13.74,
@@ -2384,12 +2290,11 @@
         },
         "rotationY": 1.308,
         "scale": 1.056
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-6",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -25.663,
@@ -2398,12 +2303,11 @@
         },
         "rotationY": 0.018,
         "scale": 1.061
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-7",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -15.115,
@@ -2412,12 +2316,11 @@
         },
         "rotationY": -2.405,
         "scale": 0.851
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-8",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -25.888,
@@ -2426,12 +2329,11 @@
         },
         "rotationY": 1.148,
         "scale": 1.259
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-9",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -22.534,
@@ -2440,12 +2342,11 @@
         },
         "rotationY": 1.418,
         "scale": 1.227
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-10",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -27.169,
@@ -2454,12 +2355,11 @@
         },
         "rotationY": 2.74,
         "scale": 0.72
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-11",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -30.272,
@@ -2468,12 +2368,11 @@
         },
         "rotationY": 1.589,
         "scale": 1.261
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-12",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -22.416,
@@ -2482,12 +2381,11 @@
         },
         "rotationY": 0.296,
         "scale": 0.721
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-13",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -17.274,
@@ -2496,12 +2394,11 @@
         },
         "rotationY": -1.334,
         "scale": 0.735
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-14",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -24.366,
@@ -2510,12 +2407,11 @@
         },
         "rotationY": 1.802,
         "scale": 1.021
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-15",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -18.86,
@@ -2524,12 +2420,11 @@
         },
         "rotationY": -2.297,
         "scale": 0.768
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-16",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -21.084,
@@ -2538,12 +2433,11 @@
         },
         "rotationY": 2.292,
         "scale": 1.238
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-17",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": -25.784,
@@ -2552,12 +2446,11 @@
         },
         "rotationY": 0.951,
         "scale": 0.906
-      },
-      "blockRadius": 0
+      }
     },
     {
       "id": "mushroom-18",
-      "model": "hollow:models/mushroom.glb",
+      "prop": "hollow:mushroom",
       "transform": {
         "position": {
           "x": 24.846,
@@ -2566,8 +2459,7 @@
         },
         "rotationY": 0.638,
         "scale": 1.277
-      },
-      "blockRadius": 0
+      }
     }
   ],
   "spawnPoints": [

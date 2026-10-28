@@ -18,8 +18,9 @@ export type SizeClass = keyof typeof SIZE_CLASSES;
 
 /** Current data-format version per definition type (ADR 0003). */
 export const SCHEMA_VERSIONS = {
-  world: 1,
-  structure: 1,
+  world: 2,
+  structure: 2,
+  prop: 1,
   species: 1,
 } as const;
 

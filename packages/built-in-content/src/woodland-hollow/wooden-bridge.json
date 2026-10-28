@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "hollow:wooden-bridge",
   "version": "1.0.0",
   "name": "Wooden bridge",
-  "affordances": ["core:crossable"]
+  "affordances": { "core:crossable": {} }
 }

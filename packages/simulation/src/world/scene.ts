@@ -1,14 +1,16 @@
 import type {
   MaterialZones,
   Portal,
-  PropPlacement,
   RegionKind,
   Vec3,
   WorldBounds,
 } from "@living-diorama/content-schema";
 import { pointInPolygon, projectOnSegment } from "./geometry";
 import type { SurfaceMesh } from "./surfaces";
-import type { WorldModel } from "./world-model";
+import type { PropModel, WorldModel } from "./world-model";
+
+/** A prop as the renderer draws it: its model, where it stands and what it blocks, in metres. */
+export type SceneProp = Pick<PropModel, "id" | "model" | "transform" | "blockRadius">;
 
 /**
  * Static world geometry for the renderer, resolved from the world model so the renderer never
@@ -43,7 +45,7 @@ export interface SceneData {
    * west→east, then south edge, west edge north→south, east edge.
    */
   edgeWater: { north: number[]; south: number[]; west: number[]; east: number[] };
-  props: PropPlacement[];
+  props: SceneProp[];
   spawnPoints: Vec3[];
 }
 
@@ -151,7 +153,12 @@ export function describeScene(model: WorldModel): SceneData {
       west: along(terrain.rows, (j) => [bounds.min.x + inset, zAt(j)]),
       east: along(terrain.rows, (j) => [bounds.max.x - inset, zAt(j)]),
     },
-    props: [...model.props],
+    props: model.props.map((p) => ({
+      id: p.id,
+      model: p.model,
+      transform: p.transform,
+      blockRadius: p.blockRadius,
+    })),
     spawnPoints: definition.spawnPoints.flatMap((s) => {
       const y = model.regions
         .get(s.position.regionId)

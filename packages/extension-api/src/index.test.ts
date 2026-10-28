@@ -24,7 +24,7 @@ function expectOk<T>(result: Result<T>) {
 
 /** 2 × 2 m flat world with one land region. */
 const world = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "test:flat",
   version: "1.0.0",
   name: "Flat",
@@ -332,7 +332,7 @@ describe("resolveReferences", () => {
     before(`assets/${sprite.id}`, "species/test:pebble");
   });
 
-  it("validates assets and checks that a prop refers to a model", () => {
+  it("validates assets and checks that a prop type refers to a model", () => {
     const registries = createRegistries();
     const bad = registries.assets.register({ ...sprite, kind: "sound", url: "", scale: 0 });
     expect(bad.ok ? [] : bad.diagnostics.map((d) => d.path.join("."))).toEqual([
@@ -342,23 +342,43 @@ describe("resolveReferences", () => {
     ]);
 
     expectOk(registries.assets.register(sprite));
+    const prop = (id: string, model: string) => ({
+      schemaVersion: 1,
+      id,
+      version: "1.0.0",
+      name: id,
+      model,
+      blockRadius: 0,
+    });
+    expectOk(registries.props.register(prop("test:flat-thing", sprite.id)));
+    expectOk(registries.props.register(prop("test:lost-thing", "test:models/gone.glb")));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: props/test:flat-thing model: "test:sprites/pebble.png" is an asset of kind image, expected model (invalid_value)',
+      'error: props/test:lost-thing model: "test:models/gone.glb" is not registered in assets (unresolved_reference)',
+    ]);
+  });
+
+  it("checks that every prop placement names a registered prop type", () => {
+    const registries = createRegistries();
+    const at = { position: { x: 0, y: 0, z: 0 } };
     expectOk(
       registries.worlds.register({
         ...world,
         props: [
-          {
-            id: "a",
-            model: sprite.id,
-            transform: { position: { x: 0, y: 0, z: 0 } },
-            blockRadius: 0,
-          },
-          {
-            id: "b",
-            model: "test:models/gone.glb",
-            transform: { position: { x: 0, y: 0, z: 0 } },
-            blockRadius: 0,
-          },
+          { id: "a", prop: "test:pine", transform: at },
+          { id: "b", prop: "test:gone", transform: at },
         ],
+      }),
+    );
+    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(
+      registries.props.register({
+        schemaVersion: 1,
+        id: "test:pine",
+        version: "1.0.0",
+        name: "Pine",
+        model: "test:pine.glb",
+        blockRadius: 0.3,
       }),
     );
     expect(
@@ -366,8 +386,43 @@ describe("resolveReferences", () => {
         .diagnostics.filter((d) => d.path[0] === "props")
         .map(formatDiagnostic),
     ).toEqual([
-      'error: worlds/test:flat props[0].model: "test:sprites/pebble.png" is an asset of kind image, expected model (invalid_value)',
-      'error: worlds/test:flat props[1].model: "test:models/gone.glb" is not registered in assets (unresolved_reference)',
+      'error: worlds/test:flat props[1].prop: "test:gone" is not registered in props (unresolved_reference)',
+    ]);
+  });
+
+  it("checks affordance params of structures and prop types against the affordance's schema", () => {
+    const registries = createRegistries();
+    expectOk(
+      registries.affordances.register({
+        id: "core:food",
+        version: "1.0.0",
+        paramsSchema: FoodAffordanceParamsSchema,
+      }),
+    );
+    expectOk(registries.assets.register({ ...sprite, id: "test:bush.glb", kind: "model" }));
+    expectOk(
+      registries.props.register({
+        schemaVersion: 1,
+        id: "test:bush",
+        version: "1.0.0",
+        name: "Bush",
+        model: "test:bush.glb",
+        blockRadius: 0.4,
+        affordances: { "core:food": { eatSeconds: 0 } },
+      }),
+    );
+    expectOk(
+      registries.structures.register({
+        schemaVersion: 2,
+        id: "test:pantry",
+        version: "1.0.0",
+        name: "Pantry",
+        affordances: { "core:food": {} },
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      "error: structures/test:pantry affordances.core:food.eatSeconds: Invalid input: expected number, received undefined (invalid_type)",
+      "error: props/test:bush affordances.core:food.eatSeconds: Too small: expected number to be >0 (too_small)",
     ]);
   });
 
@@ -378,15 +433,15 @@ describe("resolveReferences", () => {
     expectOk(registries.species.register({ ...species, capabilities: { "core:wlak": 1 } }));
     expectOk(
       registries.structures.register({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "test:bridge",
         version: "1.0.0",
         name: "Bridge",
-        affordances: ["core:crossable"],
+        affordances: { "core:crossable": {} },
       }),
     );
     expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
-      'error: structures/test:bridge affordances[0]: "core:crossable" is not registered in affordances (unresolved_reference)',
+      'error: structures/test:bridge affordances.core:crossable: "core:crossable" is not registered in affordances (unresolved_reference)',
       'error: species/test:pebble capabilities.core:wlak: "core:wlak" is not registered in capabilities (unresolved_reference)',
     ]);
   });

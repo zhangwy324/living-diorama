@@ -1,10 +1,11 @@
 import {
   error,
+  type Affordances,
   type ConnectionDefinition,
   type Diagnostic,
-  type PropPlacement,
   type RegionKind,
   type Result,
+  type Transform,
   type Vec2,
   type WorldBounds,
   type WorldDefinition,
@@ -28,14 +29,28 @@ export interface ConnectionModel extends ConnectionDefinition {
   structureId?: string;
 }
 
-/** A world definition with its terrain decoded and every region's surface instantiated. */
+/** A prop placement resolved against its type (ADR 0018 §3). */
+export interface PropModel {
+  /** Placement ID. */
+  id: string;
+  /** Prop type ID. Engine code finds props by `affordances`, never by this. */
+  prop: string;
+  model: string;
+  transform: Transform;
+  /** In world metres: the type's block radius × `transform.scale`. */
+  blockRadius: number;
+  /** Affordance → params, as the type declares them. */
+  affordances: Readonly<Affordances>;
+}
+
+/** A world definition with its terrain decoded, surfaces instantiated and props resolved. */
 export interface WorldModel {
   definition: WorldDefinition;
   bounds: WorldBounds;
   terrain: Terrain;
   regions: ReadonlyMap<string, RegionModel>;
   connections: readonly ConnectionModel[];
-  props: readonly PropPlacement[];
+  props: readonly PropModel[];
 }
 
 /** Builds the runtime model. Expects references to be resolved (`resolveReferences`) first. */
@@ -91,6 +106,29 @@ export function buildWorldModel(
   world.structures.forEach((s, si) =>
     s.regions.forEach((r, i) => addRegion(r, ["structures", si, "regions", i], s.id)),
   );
+  const props: PropModel[] = [];
+  world.props.forEach((placement, i) => {
+    const type = registries.props.get(placement.prop);
+    if (!type) {
+      diagnostics.push(
+        error(
+          "unresolved_reference",
+          `"${placement.prop}" is not registered in props`,
+          ["props", i, "prop"],
+          source,
+        ),
+      );
+      return;
+    }
+    props.push({
+      id: placement.id,
+      prop: type.id,
+      model: type.model,
+      transform: placement.transform,
+      blockRadius: type.blockRadius * placement.transform.scale,
+      affordances: type.affordances,
+    });
+  });
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
   const connections: ConnectionModel[] = [
@@ -105,7 +143,7 @@ export function buildWorldModel(
       terrain,
       regions,
       connections,
-      props: world.props,
+      props,
     },
   };
 }

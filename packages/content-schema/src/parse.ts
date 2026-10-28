@@ -2,10 +2,12 @@ import type { z } from "zod";
 import { SCHEMA_VERSIONS, type DefinitionKind } from "./constants";
 import {
   CreatureInstanceSchema,
+  PropDefinitionSchema,
   SpeciesDefinitionSchema,
   StructureDefinitionSchema,
   WorldDefinitionSchema,
   type CreatureInstance,
+  type PropDefinition,
   type SpeciesDefinition,
   type StructureDefinition,
   type WorldDefinition,
@@ -56,6 +58,9 @@ export const parseStructureDefinition = (
   source?: string,
 ): Result<StructureDefinition> =>
   parseDefinition("structure", StructureDefinitionSchema, input, source);
+
+export const parsePropDefinition = (input: unknown, source?: string): Result<PropDefinition> =>
+  parseDefinition("prop", PropDefinitionSchema, input, source);
 
 export const parseSpeciesDefinition = (
   input: unknown,
