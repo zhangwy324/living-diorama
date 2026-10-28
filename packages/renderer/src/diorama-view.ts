@@ -222,6 +222,9 @@ export function createDioramaView(
   controls.minDistance = 8;
   controls.maxDistance = 220;
 
+  // Cue sprites are sized in CSS pixels of the view (ADR 0018 §15).
+  const cueView = { camera, heightPx: 1 };
+
   let reset:
     | {
         from: THREE.Vector3;
@@ -238,6 +241,7 @@ export function createDioramaView(
     height = Math.max(1, container.clientHeight);
     renderer.setSize(width, height);
     camera.aspect = width / height;
+    cueView.heightPx = height;
     camera.fov = defaultFraming(scene, camera.aspect).fov;
     camera.updateProjectionMatrix();
   };
@@ -298,7 +302,7 @@ export function createDioramaView(
     }
     controls.update();
     const poses = snapshots.sample(now);
-    creatures.update(poses);
+    creatures.update(poses, timer.getElapsed(), cueView);
     if (overlays.group.visible) {
       overlays.routes.update(poses);
       // One screen pixel's height at one metre from the camera, so labels keep their pixel size.

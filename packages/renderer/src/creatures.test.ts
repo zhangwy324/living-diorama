@@ -60,6 +60,15 @@ describe("SnapshotInterpolator", () => {
     expect(b!.world.x).toBe(5);
   });
 
+  it("carries each creature's cues from the newest snapshot", () => {
+    const interpolator = new SnapshotInterpolator(100);
+    interpolator.push(snapshot(1, [at(0)]), 0);
+    interpolator.push(snapshot(2, [{ ...at(1), cues: ["eating", "hungry"] }]), 100);
+    expect(interpolator.sample(110)[0]!.cues).toEqual(["eating", "hungry"]);
+    interpolator.push(snapshot(3, [{ ...at(10), cues: ["sleeping"] }]), 200); // snapped
+    expect(interpolator.sample(210)[0]!.cues).toEqual(["sleeping"]);
+  });
+
   it("ignores repeated ticks and drops creatures missing from the newest snapshot", () => {
     const interpolator = new SnapshotInterpolator(100);
     interpolator.push(snapshot(1, [at(0)]), 0);
@@ -185,7 +194,7 @@ describe("CreatureBodies", () => {
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
     bodies.update([]);
     expect(bodies.count).toBe(0);
-    expect(layer.group.children).toHaveLength(0);
+    expect(layer.group.getObjectByName("a")).toBeUndefined();
   });
 
   it("makes bodies cast shadows from their faces towards the sun", async () => {

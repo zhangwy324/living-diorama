@@ -1,5 +1,5 @@
 import type { Vec3 } from "@living-diorama/content-schema";
-import type { SimulationSnapshot } from "@living-diorama/simulation";
+import type { Cue, SimulationSnapshot } from "@living-diorama/simulation";
 
 // Creature poses between simulation snapshots (ADR 0007 §8). The renderer draws one tick behind
 // the newest snapshot: when a snapshot arrives it starts blending from the previous one towards
@@ -21,6 +21,8 @@ export interface CreaturePose {
   speciesId: string;
   world: Vec3;
   heading: number;
+  /** What the creature shows (ADR 0018 §15), from the newest snapshot; the creatures fade them in and out. */
+  cues: readonly Cue[];
 }
 
 /** Blends two headings (radians) the short way round. */
@@ -68,10 +70,10 @@ export class SnapshotInterpolator {
     if (!this.#latest) return [];
     const t = Math.min(1, Math.max(0, (now - this.#receivedAt) / this.#intervalMs));
     const before = new Map(this.#previous?.creatures.map((c) => [c.id, c]));
-    return this.#latest.creatures.map(({ id, speciesId, world, heading }) => {
+    return this.#latest.creatures.map(({ id, speciesId, world, heading, cues }) => {
       const from = before.get(id);
       if (!from || distance(from.world, world) > SNAP_DISTANCE) {
-        return { id, speciesId, world, heading };
+        return { id, speciesId, world, heading, cues };
       }
       return {
         id,
@@ -82,6 +84,7 @@ export class SnapshotInterpolator {
           z: from.world.z + (world.z - from.world.z) * t,
         },
         heading: lerpHeading(from.heading, heading, t),
+        cues,
       };
     });
   }
