@@ -98,12 +98,12 @@ Controls overlay and lifecycle (once, at any scale):
 - [ ] Quit from the tray exits within a second; with `pnpm dev`, the console shows no "did not shut down in time" line.
 - [ ] Sleep the PC for a few minutes with the strip showing. After waking, the creatures carry on from where they were, without sliding across the world or stuttering.
 
-Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015):
+Creation Studio window (once at 100% and once at 150% or 200%, with two monitors; ADR 0015). M11 checked the overlay, single instance, focus and the close dialog in the dev app with synthetic input; the tray item, quitting with the Studio open, real pen and mouse pressure, other scale factors and two-monitor sharpness are run in M12:
 
 - [ ] The pencil button in the controls overlay and the tray's Creation Studio each open the Studio in front, focused, with a taskbar button and an Alt+Tab entry.
 - [ ] Opening it again, from either, focuses the open Studio instead of opening a second one; a minimized Studio is restored.
 - [ ] With the Studio open, clicking, orbiting and zooming in the strip still works. Launched while another app is in front, and with the Studio closed, the strip still never takes focus.
-- [ ] Known gap: with the Studio in front, clicking the strip makes the strip the active window, so keyboard focus leaves the Studio until it is clicked again. Note whether this still happens.
+- [ ] With the Studio in front, clicking or dragging in the strip and using its overlay buttons works and keeps the Studio active: Ctrl+Z still undoes in the Studio afterwards. Closing the Studio gives the focus back to the app that was in front before, not to the strip.
 - [ ] Pen, eraser, colours, brush sizes, Undo, Redo and Clear work from the toolbar; Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, and Clear can be undone. With a pen, pressing harder draws wider; with a mouse, quick flicks taper.
 - [ ] The drawing stays sharp when the window is resized and when it is moved to a monitor with another scale. The guide line is never part of the drawing.
 - [ ] Closing an empty Studio closes it at once. Closing it with something drawn asks: Cancel (or Escape) keeps the drawing, Save draft is disabled, Discard closes it.
