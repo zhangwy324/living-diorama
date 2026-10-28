@@ -1,6 +1,7 @@
 import type { Vec3 } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
+import { terrainHeightAt } from "./camera";
 import type { CreaturePose } from "./interpolation";
 
 // Debug labels above creatures (ADR 0018 §15, Q24 amendment): each creature's action, home,
@@ -8,13 +9,16 @@ import type { CreaturePose } from "./interpolation";
 // grid cells it visited recently. The renderer knows no need, action or affordance IDs; it shows
 // them by the part after the namespace ("core:hunger" → "hunger").
 
-/** Side of the knowledge grid's cells in metres; mirrors the simulation's `KNOWLEDGE_CELL_SIZE`. */
-const CELL_SIZE = 8;
+/**
+ * Side of the knowledge grid's cells in metres. Mirrors the simulation's `KNOWLEDGE_CELL_SIZE`,
+ * which the renderer may not import; a test in `apps/desktop` keeps the two equal.
+ */
+export const DEBUG_CELL_SIZE = 8;
 /** The label's bottom edge sits this far above the creature's feet, in metres. */
 const LABEL_LIFT = 1.2;
 /** The label as shown, in screen pixels; drawn at twice that for sharp text. */
 const LABEL_WIDTH = 220;
-const LABEL_HEIGHT = 100;
+const LABEL_HEIGHT = 130;
 const CANVAS_SCALE = 2;
 const LINE_HEIGHT = 13;
 const FONT = `${11 * CANVAS_SCALE}px ui-monospace, Consolas, monospace`;
@@ -39,9 +43,9 @@ export function labelLines(creature: CreatureSnapshot): string[] {
   if (knowledge) {
     const known = Object.entries(knowledge.places)
       .filter(([, places]) => places.length > 0)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, places]) => `${shortName(id)} ${places.length}`);
-    lines.push([...known, `${knowledge.recentCells.length} cells`].join(" · "));
+      .sort(([a], [b]) => a.localeCompare(b));
+    for (const [id, places] of known) lines.push(`knows ${places.length} ${shortName(id)}`);
+    lines.push(`${knowledge.recentCells.length} recent cells`);
   }
   return lines;
 }
@@ -67,9 +71,17 @@ export function canvasLabelSurface(): LabelSurface {
       if (!context) return;
       const line = LINE_HEIGHT * CANVAS_SCALE;
       const fitting = Math.floor((height - 8) / line);
-      const shown = lines.length > fitting ? [...lines.slice(0, fitting - 1), "…"] : lines;
+      const kept = lines.length > fitting ? [...lines.slice(0, fitting - 1), "…"] : lines;
       context.clearRect(0, 0, width, height);
       context.font = FONT;
+      // A line too wide for the panel is cut short with an ellipsis.
+      const fits = (text: string) => context.measureText(text).width <= width - 16;
+      const shown = kept.map((text) => {
+        if (fits(text)) return text;
+        let cut = text;
+        while (cut.length > 1 && !fits(`${cut}…`)) cut = cut.slice(0, -1);
+        return `${cut}…`;
+      });
       const panelWidth = Math.min(
         width,
         Math.max(...shown.map((l) => context.measureText(l).width)) + 16,
@@ -95,15 +107,6 @@ interface Label {
   sprite: THREE.Sprite;
   surface: LabelSurface;
   text: string;
-}
-
-/** Nearest terrain sample's height at (x, z), for laying cell squares on the ground. */
-function terrainHeight(scene: SceneData, x: number, z: number): number {
-  const { columns, rows, cellSize, heights } = scene.terrain;
-  const { min } = scene.bounds;
-  const i = THREE.MathUtils.clamp(Math.round((x - min.x) / cellSize), 0, columns - 1);
-  const j = THREE.MathUtils.clamp(Math.round((z - min.z) / cellSize), 0, rows - 1);
-  return heights[j * columns + i] ?? 0;
 }
 
 /**
@@ -167,9 +170,19 @@ export class CreatureLabels {
     this.group.add(this.#home, this.#known, this.#cells);
   }
 
-  /** Keeps the creatures of the newest snapshot. */
+  /**
+   * Keeps the creatures of the newest snapshot and redraws the recent cells, which only change
+   * with a snapshot. Without debug data in snapshots there are none, so nothing is rebuilt.
+   */
   setSnapshot(snapshot: SimulationSnapshot): void {
     this.#creatures = new Map(snapshot.creatures.map((c) => [c.id, c]));
+    const cells = snapshot.creatures.flatMap((c) =>
+      (c.knowledge?.recentCells ?? []).flatMap((cell) => this.#square(cell)),
+    );
+    const drawn = this.#cells.geometry.getAttribute("position")?.count ?? 0;
+    if (cells.length === 0 && drawn === 0) return;
+    this.#cells.geometry.dispose();
+    this.#cells.geometry = new THREE.BufferGeometry().setFromPoints(cells);
   }
 
   /**
@@ -180,7 +193,6 @@ export class CreatureLabels {
     const seen = new Set<string>();
     const home: THREE.Vector3[] = [];
     const known: THREE.Vector3[] = [];
-    const cells: THREE.Vector3[] = [];
     for (const pose of poses) {
       const creature = this.#creatures.get(pose.id);
       if (!creature) continue;
@@ -207,7 +219,6 @@ export class CreatureLabels {
           if (at) known.push(from, at);
         }
       }
-      for (const cell of creature.knowledge?.recentCells ?? []) cells.push(...this.#square(cell));
     }
     for (const [id, label] of this.#labels) {
       if (seen.has(id)) continue;
@@ -218,7 +229,6 @@ export class CreatureLabels {
     for (const [lines, points] of [
       [this.#home, home],
       [this.#known, known],
-      [this.#cells, cells],
     ] as const) {
       lines.geometry.dispose();
       lines.geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -242,6 +252,7 @@ export class CreatureLabels {
       lines.geometry.dispose();
       (lines.material as THREE.Material).dispose();
     }
+    this.group.clear();
   }
 
   #label(id: string): Label {
@@ -271,14 +282,15 @@ export class CreatureLabels {
 
   /** The outline of a knowledge grid cell, as four segments, on the terrain at its centre. */
   #square(cell: { x: number; z: number }): THREE.Vector3[] {
-    const x0 = cell.x * CELL_SIZE;
-    const z0 = cell.z * CELL_SIZE;
-    const y = terrainHeight(this.#scene, x0 + CELL_SIZE / 2, z0 + CELL_SIZE / 2) + LIFT;
+    const x0 = cell.x * DEBUG_CELL_SIZE;
+    const z0 = cell.z * DEBUG_CELL_SIZE;
+    const y =
+      terrainHeightAt(this.#scene, x0 + DEBUG_CELL_SIZE / 2, z0 + DEBUG_CELL_SIZE / 2) + LIFT;
     const inset = 0.2;
     const a = new THREE.Vector3(x0 + inset, y, z0 + inset);
-    const b = new THREE.Vector3(x0 + CELL_SIZE - inset, y, z0 + inset);
-    const c = new THREE.Vector3(x0 + CELL_SIZE - inset, y, z0 + CELL_SIZE - inset);
-    const d = new THREE.Vector3(x0 + inset, y, z0 + CELL_SIZE - inset);
+    const b = new THREE.Vector3(x0 + DEBUG_CELL_SIZE - inset, y, z0 + inset);
+    const c = new THREE.Vector3(x0 + DEBUG_CELL_SIZE - inset, y, z0 + DEBUG_CELL_SIZE - inset);
+    const d = new THREE.Vector3(x0 + inset, y, z0 + DEBUG_CELL_SIZE - inset);
     return [a, b, b, c, c, d, d, a];
   }
 }

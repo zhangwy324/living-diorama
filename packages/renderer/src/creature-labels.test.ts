@@ -116,7 +116,8 @@ describe("creature labels", () => {
       "home oak",
       "hunger 0.46",
       "tiredness 0.10",
-      "food 1 · 1 cells",
+      "knows 1 food",
+      "1 recent cells",
     ]);
     expect(labelLines(creature({ home: null }))).toEqual(["idle", "home none"]);
     // Without debug data only the action shows.
@@ -133,7 +134,7 @@ describe("creature labels", () => {
     expect(labels.count).toBe(2);
     const sprite = labels.group.children.find((o) => o instanceof THREE.Sprite)!;
     expect(sprite.position.y).toBeCloseTo(1.2);
-    expect(sprite.scale.y).toBeCloseTo(0.1);
+    expect(sprite.scale.y).toBeCloseTo(0.13);
   });
 
   it("redraws a label only when its text changes at two decimals", () => {
@@ -151,15 +152,17 @@ describe("creature labels", () => {
     expect(surfaces.drawn[1]).toContain("hunger 0.51");
   });
 
-  it("draws lines to home and known places and squares for recent cells", () => {
+  it("draws lines to home and known places, and squares for recent cells per snapshot", () => {
     const labels = new CreatureLabels(scene, fakeSurfaces().create);
     labels.setSnapshot(snapshot(debugged(0.5)));
+    // Recent cells come with the snapshot; the lines follow the creature each frame.
+    expect(vertexCount(labels, 2)).toBe(8); // one cell
+    const cells = (labels.group.children[2] as THREE.LineSegments).geometry;
+    expect(cells.getAttribute("position").getY(0)).toBeCloseTo(0.54); // terrain at (4, 4)
     labels.update([pose("a")], 0.001);
     expect(vertexCount(labels, 0)).toBe(2); // home
     expect(vertexCount(labels, 1)).toBe(2); // the bush
-    expect(vertexCount(labels, 2)).toBe(8); // one cell
-    const cells = (labels.group.children[2] as THREE.LineSegments).geometry;
-    expect(cells.getAttribute("position").getY(0)).toBeCloseTo(2.04); // terrain at (4, 4)
+    expect((labels.group.children[2] as THREE.LineSegments).geometry).toBe(cells);
   });
 
   it("pools labels of creatures that left and disposes every one", () => {
@@ -185,4 +188,26 @@ it("finds props at their transform and structures at their surfaces' middle", ()
   const positions = placementPositions(scene);
   expect(positions.get("oak")).toEqual({ x: 4, y: 1, z: 4 });
   expect(positions.get("bridge")).toEqual({ x: 1, y: 1, z: 1 });
+});
+
+it("disposes every overlay's geometries, materials and label textures", () => {
+  const surfaces = fakeSurfaces();
+  const overlays = createDebugOverlays(scene, undefined, surfaces.create);
+  overlays.labels.setSnapshot(snapshot(debugged(0.5)));
+  overlays.labels.update([pose("a")], 0.001);
+  const disposed: string[] = [];
+  overlays.group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
+    object.geometry.addEventListener("dispose", () => disposed.push(`geometry ${object.name}`));
+    (object.material as THREE.Material).addEventListener("dispose", () =>
+      disposed.push("material"),
+    );
+  });
+  const parent = new THREE.Group().add(overlays.group);
+  overlays.dispose();
+  // The deck wireframe and the three label line sets, each with a geometry and a material.
+  expect(disposed.filter((d) => d.startsWith("geometry"))).toHaveLength(4);
+  expect(disposed.filter((d) => d === "material")).toHaveLength(4);
+  expect(surfaces.disposed).toBe(1);
+  expect(parent.children).toHaveLength(0);
 });

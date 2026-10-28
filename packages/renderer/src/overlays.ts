@@ -173,15 +173,27 @@ export class RouteLines {
   get count(): number {
     return this.#lines.size;
   }
+
+  dispose(): void {
+    for (const line of this.#lines.values()) line.geometry.dispose();
+    this.#lines.clear();
+    this.#material.dispose();
+    this.group.clear();
+  }
 }
 
 export interface DebugOverlays {
   group: THREE.Group;
   routes: RouteLines;
   labels: CreatureLabels;
+  /** Frees every overlay's geometries, materials and label textures. */
+  dispose(): void;
 }
 
-/** Every overlay in one hidden group. Without navigation data only routes and decks are drawn. */
+/**
+ * Every overlay in one hidden group. Without navigation data only routes, decks and creature
+ * labels are drawn.
+ */
 export function createDebugOverlays(
   scene: SceneData,
   navigation: NavigationOverlay | undefined,
@@ -194,5 +206,20 @@ export function createDebugOverlays(
   const labels = new CreatureLabels(scene, createLabelSurface);
   if (navigation) group.add(walkabilityMesh(navigation), regionGraph(navigation));
   group.add(deckSurfaces(scene), routes.group, labels.group);
-  return { group, routes, labels };
+  const dispose = () => {
+    // Labels (textures, pooled sprites) and routes (a shared material) free and drop their own.
+    labels.dispose();
+    routes.dispose();
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
+      geometries.add(object.geometry as THREE.BufferGeometry);
+      for (const material of [object.material].flat()) materials.add(material as THREE.Material);
+    });
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+    group.removeFromParent();
+  };
+  return { group, routes, labels, dispose };
 }

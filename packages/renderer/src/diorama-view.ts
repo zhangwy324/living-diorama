@@ -372,7 +372,7 @@ export function createDioramaView(
       controls.dispose();
       timer.dispose();
       creatures.dispose();
-      overlays.labels.dispose();
+      overlays.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       stats.element.remove();
