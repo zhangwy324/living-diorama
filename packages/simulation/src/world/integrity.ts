@@ -24,6 +24,14 @@ export interface WorldCheck {
   limits: ReadonlyMap<string, Diagnostic[]>;
 }
 
+/**
+ * Cut-off walkable areas this small or smaller, in square metres, are not a limit (ADR 0013 §5):
+ * slivers a creature can't usefully stand in, like the few edge cells where a river meets the
+ * world's edge. One square metre is four 0.5 m cells, or a large creature's footprint (radius
+ * 0.8 m, about 2 m²) only half covered, so anything a creature could go to is still reported.
+ */
+export const MAX_IGNORED_ISLAND_AREA = 1;
+
 const at = (x: number, z: number) => `(${x.toFixed(2)}, ${z.toFixed(2)})`;
 
 /** Navigation profiles of every registered species, one per distinct profile. */
@@ -161,12 +169,17 @@ function navigate(
         `Region "${regionId}" has no walkable area for ${label}`,
         regionPath(regionId),
       );
-    } else if (components.length > 1) {
-      const [largest = [], ...islands] = components;
+      continue;
+    }
+    const cellArea = mask.cellSize * mask.cellSize;
+    const [largest = [], ...cutOff] = components;
+    // A little slack, so islands of exactly the limit (four 0.5 m cells) are ignored.
+    const islands = cutOff.filter((c) => c.length * cellArea > MAX_IGNORED_ISLAND_AREA + 1e-9);
+    if (islands.length > 0) {
       const first = mask.center(islands[0]?.[0] ?? 0);
       limit(
         "disconnected_region",
-        `Region "${regionId}" splits into ${components.length} walkable areas for ${label} ` +
+        `Region "${regionId}" splits into ${islands.length + 1} walkable areas for ${label} ` +
           `(largest ${largest.length} cells; ${islands.map((c) => c.length).join(", ")} more, first near ${at(first.x, first.z)})`,
         regionPath(regionId),
       );
