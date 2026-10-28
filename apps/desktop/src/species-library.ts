@@ -13,6 +13,7 @@ import {
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import type { LibraryStore, StoredLibraryEntry } from "@living-diorama/desktop-integration";
+import type { Limit } from "@living-diorama/simulation";
 import type { SimulationClient } from "./simulation-client";
 import { DRAWN_SPECIES_DEFAULTS } from "./startup";
 import { userSpeciesIds } from "./user-species";
@@ -33,7 +34,7 @@ export type LibrarySpecies = LibrarySpeciesBase &
     | {
         available: true;
         /** Where its creatures don't fit in this world (ADR 0013). */
-        limits: Diagnostic[];
+        limits: Limit[];
       }
     | {
         available: false;

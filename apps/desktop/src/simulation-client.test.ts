@@ -113,6 +113,25 @@ describe("simulation client", () => {
     expect(callbacks.onSpeciesRegistered).not.toHaveBeenCalled();
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
+
+  it("checks the limits of a size without registering a species", async () => {
+    const { client, callbacks, tick } = start();
+    const checking = client.checkLimits("large", { "core:walk": 1 });
+    const unknown = client.checkLimits("large", { "core:fly": 1 });
+    tick();
+    const checked = await checking;
+    const bridge = checked.ok ? checked.value.filter((d) => d.code === "portal_unusable") : [];
+    expect(bridge.map((d) => d.structure)).toEqual([
+      { id: "bridge", name: "Wooden bridge" },
+      { id: "bridge", name: "Wooden bridge" },
+    ]);
+    const rejected = await unknown;
+    expect(rejected.ok ? [] : rejected.diagnostics.map((d) => d.code)).toEqual([
+      "unknown_capability",
+    ]);
+    expect(callbacks.onSpeciesRegistered).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
 });
 
 describe("creatureCap", () => {

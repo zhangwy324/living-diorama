@@ -1,9 +1,11 @@
 import {
   error,
+  SIZE_CLASSES,
   type Diagnostic,
   type RegionKind,
   type RegionPosition,
   type Result,
+  type SizeClass,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import { addEntries, type Registries } from "@living-diorama/extension-api";
@@ -21,7 +23,8 @@ import {
   type WorldQueries,
 } from "../creatures/contracts";
 import type { Pathfinder } from "../navigation/pathfinder";
-import type { RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
+import { navProfile, profileForSpecies } from "../navigation/profile";
+import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
 import { Rng } from "./rng";
 import {
@@ -58,7 +61,7 @@ export interface DecisionTrace {
 /** A species registered while the world runs, and where its creatures don't fit. */
 export interface RegisteredSpecies {
   species: SpeciesDefinition;
-  limits: Diagnostic[];
+  limits: Limit[];
 }
 
 export interface SnapshotOptions {
@@ -164,7 +167,9 @@ export class Simulation {
     const species = checked.value;
     // A profile is only meaningful once the capabilities resolve; `addEntries` reports them.
     const known = Object.keys(species.capabilities).every((id) => registries.capabilities.has(id));
-    const navigation = known ? this.state.planNavigation(species) : undefined;
+    const navigation = known
+      ? this.state.planNavigation(profileForSpecies(species, registries))
+      : undefined;
     if (navigation && !navigation.ok) return navigation;
     const added = addEntries(registries, [
       { registry: "species", input },
@@ -181,7 +186,52 @@ export class Simulation {
     if (!added.ok) return added;
     if (!navigation) throw new Error(`"${species.id}" was registered with unknown capabilities`);
     this.state.addNavigation(navigation.value);
-    return { ok: true, value: { species, limits: navigation.value.limits } };
+    return {
+      ok: true,
+      value: { species, limits: navigation.value.limits.map((d) => this.#limit(d)) },
+    };
+  }
+
+  /**
+   * Where creatures of `sizeClass` with these capabilities wouldn't fit, without registering
+   * anything (ADR 0015 §8): the warnings a species of that profile would be registered with, or
+   * the errors that would reject it. A profile the world has no navigation for yet gets it built
+   * and kept, so asking again, or registering a species of it later, reuses it. Fails only for a
+   * size class or capability that doesn't exist.
+   */
+  checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Result<Limit[]> {
+    const { registries } = this.state;
+    const diagnostics: Diagnostic[] = [];
+    if (!Object.hasOwn(SIZE_CLASSES, sizeClass)) {
+      diagnostics.push(
+        error("unknown_size_class", `There is no size class "${String(sizeClass)}"`),
+      );
+    }
+    for (const id of Object.keys(capabilities)) {
+      if (!registries.capabilities.has(id)) {
+        diagnostics.push(error("unknown_capability", `Capability "${id}" is not registered`));
+      }
+    }
+    if (diagnostics.length > 0) return { ok: false, diagnostics };
+    const planned = this.state.planNavigation(
+      navProfile(sizeClass, Object.keys(capabilities), registries),
+    );
+    if (!planned.ok) return { ok: true, value: planned.diagnostics.map((d) => this.#limit(d)) };
+    this.state.addNavigation(planned.value);
+    return { ok: true, value: planned.value.limits.map((d) => this.#limit(d)) };
+  }
+
+  /** A diagnostic with the structure its path points into, if any, and that structure's name. */
+  #limit(diagnostic: Diagnostic): Limit {
+    const [root, index] = diagnostic.path;
+    const placement =
+      root === "structures" && typeof index === "number"
+        ? this.state.model.definition.structures[index]
+        : undefined;
+    const structure = placement && this.state.registries.structures.get(placement.structure);
+    return structure
+      ? { ...diagnostic, structure: { id: placement.id, name: structure.name } }
+      : { ...diagnostic };
   }
 
   /** Adds a creature; it makes its first decision on the next step. */

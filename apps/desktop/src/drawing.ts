@@ -70,12 +70,26 @@ export function drawDrawing(context: StrokeContext, drawing: Drawing): void {
   for (const stroke of drawing.strokes) drawStroke(context, stroke);
 }
 
-/** Draws `drawing` to PNG bytes, one pixel per canvas unit. */
-export async function rasterize(drawing: Drawing): Promise<Uint8Array> {
+function drawOffscreen(drawing: Drawing, options?: CanvasRenderingContext2DSettings) {
   const canvas = new OffscreenCanvas(drawing.canvas.width, drawing.canvas.height);
-  const context = canvas.getContext("2d");
+  const context = canvas.getContext("2d", options);
   if (!context) throw new Error("No 2D canvas");
   drawDrawing(context, drawing);
+  return { canvas, context };
+}
+
+/**
+ * The pixels of `drawing`, one per canvas unit: what `rasterize` encodes, so a body built from
+ * them (the Studio's preview) matches one built from the PNG (the world's).
+ */
+export function drawingPixels(drawing: Drawing): ImageData {
+  const { context } = drawOffscreen(drawing, { willReadFrequently: true });
+  return context.getImageData(0, 0, drawing.canvas.width, drawing.canvas.height);
+}
+
+/** Draws `drawing` to PNG bytes, one pixel per canvas unit. */
+export async function rasterize(drawing: Drawing): Promise<Uint8Array> {
+  const { canvas } = drawOffscreen(drawing);
   const blob = await canvas.convertToBlob({ type: "image/png" });
   return new Uint8Array(await blob.arrayBuffer());
 }

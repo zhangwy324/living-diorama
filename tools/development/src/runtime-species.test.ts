@@ -258,3 +258,52 @@ describe("runtime species", () => {
     expect(simulation.snapshot().creatures.map((c) => c.id)).toEqual(["creature-2", "creature-3"]);
   });
 });
+
+describe("limits query (ADR 0015 §8)", () => {
+  const walk = { "core:walk": 1 };
+
+  it("answers with the limits a species of that size would be registered with", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const checked = simulation.checkLimits("large", walk);
+    if (!checked.ok) throw new Error(checked.diagnostics.map(formatDiagnostic).join("\n"));
+    const registered = createSimulation({ ...hollow, seed: 1 }).registerSpecies(
+      drawnSpecies("boulder", "large"),
+      URL,
+    );
+    expect(registered.ok && registered.value.limits).toEqual(checked.value);
+    expect(checked.value.filter((d) => d.code === "portal_unusable")).toMatchObject([
+      { severity: "warning", structure: { id: "bridge", name: "Wooden bridge" } },
+      { severity: "warning", structure: { id: "bridge", name: "Wooden bridge" } },
+    ]);
+    expect(simulation.checkLimits("medium", walk)).toEqual({ ok: true, value: [] });
+  });
+
+  it("registers nothing, and keeps a new profile's navigation for later", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const species = simulation.state.registries.species.values().length;
+    const navigations = simulation.state.navigations.length;
+    const first = simulation.checkLimits("tiny", walk);
+    expect(simulation.state.navigations).toHaveLength(navigations + 1);
+    expect(simulation.checkLimits("tiny", walk)).toEqual(first);
+    expect(simulation.state.navigations).toHaveLength(navigations + 1);
+    expect(simulation.state.registries.species.values()).toHaveLength(species);
+    expectOk(simulation, drawnSpecies("pip", "tiny"));
+    expect(simulation.state.navigations).toHaveLength(navigations + 1);
+  });
+
+  it("returns the errors of a profile that can't appear as limits", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    const checked = simulation.checkLimits("small", {});
+    expect(checked.ok && checked.value.map((d) => `${d.severity} ${d.code}`)).toEqual([
+      "error no_spawn_point",
+    ]);
+  });
+
+  it("fails for a size class or capability that doesn't exist", () => {
+    const simulation = createSimulation({ ...hollow, seed: 1 });
+    expect(codes(simulation.checkLimits("huge" as SizeClass, { "core:fly": 1 }))).toEqual([
+      "unknown_size_class",
+      "unknown_capability",
+    ]);
+  });
+});

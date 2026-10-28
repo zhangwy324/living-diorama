@@ -13,7 +13,7 @@ import { EventCounter } from "./event-counts";
 import { startSimulation, type SimulationClient } from "./simulation-client";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { StripResizeHandle } from "./StripResizeHandle";
-import type { LibrarySnapshot, StudioRequests } from "./studio-protocol";
+import { studioHandlers, type LibrarySnapshot, type StudioRequests } from "./studio-protocol";
 
 const shell = connectDesktopShell();
 const libraryStore = connectLibraryStore();
@@ -76,7 +76,16 @@ export function App() {
     // The Studio talks to the world here (ADR 0015 §5); it is told whenever the library changes.
     let library: SpeciesLibrary | undefined;
     const snapshot = (): LibrarySnapshot => ({ species: library?.list() ?? [] });
-    const studio = serveStudio<StudioRequests, LibrarySnapshot>({ snapshot });
+    // Commands sent before the world is ready would be misuse (ADR 0009 §2), so queries wait.
+    let worldReady = () => {};
+    const ready = new Promise<void>((resolve) => (worldReady = resolve));
+    const studio = serveStudio<StudioRequests, LibrarySnapshot>(
+      studioHandlers({
+        library: snapshot,
+        checkLimits: (sizeClass, capabilities) =>
+          ready.then(() => client.checkLimits(sizeClass, capabilities)),
+      }),
+    );
     const pushLibrary = () =>
       void studio
         .pushLibrary(snapshot())
@@ -115,6 +124,7 @@ export function App() {
           return;
         }
         view.current = created;
+        worldReady();
         openLibrary();
       },
       onSpeciesRegistered: (id, summary, asset) => {

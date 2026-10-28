@@ -20,8 +20,16 @@ export interface NavProfile {
 
 /** Derives the profile from the species' capabilities and their locomotion rules (ADR 0005 §3). */
 export function profileForSpecies(species: SpeciesDefinition, registries: Registries): NavProfile {
+  return navProfile(species.sizeClass, Object.keys(species.capabilities), registries);
+}
+
+/** The profile of creatures of `sizeClass` with these capabilities, whether a species has it or not. */
+export function navProfile(
+  sizeClass: SizeClass,
+  capabilities: readonly string[],
+  registries: Registries,
+): NavProfile {
   const maxSlopeByKind = new Map<RegionKind, number>();
-  const capabilities = Object.keys(species.capabilities);
   for (const id of capabilities) {
     const rule = registries.capabilities.get(id)?.locomotion;
     if (!rule) continue;
@@ -31,11 +39,11 @@ export function profileForSpecies(species: SpeciesDefinition, registries: Regist
       maxSlopeByKind.set(kind, Math.max(maxSlopeByKind.get(kind) ?? 0, slope));
     }
   }
-  const { radius, height } = SIZE_CLASSES[species.sizeClass];
+  const { radius, height } = SIZE_CLASSES[sizeClass];
   const kinds = [...maxSlopeByKind].sort(([a], [b]) => a.localeCompare(b));
   return {
-    key: `${species.sizeClass}|${[...capabilities].sort().join(",")}|${kinds.map(([k, s]) => `${k}:${s}`).join(",")}`,
-    sizeClass: species.sizeClass,
+    key: `${sizeClass}|${[...capabilities].sort().join(",")}|${kinds.map(([k, s]) => `${k}:${s}`).join(",")}`,
+    sizeClass,
     radius,
     height,
     capabilities: new Set(capabilities),

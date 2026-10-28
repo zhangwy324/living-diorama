@@ -1,8 +1,9 @@
-import { formatDiagnostic, type Diagnostic, type Result } from "@living-diorama/content-schema";
+import { formatDiagnostic, type Result, type SizeClass } from "@living-diorama/content-schema";
 import {
   envelope,
   openEnvelope,
   type AssetSummary,
+  type Limit,
   type RequestCommand,
   type SimulationCommand,
   type SimulationEvent,
@@ -22,7 +23,7 @@ const COUNT_OVERRIDE = (import.meta.env.DEV && Number(import.meta.env.VITE_CREAT
 /** A species the worker registered, and where its creatures don't fit in this world (ADR 0013). */
 export interface RegisteredSpecies {
   speciesId: string;
-  limits: Diagnostic[];
+  limits: Limit[];
 }
 
 export interface SimulationClient {
@@ -31,6 +32,12 @@ export interface SimulationClient {
    * and `onSpeciesRegistered` has run, or with the diagnostics if it was rejected.
    */
   registerSpecies(species: unknown, appearanceUrl: string): Promise<Result<RegisteredSpecies>>;
+  /**
+   * Where creatures of this size and these capabilities wouldn't fit, without registering anything
+   * (ADR 0015 §8). Errors among the limits mean such a species can't be added; the result fails
+   * only for a size class or capability that doesn't exist.
+   */
+  checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Promise<Result<Limit[]>>;
   /** Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added. */
   spawn(speciesId: string): Promise<Result<string>>;
   /** Takes a creature out of the world. */
@@ -148,6 +155,9 @@ export function startSimulation(
           value: { speciesId: message.speciesId, limits: message.limits },
         });
         break;
+      case "limits":
+        answer(message.requestId, { ok: true, value: message.limits });
+        break;
       case "spawned":
       case "despawned":
         answer(message.requestId, { ok: true, value: message.creatureId });
@@ -184,6 +194,8 @@ export function startSimulation(
   return {
     registerSpecies: (species, appearanceUrl) =>
       request({ type: "register_species", species, appearanceUrl }),
+    checkLimits: (sizeClass, capabilities) =>
+      request({ type: "check_limits", sizeClass, capabilities }),
     spawn: (speciesId) => request({ type: "spawn", speciesId }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
