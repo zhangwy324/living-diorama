@@ -427,7 +427,8 @@ export class CueSprites {
       this.#releaseZs(sprites);
     }
 
-    const hungry = ease(weights.hungry);
+    // A meal answers the hunger: the bubble fades out as eating fades in, and back after it.
+    const hungry = ease(weights.hungry) * (1 - ease(weights.eating));
     if (hungry > HIDDEN) {
       sprites.bubble ??= this.#bubbles.acquire();
       const size = cuePixels(BUBBLE_PX, anchor.creaturePx) * unitsPerPixel;

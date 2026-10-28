@@ -193,6 +193,24 @@ describe("cue sprites", () => {
     }
   });
 
+  it("hides the food bubble while eating, and shows it again after the meal", () => {
+    const { bodies, sprites } = make();
+    const bubbles = () => sprites().filter((s) => s.name === "cue:bubble");
+    bodies.update([creature("a", ["hungry"])], at(0));
+    bodies.update([creature("a", ["hungry"])], at(1));
+    expect(bubbles()).toHaveLength(1);
+    bodies.update([creature("a", ["eating", "hungry"])], at(1.2));
+    const fading = bubbles()[0]!.material.opacity;
+    expect(fading).toBeGreaterThan(0);
+    expect(fading).toBeLessThan(1);
+    for (let t = 1.4; t < 2.5; t += 0.2)
+      bodies.update([creature("a", ["eating", "hungry"])], at(t));
+    expect(bubbles()).toHaveLength(0);
+    for (let t = 2.6; t < 4; t += 0.2) bodies.update([creature("a", ["hungry"])], at(t));
+    expect(bubbles()).toHaveLength(1);
+    expect(bubbles()[0]!.material.opacity).toBe(1);
+  });
+
   it("fades sprites out, then pools them for the next creature", () => {
     const { layer, bodies } = make();
     bodies.update([creature("a", ["sleeping"])], at(0));
