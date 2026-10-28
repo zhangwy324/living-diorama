@@ -6,11 +6,13 @@ import type {
   SimulationSnapshot,
 } from "@living-diorama/simulation";
 import * as THREE from "three";
+import { CreatureLabels, type LabelSurface } from "./creature-labels";
 import type { CreaturePose } from "./interpolation";
 import { meshGeometry } from "./world-meshes";
 
 // Debug overlays (ADR 0007 §10, roadmap M4 task 10): walkability, the region graph and portals,
-// creature routes and the deck surfaces. All hidden until turned on.
+// creature routes, the deck surfaces, and each creature's needs, knowledge and home (ADR 0018
+// §15). All hidden until turned on.
 
 /** Overlays float this far above the surface they mark, in metres. */
 const LIFT = 0.04;
@@ -176,18 +178,21 @@ export class RouteLines {
 export interface DebugOverlays {
   group: THREE.Group;
   routes: RouteLines;
+  labels: CreatureLabels;
 }
 
 /** Every overlay in one hidden group. Without navigation data only routes and decks are drawn. */
 export function createDebugOverlays(
   scene: SceneData,
   navigation: NavigationOverlay | undefined,
+  createLabelSurface?: () => LabelSurface,
 ): DebugOverlays {
   const group = new THREE.Group();
   group.name = "debug-overlays";
   group.visible = false;
   const routes = new RouteLines();
+  const labels = new CreatureLabels(scene, createLabelSurface);
   if (navigation) group.add(walkabilityMesh(navigation), regionGraph(navigation));
-  group.add(deckSurfaces(scene), routes.group);
-  return { group, routes };
+  group.add(deckSurfaces(scene), routes.group, labels.group);
+  return { group, routes, labels };
 }
