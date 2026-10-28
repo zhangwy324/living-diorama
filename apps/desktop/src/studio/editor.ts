@@ -171,7 +171,7 @@ export class DrawingEditor {
     if (this.live) {
       const scale = this.scale();
       context.setTransform(scale, 0, 0, scale, 0, 0);
-      drawStroke(context, this.live.stroke.stroke, false);
+      drawStroke(context, this.live.stroke.stroke);
     }
   }
 
@@ -211,7 +211,6 @@ export class DrawingEditor {
     stroke.add(
       (event.clientX - box.left) * units,
       (event.clientY - box.top) * units,
-      event.timeStamp,
       event.pressure,
     );
   }
