@@ -1,5 +1,5 @@
 import { formatDiagnostic, type Drawing, type SizeClass } from "@living-diorama/content-schema";
-import { encodePng, paintStrokes } from "./drawing";
+import { encodePng, paintHistory } from "./drawing";
 import { sampleSpecies } from "./sample-species";
 import type { SpeciesLibrary } from "./species-library";
 
@@ -45,7 +45,7 @@ async function saveDrawn(
   name: string,
   sizeClass: SizeClass,
 ) {
-  return library.save(drawing, await encodePng(paintStrokes(drawing.history)), name, sizeClass);
+  return library.save(drawing, await encodePng(paintHistory(drawing.history)), name, sizeClass);
 }
 
 declare global {

@@ -5,6 +5,7 @@ import {
   type DrawingOperation,
   type Stroke,
 } from "@living-diorama/content-schema";
+import { floodFill } from "./fill";
 
 // Strokes to pixels (ADR 0015 §9). The Studio's editor paints them into its 256 px image, which
 // is the drawing the library keeps (ADR 0014 §5).
@@ -150,15 +151,27 @@ export function drawRuns(
 }
 
 /**
- * A new image of `strokes` drawn in order, one pixel per canvas unit. Only for drawings made by
- * code (the development samples); a player's drawing is its image, and its record is never
- * replayed (ADR 0014 §5).
+ * A new image of `history` (strokes and fills) applied in order, one pixel per canvas unit. Only
+ * for drawings made by code (the development samples); a player's drawing is its image, and its
+ * record is never replayed (ADR 0014 §5).
  */
-export function paintStrokes(strokes: readonly Stroke[]): OffscreenCanvas {
+export function paintHistory(history: readonly DrawingOperation[]): OffscreenCanvas {
   const canvas = new OffscreenCanvas(CANVAS_SIZE, CANVAS_SIZE);
-  const context = canvas.getContext("2d");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("No 2D canvas");
-  for (const stroke of strokes) drawStroke(context, stroke);
+  for (const operation of history) {
+    if (operation.kind === "stroke") {
+      drawStroke(context, operation);
+      continue;
+    }
+    const filled = floodFill(
+      context.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE),
+      operation.x,
+      operation.y,
+      operation.color,
+    );
+    if (filled) context.putImageData(new ImageData(filled, CANVAS_SIZE, CANVAS_SIZE), 0, 0);
+  }
   return canvas;
 }
 

@@ -66,6 +66,22 @@ describe("parseDrawing", () => {
     expect(parseDrawing(drawing).ok).toBe(false);
   });
 
+  it("accepts a fill between strokes", () => {
+    const { history, ...drawing } = validDrawing();
+    const fill = { kind: "fill", x: 0, y: 511, color: "#3c7fc2" };
+    expect(parseDrawing({ ...drawing, history: [history[0], fill, history[1]] }).ok).toBe(true);
+  });
+
+  it.each([
+    ["between pixels", { x: 1.5, y: 2 }],
+    ["off the top", { x: 1, y: -1 }],
+    ["with no colour", { color: undefined }],
+    ["with a brush width", { width: 10 }],
+  ])("rejects a fill %s", (_, change) => {
+    const fill = { kind: "fill", x: 1, y: 2, color: "#3c7fc2", ...change };
+    expect(parseDrawing({ ...validDrawing(), history: [fill] }).ok).toBe(false);
+  });
+
   it("rejects an operation of an unknown kind or with none", () => {
     const [stroke] = validDrawing().history;
     expect(parseDrawing({ ...validDrawing(), history: [{ ...stroke, kind: "spray" }] }).ok).toBe(

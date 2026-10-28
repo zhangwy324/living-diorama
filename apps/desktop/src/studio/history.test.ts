@@ -1,5 +1,6 @@
-import type { Stroke } from "@living-diorama/content-schema";
+import type { Fill, Stroke } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
+import { floodFill } from "../fill";
 import { changedBox, DrawingHistory, type Change } from "./history";
 
 const SIZE = 8;
@@ -205,4 +206,22 @@ describe("blank", () => {
     history.add(a, pixels);
     expect(history.blank).toBe(false);
   });
+});
+
+it("undoes and redoes a fill as one step, like a stroke", () => {
+  const { image, history } = drawn();
+  history.add(a, image.paint(2, 2, 4, 10));
+  const afterA = image.pixels.slice();
+  const fill: Fill = { kind: "fill", x: 0, y: 0, color: "#3c7fc2" };
+  const filled = floodFill({ width: SIZE, height: SIZE, data: image.pixels }, 0, 0, fill.color)!;
+  image.pixels = filled.slice();
+  history.add(fill, filled);
+  expect(history.record).toEqual([a, fill]);
+
+  image.put(history.undo());
+  expect(history.record).toEqual([a]);
+  expect(image.pixels).toEqual(afterA);
+  image.put(history.redo());
+  expect(history.record).toEqual([a, fill]);
+  expect(image.pixels).toEqual(filled);
 });

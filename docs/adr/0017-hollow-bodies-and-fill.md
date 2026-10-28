@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-28
-- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 builds §1–§7 and PR 2 builds §8–§9. The rest are settled here and built later; a PR that has to depart from this ADR updates it.
+- **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 builds §1–§7, PR 2 builds §8–§9 and PR 3 builds §10. The rest are settled here and built later; a PR that has to depart from this ADR updates it.
 
 This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and ADR 0015 §7, §9 and §11 (see _Amendments_).
 
@@ -39,7 +39,7 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
 
 9. **Strokes stay anti-aliased as the canvas draws them.** Thresholding each stroke at 50% alpha was tried: it gives exact fills, but at the Studio's zoom (one canvas pixel is roughly 2.3 screen pixels) curves become visibly stair-stepped, the opposite of what #59 is after. The bucket deals with soft edges on its own terms (§10).
 
-### The fill tool (PR 3)
+### The fill tool (PR 3, implemented)
 
 10. **A bucket that behaves like the ones in established painting programs** (modelled on Krita, Clip Studio, GIMP and Kleki, with MS Paint and Aseprite as the reference for exact matching):
     - **Region:** a scanline flood through side-joined pixels identical to the one clicked. Clicking the background selects pixels with alpha exactly 0, so anything at all visible stops the flood; clicking a colour selects pixels with exactly that RGBA. There is no tolerance and nothing bridges gaps.
@@ -49,6 +49,15 @@ This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and AD
     - **Possible later controls:** a tolerance slider starting at 0, and separately an opt-in gap-bridging setting.
     - **Toolbar:** a dedicated button whose icon cannot be confused with the eraser, which players had mistaken for a bucket.
     - **Undo and preview:** each fill is a single undo step and appears in the log (§8). The 3D preview is rebuilt after a fill exactly as after a stroke, so filling an opening closes it in the body.
+    - **As built** (`apps/desktop/src/fill.ts`, a pure function on the RGBA pixels, tested without a canvas):
+      - The flood is a span (scanline) fill over a mask. On the background every pixel with alpha 0 matches whatever its RGB, so the eraser's leftovers count as background.
+      - The growth into soft edges goes breadth first, 2 steps at most, each step to a side-joined pixel whose alpha is above 0, below 255 and no lower than the pixel it steps from. Fully opaque pixels are never entered: painting under them would change nothing, and they are the wall that stops the growth. It never steps back onto a transparent pixel, so it cannot leak across a faint line one or two pixels thick.
+      - Painting under is done on un-premultiplied values: each painted pixel becomes `colour × a + fill × (1 − a)` with alpha 255. Everything a background fill paints therefore ends opaque, so the body sees the filled region as solid.
+      - A recolour writes the new colour at alpha 255, also when the clicked area was semi-transparent (a click on a soft edge pixel). Such a click recolours only the few edge pixels of that exact RGBA; this is kept as designed, and the manual checks watch for how often players hit it.
+      - A click that would change nothing (on an area already exactly the fill colour) is not recorded, so it adds no undo step; a background click always changes something.
+      - The log entry is `{ kind: "fill", x, y, color }`: the clicked pixel in canvas pixels (integers) and the colour. Whether it filled or recoloured follows from the image, so it isn't stored. The drawing format stays at version 2, since adding a kind leaves every older file valid. `paintHistory` (formerly `paintStrokes`), used only for drawings made by code, replays fills as well as strokes.
+      - The colour is the palette colour selected for the pen. Picking a swatch keeps the fill tool selected; only the eraser switches back to the pen on a swatch click. The brush sizes are disabled while the fill tool is selected, since a fill has no width. The tools have no single-key shortcuts, so the fill has none either. Over the canvas the cursor is a small bucket outlined in white, whose drop marks the pixel filled.
+      - It takes about 1 ms on a 256 px image in Node (inside a ring, and a whole empty canvas).
 
 ### Thickness (PR 4)
 

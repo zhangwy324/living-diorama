@@ -55,10 +55,21 @@ export const StrokeSchema = z.strictObject({
 export type Stroke = z.output<typeof StrokeSchema>;
 
 /**
- * One operation of the drawing record, told apart by `kind`. Strokes only for now; the fill tool
- * adds its own kind to this union.
+ * One click of the fill tool (ADR 0017 §10): the pixel clicked and the colour it filled with.
+ * Whether it filled the background or recoloured follows from the image at that pixel, so it isn't
+ * stored.
  */
-export const DrawingOperationSchema = z.discriminatedUnion("kind", [StrokeSchema]);
+export const FillSchema = z.strictObject({
+  kind: z.literal("fill"),
+  /** The pixel clicked, in canvas pixels from the top left. */
+  x: z.int().nonnegative(),
+  y: z.int().nonnegative(),
+  color: HexColorSchema,
+});
+export type Fill = z.output<typeof FillSchema>;
+
+/** One operation of the drawing record, told apart by `kind`: a stroke or a fill. */
+export const DrawingOperationSchema = z.discriminatedUnion("kind", [StrokeSchema, FillSchema]);
 export type DrawingOperation = z.output<typeof DrawingOperationSchema>;
 
 /**
