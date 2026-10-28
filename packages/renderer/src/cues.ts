@@ -293,10 +293,10 @@ const texture = (data: Uint8Array, size: number) => {
 };
 
 /**
- * Cue sprites draw over everything: a bubble behind a tree would say nothing. After the debug
- * overlays (10), so a label never hides a cue.
+ * Cue sprites draw over the scene: a bubble behind a tree would say nothing. Below the debug
+ * overlays (10–11) and creature labels (12), so with debug on its readouts stay on top.
  */
-const CUE_RENDER_ORDER = 12;
+const CUE_RENDER_ORDER = 9;
 
 /** Sprites of one look, reused as cues come and go. */
 class SpritePool {
