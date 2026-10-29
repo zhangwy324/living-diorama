@@ -2498,6 +2498,15 @@
         "z": -14
       },
       "heading": 0
+    },
+    {
+      "id": "river-pool",
+      "position": {
+        "regionId": "river",
+        "x": 4.25,
+        "z": 14.25
+      },
+      "heading": 0.464
     }
   ]
 }

@@ -414,8 +414,6 @@ describe("world checks for swimmers (ADR 0020 §4–§5)", () => {
       )!;
       expect(nav.banks.map((b) => b.landRegionId).sort()).toEqual(["east-meadow", "west-woods"]);
     }
-    const swimOnly = simulation.checkLimits("medium", { "core:swim": 1 });
-    expect(swimOnly.ok && swimOnly.value.map((d) => d.code)).toEqual(["no_spawn_point"]);
   });
 });
 

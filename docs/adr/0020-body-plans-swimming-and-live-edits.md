@@ -162,7 +162,9 @@ Each M16 PR adds its own paragraph here, in its own slot, so PRs landing in para
 
 ### PR 3: content
 
-_Not yet built._
+- **One spawn point in the river, `river-pool`** at (4.25, 14.25), mid-channel on the front stretch about 13 m downstream of the bridge, facing downstream. It is in the generator's layout like the other spawn points, so `world.json` is regenerated; the props stay where they were, since the river already keeps them further away than a spawn point does. The stretch was picked because the river there is wide enough for a swimmer of every size (walkable water 3–4 cells across for a large one), it is clear of the bridge and close to the default camera. A water-only species of any size now registers; walkers and amphibians of every size still stand on every spawn point whose region they move in, and a walker never appears in the river, since spawning picks only spawn points its profile can stand on. The startup checks stay clean.
+- **A water-only species gets no `no_water_exit`**, as §4 means: the check is for a profile that also moves on land. A large one gets `disconnected_region` for the river, which its body can't follow under the bridge deck; `river-pool` is in the southern part, and a large amphibian reaches the northern part through the east bank.
+- **No shore exits.** Banks already let amphibians of every size in and out from `river-pool` (a large one has 7 crossings on the west bank and 8 on the east, the west ones all north of the bridge). An authored exit for large creatures wouldn't help without reshaping the bank: along most of the bank their walkable land stops too far from the water or too high above it, and a portal needs walkable cells on both sides. Reshaping would change the land walkers use, so it is left until a world needs it.
 
 ### PR 4: renderer
 

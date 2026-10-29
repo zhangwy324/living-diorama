@@ -141,9 +141,13 @@ describe("Woodland Hollow routes", () => {
   const registries = load(registerBuiltInContent);
   const state = worldState(registries, "hollow:woodland-hollow");
   const pathfinder = state.pathfinderFor("hollow:mossling")!;
-  const spawns = state.model.definition.spawnPoints;
+  // The mossling walks, so the river spawn point for water-only creatures isn't one of its own.
+  const spawns = state.model.definition.spawnPoints.filter(
+    (s) => state.model.regions.get(s.position.regionId)?.kind !== "water",
+  );
 
-  it("routes between every pair of spawn points, west to east only over the bridge", () => {
+  it("routes between every pair of land spawn points, west to east only over the bridge", () => {
+    expect(spawns).toHaveLength(4);
     for (const a of spawns) {
       for (const b of spawns) {
         const result = pathfinder.findRoute(a.position, b.position);
