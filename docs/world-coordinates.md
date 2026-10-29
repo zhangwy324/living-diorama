@@ -90,7 +90,7 @@ A **connection** links two regions through a **portal**: a segment `a`–`b` in 
 
 | Constant              | Value   | Meaning                                                                                                                                                             |
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxWalkableSlopeDeg` | 35°     | A surface steeper than this is unwalkable (a cliff) for `core:walk`. The engine reads it from the `core:walk` capability's locomotion rule.                         |
+| `maxWalkableSlopeDeg` | 35°     | A surface steeper than this is unwalkable (a cliff) for `core:land`. The engine reads it from the `core:land` capability's locomotion rule.                         |
 | `maxStepHeight`       | 0.25 m  | The largest height discontinuity a walker crosses at a portal, e.g. from bank to deck. Across a portal, the two surfaces' heights must differ by no more than this. |
 | `surfaceEpsilon`      | 0.001 m | Tolerance when checking that a creature's height matches its surface.                                                                                               |
 | `positionEpsilon`     | 0.01 m  | Tolerance for "on the portal", "inside the footprint" and "inside the bounds" checks.                                                                               |

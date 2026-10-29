@@ -12,8 +12,11 @@ import {
 } from "@living-diorama/content-schema";
 import {
   addEntries,
+  animationProfile,
+  locomotionSubmersion,
   type ActionCue,
   type Cue,
+  type LocomotionRule,
   type NeedType,
   type Registries,
 } from "@living-diorama/extension-api";
@@ -74,10 +77,16 @@ const UTILITY_EPSILON = 1e-9;
 /** Each creature reacts to a day-phase change after a random delay up to this long. */
 export const PHASE_REACTION_SECONDS = 30;
 /**
- * How fast an action turns a creature in place (`ActionContext.turnTo`, `face`), in radians per
- * second: half a turn takes a second.
+ * How fast a creature turns, in place for an action (`ActionContext.turnTo`, `face`) and while
+ * walking (`WALK_TURN_LIMIT`), in radians per second: half a turn takes a second.
  */
 export const TURN_RATE = Math.PI;
+/**
+ * A walking creature turns towards where it is going at `TURN_RATE`, and stands turning until
+ * it faces within this many radians of it, so it never snaps round when it sets off (issue #121,
+ * ADR 0020 §7) and eases sharp corners.
+ */
+export const WALK_TURN_LIMIT = Math.PI / 4;
 const SECONDS_PER_HOUR = 3600;
 
 /**
@@ -114,6 +123,17 @@ export interface DecisionTrace {
   result: "started" | "rejected" | "no_proposal" | "kept";
   reason?: string;
   detail?: Record<string, unknown>;
+}
+
+/**
+ * How a species moves in a region kind (ADR 0006 §9, ADR 0020 §8–§9): its speed there, and the
+ * animation profile and submersion of the capability in use.
+ */
+interface Locomotion {
+  /** Metres per second before need factors. */
+  speed: number;
+  animation: string | undefined;
+  submersion: number;
 }
 
 /** What the engine derives once per species. */
@@ -211,7 +231,8 @@ export class Simulation {
   readonly #behaviors = new Map<string, BehaviorProvider>();
   readonly #connections: ReadonlyMap<string, ConnectionModel>;
   readonly #pathfinders = new Map<string, Pathfinder>();
-  readonly #speeds = new Map<string, number>();
+  /** Per species and region kind. */
+  readonly #locomotions = new Map<string, Locomotion>();
   /** The path each creature last walked, kept until its action ends; for debug routes only. */
   readonly #paths = new Map<string, PathState>();
   readonly #profiles = new Map<string, SpeciesProfile>();
@@ -647,14 +668,20 @@ export class Simulation {
       timeOfDay: this.state.minutes,
       creatures: [...this.state.creatures.values()].map((c) => {
         const { regionId, x, z } = c.position;
-        const y = model.regions.get(regionId)?.surface.heightAt(x, z) ?? NaN;
+        const region = model.regions.get(regionId);
+        const y = region?.surface.heightAt(x, z) ?? NaN;
         const progress = this.#actionCues.get(c.id)?.progress;
+        const { animation, submersion } = region
+          ? this.#locomotion(c.speciesId, region.kind)
+          : { animation: undefined, submersion: 0 };
         return {
           id: c.id,
           speciesId: c.speciesId,
           position: { regionId, x, z },
           world: { x, y, z },
           heading: c.heading,
+          animation,
+          submersion,
           ...(c.action ? { currentAction: c.action.id } : {}),
           cues: this.#cues(c),
           ...(progress === undefined ? {} : { cueProgress: progress }),
@@ -1291,22 +1318,36 @@ export class Simulation {
     };
   }
 
-  /** Metres per second: base speed times the best locomotion factor for this region kind. */
-  #speed(speciesId: string, kind: RegionKind): number {
+  /**
+   * How the species moves in this region kind. The capability in use is the one with the largest
+   * speed factor among those whose locomotion covers the kind (ADR 0006 §9), the first by ID on a
+   * tie, so the pick never depends on the order a species lists them in. The speed is base speed
+   * times that factor; the animation profile and submersion come from its rule.
+   */
+  #locomotion(speciesId: string, kind: RegionKind): Locomotion {
     const key = `${speciesId}|${kind}`;
-    let speed = this.#speeds.get(key);
-    if (speed === undefined) {
+    let found = this.#locomotions.get(key);
+    if (!found) {
       const { registries } = this.state;
       const species = registries.species.get(speciesId);
-      let factor = 0;
-      for (const [capability, f] of Object.entries(species?.capabilities ?? {})) {
+      let best: { factor: number; rule: LocomotionRule } | undefined;
+      const capabilities = Object.entries(species?.capabilities ?? {}).sort(([a], [b]) =>
+        a < b ? -1 : a > b ? 1 : 0,
+      );
+      for (const [capability, factor] of capabilities) {
         const rule = registries.capabilities.get(capability)?.locomotion;
-        if (rule?.regionKinds.includes(kind)) factor = Math.max(factor, f);
+        if (rule?.regionKinds.includes(kind) && (!best || factor > best.factor)) {
+          best = { factor, rule };
+        }
       }
-      speed = (species?.baseSpeed ?? 0) * factor;
-      this.#speeds.set(key, speed);
+      found = {
+        speed: (species?.baseSpeed ?? 0) * (best?.factor ?? 0),
+        animation: best && species ? animationProfile(best.rule, species.body) : undefined,
+        submersion: best ? locomotionSubmersion(best.rule) : 0,
+      };
+      this.#locomotions.set(key, found);
     }
-    return speed;
+    return found;
   }
 
   /**
@@ -1323,14 +1364,20 @@ export class Simulation {
   /**
    * Locomotion (roadmap M3 task 8): kinematic movement along the path at the species speed,
    * slowed by any need at 1 that declares an `atMax` speed factor (ADR 0018 §18).
-   * Heading follows the direction of travel; height is never stored, it always comes from the
-   * current region's surface. On a portal crossing the region changes on the shared cell edge.
+   * Height is never stored, it always comes from the current region's surface. On a portal
+   * crossing or a water entry the region changes on the shared cell edge.
+   *
+   * The heading turns towards the next waypoint at `TURN_RATE`, once per tick, as `turnTo`
+   * does; the creature only moves once it faces within `WALK_TURN_LIMIT` of it, and keeps turning
+   * as it walks (issue #121). The heading is part of the creature's state, so a save taken
+   * mid-turn resumes the same turn.
    */
   #walk(creature: CreatureState, profile: SpeciesProfile, path: PathState): "moving" | "arrived" {
     this.#paths.set(creature.id, path);
     const kind = this.state.model.regions.get(creature.position.regionId)?.kind;
-    const speed = kind ? this.#speed(creature.speciesId, kind) : 0;
+    const speed = kind ? this.#locomotion(creature.speciesId, kind).speed : 0;
     let budget = speed * atMaxSpeedFactor(creature, profile) * this.tickSeconds;
+    let turned = false;
     while (budget > 0) {
       const target = path.points[path.next];
       if (!target) break;
@@ -1338,7 +1385,12 @@ export class Simulation {
       const dx = target.x - here.x;
       const dz = target.z - here.z;
       const distance = Math.hypot(dx, dz);
-      if (distance > 1e-9) creature.heading = normalizeHeading(Math.atan2(dx, dz));
+      if (!turned && distance > 1e-9) {
+        turned = true;
+        const wanted = Math.atan2(dx, dz);
+        this.#turn(creature, wanted, false);
+        if (Math.abs(normalizeHeading(wanted - creature.heading)) > WALK_TURN_LIMIT) break;
+      }
       const travel = Math.min(budget, distance);
       budget -= travel;
       const arrived = travel >= distance;
@@ -1385,18 +1437,26 @@ export class Simulation {
         : preferred;
     const from = creature.position.regionId;
     creature.position = { regionId, x, z };
-    if (regionId !== from) this.#enteredRegion(creature, from, regionId, connectionId ?? "");
+    if (regionId !== from) this.#enteredRegion(creature, from, regionId, connectionId);
   }
 
-  #enteredRegion(creature: CreatureState, from: string, to: string, connectionId: string) {
+  /** `connectionId` is undefined for a derived water entry (ADR 0020 §4). */
+  #enteredRegion(
+    creature: CreatureState,
+    from: string,
+    to: string,
+    connectionId: string | undefined,
+  ) {
     const base = { tick: this.tick, creatureId: creature.id };
     this.#emit({
       ...base,
       type: "entered_region",
       fromRegionId: from,
       toRegionId: to,
-      connectionId,
+      ...(connectionId === undefined ? {} : { connectionId }),
     });
+    // A water entry crosses no connection, so no structure (ADR 0020 §4).
+    if (connectionId === undefined) return;
     // Structures are found through ownership, never by name (ADR 0004 §4).
     const structureId =
       this.#connections.get(connectionId)?.structureId ??

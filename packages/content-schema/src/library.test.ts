@@ -37,7 +37,7 @@ function validEntry() {
         locomotion: { land: { gait: "walk" } },
         anchors: { feet: { x: 128, y: 240 } },
       },
-      capabilities: { "core:walk": 1 },
+      capabilities: { "core:land": 1 },
       baseSpeed: 0.6,
       behaviors: ["core:wander", "core:feed", "core:rest"],
       senses: { "core:vision": 8 },

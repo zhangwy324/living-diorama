@@ -20,7 +20,7 @@ const species = {
   name: "Pebble",
   appearance: "test:sprites/pebble.png",
   sizeClass: "small",
-  capabilities: { "core:walk": 1 },
+  capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander"],
 };
@@ -72,7 +72,7 @@ function withActions(registries: Registries) {
   expectOk(registries.actions.register({ id: "core:follow_path", version: "1.2.0" }));
   expectOk(
     registries.capabilities.register({
-      id: "core:walk",
+      id: "core:land",
       version: "1.0.0",
       locomotion: { regionKinds: ["land"], maxSlopeDeg: 35 },
     }),
@@ -343,7 +343,7 @@ describe("resolveReferences", () => {
     before("actions/core:idle", "behaviors/core:wander");
     before("actions/core:follow_path", "behaviors/core:wander");
     before("behaviors/core:wander", "species/test:pebble");
-    before("capabilities/core:walk", "species/test:pebble");
+    before("capabilities/core:land", "species/test:pebble");
     before(`assets/${sprite.id}`, "species/test:pebble");
   });
 
@@ -596,7 +596,7 @@ describe("resolveReferences", () => {
     expectOk(moving.behaviors.register({ id: "core:wander", version: "1.0.0" }));
     expectOk(moving.capabilities.register({ id: "test:sing", version: "1.0.0" }));
     expectOk(
-      moving.species.register({ ...species, capabilities: { "test:sing": 1, "core:walk": 1 } }),
+      moving.species.register({ ...species, capabilities: { "test:sing": 1, "core:land": 1 } }),
     );
     expect(resolveReferences(moving).diagnostics).toEqual([]);
   });
@@ -661,7 +661,7 @@ describe("addEntries", () => {
     const registries = createRegistries();
     expectOk(
       registries.capabilities.register({
-        id: "core:walk",
+        id: "core:land",
         version: "1.0.0",
         locomotion: { regionKinds: ["land"] },
       }),

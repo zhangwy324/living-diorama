@@ -346,6 +346,8 @@ describe("cue sprites", () => {
     position: { regionId: "r", x: 0, z: 0 },
     world: { x: 0, y: 0, z: 0 },
     heading: 0,
+    animation: undefined,
+    submersion: 0,
     cues,
     ...(cueProgress === undefined ? {} : { cueProgress }),
   });

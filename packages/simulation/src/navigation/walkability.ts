@@ -28,13 +28,23 @@ export const CellState = {
    * The creature stands on that region here instead, so this is not an obstacle for clearance.
    */
   covered: 10,
+  /**
+   * A water region's surface is not above the ground here, e.g. where its footprint reaches over
+   * the bank (ADR 0020 §3). Like `outside`, this is not an obstacle for clearance.
+   */
+  dry: 11,
 } as const;
 export type CellState = (typeof CellState)[keyof typeof CellState];
 
-const isBaseBlocked = (s: number) =>
+/**
+ * Whether a cell in this state keeps the creature's radius away. For a creature that can swim,
+ * water over the ground is somewhere it can go, not an obstacle, so its walkable land reaches
+ * the waterline and meets the water's walkable cells there (the derived entry, ADR 0020 §4).
+ */
+const isBaseBlocked = (s: number, canSwim: boolean) =>
   s === CellState.offSurface ||
   s === CellState.steep ||
-  s === CellState.submerged ||
+  (s === CellState.submerged && !canSwim) ||
   s === CellState.noHeadroom;
 
 export class RegionMask {
@@ -164,6 +174,11 @@ export function buildRegionMask(
       states[cell] = CellState.offSurface;
       continue;
     }
+    // A water region is only where its surface lies above the ground (ADR 0020 §3).
+    if (region.kind === "water" && h <= terrain.heightAt(x, z) + eps) {
+      states[cell] = CellState.dry;
+      continue;
+    }
     heights[cell] = h;
     // Centre plus one point inside each of the cell's two terrain triangles.
     const q = cs / 4;
@@ -198,7 +213,8 @@ export function buildRegionMask(
   // Pass 2: clearance for the creature's radius.
   const radius = profile.radius;
   const reach = Math.ceil((radius + cs / 2) / cs);
-  const blocked = Uint8Array.from(states, (s) => (isBaseBlocked(s) ? 1 : 0));
+  const canSwim = profile.maxSlopeByKind.has("water");
+  const blocked = Uint8Array.from(states, (s) => (isBaseBlocked(s, canSwim) ? 1 : 0));
   for (let cell = 0; cell < states.length; cell++) {
     if (states[cell] !== CellState.walkable) continue;
     const { x, z } = mask.center(cell);

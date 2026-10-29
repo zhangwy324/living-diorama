@@ -18,6 +18,8 @@ const creature = (id: string, world: Vec3, heading = 0): CreatureSnapshot => ({
   position: { regionId: "r", x: world.x, z: world.z },
   world,
   heading,
+  animation: undefined,
+  submersion: 0,
   cues: [],
 });
 

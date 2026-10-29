@@ -42,6 +42,8 @@ const creature = (fields: Partial<CreatureSnapshot> = {}): CreatureSnapshot => (
   position: { regionId: "meadow", x: 1, z: 1 },
   world: { x: 1, y: 0, z: 1 },
   heading: 0,
+  animation: undefined,
+  submersion: 0,
   cues: [],
   ...fields,
 });

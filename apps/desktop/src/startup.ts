@@ -25,7 +25,7 @@ export const STARTUP: StartupConfig = {
 
 /** What a drawn species is given besides its name, size and image (ADR 0014 §11): the mossling's. */
 export const DRAWN_SPECIES_DEFAULTS = {
-  capabilities: { "core:walk": 1 },
+  capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander", "core:feed", "core:rest"],
   senses: { "core:vision": 8 },

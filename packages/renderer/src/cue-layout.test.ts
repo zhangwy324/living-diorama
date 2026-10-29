@@ -207,6 +207,8 @@ describe("cue layout in CreatureBodies", () => {
     position: { regionId: "r", x, z: 0 },
     world: { x, y: 0, z: 0 },
     heading: 0,
+    animation: undefined,
+    submersion: 0,
     cues,
   });
   const make = () => {

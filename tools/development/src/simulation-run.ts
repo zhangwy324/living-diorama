@@ -213,8 +213,8 @@ export function runWithInvariants(options: RunOptions): RunReport {
 
   const { model } = simulation.state;
   // Per species, since `onTick` may add species with other navigation profiles.
-  const masksOf = (speciesId: string) =>
-    simulation.state.pathfinderFor(speciesId)?.navigation.masks;
+  const navigationOf = (speciesId: string) => simulation.state.pathfinderFor(speciesId)?.navigation;
+  const speciesOf = (creatureId: string) => simulation.state.creatures.get(creatureId)?.speciesId;
   const water = [...model.regions.values()].filter((r) => r.kind === "water");
   const { min, max } = model.bounds;
   const report: RunReport = {
@@ -299,14 +299,21 @@ export function runWithInvariants(options: RunOptions): RunReport {
       checks.event(event);
       if (event.type === "first_use_of_structure") report.firstStructureUse ??= event.tick;
       if (event.type === "entered_region") {
-        // Regions change only through a connection that joins them, in a direction it allows.
-        const c = model.connections.find((c) => c.id === event.connectionId);
-        const forward = c?.from === event.fromRegionId && c.to === event.toRegionId;
-        const backward =
-          c?.bidirectional && c.to === event.fromRegionId && c.from === event.toRegionId;
-        if (!forward && !backward) {
+        // Regions change only through a connection that joins them, in a direction it allows,
+        // or, from land into water only, by a water entry of the creature's own profile
+        // (ADR 0020 §4, "Contradictions resolved"). Water to land is only by a connection.
+        const { fromRegionId: from, toRegionId: to, connectionId } = event;
+        const c = model.connections.find((c) => c.id === connectionId);
+        const forward = c?.from === from && c.to === to;
+        const backward = c?.bidirectional && c.to === from && c.from === to;
+        const entry =
+          connectionId === undefined &&
+          navigationOf(speciesOf(event.creatureId) ?? "")?.entries.some(
+            (e) => e.fromRegionId === from && e.toRegionId === to,
+          );
+        if (!forward && !backward && !entry) {
           violation(
-            `${event.creatureId} went ${event.fromRegionId} → ${event.toRegionId} via "${event.connectionId}"`,
+            `${event.creatureId} went ${from} → ${to} via ${connectionId === undefined ? "no connection" : `"${connectionId}"`}`,
           );
         }
       }
@@ -338,9 +345,17 @@ export function runWithInvariants(options: RunOptions): RunReport {
         violation(`${where}: unknown region`);
         continue;
       }
-      if (region.kind === "water") violation(`${where}: in a water region`);
-      if (!masksOf(c.speciesId)?.get(regionId)?.isWalkableAt(x, z)) {
+      // Per capability (ADR 0020): only in a region kind its locomotion covers, so a walker
+      // never in water, and on a walkable cell of its own profile there.
+      const navigation = navigationOf(c.speciesId);
+      if (!navigation?.profile.maxSlopeByKind.has(region.kind)) {
+        violation(`${where}: in a ${region.kind} region it can't move in`);
+      }
+      if (!navigation?.masks.get(regionId)?.isWalkableAt(x, z)) {
         violation(`${where}: not on a walkable cell`);
+      }
+      if (region.kind !== "water" && c.submersion !== 0) {
+        violation(`${where}: submerged by ${c.submersion} out of the water`);
       }
       const y = c.world.y;
       if (!Number.isFinite(y) || y !== region.surface.heightAt(x, z)) {
@@ -350,6 +365,8 @@ export function runWithInvariants(options: RunOptions): RunReport {
         violation(`${where}: outside the world bounds`);
       }
       for (const w of water) {
+        // A swimmer is on its own water region's surface, never under another's.
+        if (w === region) continue;
         const surface = w.surface.heightAt(x, z);
         if (surface !== undefined && pointInPolygon(x, z, w.footprint) && y <= surface) {
           violation(`${where}: under the surface of "${w.id}"`);

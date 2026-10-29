@@ -1,4 +1,4 @@
-import { WORLD_TOLERANCES } from "@living-diorama/content-schema";
+import { WORLD_TOLERANCES, type RegionKind, type Vec2 } from "@living-diorama/content-schema";
 import { projectOnSegment } from "../world/geometry";
 import type { ConnectionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
@@ -8,18 +8,44 @@ export type PortalCheck =
   | { usable: true }
   | {
       usable: false;
-      reason: "missing_capability" | "no_walkable_side" | "step_too_high";
+      /**
+       * `not_applicable`: a side is in a region kind the profile has no locomotion for, so the
+       * connection is not for it, like one needing a capability it lacks (ADR 0020 §5).
+       */
+      reason: "missing_capability" | "not_applicable" | "no_walkable_side" | "step_too_high";
       detail: string;
     };
+
+/** Two edge-adjacent walkable cells, one in each of two regions, with their centres. */
+export interface CellPair {
+  fromCell: number;
+  toCell: number;
+  from: Vec2;
+  to: Vec2;
+}
+
+/**
+ * The derived way from a land region into a water region for a profile that can move in both
+ * (ADR 0020 §4): every walkable cell of the land region edge-adjacent to a walkable cell of the
+ * water region, within a step of its surface. One-way: out of the water is only by a connection.
+ */
+export interface WaterEntry {
+  fromRegionId: string;
+  toRegionId: string;
+  pairs: readonly CellPair[];
+}
 
 /** Region masks and the capability-filtered region graph for one navigation profile. */
 export interface Navigation {
   profile: NavProfile;
   masks: ReadonlyMap<string, RegionMask>;
   portals: ReadonlyMap<string, PortalCheck>;
+  /** The derived water entries, one per land and water region pair that has any. */
+  entries: readonly WaterEntry[];
   /**
-   * Regions linked to `regionId` through usable connections, including itself. Region-level only:
-   * a region may split into areas a creature can't cross (`Pathfinder.reachableCells`).
+   * Regions linked to `regionId` through usable connections and water entries, including itself,
+   * following their directions. Region-level only: a region may split into areas a creature
+   * can't cross (`Pathfinder.reachableCells`).
    */
   reachableRegions(regionId: string): Set<string>;
 }
@@ -59,6 +85,14 @@ function checkPortal(
   const to = masks.get(connection.to);
   if (!from || !to) {
     return { usable: false, reason: "no_walkable_side", detail: "it joins an unknown region" };
+  }
+  const foreign = [from, to].find((m) => !profile.maxSlopeByKind.has(m.region.kind));
+  if (foreign) {
+    return {
+      usable: false,
+      reason: "not_applicable",
+      detail: `it joins a ${foreign.region.kind} region, which the profile can't move in`,
+    };
   }
   const { a, b } = connection.portal;
   const cs = world.terrain.cellSize;
@@ -109,10 +143,13 @@ export function buildNavigation(world: WorldModel, profile: NavProfile): Navigat
     link(connection.from, connection.to);
     if (connection.bidirectional) link(connection.to, connection.from);
   }
+  const entries = waterEntries(masks, profile);
+  for (const entry of entries) link(entry.fromRegionId, entry.toRegionId);
   return {
     profile,
     masks,
     portals,
+    entries,
     reachableRegions(regionId) {
       const seen = new Set([regionId]);
       const queue = [regionId];
@@ -128,6 +165,73 @@ export function buildNavigation(world: WorldModel, profile: NavProfile): Navigat
     },
   };
 }
+
+/** Whether moving from a region of kind `from` into one of kind `to` is a derived water entry. */
+export function isWaterEntry(from: RegionKind, to: RegionKind): boolean {
+  return from !== "water" && to === "water";
+}
+
+/**
+ * Whether two edge-adjacent walkable cells, one in a region of each mask, are a derived water
+ * entry from `from` into `to`: land into water, within a step (ADR 0020 §4).
+ */
+export function isWaterEntryPair(
+  from: RegionMask,
+  fromCell: number,
+  to: RegionMask,
+  toCell: number,
+) {
+  return (
+    isWaterEntry(from.region.kind, to.region.kind) &&
+    from.state(fromCell) === CellState.walkable &&
+    to.state(toCell) === CellState.walkable &&
+    Math.abs(from.height(fromCell) - to.height(toCell)) <= WORLD_TOLERANCES.maxStepHeight
+  );
+}
+
+/** Every derived water entry of a profile; none unless it can move on land and in water. */
+function waterEntries(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile): WaterEntry[] {
+  if (!profile.maxSlopeByKind.has("water")) return [];
+  const all = [...masks.values()];
+  const entries: WaterEntry[] = [];
+  for (const land of all) {
+    if (land.region.kind === "water" || !profile.maxSlopeByKind.has(land.region.kind)) continue;
+    for (const water of all) {
+      if (!isWaterEntry(land.region.kind, water.region.kind)) continue;
+      const pairs = adjacentPairs(land, water);
+      if (pairs.length > 0) {
+        entries.push({ fromRegionId: land.region.id, toRegionId: water.region.id, pairs });
+      }
+    }
+  }
+  return entries;
+}
+
+/** Edge-adjacent pairs of cells from `a` into `b` that are a water entry, in cell order. */
+function adjacentPairs(a: RegionMask, b: RegionMask): CellPair[] {
+  const cs = a.cellSize;
+  const { box } = b.region;
+  const pairs: CellPair[] = [];
+  for (let cell = 0; cell < a.states.length; cell++) {
+    if (a.states[cell] !== CellState.walkable) continue;
+    const c = a.center(cell);
+    if (c.x < box.minX - cs || c.x > box.maxX + cs || c.z < box.minZ - cs || c.z > box.maxZ + cs)
+      continue;
+    for (const [dx, dz] of EDGE_NEIGHBOURS) {
+      const toCell = b.cellAt(c.x + dx * cs, c.z + dz * cs);
+      if (toCell === -1 || !isWaterEntryPair(a, cell, b, toCell)) continue;
+      pairs.push({ fromCell: cell, toCell, from: c, to: b.center(toCell) });
+    }
+  }
+  return pairs;
+}
+
+const EDGE_NEIGHBOURS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
 
 /** Distance from (x, z) to the portal segment of `connection`. */
 export function distanceToPortal(connection: ConnectionModel, x: number, z: number): number {

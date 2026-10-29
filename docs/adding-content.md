@@ -88,7 +88,7 @@ A placement in the world's `props` names the type and says where it stands:
   "appearance": "meadow:sprites/hedgehog.svg",
   "sizeClass": "small",
   "body": { "thickness": 0.3 },
-  "capabilities": { "core:walk": 0.8 },
+  "capabilities": { "core:land": 0.8 },
   "baseSpeed": 0.6,
   "behaviors": ["core:wander"],
   "senses": { "core:vision": 8 },
@@ -111,7 +111,8 @@ A placement in the world's `props` names the type and says where it stands:
   - `template` is `walker` (the default), `hopper` or `swimmer`. It decides which anchors apply, not where the creature can move.
   - `locomotion.land.gait` is how the creature moves on land, `walk` (the default) or `hop`. It is a style, not a capability: it picks the animation on land and is used only when the species has a land capability.
   - `anchors` places the template's anchors, in the drawing's pixels from the top left (0 to 256): a walker's `feet`, a swimmer's `tail`; a hopper has none. An anchor left out sits where the drawing's bounds put it.
-- `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. At least one must be a locomotion capability. v1 has one locomotion capability, `core:walk` (land and cave regions, slopes up to 35°). A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
+- `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. At least one must be a locomotion capability. The engine has two: `core:land` (land and cave regions, slopes up to 35°; its animation is the species' land gait) and `core:swim` (water regions, on the water's surface, lowered by half the body's height). A species may have either or both ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §1–§2). Where several cover a region, the creature moves with the largest factor. A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
+  - A swimmer that can also move on land jumps into water from any walkable bank cell next to it; no connection is needed. It leaves the water only through a connection that requires `core:swim`, so a world with water needs such shore exits for amphibious creatures, and a spawn point in the water for water-only ones.
 - `behaviors` lists what decides the creature's next action. The engine has `core:wander` (rest and walk about), `core:feed` (when hungry, eat at remembered food, or explore to find some; it gives the creature `core:hunger`) and `core:rest` (when tired or at night, sleep beside a remembered shelter, its home if it has one, or where it stands; it gives the creature `core:tiredness`). Species drawn in the Studio get all three, and `core:vision` 8, like the mossling. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
 - `senses` (optional) maps each sense the creature has to its strength. A sense left out is one it lacks. The engine registers `core:vision`, its range in metres (1 to 30).
 - `traits` (optional) maps traits to values. A trait left out takes its default. The engine registers `core:nocturnal` (0 sleeps at night, 1 by day; a whole number; default 0) and `core:appetite` (scales how fast hunger rises, 0.5 to 2; default 1).
@@ -170,18 +171,18 @@ expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
 
 Diagnostics say what is wrong and where (`error: worlds/meadow:meadow regions[2].footprint[0]: … (code)`). The world checks run per navigation profile (each distinct size class and set of capabilities among the registered species). A creature only goes where it fits, so a size that doesn't fit somewhere is a warning, not an error: a large creature can't cross a narrow bridge and never tries ([ADR 0013](adr/0013-size-limits.md)). If your species should go everywhere, check that it gets no warnings either.
 
-| Code                       | Severity | Meaning                                                                                                           |
-| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
-| `no_walkable_area`         | warning  | A region has nowhere this profile can stand.                                                                      |
-| `disconnected_region`      | warning  | A region's walkable area splits into pieces this profile can't cross between. Pieces of 1 m² or less are ignored. |
-| `portal_unusable`          | warning  | A portal has no room for this profile on one side.                                                                |
-| `portal_unusable`          | error    | A portal's surfaces don't meet within the step height.                                                            |
-| `spawn_not_walkable`       | warning  | A spawn point has no room for this profile.                                                                       |
-| `no_spawn_point`           | error    | This profile can't stand on any spawn point, so its creatures can't appear.                                       |
-| `ambiguous_overlap`        | error    | Two regions are walkable at the same place and height.                                                            |
-| `region_seam`              | warning  | Two regions touch away from any portal, so creatures meet an invisible wall.                                      |
-| `unsatisfiable_connection` | warning  | No registered species has every capability a connection requires.                                                 |
-| `spawn_unusable`           | warning  | No registered species can move in a spawn point's region.                                                         |
+| Code                  | Severity | Meaning                                                                                                                    |
+| --------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `no_walkable_area`    | warning  | A region has nowhere this profile can stand.                                                                               |
+| `disconnected_region` | warning  | A region's walkable area splits into pieces this profile can't cross between. Pieces of 1 m² or less are ignored.          |
+| `portal_unusable`     | warning  | A portal has no room for this profile on one side.                                                                         |
+| `portal_unusable`     | error    | A portal's surfaces don't meet within the step height.                                                                     |
+| `spawn_not_walkable`  | warning  | A spawn point has no room for this profile.                                                                                |
+| `no_spawn_point`      | error    | This profile can't stand on any spawn point, so its creatures can't appear.                                                |
+| `ambiguous_overlap`   | error    | Two regions are walkable at the same place and height.                                                                     |
+| `region_seam`         | warning  | Two regions touch away from any portal, so creatures meet an invisible wall. A bank a swimmer can jump in from is no seam. |
+| `no_water_exit`       | warning  | This profile can jump into a water region from the bank, but no connection leads it out again.                             |
+| `spawn_unusable`      | warning  | No registered capability can move in a spawn point's region.                                                               |
 
 In the running app, the debug overlays (**Show debug overlays** in the strip's controls) show walkability cells, the region graph, portals and each creature's route.
 

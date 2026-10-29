@@ -13,13 +13,24 @@ import { CellState, type RegionMask } from "./walkability";
 // A region can split into several walkable areas for one profile, e.g. a rock that a large
 // creature can't pass (ADR 0013). Areas are linked by the same crossings routes use, so what
 // `reachableCells` returns is exactly what `findRoute` can reach.
+//
+// For a profile that can swim, derived water entries (ADR 0020 §4) add one-way crossings from
+// land into water, picked from the entry's cell pairs like a portal's, so the graph is directed:
+// out of the water is only through connections.
 
 /** Crossings on one portal are at least this far apart, in metres. */
 const CROSSING_SPACING = 1;
+/**
+ * Crossings of one water entry between the same two areas are at least this far apart, in
+ * metres. A bank is long and has no portal to spread along, so they are sparser than a portal's;
+ * every crossing is a door with a distance field of its own.
+ */
+const ENTRY_SPACING = 2;
 
 /** One way across a portal: from a walkable cell in one region into an adjacent one in the next. */
 export interface Crossing {
-  connectionId: string;
+  /** The connection crossed; absent for a derived water entry. */
+  connectionId?: string;
   fromRegionId: string;
   toRegionId: string;
   fromCell: number;
@@ -66,6 +77,8 @@ export class Pathfinder {
   readonly #areas = new Map<string, { ofCell: Int32Array; cells: number[][] }>();
   /** Per area key, the cells reachable from it. */
   readonly #reachable = new Map<string, ReachableCells>();
+  /** Per region, the crossings of the water entries leaving it; built on first use. */
+  #entryCrossings: Map<string, Crossing[]> | undefined;
 
   constructor(
     readonly world: WorldModel,
@@ -158,6 +171,7 @@ export class Pathfinder {
     }
     for (const id of ids) this.#areas.delete(id);
     this.#reachable.clear();
+    this.#entryCrossings = undefined;
   }
 
   findRoute(from: RegionPosition, to: RegionPosition): RouteResult {
@@ -278,9 +292,51 @@ export class Pathfinder {
   }
 
   #exits(regionId: string): Crossing[] {
-    return this.world.connections
-      .filter((c) => c.from === regionId || c.to === regionId)
-      .flatMap((c) => this.crossings(c).filter((x) => x.fromRegionId === regionId));
+    return [
+      ...this.world.connections
+        .filter((c) => c.from === regionId || c.to === regionId)
+        .flatMap((c) => this.crossings(c).filter((x) => x.fromRegionId === regionId)),
+      ...this.entryCrossings(regionId),
+    ];
+  }
+
+  /** The crossings of the derived water entries leaving `regionId` (ADR 0020 §4), in cell order. */
+  entryCrossings(regionId: string): readonly Crossing[] {
+    this.#entryCrossings ??= this.#buildEntryCrossings();
+    return this.#entryCrossings.get(regionId) ?? [];
+  }
+
+  /**
+   * Per water entry and pair of areas it joins, cell pairs at least `ENTRY_SPACING` apart, taken
+   * in cell order, so every area that touches the water gets a way in.
+   */
+  #buildEntryCrossings(): Map<string, Crossing[]> {
+    const byRegion = new Map<string, Crossing[]>();
+    for (const entry of this.navigation.entries) {
+      const fromAreas = this.#regionAreas(entry.fromRegionId).ofCell;
+      const toAreas = this.#regionAreas(entry.toRegionId).ofCell;
+      const chosen = new Map<string, Crossing[]>();
+      for (const pair of entry.pairs) {
+        const key = `${fromAreas[pair.fromCell] ?? -1}>${toAreas[pair.toCell] ?? -1}`;
+        let list = chosen.get(key);
+        if (!list) chosen.set(key, (list = []));
+        const near = (c: Crossing) =>
+          Math.hypot(c.from.x - pair.from.x, c.from.z - pair.from.z) < ENTRY_SPACING - 1e-9;
+        if (list.some(near)) continue;
+        list.push({
+          fromRegionId: entry.fromRegionId,
+          toRegionId: entry.toRegionId,
+          fromCell: pair.fromCell,
+          toCell: pair.toCell,
+          from: pair.from,
+          to: pair.to,
+          cost: Math.hypot(pair.to.x - pair.from.x, pair.to.z - pair.from.z),
+        });
+      }
+      const crossings = [...chosen.values()].flat().sort((p, q) => p.fromCell - q.fromCell);
+      byRegion.set(entry.fromRegionId, [...(byRegion.get(entry.fromRegionId) ?? []), ...crossings]);
+    }
+    return byRegion;
   }
 
   #field(regionId: string, cell: number): Float64Array {

@@ -26,7 +26,10 @@ export interface PathState {
   next: number;
 }
 
-/** A waypoint. `connectionId` is set on the first waypoint after a portal crossing. */
+/**
+ * A waypoint. `connectionId` is set on the first waypoint after a portal crossing; the first
+ * waypoint after a derived water entry, which crosses no connection, has none (ADR 0020 §4).
+ */
 export interface PathPoint extends RegionPosition {
   connectionId?: string;
 }

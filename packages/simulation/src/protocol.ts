@@ -16,7 +16,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -153,6 +153,17 @@ export interface CreatureSnapshot {
   /** World position resolved from the region's surface, so the renderer needs no lookups. */
   world: Vec3;
   heading: number;
+  /**
+   * The animation profile of the capability in use where the creature is (ADR 0020 §8): `walk`
+   * or `hop` on land (the species' gait), `swim` in water, or another name a pack declares.
+   * Undefined for none; the renderer draws an unknown or missing profile with no motion.
+   */
+  animation: string | undefined;
+  /**
+   * How far the body sits below the surface, as a share of its height from 0 to 1, from the
+   * capability in use (ADR 0020 §9). 0 on land.
+   */
+  submersion: number;
   currentAction?: string;
   /**
    * What the creature visibly shows (ADR 0018 §15), so the renderer needs no action or need IDs:
@@ -206,7 +217,8 @@ export type CreatureEvent =
       type: "entered_region";
       fromRegionId: string;
       toRegionId: string;
-      connectionId: string;
+      /** The connection crossed; absent for a derived water entry (ADR 0020 §4). */
+      connectionId?: string;
     })
   | (CreatureEventBase & {
       type: "first_use_of_structure";
