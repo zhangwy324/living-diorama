@@ -3,10 +3,14 @@ import {
   chooseShelter,
   emptyKnowledge,
   minutesAfter,
+  OPEN_SPOT_MOVES,
   rememberPlace,
   restBehavior,
   Rng,
+  SEARCH_FORGET_SECONDS,
+  SHELTER_SEARCH_RADII,
   SLEEP_CONTINUE_UTILITY,
+  SLEEPER_GAP,
   sleepAction,
   sleepCycle,
   type ActionContext,
@@ -27,6 +31,7 @@ import { createSimulation } from "./simulation-run";
 
 const SHELTER = "core:shelter";
 const HUNGER = "core:hunger";
+const MOSSLING = "hollow:mossling";
 const TIREDNESS = "core:tiredness";
 const NOCTURNAL = "core:nocturnal";
 
@@ -36,6 +41,8 @@ interface Stub {
   places: Record<string, { x: number; z: number }>;
   /** Route length per placement; undefined means no route. */
   routes?: Record<string, number | undefined>;
+  /** `randomWalkablePointWithin`: undefined, the default, means no point. */
+  within?: (maxDistance: number) => { x: number; z: number } | undefined;
 }
 
 function observe(
@@ -57,7 +64,11 @@ function observe(
     routeLength: (destination) => stub.routes?.[destination.regionId],
     reachableRegions: () => [],
     randomWalkablePoint: () => undefined,
-    randomWalkablePointWithin: () => undefined,
+    randomWalkablePointWithin: (maxDistance) => {
+      const point = stub.within?.(maxDistance);
+      return point && { regionId: "r", ...point };
+    },
+    sleeperNear: () => false,
   };
   return {
     tick: 100_000,
@@ -147,7 +158,7 @@ describe("core:rest", () => {
     expect(0.2 + 0.8 - SLEEP_CONTINUE_UTILITY).toBeLessThan(0.15);
   });
 
-  it("knowing no shelter, or none it can reach, sleeps where it stands", () => {
+  it("knowing no shelter, or none it can reach, with nowhere to search, sleeps in the open", () => {
     expect(evaluate(observe({ places: {} }, { dayPhase: "night" }))).toMatchObject({
       action: "core:sleep",
       params: {},
@@ -156,17 +167,126 @@ describe("core:rest", () => {
     expect(evaluate({ ...unreachable, dayPhase: "night" })).toMatchObject({ params: {} });
   });
 
+  it("knowing no shelter, walks out to look for one three times, further each time", () => {
+    const asked: number[] = [];
+    // Every draw lands at the edge of the radius asked for.
+    const stub: Stub = { places: {}, within: (d) => (asked.push(d), { x: d, z: 0 }) };
+    const memory = {};
+    const proposals = [0, 1, 2, 3].map((k) =>
+      restBehavior.evaluate(
+        observe(stub, { dayPhase: "night", tick: 100_000 + k * 600 }),
+        memory,
+        Rng.fromSeed(1),
+      ),
+    );
+    expect(asked).toEqual(SHELTER_SEARCH_RADII);
+    expect(proposals.slice(0, 3)).toEqual(
+      SHELTER_SEARCH_RADII.map((d, k) => ({
+        action: "core:follow_path",
+        params: { destination: { regionId: "r", x: d, z: 0 } },
+        utility: 1.2,
+        reason: `night: looking for shelter (${k + 1}/3)`,
+      })),
+    );
+    expect(proposals[3]).toMatchObject({
+      action: "core:sleep",
+      params: {},
+      reason: "night in the open",
+    });
+    // Sleeping in the open, it remembers having searched, so woken later in the night (or
+    // napping the next morning) it lies down again at once.
+    expect(memory).toEqual({ searches: 3, searchedAtTick: 101_200 });
+    const later = restBehavior.evaluate(
+      observe(stub, { dayPhase: "night", tick: 101_200 + 4 * 36_000 }),
+      memory,
+      Rng.fromSeed(1),
+    );
+    expect(later).toMatchObject({ action: "core:sleep", params: {} });
+    expect(asked).toEqual(SHELTER_SEARCH_RADII);
+  });
+
+  it("skips a search walk that would go less than half its radius", () => {
+    // Every point drawn is 4 m away: enough for the 6 m search only.
+    const stub: Stub = { places: {}, within: () => ({ x: 4, z: 0 }) };
+    const memory = {};
+    const first = restBehavior.evaluate(
+      observe(stub, { dayPhase: "night" }),
+      memory,
+      Rng.fromSeed(1),
+    );
+    expect(first).toMatchObject({
+      action: "core:follow_path",
+      reason: "night: looking for shelter (1/3)",
+    });
+    const next = restBehavior.evaluate(
+      observe(stub, { dayPhase: "night" }),
+      memory,
+      Rng.fromSeed(1),
+    );
+    expect(next).toMatchObject({ action: "core:sleep", params: {} });
+  });
+
+  it("searches afresh once its last search is more than 12 hours old", () => {
+    const stub: Stub = { places: {}, within: (d) => ({ x: d, z: 0 }) };
+    const ticks = SEARCH_FORGET_SECONDS * 10;
+    const now = 1_000_000;
+    const search = (searchedAtTick: number) =>
+      restBehavior.evaluate(
+        observe(stub, { dayPhase: "night", tick: now }),
+        { searches: 3, searchedAtTick },
+        Rng.fromSeed(1),
+      );
+    expect(SEARCH_FORGET_SECONDS).toBe(12 * 3600);
+    expect(search(now - ticks)).toMatchObject({ action: "core:sleep" });
+    expect(search(now - ticks - 1)).toMatchObject({
+      action: "core:follow_path",
+      reason: "night: looking for shelter (1/3)",
+    });
+  });
+
+  it("goes to a shelter seen while searching", () => {
+    const memory = {};
+    const stub: Stub = {
+      places: { t: { x: 3, z: 0 } },
+      routes: { t: 4 },
+      within: (d) => ({ x: d, z: 0 }),
+    };
+    restBehavior.evaluate(observe(stub, { dayPhase: "night" }), memory, Rng.fromSeed(1));
+    const seen = observe(stub, { dayPhase: "night", knowledge: knowing("t") });
+    expect(restBehavior.evaluate(seen, memory, Rng.fromSeed(1))).toMatchObject({
+      action: "core:sleep",
+      params: { placementId: "t" },
+    });
+    expect(memory).toEqual({});
+  });
+
+  it("while its own search walk runs, returns 0.95 to continue it", () => {
+    const action = { id: "core:follow_path", behavior: "core:rest", startTick: 0 };
+    expect(evaluate(observe({ places: {} }, { dayPhase: "night", action }))).toEqual({
+      action: "core:follow_path",
+      utility: SLEEP_CONTINUE_UTILITY,
+      reason: "continue",
+    });
+  });
+
   it.each([
     { action: "core:sleep", outcome: "interrupted", reason: "stuck" },
     { action: "core:sleep", outcome: "failed", reason: "no_spot" },
-  ] as const)("sleeps where it stands after its last sleep ended $outcome", (lastResult) => {
-    const stub = { places: { t: { x: 3, z: 0 } }, routes: { t: 4 } };
-    const observation = observe(stub, { dayPhase: "night", knowledge: knowing("t"), lastResult });
-    expect(evaluate(observation)).toMatchObject({ params: {} });
-    // Otherwise, the shelter.
-    const fine = observe(stub, { dayPhase: "night", knowledge: knowing("t") });
-    expect(evaluate(fine)).toMatchObject({ params: { placementId: "t" } });
-  });
+  ] as const)(
+    "sleeps in the open, without searching, after its last sleep ended $outcome",
+    (lastResult) => {
+      const stub: Stub = {
+        places: { t: { x: 3, z: 0 } },
+        routes: { t: 4 },
+        within: (d) => ({ x: d, z: 0 }),
+      };
+      const observation = observe(stub, { dayPhase: "night", knowledge: knowing("t"), lastResult });
+      expect(evaluate(observation)).toMatchObject({ action: "core:sleep", params: {} });
+      // Otherwise, the shelter.
+      const fine = observe(stub, { dayPhase: "night", knowledge: knowing("t") });
+      expect(evaluate(fine)).toMatchObject({ params: { placementId: "t" } });
+    },
+  );
 
   it("prefers home unless its route is more than twice the nearest shelter's", () => {
     const stub: Stub = {
@@ -215,19 +335,35 @@ describe("core:rest", () => {
 
 // ---- core:sleep ------------------------------------------------------------------------------
 
-function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal = 0 } = {}) {
+function sleepContext({
+  phase = "night" as DayPhase,
+  tiredness = 0.5,
+  nocturnal = 0,
+  // Other sleepers, each too close within 1 m; and the points `randomWalkablePointWithin` draws.
+  sleepers = [] as { x: number; z: number }[],
+  points = [] as { x: number; z: number }[],
+} = {}) {
   const turned: number[] = [];
   const turning: ("turning" | "facing")[] = [];
   const emitted: unknown[] = [];
   const homes: string[] = [];
   let walked = 0;
+  let position = { regionId: "r", x: 0, z: 0 };
   const context = {
     catchingUp: false,
     tick: 0,
     tickSeconds: 0.1,
-    position: { regionId: "r", x: 0, z: 0 },
+    get position() {
+      return position;
+    },
     dayPhase: phase,
     needs: { [TIREDNESS]: tiredness, [HUNGER]: 0.2 },
+    randomWalkablePointWithin: () => {
+      const point = points.shift();
+      return point && { regionId: "r", ...point };
+    },
+    sleeperNear: (p: { x: number; z: number }) =>
+      sleepers.some((s) => Math.hypot(s.x - p.x, s.z - p.z) < 1),
     traits: { [NOCTURNAL]: nocturnal },
     place: (id: string) =>
       id === "tree"
@@ -236,23 +372,21 @@ function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal 
           ? { id, x: 2, y: 0, z: 0, blockRadius: 0.5, affordances: {} }
           : undefined,
     spotAt: () => ({ regionId: "r", x: 1.2, z: 0 }),
-    planRoute: () => ({
-      ok: true as const,
-      route: {
-        legs: [
-          {
-            regionId: "r",
-            points: [
-              { x: 0, z: 0 },
-              { x: 1.2, z: 0 },
-            ],
-          },
-        ],
-        length: 1.2,
-      },
-    }),
-    walk: () => {
+    planRoute: (to: { x: number; z: number }) => {
+      const { x, z } = position;
+      return {
+        ok: true as const,
+        route: {
+          legs: [{ regionId: "r", points: [{ x, z }, to] }],
+          length: Math.hypot(to.x - x, to.z - z),
+        },
+      };
+    },
+    // Arrives at once, at the end of the path.
+    walk: (path: { points: { x: number; z: number }[] }) => {
       walked++;
+      const end = path.points.at(-1);
+      if (end) position = { regionId: "r", x: end.x, z: end.z };
       return "arrived" as const;
     },
     adjustNeed: () => {},
@@ -268,7 +402,7 @@ function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal 
     home: null as string | null,
     setHome: (id: string) => homes.push(id),
   } satisfies ActionContext;
-  return { context, emitted, homes, walked: () => walked, turned, turning };
+  return { context, emitted, homes, walked: () => walked, turned, turning, at: () => position };
 }
 
 describe("core:sleep", () => {
@@ -421,6 +555,48 @@ describe("core:sleep", () => {
     sleepAction.interrupted?.(start.state, context, "outranked");
     expect(emitted.at(-1)).toEqual({ type: "woke_up", reason: "interrupted", tiredness: 0.5 });
   });
+
+  it("in the open, walks to a clear point first if another sleeper lies too close", () => {
+    const { context, emitted, at } = sleepContext({
+      sleepers: [{ x: 0, z: 0.5 }],
+      // Too close as well, then clear.
+      points: [
+        { x: 0.5, z: 0 },
+        { x: 2, z: 1 },
+      ],
+    });
+    const start = sleepAction.start({}, context);
+    if (!start.ok) throw new Error("start failed");
+    expect(sleepAction.step(start.state, context)).toEqual({ status: "running" });
+    expect(start.state).toMatchObject({ moves: 1, arrived: false });
+    expect(sleepAction.step(start.state, context)).toEqual({ status: "running" });
+    expect(at()).toMatchObject({ x: 2, z: 1 });
+    expect(sleepAction.step(start.state, context)).toMatchObject({ asleep: true });
+    expect(emitted).toEqual([{ type: "fell_asleep", placementId: null, tiredness: 0.5 }]);
+  });
+
+  it("in the open, moves away at most three times, then lies down anyway", () => {
+    // Sleepers everywhere it could go.
+    const sleepers = [0, 1, 2, 3].map((x) => ({ x, z: 0 }));
+    const points = [1, 2, 3].map((x) => ({ x, z: 0 }));
+    const { context, at } = sleepContext({ sleepers, points });
+    const start = sleepAction.start({}, context);
+    if (!start.ok) throw new Error("start failed");
+    let status;
+    for (let t = 0; t < 10 && !status?.asleep; t++) status = sleepAction.step(start.state, context);
+    expect(status).toMatchObject({ asleep: true });
+    expect(start.state).toMatchObject({ moves: OPEN_SPOT_MOVES });
+    expect(at()).toMatchObject({ x: 0, z: 0 });
+  });
+
+  it("at a shelter, lies down at its spot whoever sleeps near", () => {
+    const { context } = sleepContext({ sleepers: [{ x: 1.2, z: 0 }], points: [{ x: 5, z: 5 }] });
+    const start = sleepAction.start({ placementId: "tree" }, context);
+    if (!start.ok) throw new Error("start failed");
+    sleepAction.step(start.state, context);
+    expect(sleepAction.step(start.state, context)).toMatchObject({ asleep: true });
+    expect(start.state).toMatchObject({ moves: 0 });
+  });
 });
 
 // ---- In the simulation -----------------------------------------------------------------------
@@ -545,18 +721,92 @@ describe("sleeping in Woodland Hollow", () => {
     expect(offShelter.length).toBeGreaterThan(0);
   });
 
-  it("knowing no shelter, sleeps where it stands", () => {
-    const { run, spawn, of } = setup(2, 21 * 60);
+  /** The searches `core:rest` chose for `creature`, with where it set off from. */
+  const searches = (traces: DecisionTrace[], creature: CreatureState) =>
+    traces.flatMap((t) => {
+      const proposal = t.candidates.find((c) => c.behavior === "core:rest")?.proposal;
+      return t.creatureId === creature.id &&
+        t.result === "started" &&
+        t.chosen?.behavior === "core:rest" &&
+        t.chosen.action === "core:follow_path"
+        ? [{ from: t.position, params: t.chosen.params, reason: proposal?.reason }]
+        : [];
+    });
+
+  it("knowing no shelter, searches three times, further each time, then sleeps in the open", () => {
+    const { traces, run, spawn, of } = setup(1, 21 * 60);
     const creature = spawn();
     // No vision: it learns only by touch, and the meadow spawn is no shelter.
     creature.variation.senses["core:vision"] = 0;
     creature.needs[HUNGER] = 0;
-    const { x, z } = creature.position;
-    run(20);
+    const spawnedAt = { ...creature.position };
+    run(HOUR, () => creature.asleep);
     expect(creature.asleep).toBe(true);
+    const walks = searches(traces, creature);
+    expect(walks.map((w) => w.reason)).toEqual(
+      [1, 2, 3].map((k) => `night: looking for shelter (${k}/3)`),
+    );
+    walks.forEach(({ from, params }, k) => {
+      const { destination } = params as { destination: { x: number; z: number } };
+      const d = Math.hypot(destination.x - from.x, destination.z - from.z);
+      // At least half the radius; at most the radius, plus half a cell for the point's place in it.
+      expect(d).toBeGreaterThanOrEqual(SHELTER_SEARCH_RADII[k]! / 2);
+      expect(d).toBeLessThanOrEqual(SHELTER_SEARCH_RADII[k]! + 0.5);
+    });
     expect(of(creature, "fell_asleep")).toEqual([expect.objectContaining({ placementId: null })]);
-    expect(creature.position).toMatchObject({ x, z });
+    expect(
+      Math.hypot(creature.position.x - spawnedAt.x, creature.position.z - spawnedAt.z),
+    ).toBeGreaterThan(3);
     expect(creature.home).toBeNull();
+    // About a minute of searching, not the night.
+    expect(of(creature, "fell_asleep")[0]!.tick).toBeLessThan(3 * 600);
+  });
+
+  it("finds a shelter while searching and sleeps there, at its new home", () => {
+    const { simulation, traces, run, spawn, of } = setup(3, 21 * 60);
+    const creature = spawn();
+    creature.variation.senses["core:vision"] = 0;
+    creature.needs[HUNGER] = 0;
+    run(HOUR, () => creature.asleep);
+    expect(searches(traces, creature).length).toBeGreaterThan(0);
+    const [fell] = of(creature, "fell_asleep");
+    const home = (fell as { placementId: string | null }).placementId;
+    expect(home).not.toBeNull();
+    expect(creature.home).toBe(home);
+    const { x, z } = simulation.state.model.propsById.get(home!)!.transform.position;
+    expect(Math.hypot(creature.position.x - x, creature.position.z - z)).toBeLessThan(2);
+  });
+
+  it("homeless sleepers settling on one point lie down apart, the same for the same seed", () => {
+    const night = () => {
+      const { simulation, run, spawn, of } = setup(5, 21 * 60);
+      const creatures = [spawn(), spawn(), spawn(), spawn()];
+      const { position } = creatures[0]!;
+      for (const c of creatures) {
+        c.variation.senses["core:vision"] = 0;
+        c.needs[HUNGER] = 0;
+        c.position = { ...position };
+        // It has searched already tonight.
+        c.memory["core:rest"] = { searches: 3, searchedAtTick: 0 };
+      }
+      run(HOUR, () => creatures.every((c) => c.asleep));
+      expect(creatures.every((c) => c.asleep)).toBe(true);
+      for (const c of creatures) {
+        expect(of(c, "fell_asleep")).toEqual([expect.objectContaining({ placementId: null })]);
+      }
+      // All but one moved off the point, at least once.
+      const moved = creatures.filter((c) => (c.action!.state as { moves: number }).moves > 0);
+      expect(moved.length).toBeGreaterThanOrEqual(creatures.length - 1);
+      const radius = simulation.state.pathfinderFor(MOSSLING)!.navigation.profile.radius;
+      return { positions: creatures.map((c) => ({ ...c.position })), radius };
+    };
+    const { positions, radius } = night();
+    for (const [i, a] of positions.entries()) {
+      for (const b of positions.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThanOrEqual(2 * radius + SLEEPER_GAP);
+      }
+    }
+    expect(night().positions).toEqual(positions);
   });
 
   it("asleep, hunger rises at a fifteenth of its rate and tiredness falls", () => {

@@ -5,11 +5,13 @@ import {
   feedBehavior,
   hungerNeed,
   minutesAfter,
+  OPEN_SPOT_RADII,
   phaseSpans,
   planCatchUp,
   restBehavior,
   Rng,
   SHORT_GAP_MS,
+  SLEEPER_GAP,
   sleepAction,
   tirednessAfter,
   tirednessNeed,
@@ -351,6 +353,74 @@ describe("catch-up after a long gap", () => {
     expect(after.position).toEqual(creature.position);
     expect(after.home).toBeNull();
   });
+  it("counts as asleep only creatures already put to bed, not those asleep at the save", () => {
+    const save = nightSave();
+    const [first, second] = save.creatures;
+    const { position } = first!;
+    // Both homeless on one point; the second was asleep there at the save, but wakes in catch-up.
+    for (const creature of [first!, second!]) {
+      creature.home = null;
+      creature.knowledge.places["core:shelter"] = [];
+      creature.position = { ...position };
+    }
+    expect(second!.asleep).toBe(true);
+    const original = restBehavior.catchUp!;
+    const spy = vi
+      .spyOn(restBehavior, "catchUp")
+      .mockImplementation((observation, gap, rng) =>
+        observation.creature.id === second!.id ? null : original(observation, gap, rng),
+      );
+    try {
+      const { simulation } = restored(save, { nowMs: SAVED_AT + 3 * HOUR, minutes: at(23, 10) });
+      const [after, awake] = simulation.save(SAVED_AT).creatures;
+      expect(awake!.action).toBeUndefined();
+      // The second's stale sleep at the save doesn't push the first off its point.
+      expect(after!.action).toMatchObject({ id: "core:sleep", state: { placementId: null } });
+      expect(after!.position).toEqual(position);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("puts creatures knowing no shelter to bed apart, the same for the same save", () => {
+    const save = nightSave();
+    const { position } = save.creatures[0]!;
+    for (const creature of save.creatures) {
+      creature.home = null;
+      creature.knowledge.places["core:shelter"] = [];
+      creature.position = { ...position };
+    }
+    const bed = () => {
+      const { simulation, report } = restored(structuredClone(save), {
+        nowMs: SAVED_AT + 3 * HOUR,
+        minutes: at(23, 10),
+      });
+      expect(report.catchUp.failures).toEqual([]);
+      const creatures = simulation.save(SAVED_AT).creatures;
+      const radius = simulation.state.pathfinderFor(MOSSLING)!.navigation.profile.radius;
+      return { creatures, radius };
+    };
+    const { creatures, radius } = bed();
+    for (const creature of creatures) {
+      expect(creature.action).toMatchObject({
+        id: "core:sleep",
+        state: { placementId: null, asleep: true },
+      });
+      expect(creature.asleep).toBe(true);
+    }
+    // The first stays where it was; the others lie down clear of those before them.
+    expect(creatures[0]!.position).toEqual(position);
+    const positions = creatures.map((c) => c.position);
+    for (const [i, a] of positions.entries()) {
+      for (const b of positions.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThanOrEqual(2 * radius + SLEEPER_GAP);
+        expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThanOrEqual(
+          2 * OPEN_SPOT_RADII.at(-1)! + 1,
+        );
+      }
+    }
+    expect(bed().creatures).toEqual(creatures);
+  });
 });
 
 describe("core:rest catching up", () => {
@@ -402,7 +472,7 @@ describe("core:rest catching up", () => {
         senses: {},
         knowledge: { places: {}, recentCells: [] },
         home: null,
-        world: { place: () => undefined, spotAt: () => undefined },
+        world: { place: () => undefined, spotAt: () => undefined, sleeperNear: () => false },
       }) as unknown as CreatureObservation;
     const g = gap([{ phase: "day", hours: 3 }]);
     const rng = new Rng({ words: [1, 2, 3, 4], key: 5 });
@@ -509,6 +579,25 @@ describe("catch-up hooks that fail", () => {
     });
     expect(report.catchUp.failures.map((f) => f.reason)).toEqual(
       save.creatures.map(() => "no_spot"),
+    );
+    expect(simulation.save(SAVED_AT).creatures.every((c) => !c.action)).toBe(true);
+  });
+
+  it("place the creature awake when asked to start at a position it has no route to", () => {
+    vi.spyOn(restBehavior, "catchUp").mockReturnValue({
+      start: {
+        action: "core:sleep",
+        params: { asleep: true },
+        at: { regionId: "nowhere", x: 0, z: 0 },
+      },
+    });
+    const save = nightSave();
+    const { simulation, report } = restored(save, {
+      nowMs: SAVED_AT + 5 * HOUR,
+      minutes: at(1, 10),
+    });
+    expect(report.catchUp.failures.map((f) => f.reason)).toEqual(
+      save.creatures.map(() => "no_route"),
     );
     expect(simulation.save(SAVED_AT).creatures.every((c) => !c.action)).toBe(true);
   });
@@ -637,6 +726,11 @@ describe("saved running actions", () => {
       "core:rest",
       { placementId: null, heading: "0", path, arrived: true, asleep: true, nap: false },
     ],
+    [
+      "core:sleep",
+      "core:rest",
+      { placementId: null, heading: 0, path, arrived: true, asleep: true, moves: -1, nap: false },
+    ],
     ["core:sleep", "core:rest", "asleep"],
     // The shape before resting headings: where the shelter stands instead of a heading.
     [
@@ -661,7 +755,7 @@ describe("saved running actions", () => {
     [
       "core:sleep",
       "core:rest",
-      { placementId: null, heading: 0, path, arrived: true, asleep: true, nap: false },
+      { placementId: null, heading: 0, path, arrived: true, asleep: true, moves: 0, nap: false },
     ],
   ])("keeps %s with a sound state", (id, behavior, state) => {
     const { after, report } = withAction({ id, behavior, state, startTick: 0 });

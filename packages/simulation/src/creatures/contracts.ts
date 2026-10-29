@@ -65,8 +65,23 @@ export interface PlaceQueries {
   spotAt(placementId: string): RegionPosition | undefined;
 }
 
+/** Queries about open ground near the creature, shared by behaviors and actions. */
+export interface OpenGroundQueries {
+  /**
+   * A uniformly random point on a cell the creature can reach, in any region, whose centre lies
+   * within `maxDistance` metres (straight line) of the creature; undefined if there is none.
+   */
+  randomWalkablePointWithin(maxDistance: number, rng: Rng): RegionPosition | undefined;
+  /**
+   * Whether another creature that is asleep lies too close to a body of this creature's size at
+   * `position`: closer, centre to centre and ignoring height, than the two body radii plus `gap`
+   * metres (issue #122).
+   */
+  sleeperNear(position: RegionPosition, gap: number): boolean;
+}
+
 /** What an action may do to the world. The engine applies every change itself. */
-export interface ActionContext extends PlaceQueries {
+export interface ActionContext extends PlaceQueries, OpenGroundQueries {
   /**
    * True only while catch-up starts an action already under way after a gap (ADR 0018 §19), e.g.
    * sleep that begins asleep; false on every ordinary start and step.
@@ -135,6 +150,11 @@ export type ActionStart =
       state: unknown;
       /** Extra facts for the decision trace, e.g. the planned route. */
       detail?: Record<string, unknown>;
+      /**
+       * The creature is asleep from the start, as in sleep that catch-up starts: it counts as
+       * asleep for `sleeperNear` before its first step.
+       */
+      asleep?: boolean;
     }
   | { ok: false; reason: string; detail?: Record<string, unknown> };
 
@@ -193,7 +213,7 @@ export interface ReachableRegion {
  * Read-only world queries for behaviors. What a creature knows of places comes from
  * `observation.knowledge`, which perception fills (ADR 0018 §10); `place` only looks one up.
  */
-export interface WorldQueries extends PlaceQueries {
+export interface WorldQueries extends PlaceQueries, OpenGroundQueries {
   /**
    * Regions with walkable area the creature can reach from where it stands, its own included. A
    * creature too big for a bridge or a gap never sees what lies beyond it (ADR 0013).
@@ -204,11 +224,6 @@ export interface WorldQueries extends PlaceQueries {
    * can reach none.
    */
   randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
-  /**
-   * A uniformly random point on a cell the creature can reach, in any region, whose centre lies
-   * within `maxDistance` metres (straight line) of the creature; undefined if there is none.
-   */
-  randomWalkablePointWithin(maxDistance: number, rng: Rng): RegionPosition | undefined;
   /**
    * The length in metres of the route the creature would walk to `destination`, or undefined if
    * it has none. Plans a route, so a behavior should ask for a few candidates only. Emits nothing.
@@ -296,12 +311,13 @@ export interface CatchUpResult {
   needs?: Record<string, number>;
   /**
    * An action to resume the present with, already under way, e.g. asleep at home. The engine
-   * moves the creature to its spot at the placement `at` (it stays where it is without one), then
+   * moves the creature to its spot at the placement `at`, or to the position `at` if it has a
+   * route there (it stays where it is without one), then
    * starts the action with `params`; the behavior must declare the action, as for a proposal, and
    * its `start` must take the creature as already there. Only the first behavior's start is used.
    * If the spot or the start fails, the creature is placed awake instead.
    */
-  start?: { action: string; params?: unknown; at?: string };
+  start?: { action: string; params?: unknown; at?: string | RegionPosition };
 }
 
 /** Plain data the engine keeps per creature and behavior, for cooldowns and hysteresis. */
