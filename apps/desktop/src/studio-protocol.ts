@@ -1,6 +1,6 @@
 import type { Diagnostic, Drawing, Result, SizeClass } from "@living-diorama/content-schema";
 import type { RequestHandlers } from "@living-diorama/desktop-integration";
-import type { CheckedLimits } from "./simulation-client";
+import type { CheckedLimits } from "@living-diorama/simulation";
 import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
 import {
   canMove,

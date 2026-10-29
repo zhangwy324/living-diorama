@@ -12,7 +12,7 @@ import {
   serveStudio,
   type LibraryStore,
 } from "@living-diorama/desktop-integration";
-import type { Limit } from "@living-diorama/simulation";
+import type { CheckedLimits, Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { defaultPlan } from "./body-plan";
@@ -27,7 +27,6 @@ import {
   type StudioRequests,
   type StudioServices,
 } from "./studio-protocol";
-import type { CheckedLimits } from "./simulation-client";
 import { userSpeciesIds } from "./user-species";
 
 const bridge: Limit = {

@@ -250,6 +250,14 @@ export type WorldEvent =
 
 export type SimulationEvent = CreatureEvent | WorldEvent;
 
+/** What `limits` answers `check_limits` with (ADR 0015 §8, issue #136). */
+export interface CheckedLimits {
+  /** Where the profile's creatures don't fit, or the errors that keep it out of the world. */
+  limits: Limit[];
+  /** The locomotion rule of each asked capability that is a way of moving, by its ID. */
+  locomotion: Record<string, LocomotionRule>;
+}
+
 export type SimulationMessage =
   | ({ type: "ready"; worldId: string } & WorldContent)
   /** Sent every tick; `events` are those emitted since the previous snapshot. */
@@ -271,13 +279,7 @@ export type SimulationMessage =
    * errors that keep it out of the world entirely (e.g. `no_spawn_point`). With them, how the
    * asked capabilities move a creature, so the Studio's preview needn't repeat it (issue #136).
    */
-  | {
-      type: "limits";
-      requestId?: string;
-      limits: Limit[];
-      /** The locomotion rule of each asked capability that is a way of moving, by its ID. */
-      locomotion: Record<string, LocomotionRule>;
-    }
+  | ({ type: "limits"; requestId?: string } & CheckedLimits)
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }
   /**

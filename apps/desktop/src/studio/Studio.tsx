@@ -45,6 +45,7 @@ import { drawingHints, limitHints } from "./hints";
 import { MyCreatures } from "./MyCreatures";
 import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
 import { useReducedMotion } from "./reduced-motion";
+import { keepTrying } from "./retry";
 import { NO_NAME, canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 import { hasWarningTint, WarningToggle } from "./WarningToggle";
@@ -240,7 +241,8 @@ export function Studio() {
 
   // The limits in the world follow the size picker and the ways of moving (ADR 0015 §8, ADR 0020
   // §12); the gait doesn't change them. The world doesn't change while the app runs, so each
-  // pairing is asked about once.
+  // pairing is asked about once. An unanswered question (the strip still starting, say) is asked
+  // again, since the preview's motion waits on the rules that come with the answer.
   const { land, swim } = plan.locomotion;
   useEffect(() => {
     // Nothing to ask with no way of moving; the panel shows no limits then.
@@ -250,17 +252,21 @@ export function Studio() {
     setSizeHints(cached ?? []);
     if (cached) return;
     let current = true;
-    channel
-      .request("limits", { sizeClass, locomotion: { land, swim } })
-      .then(({ limits, locomotion }) => {
-        setLocomotionRules((known) => ({ ...known, ...locomotion }));
-        const hints = limitHints(limits);
-        sizeHintCache.current.set(key, hints);
-        if (current) setSizeHints(hints);
-      })
-      .catch((error: unknown) => console.warn(`Could not check the limits for ${key}`, error));
+    const stop = keepTrying(
+      () =>
+        channel
+          .request("limits", { sizeClass, locomotion: { land, swim } })
+          .then(({ limits, locomotion }) => {
+            setLocomotionRules((known) => ({ ...known, ...locomotion }));
+            const hints = limitHints(limits);
+            sizeHintCache.current.set(key, hints);
+            if (current) setSizeHints(hints);
+          }),
+      (error: unknown) => console.warn(`Could not check the limits for ${key}`, error),
+    );
     return () => {
       current = false;
+      stop();
     };
   }, [sizeClass, land, swim]);
 

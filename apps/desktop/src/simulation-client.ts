@@ -1,9 +1,9 @@
 import { formatDiagnostic, type Result, type SizeClass } from "@living-diorama/content-schema";
-import type { LocomotionRule } from "@living-diorama/extension-api";
 import {
   envelope,
   openEnvelope,
   type AssetSummary,
+  type CheckedLimits,
   type Limit,
   type RequestCommand,
   type RestoreReport,
@@ -37,13 +37,6 @@ export const COUNT_OVERRIDE = parseCountOverride(import.meta.env.VITE_CREATURE_C
 export interface RegisteredSpecies {
   speciesId: string;
   limits: Limit[];
-}
-
-/** The answer to a limits query: where the profile doesn't fit, and how its capabilities move. */
-export interface CheckedLimits {
-  limits: Limit[];
-  /** The locomotion rule of each asked capability that is a way of moving, by its ID. */
-  locomotion: Record<string, LocomotionRule>;
 }
 
 export interface SimulationClient {
