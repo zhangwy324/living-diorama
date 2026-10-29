@@ -16,7 +16,7 @@ import {
 import type { LibraryStore, StoredLibraryEntry } from "@living-diorama/desktop-integration";
 import type { Limit } from "@living-diorama/simulation";
 import type { SimulationClient } from "./simulation-client";
-import { locomotionCapabilities, planBody, defaultPlan, type BodyPlanChoice } from "./body-plan";
+import { defaultPlan, locomotionCapabilities, planBody, type BodyPlanChoice } from "./body-plan";
 import { DRAWN_SPECIES_DEFAULTS } from "./startup";
 import { userSpeciesIds } from "./user-species";
 

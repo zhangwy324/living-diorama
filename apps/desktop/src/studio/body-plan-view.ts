@@ -108,7 +108,9 @@ export function placeAnchor(plan: BodyPlanChoice, name: AnchorName, point: Ancho
  * nothing was placed.
  */
 export const afterDrawingEdit = (plan: BodyPlanChoice): BodyPlanChoice =>
-  Object.values(plan.anchors).some((anchor) => anchor !== undefined) ? resetAnchors(plan) : plan;
+  Object.values(plan.anchors).some((anchor) => anchor !== undefined)
+    ? { ...plan, anchors: {} }
+    : plan;
 
 /**
  * The anchor a click on the drawing places: the one chosen if it is still shown, else the first.
@@ -137,5 +139,12 @@ export function anchorNote(plan: BodyPlanChoice, placing: AnchorName | undefined
 /** An anchor's name in running text: "center of gravity", "tail". */
 export const anchorWord = (name: AnchorName) => ANCHOR_LABELS[name].name.toLowerCase();
 
-/** `plan` with every anchor back where `defaultAnchor` puts it. */
-export const resetAnchors = (plan: BodyPlanChoice): BodyPlanChoice => ({ ...plan, anchors: {} });
+/**
+ * `plan` with the points its ways of moving show back where `defaultAnchor` puts them. A placed
+ * point hidden by a way of moving that is off is kept, so it comes back with it.
+ */
+export function resetAnchors(plan: BodyPlanChoice): BodyPlanChoice {
+  const shown: readonly string[] = planAnchors(plan.locomotion);
+  const kept = Object.entries(plan.anchors).filter(([name]) => !shown.includes(name));
+  return { ...plan, anchors: Object.fromEntries(kept) };
+}

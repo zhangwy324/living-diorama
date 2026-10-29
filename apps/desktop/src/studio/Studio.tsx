@@ -11,8 +11,14 @@ import {
   openStudioChannel,
 } from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { canMove, defaultPlan, planAnchors, type BodyPlanChoice } from "../body-plan";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  activeAnchors,
+  canMove,
+  defaultPlan,
+  planAnchors,
+  type BodyPlanChoice,
+} from "../body-plan";
 import {
   NO_LOCOMOTION,
   type LibrarySnapshot,
@@ -213,7 +219,9 @@ export function Studio() {
       ),
     [profile, submersion, speed],
   );
-  useEffect(() => preview.current?.setAnchors(plan.anchors), [plan.anchors]);
+  // The preview turns about the points the release will carry: the shown ones.
+  const releasedAnchors = useMemo(() => activeAnchors(plan), [plan]);
+  useEffect(() => preview.current?.setAnchors(releasedAnchors), [releasedAnchors]);
 
   // The limits in the world follow the size picker and the ways of moving (ADR 0015 §8, ADR 0020
   // §12); the gait doesn't change them. The world doesn't change while the app runs, so each

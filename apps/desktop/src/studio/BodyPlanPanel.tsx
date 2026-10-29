@@ -93,10 +93,13 @@ export function BodyPlanPanel({
             const only = anchors.length === 1;
             const help = (
               <>
-                <strong>{ANCHOR_LABELS[name].name}</strong>: {ANCHOR_LABELS[name].help}.{" "}
-                {plan.anchors[name]
-                  ? "Placed."
-                  : `At its default${only ? "; click the drawing to place it" : ""}.`}
+                <strong id={`anchor-name-${name}`}>{ANCHOR_LABELS[name].name}</strong>
+                <span id={`anchor-help-${name}`}>
+                  : {ANCHOR_LABELS[name].help}.{" "}
+                  {plan.anchors[name]
+                    ? "Placed."
+                    : `At its default${only ? "; click the drawing to place it" : ""}.`}
+                </span>
               </>
             );
             // With two points, each is a choice of which one a click places.
@@ -111,6 +114,8 @@ export function BodyPlanPanel({
                   name="placing"
                   value={name}
                   checked={props.placing === name}
+                  aria-labelledby={`anchor-name-${name}`}
+                  aria-describedby={`anchor-help-${name}`}
                   onChange={() => props.onPlacing(name)}
                 />
                 <span className="anchor-help">{help}</span>

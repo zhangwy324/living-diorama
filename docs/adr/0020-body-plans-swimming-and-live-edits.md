@@ -72,9 +72,9 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 
     Where a species can move stays where it is, in the species' `capabilities` map (ADR 0004 §2): land movement and swimming are `core:land` and `core:swim` entries with their speed factors. The gait is not in that map, and nothing is stored twice. PR 1 chooses the field names, but the style should be shaped per medium, for example `locomotion: { land: { gait } }`, so a water style can later sit beside it (`locomotion.water.style`) without renaming anything.
 
-12. **A confirm step in the Studio.** Between drawing and Release, the Studio shows a panel: the template, land movement and swimming, the land gait, clicks to place the anchors, and an animated preview of the body in each way it moves. The size limits (ADR 0015 §8) are asked for the chosen capabilities, since a navigation profile is the size class plus the capabilities (ADR 0012); the gait doesn't change them. The release moment (#51) and the size suggestion (#49) stay separate issues.
+12. **A confirm step in the Studio.** _Amended by the owner on 2026-10-29: the panel has no template; the points shown follow the ways of moving (see "As built", Follow-up: no body templates)._ Between drawing and Release, the Studio shows a panel: the template, land movement and swimming, the land gait, clicks to place the anchors, and an animated preview of the body in each way it moves. The size limits (ADR 0015 §8) are asked for the chosen capabilities, since a navigation profile is the size class plus the capabilities (ADR 0012); the gait doesn't change them. The release moment (#51) and the size suggestion (#49) stay separate issues.
 
-13. **Library entries go to version 3.** The body plan is stored with every species the library saves. An entry or a species without a body plan is read as a walker with default anchors. That is a cheap default for content with no plan, not a migration path: no backward compatibility is required (AGENTS.md), and entries of version 2 may simply fail to load.
+13. **Library entries go to version 3.** _Amended on 2026-10-29: version 4 drops the template, and a species without a body plan has the walk gait and default anchors (see "As built", Follow-up: no body templates)._ The body plan is stored with every species the library saves. An entry or a species without a body plan is read as a walker with default anchors. That is a cheap default for content with no plan, not a migration path: no backward compatibility is required (AGENTS.md), and entries of version 2 may simply fail to load.
 
 14. **The body plan replaces the drawn species' fixed capabilities.** ADR 0014 §11's `DRAWN_SPECIES_DEFAULTS` gave every drawn species `core:walk` 1. From PR 6 a drawn species takes its capabilities (`core:land`, `core:swim` or both) and its gait from its body plan, with a speed factor of 1 for each capability unless PR 1 or PR 6 tunes it. The other defaults (base speed, behaviors, senses, traits) stay app configuration until drawing release 3 reads them from the drawing (roadmap §3.2 step 8).
 
@@ -109,7 +109,7 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 The spec predates several ADRs. Where they disagree, this ADR settles it; the private design docs are updated to match.
 
 - **Strokes or image as the source of truth.** The spec's creature flow and asset list keep vector strokes as the editable original. Since ADR 0017 §8 the 256 px image is the drawing and the strokes are a record that is never replayed. That stands, and anchors (§10) are stored in the image's pixels.
-- **The template list.** The spec lists eight creature body plans and names a different first set in its open questions. The templates are walker, hopper and swimmer for now (§11); others (flyer, crawler and so on) come later. A walker and a hopper differ in gait, not in capability.
+- **The template list.** _Amended by the owner on 2026-10-29: there are no templates; a creature's ways of moving and land gait say what it is (see "As built", Follow-up: no body templates)._ The spec lists eight creature body plans and names a different first set in its open questions. The templates are walker, hopper and swimmer for now (§11); others (flyer, crawler and so on) come later. A walker and a hopper differ in gait, not in capability.
 - **What animation deforms.** The spec's baseline is a 2D billboard animated with squash, sway, bob and limb anchors. Since ADR 0011 the body is an extruded mesh, and M16 animates that mesh as a whole (§8). The billboard is gone.
 - **The water invariants.** ADR 0006 §12 checks that every creature stands on a non-water region and never under a water surface. That was true while only walkers existed. The invariants now hold per capability: each creature is on a walkable cell of a region its capabilities' locomotion covers, on that region's surface, and changes region only through a connection joining the two or by a jump across a bank, either way between land and water (§4). A walker still never enters water; a swimmer is in water only on a water region's surface.
 - **How the Studio commits to the world.** The spec has the Studio commit through a world-edit interface, while the app has the Studio ask the strip, which sends worker commands (ADR 0015). For creatures nothing changes: a release registers a species and spawns creatures, which are not world edits. For world edits M17 settles it: the one edit path is the worker's edit command (§17), and the Studio reaches it through the strip like any other command.
@@ -118,12 +118,12 @@ The spec predates several ADRs. Where they disagree, this ADR settles it; the pr
 
 M16 is done when:
 
-- a drawn species can be a walker, hopper or swimmer, with swimming on or off for walkers and hoppers and land movement (walking or hopping) on or off for swimmers;
+- a drawn species can be a walker, hopper or swimmer, with swimming on or off for walkers and hoppers and land movement (walking or hopping) on or off for swimmers; _amended on 2026-10-29: it moves on land (walking or hopping), swims, or both, with no template;_
 - `core:walk` is renamed `core:land` everywhere, and there is no hop capability;
 - an amphibious creature jumps into the river from the bank and climbs out on a bank low enough, or by a shore exit; a water-only creature stays in the water; a walker never enters it;
 - walking, hopping and swimming each show their own animation, and a swimmer sits lower in the water;
 - creatures turn smoothly when they set off (#121);
-- the Studio's confirm panel sets the template, locomotion and anchors and previews the animation;
+- the Studio's confirm panel sets the template, locomotion and anchors and previews the animation; _amended on 2026-10-29: locomotion and the anchors it uses, with no template;_
 - `pnpm check` and `pnpm soak` pass with swim and hop scenarios and the per-capability invariants;
 - a manual checklist entry is added and run by the owner;
 - this ADR records the decisions and every departure from them.

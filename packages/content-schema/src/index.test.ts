@@ -335,7 +335,7 @@ describe("SpeciesDefinition", () => {
     expect(parseSpeciesDefinition({ ...species, body: corner }).ok).toBe(true);
   });
 
-  it("rejects an unknown gait, medium or template", () => {
+  it("rejects an unknown gait or medium, and a template", () => {
     expect(
       messages(
         parseSpeciesDefinition({ ...species, body: { locomotion: { land: { gait: "run" } } } }),

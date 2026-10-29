@@ -63,6 +63,17 @@ describe("placing anchors", () => {
     expect(resetAnchors(both).locomotion).toEqual(both.locomotion);
   });
 
+  it("resets only the points shown, keeping a placed one hidden by a way of moving that is off", () => {
+    const placed = {
+      locomotion: SWIM,
+      anchors: { centerOfGravity: { x: 7, y: 8 }, tail: { x: 5, y: 6 } },
+    };
+    expect(resetAnchors(placed).anchors).toEqual({ centerOfGravity: { x: 7, y: 8 } });
+    expect(resetAnchors({ ...placed, locomotion: LAND }).anchors).toEqual({ tail: { x: 5, y: 6 } });
+    // A drawing edit still drops every placed point, shown or not.
+    expect(afterDrawingEdit(placed).anchors).toEqual({});
+  });
+
   it("places the point chosen while it is shown, else the first, and none with no way of moving", () => {
     expect(placingAnchor(["centerOfGravity", "tail"], "tail")).toBe("tail");
     expect(placingAnchor(["centerOfGravity", "tail"], undefined)).toBe("centerOfGravity");

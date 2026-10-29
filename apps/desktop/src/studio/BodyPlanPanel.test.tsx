@@ -26,6 +26,9 @@ const panel = (plan: BodyPlanChoice, mode?: "land" | "swim", placing?: AnchorNam
     />,
   );
 
+/** The markup's text, tags left out. */
+const text = (html: string) => html.replace(/<[^>]*>/g, "");
+
 /** Each input of a kind as `value` or `value*` when checked, `!` added when disabled. */
 const inputs = (html: string, type: string, name: string) =>
   [...html.matchAll(new RegExp(`<input type="${type}"[^>]*>`, "g"))]
@@ -43,9 +46,9 @@ describe("the confirm panel", () => {
     expect(html).not.toContain("template");
     expect(inputs(html, "checkbox", "")).toEqual(["*", ""]);
     expect(inputs(html, "radio", "gait")).toEqual(["walk*", "hop"]);
-    expect(html).toContain("<strong>Center of gravity</strong>: where the body balances.");
+    expect(text(html)).toContain("Center of gravity: where the body balances.");
     expect(html).toContain("At its default; click the drawing to place it.");
-    expect(html).not.toContain("<strong>Tail</strong>");
+    expect(html).not.toContain("Tail");
     // One point: nothing to choose about what a click places.
     expect(inputs(html, "radio", "placing")).toEqual([]);
     expect(/<button[^>]*class="reset-anchors"[^>]*>/.exec(html)?.[0]).toContain("disabled");
@@ -58,7 +61,7 @@ describe("the confirm panel", () => {
     const html = panel(moving(SWIM), undefined, "tail");
     expect(inputs(html, "checkbox", "")).toEqual(["", "*"]);
     expect(inputs(html, "radio", "gait")).toEqual(["walk*!", "hop!"]);
-    expect(html).toContain("<strong>Tail</strong>");
+    expect(text(html)).toContain("Tail: the end that swishes as it swims.");
     expect(html).not.toContain("Center of gravity");
     // One way of moving: nothing to choose in the preview.
     expect(html).not.toContain("preview-mode");
@@ -68,11 +71,13 @@ describe("the confirm panel", () => {
     const plan = { ...moving(BOTH), anchors: { centerOfGravity: { x: 100, y: 100 } } };
     const html = panel(plan, "swim", "tail");
     expect(inputs(html, "radio", "placing")).toEqual(["centerOfGravity", "tail*"]);
-    expect(html).toContain("<strong>Center of gravity</strong>");
+    expect(text(html)).toContain("Center of gravity: where the body balances.");
     expect(html).toContain("Placed.");
+    // Each row is named by its point alone; the help describes it.
     expect(html).toContain(
-      "<strong>Tail</strong>: the end that swishes as it swims. At its default.",
+      'aria-labelledby="anchor-name-tail" aria-describedby="anchor-help-tail"',
     );
+    expect(text(html)).toContain("Tail: the end that swishes as it swims. At its default.");
     expect(inputs(html, "radio", "preview-mode")).toEqual(["land", "swim*"]);
     expect(html).toContain("Walking");
     expect(html).toContain("Swimming");
