@@ -13,7 +13,7 @@ import {
   type Route,
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { registerRiverCrossing, riverCrossingWorld } from "./index";
+import { registerHollowCreatures, registerRiverCrossing, riverCrossingWorld } from "./index";
 
 function load(register: (registries: Registries) => unknown): Registries {
   const registries = createRegistries();
@@ -137,6 +137,143 @@ describe("river-crossing routes (stacked deck over water)", () => {
   });
 });
 
+/** A small deterministic random stream (mulberry32), so samples are the same on every run. */
+function sampler(seed: number) {
+  let s = seed >>> 0;
+  const next = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
+}
+
+/**
+ * For sampled walkable starts, `findRoute` reaches every sampled cell `reachableCells` lists, with
+ * walkable legs, and fails on sampled walkable cells it doesn't list.
+ */
+function expectReachabilityAgrees(pathfinder: Pathfinder, starts: number, goals: number) {
+  const pick = sampler(131);
+  const walkable: RegionPosition[] = [];
+  for (const [regionId, mask] of pathfinder.navigation.masks) {
+    for (let cell = 0; cell < mask.states.length; cell++) {
+      if (mask.isWalkableAt(mask.center(cell).x, mask.center(cell).z)) {
+        walkable.push({ regionId, ...mask.center(cell) });
+      }
+    }
+  }
+  expect(walkable.length).toBeGreaterThan(0);
+  for (let k = 0; k < starts; k++) {
+    const from = pick(walkable);
+    const reachable = pathfinder.reachableCells(from);
+    const listed: RegionPosition[] = [...reachable].flatMap(([regionId, cells]) => {
+      const mask = pathfinder.navigation.masks.get(regionId)!;
+      return cells.map((cell) => ({ regionId, ...mask.center(cell) }));
+    });
+    const isListed = (p: RegionPosition) => {
+      const mask = pathfinder.navigation.masks.get(p.regionId)!;
+      return reachable.get(p.regionId)?.includes(mask.cellAt(p.x, p.z)) ?? false;
+    };
+    for (let g = 0; g < goals; g++) {
+      const to = pick(listed);
+      const result = pathfinder.findRoute(from, to);
+      if (!result.ok) throw new Error(`listed as reachable, but ${result.detail}`);
+      expectWalkable(pathfinder, result.route);
+      const other = pick(walkable);
+      expect(pathfinder.findRoute(from, other).ok).toBe(isListed(other));
+    }
+  }
+}
+
+describe("routes between separate areas of one region", () => {
+  // The north bank is cut in two by a row of rocks; two bridges lead from each half to the south
+  // bank, so the halves meet only through other regions.
+  const split = structuredClone(riverCrossingWorld);
+  split.id = "fixture:split-bank";
+  const bridge = split.structures[0]!;
+  split.structures = [-2, 2].map((dx) => {
+    const copy = structuredClone(bridge);
+    const side = dx < 0 ? "west" : "east";
+    copy.id = `bridge-${side}`;
+    copy.transform.position.x += dx;
+    const deck = copy.regions[0]!;
+    deck.id = `deck-${side}`;
+    const params = deck.surface.params as { centerline: { x: number }[] };
+    for (const p of params.centerline) p.x += dx;
+    deck.footprint = deck.footprint.map((p) => ({ ...p, x: p.x + dx }));
+    for (const c of copy.connections) {
+      c.id = `${c.id}-${side}`;
+      if (c.from === "bridge-deck") c.from = deck.id;
+      if (c.to === "bridge-deck") c.to = deck.id;
+      c.portal.a.x += dx;
+      c.portal.b.x += dx;
+    }
+    return copy;
+  });
+  split.props = [-3, -2.6, -2.2, -1.8, -1.4, -1, -0.6].map((z, k) => ({
+    id: `wall-${k}`,
+    prop: "fixture:rock",
+    transform: { position: { x: 0, y: 0.5, z } },
+  }));
+  const registries = load((r) => {
+    registerRiverCrossing(r);
+    r.worlds.register(split);
+  });
+  const pathfinder = worldState(registries, "fixture:split-bank").pathfinderFor("fixture:pebble")!;
+  const west: RegionPosition = { regionId: "north-bank", x: -2.5, z: -2 };
+  const east: RegionPosition = { regionId: "north-bank", x: 2.5, z: -2 };
+
+  it("splits the north bank into two areas", () => {
+    expect(pathfinder.navigation.masks.get("north-bank")!.components()).toHaveLength(2);
+  });
+
+  it("routes between the halves through the other regions", () => {
+    const result = pathfinder.findRoute(west, east);
+    if (!result.ok) throw new Error(result.detail);
+    expect(result.route.legs.map((l) => l.regionId)).toEqual([
+      "north-bank",
+      "deck-west",
+      "south-bank",
+      "deck-east",
+      "north-bank",
+    ]);
+    expectWalkable(pathfinder, result.route);
+    expect(result.route.legs.at(-1)!.points.at(-1)).toEqual({ x: 2.5, z: -2 });
+  });
+
+  it("keeps a route inside one area of the region", () => {
+    const result = pathfinder.findRoute(west, { regionId: "north-bank", x: -1, z: -2.5 });
+    if (!result.ok) throw new Error(result.detail);
+    expect(result.route.legs.map((l) => l.regionId)).toEqual(["north-bank"]);
+  });
+
+  it("agrees with reachability", () => {
+    expect(pathfinder.reachableCells(west).get("north-bank")).toEqual(
+      pathfinder.reachableCells(east).get("north-bank"),
+    );
+    expectReachabilityAgrees(pathfinder, 20, 10);
+  });
+
+  it("fails when the halves meet through nothing", () => {
+    const registries = load((r) => {
+      registerRiverCrossing(r);
+      r.worlds.register({
+        ...split,
+        id: "fixture:split-one-bridge",
+        structures: [split.structures[0]!],
+      });
+    });
+    const state = worldState(registries, "fixture:split-one-bridge");
+    const lonely = state.pathfinderFor("fixture:pebble")!;
+    expect(lonely.findRoute(west, east)).toMatchObject({ ok: false, reason: "unreachable" });
+    expect(lonely.reachableCells(west).get("north-bank")).not.toContain(
+      lonely.navigation.masks.get("north-bank")!.cellAt(east.x, east.z),
+    );
+  });
+});
+
 describe("Woodland Hollow routes", () => {
   const registries = load(registerBuiltInContent);
   const state = worldState(registries, "hollow:woodland-hollow");
@@ -165,6 +302,16 @@ describe("Woodland Hollow routes", () => {
           expect(regions).toContain("bridge-deck");
         }
       }
+    }
+  });
+
+  it("agrees with reachability for walkers, swimmers and amphibians", () => {
+    const registries = load(registerHollowCreatures);
+    const state = worldState(registries, "hollow:woodland-hollow");
+    const species = registries.species.values();
+    expect(species.length).toBeGreaterThan(3);
+    for (const { id } of species) {
+      expectReachabilityAgrees(state.pathfinderFor(id)!, 8, 6);
     }
   });
 });
