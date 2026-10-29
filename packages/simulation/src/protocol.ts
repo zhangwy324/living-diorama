@@ -63,14 +63,15 @@ export type RequestCommand =
    */
   | { type: "save"; requestId?: string; savedAt: number }
   /**
-   * Replaces the world with a save (ADR 0019 §3, §7), answered by `restored`. `save` is the
-   * stored JSON, parsed, and untrusted: the worker validates it. A save that fails validation,
-   * is of another world or world version, or disagrees with itself is answered by `rejected`
-   * and leaves the world as it was, so the caller carries on with a fresh world. `nowMs` is the
+   * Replaces the world with a save (ADR 0019 §3, §7), answered by `restored`. `json` is the
+   * stored text, as `saved` gave it, and untrusted: the worker parses and validates it. Text that
+   * isn't JSON, or a save that fails validation, is of another world or world version, or
+   * disagrees with itself, is answered by `rejected` and leaves the world as it was, so the
+   * caller carries on with a fresh world. `nowMs` is the
    * wall-clock time in milliseconds since the epoch, from which the gap since the save is
    * computed; `minutes` is the present local time of day (ADR 0018 §5).
    */
-  | { type: "restore"; requestId?: string; save: unknown; nowMs: number; minutes: number };
+  | { type: "restore"; requestId?: string; json: string; nowMs: number; minutes: number };
 
 export type SimulationCommand =
   /**
@@ -272,9 +273,9 @@ export type SimulationMessage =
   | { type: "restored"; requestId?: string; report: RestoreReport }
   /**
    * A request command could not be applied. Not a fault: the world keeps running. For `restore`
-   * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why: the
-   * schema's (e.g. `unsupported_save_version`), `save_world_mismatch` or `save_inconsistent`, or
-   * `invalid_wall_clock` / `invalid_time_of_day` for the options.
+   * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why:
+   * `invalid_save_json`, the schema's (e.g. `unsupported_save_version`), `save_world_mismatch`
+   * or `save_inconsistent`, or `invalid_wall_clock` / `invalid_time_of_day` for the options.
    */
   | {
       type: "rejected";

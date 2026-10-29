@@ -75,16 +75,24 @@ export function describeContent({ state }: Simulation): WorldContent {
   };
 }
 
-/** Validates the untrusted save and the options, then restores; never throws on them. */
+/** Checks the options and the untrusted save text, then restores; never throws on either. */
 function restoreSave(
   sim: Simulation,
-  { save, nowMs, minutes }: Extract<RequestCommand, { type: "restore" }>,
+  { json, nowMs, minutes }: Extract<RequestCommand, { type: "restore" }>,
 ): Result<RestoreReport> {
   if (!Number.isFinite(nowMs)) {
     const message = `The wall-clock time must be a number of milliseconds, got ${String(nowMs)}`;
     return { ok: false, diagnostics: [error("invalid_wall_clock", message)] };
   }
   if (!Number.isFinite(minutes)) return { ok: false, diagnostics: [invalidTimeOfDay(minutes)] };
+  let save: unknown;
+  try {
+    if (typeof json !== "string") throw new TypeError(`Expected text, got ${typeof json}`);
+    save = JSON.parse(json);
+  } catch (cause) {
+    const message = `The save is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return { ok: false, diagnostics: [error("invalid_save_json", message)] };
+  }
   const parsed = parseWorldSave(save);
   return parsed.ok ? sim.restore(parsed.value, { nowMs, minutes }) : parsed;
 }

@@ -492,9 +492,6 @@ describe("saving and restoring in the host", () => {
     return { json: saved.json, messages };
   }
 
-  /** The save as the app reads it back: parsed JSON, untrusted. */
-  const parse = (json: string) => JSON.parse(json) as Record<string, unknown>;
-
   const rejections = (messages: SimulationMessage[]) =>
     messages.flatMap((m) =>
       m.type === "rejected"
@@ -524,7 +521,7 @@ describe("saving and restoring in the host", () => {
     host.advance(5000);
     const { json, messages } = save(host);
     expect(messages.map((m) => m.type)).toEqual(["saved"]);
-    expect(parse(json)).toMatchObject({ tick: paused?.snapshot.tick });
+    expect(JSON.parse(json)).toMatchObject({ tick: paused?.snapshot.tick });
   });
 
   it("restores a save into another world, which carries on as if it never stopped", () => {
@@ -540,13 +537,12 @@ describe("saving and restoring in the host", () => {
     host.init(99);
     host.advance(500);
     host.take();
-    const saved = parse(json);
     host.send({
       type: "restore",
       requestId: "restore",
-      save: saved,
+      json,
       nowMs: SAVED_AT + 1000,
-      minutes: saved.minutes as number,
+      minutes: NOON,
     });
     host.advance(100);
     // Time owed to the replaced world doesn't tick: the restored one starts at the next wake-up.
@@ -570,7 +566,7 @@ describe("saving and restoring in the host", () => {
     host.send({ type: "pause" });
     host.advance(100);
     host.take();
-    host.send({ type: "restore", save: parse(json), nowMs: SAVED_AT, minutes: 20 * 60 });
+    host.send({ type: "restore", json, nowMs: SAVED_AT, minutes: 20 * 60 });
     host.advance(100);
     const messages = host.take();
     expect(messages.map((m) => m.type)).toEqual(["restored", "snapshot"]);
@@ -586,20 +582,27 @@ describe("saving and restoring in the host", () => {
 
   it("rejects an unusable save, leaving the world running as it was", () => {
     const host = running(7, 5000);
-    const valid = parse(save(host).json);
-    const unusable: [unknown, string[]?][] = [
-      ["not a save"],
-      [null],
-      [undefined],
-      [{}],
-      [[1, 2, 3]],
-      [{ ...valid, creatures: "many" }],
-      [{ ...valid, schemaVersion: 2 }, ["unsupported_save_version"]],
-      [{ ...valid, world: { id: "hollow:elsewhere", version: "1.0.0" } }, ["save_world_mismatch"]],
-      [{ ...valid, nextCreature: 1 }, ["save_inconsistent"]],
+    const { json: saved } = save(host);
+    const valid = JSON.parse(saved) as Record<string, unknown>;
+    const text = (value: unknown) => JSON.stringify(value);
+    const unusable: [string, string[]?][] = [
+      ["", ["invalid_save_json"]],
+      ["{ not json", ["invalid_save_json"]],
+      [saved.slice(0, -1), ["invalid_save_json"]],
+      ['"not a save"'],
+      ["null"],
+      [text({})],
+      [text([1, 2, 3])],
+      [text({ ...valid, creatures: "many" })],
+      [text({ ...valid, schemaVersion: 2 }), ["unsupported_save_version"]],
+      [
+        text({ ...valid, world: { id: "hollow:elsewhere", version: "1.0.0" } }),
+        ["save_world_mismatch"],
+      ],
+      [text({ ...valid, nextCreature: 1 }), ["save_inconsistent"]],
     ];
-    unusable.forEach(([bad], k) =>
-      host.send({ type: "restore", requestId: `r${k}`, save: bad, nowMs: SAVED_AT, minutes: NOON }),
+    unusable.forEach(([json], k) =>
+      host.send({ type: "restore", requestId: `r${k}`, json, nowMs: SAVED_AT, minutes: NOON }),
     );
     host.advance(100);
     const messages = host.take();
@@ -620,9 +623,9 @@ describe("saving and restoring in the host", () => {
 
   it("rejects a wall-clock time, time of day or save time it can't use", () => {
     const host = running(7, 1000);
-    const valid = parse(save(host).json);
+    const { json } = save(host);
     const restore = (nowMs: number, minutes: number) =>
-      host.send({ type: "restore", save: valid, nowMs, minutes });
+      host.send({ type: "restore", json, nowMs, minutes });
     restore(Number.NaN, NOON);
     restore(Number.POSITIVE_INFINITY, NOON);
     restore(SAVED_AT, Number.NaN);
