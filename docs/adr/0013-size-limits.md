@@ -14,6 +14,8 @@
 
 2. **Navigation works with areas.** For each profile, a region's walkable cells split into connected areas (`RegionMask.components`). `Pathfinder.reachableCells(position)` floods from the creature's area through the crossings routes already use, so it returns exactly what `findRoute` can reach, and caches the result per area. Wander's queries (`reachableRegions`, `randomWalkablePoint`) only offer those cells; their contract is unchanged, only "reachable" now means from where the creature stands. Cells are kept in cell order, so a seed reproduces the same choices. `Navigation.reachableRegions` stays region-level, for the world tests and overlays.
 
+   As built since #131: `reachableCells` returns exactly what `findRoute` can reach. Before, a route with both ends in one region searched only inside it and failed between two of its areas that only other regions join; now it searches inside the region only when both ends share an area. Known limit: a route within one area never detours through other regions, even where that would be shorter.
+
 3. **Not fitting is a warning; broken geometry stays an error.** Per profile:
    - warnings (limits): a region that splits into areas (`disconnected_region`), a portal with no room on one side (`portal_unusable`, naming the structure it belongs to), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`);
    - errors: a portal whose surfaces don't meet within the step height (`portal_unusable`), since no size can use it; two regions walkable at the same place and height (`ambiguous_overlap`);
