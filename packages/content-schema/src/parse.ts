@@ -11,6 +11,7 @@ import {
   type WorldDefinition,
 } from "./definitions";
 import { error, fromZodIssues, type Result } from "./diagnostics";
+import { WorldEditSchema, type WorldEdit } from "./edit";
 import { WorldSaveSchema, type WorldSave } from "./save";
 
 /** Any content schema. Lets other packages hold schemas without depending on Zod. */
@@ -83,3 +84,10 @@ export function parseWorldSave(input: unknown, source?: string): Result<WorldSav
   }
   return validate(WorldSaveSchema, input, source);
 }
+
+/**
+ * Validates a world edit (ADR 0021) and fills in its defaults. Whether it fits the world it is
+ * meant for (the placements exist, the props stay inside the bounds) is the engine's to check.
+ */
+export const parseWorldEdit = (input: unknown, source?: string): Result<WorldEdit> =>
+  validate(WorldEditSchema, input, source);
