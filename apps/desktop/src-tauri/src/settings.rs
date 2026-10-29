@@ -8,6 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::placement::{DEFAULT_STRIP_HEIGHT, NormalWindow, clamp_strip_height};
+use crate::storage;
 
 /// The file format version this build reads and writes. Adding an optional field keeps it: older
 /// builds ignore fields they don't know, and newer ones give missing fields their defaults. The
@@ -87,16 +88,11 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     write_json(path, settings)
 }
 
-/// Writes `value` as JSON to a temporary file next to `path`, then renames it over `path`, so a
-/// crash mid-write never leaves a torn file. Creates the directory if needed.
+/// Writes `value` as JSON to `path` atomically (`storage::write_atomic`). Creates the directory if
+/// needed.
 pub fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let json = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, json)?;
-    fs::rename(&temporary, path)
+    let json = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
+    storage::write_atomic(path, &json)
 }
 
 #[cfg(test)]
