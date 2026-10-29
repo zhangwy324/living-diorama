@@ -759,7 +759,7 @@ export class Simulation {
       const provider = this.#actions.get(running.id);
       const activity = { walked: false };
       const status: ActionStatus = provider
-        ? provider.step(running.state, this.#actionContext(creature, profile, activity))
+        ? provider.step(running.state, this.#actionContext(creature, profile, running.id, activity))
         : { status: "failed", reason: "unknown_action" };
       creature.asleep = status.asleep === true;
       if (status.status === "running") {
@@ -899,7 +899,7 @@ export class Simulation {
   ) {
     this.#actions
       .get(action.id)
-      ?.interrupted?.(action.state, this.#actionContext(creature, profile), reason);
+      ?.interrupted?.(action.state, this.#actionContext(creature, profile, action.id), reason);
     creature.asleep = false;
   }
 
@@ -1010,7 +1010,7 @@ export class Simulation {
         ? { ok: false, reason: "undeclared_action" }
         : provider.start(
             proposal.params,
-            this.#actionContext(creature, profile, undefined, catchingUp),
+            this.#actionContext(creature, profile, proposal.action, undefined, catchingUp),
           );
     if (start.ok) {
       creature.action = {
@@ -1128,9 +1128,12 @@ export class Simulation {
   #actionContext(
     creature: CreatureState,
     profile: SpeciesProfile,
+    actionId: string,
     activity?: { walked: boolean },
     catchingUp = false,
   ): ActionContext {
+    const { tick } = this;
+    let rng: Rng | undefined;
     return {
       ...this.#placeQueries(creature),
       catchingUp,
@@ -1169,9 +1172,10 @@ export class Simulation {
       get heading() {
         return creature.heading;
       },
-      // A view over the creature's stream as it is when drawn from: a decision replaces the state.
+      // Forked when first drawn from, so an action never moves the creature's own stream on.
       get rng() {
-        return new Rng(creature.rng);
+        rng ??= new Rng(creature.rng).fork(`action@${tick}:${actionId}`);
+        return rng;
       },
       turnTo: (heading) => this.#turn(creature, heading, catchingUp),
       face: (x, z) => {

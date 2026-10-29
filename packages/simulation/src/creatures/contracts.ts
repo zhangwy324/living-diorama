@@ -94,8 +94,10 @@ export interface ActionContext extends PlaceQueries {
   /** Radians in [-π, π); 0 faces +Z and π/2 faces +X. Change it through `turnTo` or `face`. */
   readonly heading: number;
   /**
-   * The creature's own random stream (ADR 0006 §3), e.g. for a resting heading. Drawing from it
-   * moves the stream on for its later decisions too, so a run stays the same for its seed.
+   * A random stream for this call, e.g. for a resting heading: forked from the creature's own
+   * (ADR 0006 §3) as `action@<tick>:<action ID>`, so drawing from it never shifts the creature's
+   * stream, and the same for its seed. Draws within one call continue one stream; anything an
+   * action must remember of them goes in its state.
    */
   readonly rng: Rng;
   /**

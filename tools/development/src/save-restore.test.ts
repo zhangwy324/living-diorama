@@ -321,3 +321,91 @@ describe("a save that doesn't fit the world", () => {
     });
   });
 });
+
+describe("a save mid-turn", () => {
+  const TURN_HZ = 10;
+
+  /**
+   * Runs four mosslings from `start` at 10 Hz until one running `actionId` is turning in place
+   * (it turned this tick without moving, and hasn't started eating or fallen asleep), and returns
+   * the world then with that creature's ID.
+   */
+  function midTurn(actionId: string, start: number, seed: number) {
+    const simulation = createSimulation({
+      register: registerBuiltInContent,
+      worldId: WORLD,
+      seed,
+      tickRateHz: TURN_HZ,
+      startMinutes: start,
+    });
+    for (let k = 0; k < 4; k++) expect(simulation.spawn(MOSSLING).ok).toBe(true);
+    const at = (tick: number) => minutesAfter(start, (tick * 1000) / TURN_HZ);
+    for (let t = 0; t < 36_000; t++) {
+      const before = new Map(
+        [...simulation.state.creatures.values()].map((c) => [
+          c.id,
+          { ...c.position, h: c.heading },
+        ]),
+      );
+      simulation.setTimeOfDay(at(simulation.tick));
+      simulation.step();
+      const cues = new Map(simulation.snapshot().creatures.map((c) => [c.id, c.cues]));
+      for (const c of simulation.state.creatures.values()) {
+        const was = before.get(c.id);
+        const state = c.action?.state as { arrived?: boolean; asleep?: boolean } | undefined;
+        if (
+          c.action?.id === actionId &&
+          state?.arrived &&
+          !state.asleep &&
+          cues.get(c.id)?.length === 0 &&
+          was &&
+          was.x === c.position.x &&
+          was.z === c.position.z &&
+          was.h !== c.heading
+        ) {
+          return { simulation, creatureId: c.id, at };
+        }
+      }
+    }
+    throw new Error(`no ${actionId} turn found`);
+  }
+
+  it.each([
+    ["core:eat", 12 * 60, 3],
+    ["core:sleep", 19 * 60 + 55, 5],
+  ])("of %s resumes towards the same heading, as an unbroken run", (actionId, start, seed) => {
+    const { simulation: unbroken, creatureId, at } = midTurn(actionId, start, seed);
+    const save = throughDisk(unbroken.save(SAVED_AT));
+    // A fresh world of another seed, at the same tick rate.
+    const simulation = createSimulation({
+      register: registerBuiltInContent,
+      worldId: WORLD,
+      seed: 999,
+      tickRateHz: TURN_HZ,
+    });
+    const result = simulation.restore(save, { nowMs: save.savedAt, minutes: save.minutes });
+    if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+    expect(result.value.droppedActions).toEqual([]);
+    const carryOn = (sim: Simulation) => {
+      const events: SimulationEvent[] = [];
+      const headings: number[] = [];
+      for (let k = 0; k < 30; k++) {
+        sim.setTimeOfDay(at(sim.tick));
+        events.push(...sim.step());
+        headings.push(sim.state.creatures.get(creatureId)!.heading);
+      }
+      return { events, headings };
+    };
+    const expected = carryOn(unbroken);
+    const actual = carryOn(simulation);
+    expect(actual).toEqual(expected);
+    expect(simulation.save(0)).toEqual(unbroken.save(0));
+    // The turn finished within the 30 ticks, still in the same action, which now eats or sleeps.
+    const creature = simulation.state.creatures.get(creatureId)!;
+    expect(creature.action?.id).toBe(actionId);
+    expect(simulation.snapshot().creatures.find((c) => c.id === creatureId)!.cues).toEqual([
+      actionId === "core:eat" ? "eating" : "sleeping",
+    ]);
+    expect(new Set(actual.headings.slice(-5)).size).toBe(1);
+  });
+});
