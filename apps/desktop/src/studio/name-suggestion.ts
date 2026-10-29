@@ -4,7 +4,7 @@
 const FIRST = [
   "Mossy",
   "Bumble",
-  "Pebbly",
+  "Speckled",
   "Fuzzy",
   "Puddle",
   "Twiggy",
@@ -51,8 +51,8 @@ const SECOND = [
   "Nook",
   "Wiggle",
   "Truffle",
-  "Moss",
-  "Twig",
+  "Bloom",
+  "Tadpole",
 ] as const;
 
 /** How many different names there are to suggest. */
@@ -69,8 +69,28 @@ function mix(seed: number): number {
   return (x ^ (x >>> 16)) >>> 0;
 }
 
-/** A fresh seed for {@link suggestName}, one per new drawing. */
+/** A fresh seed for {@link suggestName}. */
 export const randomNameSeed = () => Math.floor(Math.random() * 2 ** 32);
+
+/** Seeds tried by {@link anotherName} before it settles for whatever it last drew. */
+const REROLL_TRIES = 16;
+
+/**
+ * A suggestion other than `current` (the reroll button), still skipping `taken` names where it
+ * can. Settles for a repeat only if a run of seeds keeps landing on `current`.
+ */
+export function anotherName(
+  current: string,
+  taken: Iterable<string> = [],
+  random: () => number = randomNameSeed,
+): string {
+  const names = Array.from(taken);
+  let name = current;
+  for (let tries = 0; tries < REROLL_TRIES && name === current; tries++) {
+    name = suggestName(random(), names);
+  }
+  return name;
+}
 
 /**
  * The suggested name for `seed`, skipping names already in the library where it can (names

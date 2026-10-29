@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { randomNameSeed, SUGGESTION_COUNT, suggestName } from "./name-suggestion";
+import { anotherName, randomNameSeed, SUGGESTION_COUNT, suggestName } from "./name-suggestion";
 
 it("suggests the same two-part name for the same seed", () => {
   expect(suggestName(7)).toBe(suggestName(7));
@@ -11,10 +11,30 @@ it("suggests different names for different seeds", () => {
   expect(names.size).toBeGreaterThan(40);
 });
 
-it("fits the name field", () => {
+it("fits the name field and never pairs a word with itself", () => {
   for (let seed = 0; seed < SUGGESTION_COUNT * 4; seed++) {
-    expect(suggestName(seed).length).toBeLessThanOrEqual(40);
+    const name = suggestName(seed);
+    expect(name.length).toBeLessThanOrEqual(40);
+    const [first = "", second = ""] = name.toLowerCase().split(" ");
+    expect(first.slice(0, 4)).not.toBe(second.slice(0, 4));
   }
+});
+
+it("moves to the next noun with the same adjective when a name is taken", () => {
+  expect(suggestName(3, [suggestName(3)]).split(" ")[0]).toBe(suggestName(3).split(" ")[0]);
+});
+
+it("rerolls to a different name, skipping taken ones", () => {
+  const seeds = [3, 3, 3, 8];
+  const current = suggestName(3);
+  const taken = [suggestName(8)];
+  // Seed 3 repeats the current name and is skipped; seed 8 skips its taken name.
+  expect(anotherName(current, taken, () => seeds.shift() ?? 0)).toBe(suggestName(8, taken));
+  expect(suggestName(8, taken)).not.toBe(current);
+});
+
+it("settles for a repeat when every seed lands on the current name", () => {
+  expect(anotherName(suggestName(3), [], () => 3)).toBe(suggestName(3));
 });
 
 it("skips names already in the library, whatever their case", () => {

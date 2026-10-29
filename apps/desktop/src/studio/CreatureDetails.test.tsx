@@ -13,6 +13,7 @@ it("shows the name, the four sizes with one chosen, the thickness and the hints"
       name="Creature 2"
       placeholder="Creature"
       onName={() => {}}
+      onSuggestName={() => {}}
       sizeClass={DEFAULT_SIZE_CLASS}
       onSizeClass={() => {}}
       thickness={BODY_THICKNESS.default}
@@ -21,6 +22,11 @@ it("shows the name, the four sizes with one chosen, the thickness and the hints"
     />,
   );
   expect(html).toContain('value="Creature 2"');
+  // The reroll button beside the name says what it does, aloud and as a tooltip.
+  const reroll = /<button[^>]*class="suggest-name"[^>]*>/.exec(html)?.[0] ?? "";
+  expect(reroll).toContain('type="button"');
+  expect(reroll).toContain('aria-label="Suggest another name"');
+  expect(reroll).toContain('title="Suggest another name"');
   const sizes = [...html.matchAll(/<input type="radio"[^>]*>/g)].map(([input]) => {
     const size = /value="(\w+)"/.exec(input)?.[1];
     return input.includes("checked") ? `${size}*` : size;

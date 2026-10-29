@@ -8,6 +8,9 @@ export const SIZES = Object.keys(SIZE_CLASSES) as SizeClass[];
 /** A new drawing's size: the mossling's, the size the built-in world is made for. */
 export const DEFAULT_SIZE_CLASS: SizeClass = "medium";
 
+/** The reroll button's label and tooltip. */
+export const SUGGEST_NAME_LABEL = "Suggest another name";
+
 /** The thickness slider works in whole percent of the height, in steps of this many. */
 export const THICKNESS_STEP_PERCENT = 5;
 
@@ -22,6 +25,8 @@ export function CreatureDetails(props: {
   name: string;
   placeholder: string;
   onName(name: string): void;
+  /** Replaces the name, typed or suggested, with a new suggestion. */
+  onSuggestName(): void;
   sizeClass: SizeClass;
   onSizeClass(size: SizeClass): void;
   /** Depth as a share of the height. */
@@ -33,14 +38,42 @@ export function CreatureDetails(props: {
     <div className="creature-details">
       <label className="field">
         <span>Name</span>
-        <input
-          type="text"
-          value={props.name}
-          placeholder={props.placeholder}
-          maxLength={40}
-          spellCheck={false}
-          onChange={(event) => props.onName(event.target.value)}
-        />
+        <span className="name-row">
+          <input
+            type="text"
+            value={props.name}
+            placeholder={props.placeholder}
+            maxLength={40}
+            spellCheck={false}
+            onChange={(event) => props.onName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="suggest-name"
+            title={SUGGEST_NAME_LABEL}
+            aria-label={SUGGEST_NAME_LABEL}
+            onClick={props.onSuggestName}
+          >
+            {/* A die showing five. */}
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <rect
+                x="2"
+                y="2"
+                width="12"
+                height="12"
+                rx="2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <circle cx="5.5" cy="5.5" r="1.1" />
+              <circle cx="10.5" cy="5.5" r="1.1" />
+              <circle cx="8" cy="8" r="1.1" />
+              <circle cx="5.5" cy="10.5" r="1.1" />
+              <circle cx="10.5" cy="10.5" r="1.1" />
+            </svg>
+          </button>
+        </span>
       </label>
       <fieldset className="field sizes">
         <legend>Size</legend>
