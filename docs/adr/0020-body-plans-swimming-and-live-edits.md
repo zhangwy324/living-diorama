@@ -82,6 +82,8 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 
 ### Live world edits (M17; fixed now, built later)
 
+_Superseded by [ADR 0021](0021-live-prop-editing.md) (owner, 2026-10-29). M17 was rescoped when it started: props only, edited live, with a full rebuild after each edit and the edited world embedded in the save instead of an edit list. §16–§21 below are kept as they were agreed and no longer describe the plan._
+
 16. **What an edit can do.** M17's edits add, remove and move prop and structure placements. No terrain edits yet. They are made through a development hook in the app and through `pnpm sim`; a player-facing tool comes with structure drawing.
 
 17. **One edit path, in the simulation.** Every world edit goes through a single validated edit command in the worker, applied between ticks like every other command (ADR 0006 §11). Nothing else changes world content at run time. The Studio, the dev hook, the headless runner and later structure drawing and the agent bridge all reach the world through it.
@@ -128,7 +130,7 @@ M16 is done when:
 - a manual checklist entry is added and run by the owner;
 - this ADR records the decisions and every departure from them.
 
-M17's exit is set when it starts.
+M17's exit is set when it starts. _It is in [ADR 0021](0021-live-prop-editing.md)._
 
 ## As built
 
@@ -269,4 +271,4 @@ PRs 5 and 6 landed as one PR, so a released creature never had a body plan the w
 - A world with water needs a bank low and near enough, or an authored exit, for amphibious creatures to get out, and a water spawn point for water-only ones. The per-profile checks report where they are missing: a hint for a water region without a way out, and `no_spawn_point` for a water-only species with nowhere to appear.
 - M16's animation is deliberately thin and will be thrown away when per-part animation arrives; keeping it behind one interface makes that cheap.
 - Body plans add a field to every library entry, and entries saved before M16 may stop loading. That is accepted until backward compatibility is required.
-- M17 starts with its contracts fixed: one edit path, edits in the save, relocation over rejection, whole-region rebuilds, dry runs and inverse edits.
+- M17 starts with its contracts fixed: one edit path, edits in the save, relocation over rejection, whole-region rebuilds, dry runs and inverse edits. _Superseded by ADR 0021, which keeps one edit path, relocation over rejection, dry runs and inverse edits, and replaces edits in the save and whole-region rebuilds._
