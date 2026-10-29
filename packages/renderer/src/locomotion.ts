@@ -6,8 +6,9 @@ import { SNAP_DISTANCE } from "./interpolation";
 // Whole-body animation per locomotion profile (ADR 0020 §8): a walk's bob and waddle, a hop's
 // squash and arc, a swim's sway and bob. Only whole-body transforms, no bones or bending. This
 // module is the one place that turns a profile into motion, so per-part animation can replace it
-// by swapping `trackMovement`, `locomotionMotion` and `locomotionTransform`. Profiles are plain names from the snapshot;
-// the renderer never sees the capabilities behind them.
+// by swapping `trackMovement`, `locomotionMotion`, `leapMotion` and `locomotionTransform`.
+// Profiles are plain names from the snapshot; the renderer never sees the capabilities behind
+// them.
 
 /** How a creature has been moving, carried from frame to frame. */
 export interface Movement {
@@ -29,9 +30,15 @@ const SPEED_SMOOTHING = 0.2;
  * A teleport or a break (a gap longer than `SNAP_SECONDS`) starts afresh at rest. While no
  * animation time passes (the simulation is paused) the speed and distance hold, so the pose holds,
  * and the last of the blend towards the newest snapshot is taken as it is rather than counted as a
- * dash on resuming. Mutates and returns it.
+ * dash on resuming. In the air on a bank jump (`airborne`) they hold too: the leap is the motion,
+ * and the gait goes on where it left off once the creature lands. Mutates and returns it.
  */
-export function trackMovement(movement: Movement, world: Vec3, dt: number): Movement {
+export function trackMovement(
+  movement: Movement,
+  world: Vec3,
+  dt: number,
+  airborne = false,
+): Movement {
   if (!(dt >= 0)) dt = 0;
   const last = movement.last;
   const distance = last ? Math.hypot(world.x - last.x, world.y - last.y, world.z - last.z) : 0;
@@ -43,7 +50,7 @@ export function trackMovement(movement: Movement, world: Vec3, dt: number): Move
   last.x = world.x;
   last.y = world.y;
   last.z = world.z;
-  if (dt === 0) return movement;
+  if (dt === 0 || airborne) return movement;
   movement.speed += (distance / dt - movement.speed) * (1 - Math.exp(-dt / SPEED_SMOOTHING));
   movement.travelled += movement.speed * dt;
   return movement;
@@ -210,6 +217,29 @@ export function locomotionMotion(input: LocomotionInput, out: LocomotionMotion):
   out.pivot = "centerOfGravity";
   // Each profile scales its moving parts by the weight, so at rest they vanish.
   profile?.(input, weight, out);
+  return out;
+}
+
+// The leap across a bank (ADR 0020 §4, issue #132): the arc itself is in the drawn position, so
+// the body only stretches as it leaves and as it comes down, nose up then nose down, like a hop's
+// time in the air but in full whatever the speed. About the center of gravity.
+const LEAP_STRETCH = 0.1;
+const LEAP_PITCH = 0.2;
+
+/**
+ * The body's motion `progress` (0–1) of the way through a bank jump, written into `out`, which it
+ * returns. It takes the place of the profile's motion while in the air (`CreaturePose.jump`).
+ */
+export function leapMotion(progress: number, out: LocomotionMotion): LocomotionMotion {
+  const a = Math.min(1, Math.max(0, progress));
+  const stretch = LEAP_STRETCH * Math.sin(TAU * a) ** 2;
+  out.lift = 0;
+  out.pitch = -LEAP_PITCH * Math.sin(TAU * a);
+  out.roll = 0;
+  out.yaw = 0;
+  out.scaleY = 1 + stretch;
+  out.scaleXZ = 1 - stretch * 0.5;
+  out.pivot = "centerOfGravity";
   return out;
 }
 

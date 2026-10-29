@@ -28,6 +28,7 @@ import { visibleState, type CueVisibility, type VisibilityState } from "./cue-vi
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import {
+  leapMotion,
   locomotionMotion,
   locomotionTransform,
   placePivots,
@@ -218,7 +219,13 @@ export class CreatureBodies {
       const { mesh, weights, phase } = creature;
       stepCueWeights(weights, pose.cues, dt);
       if (pose.cues.includes("eating")) creature.progress = pose.cueProgress;
-      const { speed, travelled } = trackMovement(creature.movement, pose.world, animationDt);
+      const airborne = pose.jump !== undefined;
+      const { speed, travelled } = trackMovement(
+        creature.movement,
+        pose.world,
+        animationDt,
+        airborne,
+      );
       const motion = bodyMotion(weights, time, phase, this.#motion);
       const height = look.height;
       const input = this.#input;
@@ -228,7 +235,10 @@ export class CreatureBodies {
       input.time = time;
       input.phase = phase;
       input.height = height;
-      const locomotion = locomotionMotion(input, this.#locomotion);
+      // In the air on a bank jump the leap takes the profile's place; the arc is in the pose.
+      const locomotion = airborne
+        ? leapMotion(pose.jump ?? 0, this.#locomotion)
+        : locomotionMotion(input, this.#locomotion);
       this.#place(mesh, pose, look, motion, locomotion);
       mesh.geometry = look.body.geometry;
       mesh.material = look.body.material;

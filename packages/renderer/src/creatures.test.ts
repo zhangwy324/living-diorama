@@ -17,8 +17,9 @@ import { SceneLayer } from "./layers";
 const placed = (mesh: THREE.Object3D) => {
   const position = new THREE.Vector3();
   const scale = new THREE.Vector3();
-  mesh.matrix.decompose(position, new THREE.Quaternion(), scale);
-  return { position, scale };
+  const quaternion = new THREE.Quaternion();
+  mesh.matrix.decompose(position, quaternion, scale);
+  return { position, quaternion, scale };
 };
 
 const creature = (id: string, world: Vec3, heading = 0): CreatureSnapshot => ({
@@ -345,6 +346,30 @@ describe("CreatureBodies", () => {
           expect(lowest.filter((y) => y < 1e-3).length).toBeGreaterThan(10);
         }
       }
+    });
+
+    it("draws the leap in the air on a bank jump, and walks on at pace after landing", async () => {
+      const { layer, bodies } = make();
+      await loaded(bodies);
+      moving(30, { animation: "walk" }, bodies);
+      // Halfway through the leap the body is plain: no waddle or bob, the arc is in the pose.
+      const apex = { x: 0.6 * (31 / 60) + 1.5, y: 0.9, z: 0 };
+      bodies.update([{ ...creature("a", apex, Math.PI / 2), animation: "walk", jump: 0.5 }], {
+        time: 31 / 60,
+        realTime: 31 / 60,
+      });
+      const { position, quaternion, scale } = placed(bodyOf(layer, "a"));
+      expect(position.y).toBeCloseTo(0.9);
+      expect(quaternion.angleTo(new THREE.Quaternion())).toBeLessThan(1e-6);
+      expect(scale.y).toBeCloseTo(1);
+      // Landed a frame later: still walking at pace, so the gait shows at once.
+      const landed = { x: apex.x + 0.01, y: apex.y, z: 0 };
+      bodies.update([{ ...creature("a", landed, Math.PI / 2), animation: "walk" }], {
+        time: 32 / 60,
+        realTime: 32 / 60,
+      });
+      const after = placed(bodyOf(layer, "a"));
+      expect(after.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(0.01);
     });
 
     it("lowers the body by its submersion, a share of its height", async () => {

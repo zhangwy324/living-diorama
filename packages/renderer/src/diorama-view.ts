@@ -217,7 +217,8 @@ export function createDioramaView(
     scene,
     options,
   );
-  const snapshots = new SnapshotInterpolator();
+  // Species sizes cap how high bank jumps arc.
+  const snapshots = new SnapshotInterpolator(undefined, options.resolveSpecies);
   const stats = new DebugStats(container.ownerDocument);
   container.appendChild(stats.element);
 
