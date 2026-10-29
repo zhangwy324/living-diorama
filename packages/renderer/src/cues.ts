@@ -286,10 +286,13 @@ export function zPixels(size: number): Uint8Array {
 /** The progress ring is drawn in this many steps, each a texture of its own. */
 export const RING_STEPS = 32;
 
-/** The ring texture step, 0–`RING_STEPS`, nearest to a progress of 0–1. */
+/**
+ * The ring texture step, 0–`RING_STEPS`, for a progress of 0–1, rounded down: the ring is full only
+ * at progress 1, which a meal never reports, as it ends then.
+ */
 export function ringStep(progress: number): number {
   const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
-  return Math.round(p * RING_STEPS);
+  return Math.floor(p * RING_STEPS);
 }
 
 /**

@@ -173,10 +173,13 @@ describe("cue textures", () => {
     expect(blue(ringPixels(64, 1), ...track)).toBeLessThan(120);
   });
 
-  it("steps progress to the nearest ring texture, within its range", () => {
+  it("steps progress down to a ring texture, within its range, full only at 1", () => {
     expect(ringStep(0)).toBe(0);
     expect(ringStep(0.5)).toBe(RING_STEPS / 2);
     expect(ringStep(1)).toBe(RING_STEPS);
+    // The last tick of a 100-tick meal still shows a gap.
+    expect(ringStep(0.99)).toBe(RING_STEPS - 1);
+    expect(ringStep(0.5 / RING_STEPS)).toBe(0);
     expect(ringStep(-1)).toBe(0);
     expect(ringStep(2)).toBe(RING_STEPS);
     expect(ringStep(Number.NaN)).toBe(0);

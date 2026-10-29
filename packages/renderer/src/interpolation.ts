@@ -91,10 +91,13 @@ export class SnapshotInterpolator {
         heading: lerpHeading(from.heading, heading, t),
         // The cues of the snapshot the pose blends from, until it arrives, so cues don't lead the body.
         cues: t < 1 ? from.cues : cues,
-        // Blended when both snapshots have it, so a progress ring fills smoothly between ticks.
+        // Blended when both snapshots have it, so a progress ring fills smoothly between ticks; a
+        // lower one is a new meal, taken as it is so the ring never sweeps backwards.
         cueProgress:
           from.cueProgress !== undefined && cueProgress !== undefined
-            ? from.cueProgress + (cueProgress - from.cueProgress) * t
+            ? cueProgress < from.cueProgress
+              ? cueProgress
+              : from.cueProgress + (cueProgress - from.cueProgress) * t
             : t < 1
               ? from.cueProgress
               : cueProgress,
