@@ -33,8 +33,9 @@ export interface DesktopShell {
   /** Calls `listener` whenever the window enters or leaves full screen. Returns a function that stops listening. */
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void;
   /**
-   * Calls `listener` when the user quits. The shell exits once the promise it returns settles, or
-   * after three seconds (ADR 0008 §14, ADR 0019 §4). Returns a function that stops listening.
+   * Calls `listener` when the user quits, and when Windows shuts down, restarts or signs out. The
+   * shell exits once the promise it returns settles, or after three seconds (ADR 0008 §14, ADR 0019
+   * §4). Returns a function that stops listening.
    */
   onQuitRequested(listener: () => Promise<void> | void): () => void;
   /** Writes the simulation event counts where the measuring script reads them (ADR 0009 §5). */
