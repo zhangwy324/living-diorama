@@ -77,6 +77,8 @@ export interface CatchUpFailure {
    * that isn't a finite number; that need was left alone. `no_spot`: the creature has no spot it
    * can reach at the placement the hook named. Otherwise why the action it asked for failed to
    * start (`start_failed` if it threw); the creature was placed awake then.
+   * `interrupted_failed`: the `interrupted` hook of the action it was running threw as catch-up
+   * dropped that action; the action was dropped all the same.
    */
   reason: string;
   /** The need, for `undeclared_need` and `invalid_need`. */

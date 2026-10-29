@@ -548,15 +548,24 @@ export class Simulation {
     // included, uses the tick after the jump.
     this.state.tick += Math.round((gapMs / 1000) * this.tickRateHz);
     const failures: CatchUpFailure[] = [];
-    // Every running action is cut short first (`catch_up`, issue #164), so each `interrupted`
-    // hook sees the world as it stopped, before any creature is placed. A hook draws from a stream
-    // of its own, so the forks below don't depend on it, and its events are discarded below.
-    // Everything about the moment of the save goes with the action. All awake too, so a creature
-    // put to bed sees asleep only those put to bed before it.
+    // Every running action is cut short (`catch_up`, issue #164) before any creature is placed,
+    // in creature order, so a hook sees the creatures before it already cut short and awake. A
+    // hook draws from a stream of its own, so the forks below don't depend on it; its events are
+    // discarded below, and one that throws is reported. Everything about the moment of the save
+    // goes with the action. All awake too, so a creature put to bed sees asleep only those put
+    // to bed before it.
     for (const creature of this.state.creatures.values()) {
-      if (creature.action) {
-        const profile = this.#profile(creature.speciesId);
-        this.#interrupted(creature, profile, creature.action, "catch_up");
+      const { action } = creature;
+      if (action) {
+        try {
+          this.#interrupted(creature, this.#profile(creature.speciesId), action, "catch_up");
+        } catch {
+          failures.push({
+            creatureId: creature.id,
+            behavior: action.behavior,
+            reason: "interrupted_failed",
+          });
+        }
       }
       delete creature.action;
       delete creature.lastResult;

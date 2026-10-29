@@ -194,7 +194,8 @@ export interface ActionProvider extends ActionType {
    * outranked it (`outranked`), the watchdog stopped it (`stuck`), or catch-up after a gap
    * dropped it (`catch_up`, ADR 0019). For what an action must do when cut short, e.g. a sleeper
    * emitting `woke_up`, or an action releasing what it holds. On `catch_up` the tick is already
-   * the present one, and events emitted are discarded, as catch-up announces nothing. Not called
+   * the present one, events emitted are discarded, as catch-up announces nothing, and a throw is
+   * reported as an `interrupted_failed` catch-up failure. Not called
    * on despawn, nor for a saved action that restore drops because its state fails the check.
    */
   interrupted?(state: unknown, context: ActionContext, reason: string): void;
