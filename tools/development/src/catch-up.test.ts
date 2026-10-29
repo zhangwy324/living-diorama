@@ -222,11 +222,17 @@ describe("catch-up after a long gap", () => {
         state: { placementId: creature.home, arrived: true, asleep: true, nap: false },
       });
       expect(creature.position).toEqual(simulation.spotFor(creature.id, creature.home!));
+      // Lying at a resting heading of its own already, with no turn to make.
+      expect(creature.heading).toBe((creature.action?.state as { heading: number }).heading);
       // Up from 10:10 to 20:00, asleep since: tired, but less than at bedtime.
       expect(creature.needs[TIREDNESS]).toBeGreaterThan(0.2);
       expect(creature.needs[HUNGER]).toBeLessThan(hungerNeed.actAt);
     }
+    // Each draws its own heading, so they don't all lie the same way.
+    expect(new Set(restoredCreatures.map((c) => c.heading)).size).toBe(restoredCreatures.length);
+    const headings = restoredCreatures.map((c) => c.heading);
     const events = run(simulation, 20, at(22, 10));
+    expect(simulation.save(SAVED_AT).creatures.map((c) => c.heading)).toEqual(headings);
     expect(events.filter((e) => e.type === "day_phase_changed")).toEqual([]);
     expect(events.filter((e) => PER_CREATURE.includes(e.type))).toEqual([]);
     const snapshot = simulation.snapshot();
@@ -341,6 +347,7 @@ describe("catch-up after a long gap", () => {
       id: "core:sleep",
       state: { placementId: null, asleep: true },
     });
+    expect(after.heading).toBe((after.action?.state as { heading: number }).heading);
     expect(after.position).toEqual(creature.position);
     expect(after.home).toBeNull();
   });
@@ -619,18 +626,24 @@ describe("saved running actions", () => {
     ["core:eat", "core:feed", eat],
     ["core:eat", "core:feed", { ...eat, placementId: 7 }],
     ["core:eat", "core:feed", { ...eat, ticksLeft: 0 }],
-    ["core:sleep", "core:rest", { placementId: null, x: 0, z: 0, path, arrived: 1 }],
+    ["core:sleep", "core:rest", { placementId: null, heading: 0, path, arrived: 1 }],
     [
       "core:sleep",
       "core:rest",
-      { placementId: null, x: 0, z: 0, path, arrived: true, asleep: true },
+      { placementId: null, heading: 0, path, arrived: true, asleep: true },
     ],
     [
       "core:sleep",
       "core:rest",
-      { placementId: null, x: "0", z: 0, path, arrived: true, asleep: true, nap: false },
+      { placementId: null, heading: "0", path, arrived: true, asleep: true, nap: false },
     ],
     ["core:sleep", "core:rest", "asleep"],
+    // The shape before resting headings: where the shelter stands instead of a heading.
+    [
+      "core:sleep",
+      "core:rest",
+      { placementId: null, x: 0, z: 0, path, arrived: true, asleep: true, nap: false },
+    ],
     ["core:follow_path", "core:wander", { points: [{ regionId: "r", x: 1 }], next: 0 }],
     ["core:follow_path", "core:wander", { ...path, next: 2 }],
     ["core:idle", "core:wander", { remainingTicks: 0 }],
@@ -648,7 +661,7 @@ describe("saved running actions", () => {
     [
       "core:sleep",
       "core:rest",
-      { placementId: null, x: 0, z: 0, path, arrived: true, asleep: true, nap: false },
+      { placementId: null, heading: 0, path, arrived: true, asleep: true, nap: false },
     ],
   ])("keeps %s with a sound state", (id, behavior, state) => {
     const { after, report } = withAction({ id, behavior, state, startTick: 0 });

@@ -216,6 +216,8 @@ describe("core:rest", () => {
 // ---- core:sleep ------------------------------------------------------------------------------
 
 function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal = 0 } = {}) {
+  const turned: number[] = [];
+  const turning: ("turning" | "facing")[] = [];
   const emitted: unknown[] = [];
   const homes: string[] = [];
   let walked = 0;
@@ -254,12 +256,19 @@ function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal 
       return "arrived" as const;
     },
     adjustNeed: () => {},
-    face: () => {},
+    heading: 0,
+    rng: Rng.fromSeed(1),
+    // Turns complete at once unless a test queues ticks of turning.
+    turnTo: (heading: number) => {
+      turned.push(heading);
+      return turning.shift() ?? ("facing" as const);
+    },
+    face: () => "facing" as const,
     emit: (event: unknown) => emitted.push(event),
     home: null as string | null,
     setHome: (id: string) => homes.push(id),
   } satisfies ActionContext;
-  return { context, emitted, homes, walked: () => walked };
+  return { context, emitted, homes, walked: () => walked, turned, turning };
 }
 
 describe("core:sleep", () => {
@@ -289,6 +298,41 @@ describe("core:sleep", () => {
     expect(walked()).toBe(1);
     expect(emitted).toEqual([{ type: "fell_asleep", placementId: "tree", tiredness: 0.6 }]);
     expect(homes).toEqual(["tree"]);
+  });
+
+  it("turns in place to a resting heading of its own before lying down", () => {
+    const { context, emitted, turned, turning } = sleepContext({ tiredness: 0.6 });
+    const start = sleepAction.start({ placementId: "tree" }, context);
+    if (!start.ok) throw new Error("start failed");
+    const { heading } = start.state as { heading: number };
+    expect(heading).toBeGreaterThanOrEqual(-Math.PI);
+    expect(heading).toBeLessThan(Math.PI);
+    turning.push("turning", "turning");
+    // Walks there, then turns for two ticks, not yet asleep and with no cue.
+    for (let t = 0; t < 3; t++) {
+      expect(sleepAction.step(start.state, context)).toEqual({ status: "running" });
+    }
+    expect(emitted).toEqual([]);
+    expect(sleepAction.step(start.state, context)).toMatchObject({ asleep: true });
+    expect(emitted).toEqual([expect.objectContaining({ type: "fell_asleep" })]);
+    // Always towards its drawn heading, not the shelter (which stands at +X, heading π/2).
+    expect(turned).toEqual([heading, heading, heading]);
+  });
+
+  it("draws each night's resting heading from the creature's stream, the same for its seed", () => {
+    const headings = (seed: number) => {
+      const { context } = sleepContext();
+      context.rng = Rng.fromSeed(seed);
+      return [0, 1, 2].map(() => {
+        const start = sleepAction.start({ placementId: "tree" }, context);
+        if (!start.ok) throw new Error("start failed");
+        return (start.state as { heading: number }).heading;
+      });
+    };
+    const nights = headings(5);
+    expect(new Set(nights).size).toBe(3);
+    expect(headings(5)).toEqual(nights);
+    expect(headings(6)).not.toEqual(nights);
   });
 
   it("doesn't change an existing home", () => {
@@ -440,6 +484,65 @@ describe("sleeping in Woodland Hollow", () => {
     expect(simulation.snapshot().creatures[0]!.cues).toContain("sleeping");
     const { x, z } = simulation.state.model.propsById.get(home!)!.transform.position;
     expect(Math.hypot(creature.position.x - x, creature.position.z - z)).toBeLessThan(2);
+  });
+
+  it("settles around a shelter facing ways of their own, turning smoothly", () => {
+    const { simulation, run, spawn } = setup(4, 21 * 60);
+    const creatures = [spawn(), spawn(), spawn(), spawn()];
+    // They all know the shelter nearest the first.
+    const { x: x0, z: z0 } = creatures[0]!.position;
+    const shelter = [...simulation.state.model.propsByAffordance.get(SHELTER)!].sort(
+      (a, b) =>
+        Math.hypot(a.transform.position.x - x0, a.transform.position.z - z0) -
+        Math.hypot(b.transform.position.x - x0, b.transform.position.z - z0),
+    )[0]!;
+    for (const creature of creatures) {
+      creature.needs[HUNGER] = 0;
+      rememberPlace(creature.knowledge, SHELTER, shelter.id, 0, 4);
+    }
+    const step = Math.PI * simulation.tickSeconds;
+    const last = new Map(creatures.map((c) => [c.id, c.heading]));
+    let biggest = 0;
+    const turnTicks = new Map<string, number>();
+    run(HOUR, () => {
+      for (const c of creatures) {
+        const state = c.action?.state as { arrived?: boolean; asleep?: boolean } | undefined;
+        // Once there and not yet asleep, it only turns: by at most half a turn a second.
+        if (state?.arrived && !state.asleep) {
+          const turn = Math.abs(
+            Math.atan2(
+              Math.sin(c.heading - last.get(c.id)!),
+              Math.cos(c.heading - last.get(c.id)!),
+            ),
+          );
+          biggest = Math.max(biggest, turn);
+          turnTicks.set(c.id, (turnTicks.get(c.id) ?? 0) + 1);
+        }
+        last.set(c.id, c.heading);
+      }
+      return creatures.every((c) => c.asleep);
+    });
+    expect(creatures.every((c) => c.asleep)).toBe(true);
+    expect(biggest).toBeGreaterThan(0);
+    expect(biggest).toBeLessThanOrEqual(step + 1e-9);
+    // Half a turn at most: within a second (10 ticks) and the tick it lies down on.
+    for (const ticks of turnTicks.values()) expect(ticks).toBeLessThanOrEqual(11);
+    for (const c of creatures) {
+      expect(c.heading).toBe((c.action!.state as { heading: number }).heading);
+    }
+    // Not all facing their shelters: each lies at a heading drawn from its own stream.
+    expect(new Set(creatures.map((c) => c.heading)).size).toBe(creatures.length);
+    const atShelter = creatures.flatMap((c) => {
+      const { placementId } = c.action!.state as { placementId: string | null };
+      return placementId === null ? [] : [{ c, placementId }];
+    });
+    expect(atShelter.length).toBe(creatures.length);
+    const offShelter = atShelter.filter(({ c, placementId }) => {
+      const { x, z } = simulation.state.model.propsById.get(placementId)!.transform.position;
+      const towards = Math.atan2(x - c.position.x, z - c.position.z);
+      return Math.abs(Math.sin((c.heading - towards) / 2)) > 0.1;
+    });
+    expect(offShelter.length).toBeGreaterThan(0);
   });
 
   it("knowing no shelter, sleeps where it stands", () => {

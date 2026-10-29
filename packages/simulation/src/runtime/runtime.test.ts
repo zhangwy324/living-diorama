@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FixedClock, isValidSpeed, MAX_SPEED, normalizeHeading, Rng } from "../index";
+import { FixedClock, isValidSpeed, MAX_SPEED, normalizeHeading, Rng, turnHeading } from "../index";
 
 describe("FixedClock", () => {
   it("releases whole ticks and carries the remainder", () => {
@@ -139,4 +139,16 @@ it("normalizes headings into [-π, π)", () => {
   expect(normalizeHeading(Math.PI)).toBeCloseTo(-Math.PI);
   expect(normalizeHeading(3 * Math.PI + 0.5)).toBeCloseTo(-Math.PI + 0.5);
   expect(normalizeHeading(-0.25)).toBeCloseTo(-0.25);
+});
+
+it("turns a heading the short way round, by at most the step, landing exactly on the target", () => {
+  // From 3 to −3 is 0.28 rad the positive way, across ±π.
+  const across = turnHeading(3, -3, 0.1);
+  expect(across).toBeCloseTo(3.1, 12);
+  expect(turnHeading(across, -3, 0.1)).toBeCloseTo(3.2 - 2 * Math.PI, 12);
+  expect(turnHeading(0.5, 0, 0.1)).toBeCloseTo(0.4, 12);
+  expect(turnHeading(0.05, 0, 0.1)).toBe(0);
+  // A target outside [-π, π) is normalised, so "facing" can be told by equality.
+  expect(turnHeading(-3, 2 * Math.PI + 1, 10)).toBe(normalizeHeading(1));
+  expect(turnHeading(1, 2, Infinity)).toBe(2);
 });

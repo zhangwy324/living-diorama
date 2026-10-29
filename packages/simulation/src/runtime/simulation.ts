@@ -52,6 +52,7 @@ import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport 
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
   normalizeHeading,
+  turnHeading,
   WorldState,
   type CreatureState,
   type WorldStateOptions,
@@ -72,6 +73,11 @@ export const INTERRUPT_MARGIN = 0.15;
 const UTILITY_EPSILON = 1e-9;
 /** Each creature reacts to a day-phase change after a random delay up to this long. */
 export const PHASE_REACTION_SECONDS = 30;
+/**
+ * How fast an action turns a creature in place (`ActionContext.turnTo`, `face`), in radians per
+ * second: half a turn takes a second.
+ */
+export const TURN_RATE = Math.PI;
 const SECONDS_PER_HOUR = 3600;
 
 /**
@@ -753,7 +759,7 @@ export class Simulation {
       const provider = this.#actions.get(running.id);
       const activity = { walked: false };
       const status: ActionStatus = provider
-        ? provider.step(running.state, this.#actionContext(creature, profile, activity))
+        ? provider.step(running.state, this.#actionContext(creature, profile, running.id, activity))
         : { status: "failed", reason: "unknown_action" };
       creature.asleep = status.asleep === true;
       if (status.status === "running") {
@@ -893,7 +899,7 @@ export class Simulation {
   ) {
     this.#actions
       .get(action.id)
-      ?.interrupted?.(action.state, this.#actionContext(creature, profile), reason);
+      ?.interrupted?.(action.state, this.#actionContext(creature, profile, action.id), reason);
     creature.asleep = false;
   }
 
@@ -1004,7 +1010,7 @@ export class Simulation {
         ? { ok: false, reason: "undeclared_action" }
         : provider.start(
             proposal.params,
-            this.#actionContext(creature, profile, undefined, catchingUp),
+            this.#actionContext(creature, profile, proposal.action, undefined, catchingUp),
           );
     if (start.ok) {
       creature.action = {
@@ -1122,9 +1128,12 @@ export class Simulation {
   #actionContext(
     creature: CreatureState,
     profile: SpeciesProfile,
+    actionId: string,
     activity?: { walked: boolean },
     catchingUp = false,
   ): ActionContext {
+    const { tick } = this;
+    let rng: Rng | undefined;
     return {
       ...this.#placeQueries(creature),
       catchingUp,
@@ -1160,10 +1169,21 @@ export class Simulation {
         if (!Object.hasOwn(creature.needs, id) || !Number.isFinite(delta)) return;
         creature.needs[id] = clamp01((creature.needs[id] ?? 0) + delta);
       },
+      get heading() {
+        return creature.heading;
+      },
+      // Forked when first drawn from, so an action never moves the creature's own stream on.
+      get rng() {
+        rng ??= new Rng(creature.rng).fork(`action@${tick}:${actionId}`);
+        return rng;
+      },
+      turnTo: (heading) => this.#turn(creature, heading, catchingUp),
       face: (x, z) => {
         const dx = x - creature.position.x;
         const dz = z - creature.position.z;
-        if (Math.hypot(dx, dz) > 1e-9) creature.heading = normalizeHeading(Math.atan2(dx, dz));
+        return Math.hypot(dx, dz) > 1e-9
+          ? this.#turn(creature, Math.atan2(dx, dz), catchingUp)
+          : "facing";
       },
       emit: (event) => this.#emit({ ...event, tick: this.tick, creatureId: creature.id }),
       get home() {
@@ -1287,6 +1307,17 @@ export class Simulation {
       this.#speeds.set(key, speed);
     }
     return speed;
+  }
+
+  /**
+   * Turns the creature towards `heading` by at most `TURN_RATE` × tick, the short way round, or
+   * all the way while catching up.
+   */
+  #turn(creature: CreatureState, heading: number, catchingUp: boolean): "turning" | "facing" {
+    if (!Number.isFinite(heading)) return "facing";
+    const step = catchingUp ? Infinity : TURN_RATE * this.tickSeconds;
+    creature.heading = turnHeading(creature.heading, heading, step);
+    return creature.heading === normalizeHeading(heading) ? "facing" : "turning";
   }
 
   /**

@@ -183,9 +183,11 @@ export const restBehavior: BehaviorProvider = {
 interface SleepState {
   /** The shelter it sleeps beside, or null to sleep where it stands. */
   placementId: string | null;
-  /** Where the shelter stands, to face it. */
-  x: number;
-  z: number;
+  /**
+   * The heading it lies down at, drawn from its own stream at the start: it settles beside the
+   * shelter facing any way, as animals lie around a tree, not facing the shelter.
+   */
+  heading: number;
   path: PathState;
   /** Set once the creature stands at its spot; it then stops walking. */
   arrived: boolean;
@@ -200,9 +202,10 @@ interface SleepState {
 
 /**
  * Walks to the creature's spot at `params.placementId`, a place offering `core:shelter`, or,
- * without one, stays where it is; then sleeps there. Checked every tick: a night's sleep ends
+ * without one, stays where it is; turns in place to a resting heading drawn from its own stream
+ * (any way, not towards the shelter); then sleeps there. Checked every tick: a night's sleep ends
  * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
- * reaches 0. Emits `fell_asleep` on arriving and `woke_up` on waking, also when interrupted. The
+ * reaches 0. Emits `fell_asleep` on lying down and `woke_up` on waking, also when interrupted. The
  * first shelter a creature sleeps at becomes its home. With `params.asleep` true it starts already
  * there and asleep, for catch-up (`startAsleep`).
  */
@@ -218,11 +221,9 @@ export const sleepAction: ActionProvider = {
     const { placementId } = params;
     if (params.asleep === true) return startAsleep(placementId, waking, context);
     if (placementId === undefined) {
-      const { x, z } = context.position;
       const state: SleepState = {
         placementId: null,
-        x,
-        z,
+        heading: restingHeading(context),
         path: { points: [], next: 0 },
         arrived: true,
         asleep: false,
@@ -244,8 +245,7 @@ export const sleepAction: ActionProvider = {
     const path = pathFromRoute(route.route);
     const state: SleepState = {
       placementId,
-      x: place.x,
-      z: place.z,
+      heading: restingHeading(context),
       path,
       arrived: path.points.length === 0,
       asleep: false,
@@ -269,8 +269,9 @@ export const sleepAction: ActionProvider = {
       return { status: "done" };
     }
     if (!sleep.asleep) {
+      // Turns in place to its resting heading before lying down.
+      if (context.turnTo(sleep.heading) === "turning") return { status: "running" };
       sleep.asleep = true;
-      if (sleep.placementId !== null) context.face(sleep.x, sleep.z);
       context.emit({ type: "fell_asleep", placementId: sleep.placementId, tiredness });
       if (sleep.placementId !== null && context.home === null) context.setHome(sleep.placementId);
     }
@@ -288,11 +289,10 @@ export const sleepAction: ActionProvider = {
   },
   checkState(state, exists) {
     if (!isRecord(state)) return false;
-    const { placementId, x, z, path, arrived, asleep, nap } = state;
+    const { placementId, heading, path, arrived, asleep, nap } = state;
     return (
       (placementId === null || (typeof placementId === "string" && exists(placementId))) &&
-      Number.isFinite(x) &&
-      Number.isFinite(z) &&
+      Number.isFinite(heading) &&
       isPathState(path) &&
       typeof arrived === "boolean" &&
       typeof asleep === "boolean" &&
@@ -305,12 +305,11 @@ export const sleepAction: ActionProvider = {
  * Sleep already under way, for catch-up only (ADR 0018 §19; `not_catching_up` otherwise). At a
  * shelter `placementId`, the creature must already stand at its spot there, where the engine
  * placed it (`not_at_spot` otherwise); without one it sleeps where it stands. It is asleep from
- * the start, so it emits no `fell_asleep`; a shelter becomes its home if it has none, as on
+ * the start, at a resting heading of its own with no turn, so it emits no `fell_asleep`; a shelter becomes its home if it has none, as on
  * falling asleep there.
  */
 function startAsleep(placementId: unknown, waking: boolean, context: ActionContext): ActionStart {
   if (!context.catchingUp) return { ok: false, reason: "not_catching_up" };
-  let { x, z } = context.position;
   if (placementId !== undefined) {
     const place = typeof placementId === "string" ? context.place(placementId) : undefined;
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
@@ -324,20 +323,24 @@ function startAsleep(placementId: unknown, waking: boolean, context: ActionConte
       spot.regionId === here.regionId &&
       Math.hypot(spot.x - here.x, spot.z - here.z) <= AT_SPOT_METRES;
     if (!there) return { ok: false, reason: "not_at_spot", detail: { placementId } };
-    ({ x, z } = place);
-    context.face(place.x, place.z);
     if (context.home === null) context.setHome(place.id);
   }
   const state: SleepState = {
     placementId: typeof placementId === "string" ? placementId : null,
-    x,
-    z,
+    heading: restingHeading(context),
     path: { points: [], next: 0 },
     arrived: true,
     asleep: true,
     nap: waking,
   };
+  // Catching up, the turn is done at once.
+  context.turnTo(state.heading);
   return { ok: true, state, detail: { placementId: state.placementId, asleep: true } };
+}
+
+/** A uniformly random heading to lie down at, from the creature's own stream. */
+function restingHeading(context: ActionContext): number {
+  return context.rng.range(-Math.PI, Math.PI);
 }
 
 /**

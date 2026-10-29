@@ -9,6 +9,7 @@ import {
   feedBehavior,
   findSpot,
   MEAL,
+  normalizeHeading,
   perceive,
   RegionMask,
   perceptionOffset,
@@ -16,6 +17,7 @@ import {
   Rng,
   SPOT_GAP,
   SPOT_SEARCH_RADIUS,
+  TURN_RATE,
   type ActionContext,
   type BehaviorProvider,
   type CreatureKnowledge,
@@ -321,7 +323,11 @@ describe("core:feed", () => {
 
 // ---- core:eat --------------------------------------------------------------------------------
 
-function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: number }[]) {
+function eatContext(
+  walks: ("moving" | "arrived")[],
+  legs: { x: number; z: number }[],
+  turns: ("turning" | "facing")[] = [],
+) {
   const adjusted: number[] = [];
   const emitted: unknown[] = [];
   let walked = 0;
@@ -354,7 +360,13 @@ function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: numbe
       adjusted.push(delta);
       needs[id as typeof HUNGER] = Math.max(0, needs[HUNGER] + delta);
     },
-    face: (x, z) => faced.push({ x, z }),
+    heading: 0,
+    rng: Rng.fromSeed(1),
+    turnTo: () => "facing",
+    face: (x, z) => {
+      faced.push({ x, z });
+      return turns.shift() ?? "facing";
+    },
     emit: (event) => emitted.push(event),
     home: null,
     setHome: () => {},
@@ -371,6 +383,17 @@ describe("core:eat", () => {
     });
     expect(eatAction.start({ placementId: "nowhere" }, context)).toMatchObject({ ok: false });
     expect(eatAction.start({}, context)).toMatchObject({ ok: false, reason: "invalid_params" });
+  });
+
+  it("doesn't eat or show its cue while it still turns to the food", () => {
+    const { context, adjusted } = eatContext([], [], ["turning", "turning"]);
+    const start = eatAction.start({ placementId: "m" }, context);
+    if (!start.ok) throw new Error("start failed");
+    expect(eatAction.step(start.state, context)).toEqual({ status: "running" });
+    expect(eatAction.step(start.state, context)).toEqual({ status: "running" });
+    expect(adjusted).toEqual([]);
+    expect(eatAction.step(start.state, context)).toMatchObject({ cue: "eating" });
+    expect(adjusted).toHaveLength(1);
   });
 
   it("walks to its spot, stops walking, faces the food and eats 0.8 of hunger over eatSeconds", () => {
@@ -629,6 +652,45 @@ describe("feeding in Woodland Hollow", () => {
         Math.hypot(b.transform.position.x - x, b.transform.position.z - z),
     );
   }
+
+  it("turns to face its food in a short, gradual turn, then eats facing it", () => {
+    const { simulation, run } = setup(3);
+    const spawned = simulation.spawn("hollow:mossling", "meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    const [food] = nearestFood(simulation, creature.position.x, creature.position.z);
+    rememberPlace(creature.knowledge, FOOD, food!.id, 0, 8);
+    creature.needs[HUNGER] = 0.6;
+    run(1);
+    for (let t = 0; t < 2_000 && !(creature.action?.state as { arrived: boolean }).arrived; t++) {
+      run(1);
+    }
+    const { x, z } = food!.transform.position;
+    const towards = Math.atan2(x - creature.position.x, z - creature.position.z);
+    // Arriving with its back to the food: the longest turn there is, bar a hair.
+    creature.heading = normalizeHeading(towards + Math.PI - 0.01);
+    const hunger = creature.needs[HUNGER];
+    const step = TURN_RATE * simulation.tickSeconds;
+    const turns: number[] = [];
+    for (let t = 0; t < 30 && simulation.snapshot().creatures[0]!.cues.length === 0; t++) {
+      const before = creature.heading;
+      run(1);
+      turns.push(Math.abs(normalizeHeading(creature.heading - before)));
+    }
+    // Half a turn at π rad/s takes a second: 10 ticks at 10 Hz, eating from the last.
+    expect(turns).toHaveLength(10);
+    for (const turn of turns) expect(turn).toBeLessThanOrEqual(step + 1e-9);
+    expect(turns.slice(0, 9).every((turn) => Math.abs(turn - step) < 1e-9)).toBe(true);
+    expect(creature.heading).toBe(normalizeHeading(towards));
+    // Nothing is eaten during the turn.
+    const { perTick } = creature.action!.state as { perTick: number };
+    expect(creature.needs[HUNGER]).toBeCloseTo(hunger! - perTick, 3);
+    // It keeps facing the food while it eats.
+    run(20);
+    expect(creature.action?.id).toBe("core:eat");
+    expect(simulation.snapshot().creatures[0]!.cues).toEqual(["eating"]);
+    expect(creature.heading).toBe(normalizeHeading(towards));
+  });
 
   it("counts an interrupted meal in part, without an `ate` event", () => {
     // A test behavior that outranks a meal in progress by far.
