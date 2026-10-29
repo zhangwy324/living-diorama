@@ -88,7 +88,7 @@ describe("saving", () => {
     expect(registered).toEqual([speciesId]);
     const [stored] = await store.list();
     expect(stored?.entry).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       species: {
         id: speciesId,
         appearance: appearanceId,
@@ -118,11 +118,13 @@ describe("saving", () => {
     const first = await open();
     value(await first.library.save(DRAWING, PNG, "Puddle", "small", { thickness: 0.15 }));
     const thickness = (world: { registerSpecies: { mock: { calls: unknown[][] } } }) =>
-      world.registerSpecies.mock.calls.map(([species]) => (species as SpeciesDefinition).body);
-    expect(thickness(first.world)).toEqual([{ thickness: 0.15 }]);
+      world.registerSpecies.mock.calls.map(
+        ([species]) => (species as SpeciesDefinition).body.thickness,
+      );
+    expect(thickness(first.world)).toEqual([0.15]);
 
     const relaunched = await open(first.store);
-    expect(thickness(relaunched.world)).toEqual([{ thickness: 0.15 }]);
+    expect(thickness(relaunched.world)).toEqual([0.15]);
 
     const tooThick = await first.library.save(DRAWING, PNG, "Slab", "small", { thickness: 2 });
     expect(tooThick.ok).toBe(false);
@@ -189,12 +191,12 @@ describe("startup", () => {
   it("skips entries that fail their schema or hold another ID, and leaves their files", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { schemaVersion: 3 }, DRAWING, PNG);
+    await store.save(UUIDS[0] ?? "", { schemaVersion: 4 }, DRAWING, PNG);
     const other = userSpeciesIds(UUIDS[0]);
     await store.save(
       UUIDS[1] ?? "",
       {
-        schemaVersion: 1,
+        schemaVersion: 3,
         createdAt: "2026-10-27T12:00:00Z",
         species: {
           schemaVersion: 1,

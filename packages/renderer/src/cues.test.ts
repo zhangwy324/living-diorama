@@ -1,3 +1,4 @@
+import { defaultBody } from "@living-diorama/content-schema";
 import type { Cue, CreatureSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -351,7 +352,11 @@ describe("cue sprites", () => {
   const make = () => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
-      resolveSpecies: () => ({ appearance: "x", sizeClass: "medium", body: { thickness: 0.25 } }),
+      resolveSpecies: () => ({
+        appearance: "x",
+        sizeClass: "medium",
+        body: { ...defaultBody(), thickness: 0.25 },
+      }),
       resolveAsset: () => undefined,
     });
     const sprites = () => {
@@ -488,7 +493,11 @@ describe("cue sprites", () => {
     const long = { width: 40, height: 20, data: new Uint8Array(40 * 20 * 4).fill(255) };
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
-      resolveSpecies: () => ({ appearance: "x", sizeClass: "medium", body: { thickness: 0.25 } }),
+      resolveSpecies: () => ({
+        appearance: "x",
+        sizeClass: "medium",
+        body: { ...defaultBody(), thickness: 0.25 },
+      }),
       resolveAsset: () => ({ kind: "image", url: "long.png" }),
       readImage: async () => long,
     });

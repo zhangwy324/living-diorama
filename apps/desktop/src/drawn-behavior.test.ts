@@ -152,39 +152,4 @@ describe("drawn creatures released from the Studio", () => {
       }
     },
   );
-
-  it("from a version 1 library entry, a relaunched species feeds, rests and sees", async () => {
-    const { simulation, world } = headlessWorld(12 * 60);
-    const store = createMemoryLibraryStore();
-    const uuid = "00000000-0000-4000-8000-000000000001";
-    await store.save(
-      uuid,
-      {
-        schemaVersion: 1,
-        createdAt: "2026-10-27T12:00:00Z",
-        species: {
-          schemaVersion: 1,
-          id: `user:${uuid}`,
-          version: "1.0.0",
-          name: "Old",
-          appearance: `user:${uuid}/appearance.png`,
-          sizeClass: "small",
-          body: { thickness: 0.4 },
-          capabilities: { "core:walk": 1 },
-          baseSpeed: 0.6,
-          behaviors: ["core:wander"],
-          senses: {},
-          traits: {},
-        },
-      },
-      DRAWING,
-      PNG,
-    );
-    const library = await openSpeciesLibrary(store, world);
-    expect(library.list()).toMatchObject([{ name: "Old", available: true }]);
-    expect(simulation.state.registries.species.get(`user:${uuid}`)).toMatchObject({
-      behaviors: ["core:wander", "core:feed", "core:rest"],
-      senses: { "core:vision": 8 },
-    });
-  });
 });

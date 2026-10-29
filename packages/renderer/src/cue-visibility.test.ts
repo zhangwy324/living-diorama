@@ -1,3 +1,4 @@
+import { defaultBody } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -185,7 +186,11 @@ describe("CueVisibility", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { layers, visibility } = make(world(3));
     const bodies = new CreatureBodies(layers.creatures, {
-      resolveSpecies: () => ({ appearance: "x", sizeClass: "small", body: { thickness: 0.25 } }),
+      resolveSpecies: () => ({
+        appearance: "x",
+        sizeClass: "small",
+        body: { ...defaultBody(), thickness: 0.25 },
+      }),
       resolveAsset: () => undefined,
       visibility,
     });

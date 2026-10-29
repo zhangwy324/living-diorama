@@ -22,11 +22,19 @@ export interface Reference {
   check?: (target: RegistryEntry) => Diagnostic[];
 }
 
+/** Looks an entry up by registry name and ID, as reference resolution sees them. */
+export type Lookup = (registry: string, id: string) => RegistryEntry | undefined;
+
 export interface RegistryOptions<T extends RegistryEntry> {
   /** Validates raw input; `source` labels diagnostics, e.g. `species/core:pebble`. */
   validate: (input: unknown, source: string) => Result<T>;
   /** Lists what an entry refers to, for dependency resolution. */
   references?: (entry: T) => Reference[];
+  /**
+   * Checks an entry against several of its targets at once, which no single reference can, e.g.
+   * that a species has a way of moving. Runs when references resolve, after they are checked.
+   */
+  check?: (entry: T, lookup: Lookup) => Diagnostic[];
 }
 
 /** Holds one version of each namespaced ID. Entries are validated on registration. */
@@ -93,5 +101,10 @@ export class Registry<T extends RegistryEntry> {
 
   references(entry: T): Reference[] {
     return this.#options.references?.(entry) ?? [];
+  }
+
+  /** The entry's checks across its targets (`RegistryOptions.check`). */
+  check(entry: T, lookup: Lookup): Diagnostic[] {
+    return this.#options.check?.(entry, lookup) ?? [];
   }
 }

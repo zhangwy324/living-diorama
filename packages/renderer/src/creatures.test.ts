@@ -1,4 +1,4 @@
-import type { Vec3 } from "@living-diorama/content-schema";
+import { defaultBody, type Vec3 } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -160,7 +160,11 @@ describe("CreatureBodies", () => {
     const bodies = new CreatureBodies(layer, {
       resolveSpecies: (id) =>
         id === "test:critter"
-          ? { appearance: "test:img", sizeClass: "medium", body: { thickness: 0.25 } }
+          ? {
+              appearance: "test:img",
+              sizeClass: "medium",
+              body: { ...defaultBody(), thickness: 0.25 },
+            }
           : undefined,
       resolveAsset: (ref) =>
         ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined,

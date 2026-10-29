@@ -1,10 +1,17 @@
 import {
+  defaultBody,
   FoodAffordanceParamsSchema,
   formatDiagnostic,
   type Result,
 } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
-import { addEntries, createRegistries, resolveReferences, type Registries } from "./index";
+import {
+  addEntries,
+  animationProfile,
+  createRegistries,
+  resolveReferences,
+  type Registries,
+} from "./index";
 
 const species = {
   schemaVersion: 1,
@@ -517,6 +524,77 @@ describe("resolveReferences", () => {
     ]);
   });
 
+  it("accepts a locomotion rule's animation and submersion", () => {
+    const registries = createRegistries();
+    expectOk(
+      registries.capabilities.register({
+        id: "core:swim",
+        version: "1.0.0",
+        locomotion: { regionKinds: ["water"], animation: "swim", submersion: 0.5 },
+      }),
+    );
+    expectOk(
+      registries.capabilities.register({
+        id: "core:land",
+        version: "1.0.0",
+        locomotion: { regionKinds: ["land"], animation: { fromStyle: "land" }, submersion: 0 },
+      }),
+    );
+    expectOk(
+      registries.capabilities.register({
+        id: "core:wade",
+        version: "1.0.0",
+        locomotion: { regionKinds: ["water"], submersion: 1 },
+      }),
+    );
+  });
+
+  it.each([
+    ["a submersion below 0", { submersion: -0.1 }, "locomotion.submersion"],
+    ["a submersion above 1", { submersion: 1.5 }, "locomotion.submersion"],
+    ["a submersion that isn't a number", { submersion: "deep" }, "locomotion.submersion"],
+    ["an empty profile name", { animation: "" }, "locomotion.animation"],
+    ["a style of an unknown medium", { animation: { fromStyle: "air" } }, "locomotion.animation"],
+    ["an animation that is a number", { animation: 3 }, "locomotion.animation"],
+  ])("rejects %s", (_, rule, path) => {
+    const result = createRegistries().capabilities.register({
+      id: "core:swim",
+      version: "1.0.0",
+      locomotion: { regionKinds: ["water"], ...rule },
+    });
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.path.join("."))).toEqual([path]);
+  });
+
+  it("takes the animation profile from the rule, or from the species' style there", () => {
+    const body = defaultBody();
+    const swim = { regionKinds: ["water"], animation: "swim" } as const;
+    const land = { regionKinds: ["land"], animation: { fromStyle: "land" } } as const;
+    expect(animationProfile(swim, body)).toBe("swim");
+    expect(animationProfile(land, body)).toBe("walk");
+    expect(animationProfile(land, { ...body, locomotion: { land: { gait: "hop" } } })).toBe("hop");
+    expect(animationProfile({ regionKinds: ["land"] }, body)).toBeUndefined();
+  });
+
+  it("requires a species to have a way of moving", () => {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(registries.capabilities.register({ id: "test:sing", version: "1.0.0" }));
+    expectOk(registries.species.register({ ...species, capabilities: { "test:sing": 1 } }));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      "error: species/test:pebble capabilities: A species needs at least one way of moving: a capability with a locomotion rule (no_locomotion)",
+    ]);
+
+    const moving = createRegistries();
+    withActions(moving);
+    expectOk(moving.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(moving.capabilities.register({ id: "test:sing", version: "1.0.0" }));
+    expectOk(
+      moving.species.register({ ...species, capabilities: { "test:sing": 1, "core:walk": 1 } }),
+    );
+    expect(resolveReferences(moving).diagnostics).toEqual([]);
+  });
+
   it("reports unresolved references and unsatisfied version ranges", () => {
     const registries = createRegistries();
     withActions(registries);
@@ -610,6 +688,18 @@ describe("addEntries", () => {
       { registry: "assets", input: { ...sprite, kind: "sound" } },
     ]);
     expect(invalid.ok).toBe(false);
+    expect(registries.species.size).toBe(0);
+  });
+
+  it("checks that a species added has a way of moving, against entries added with it", () => {
+    const registries = resolved();
+    expectOk(registries.capabilities.register({ id: "test:sing", version: "1.0.0" }));
+    const still = { ...species, capabilities: { "test:sing": 1 } };
+    const result = addEntries(registries, [
+      { registry: "species", input: still },
+      { registry: "assets", input: sprite },
+    ]);
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["no_locomotion"]);
     expect(registries.species.size).toBe(0);
   });
 

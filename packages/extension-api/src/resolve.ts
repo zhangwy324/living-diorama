@@ -38,6 +38,9 @@ export function resolveReferences(registries: Registries): Resolution {
         diagnostics.push(...checkReference(ref, lookup(registries, ref.registry, ref.id), source));
         targets.add(keyOf(ref.registry, ref.id));
       }
+      for (const d of registry.check(entry, (r, id) => lookup(registries, r, id))) {
+        diagnostics.push({ ...d, source });
+      }
     }
   }
 
@@ -91,13 +94,14 @@ export function addEntries(
   }
   // References to an entry that failed would only repeat its failure as "not registered".
   if (diagnostics.length > 0) return { ok: false, diagnostics };
+  const find = (registry: string, id: string) =>
+    staged.get(keyOf(registry, id))?.entry ?? lookup(registries, registry, id);
   for (const [source, { key, entry }] of staged) {
     const registry = registries[key.registry] as Registry<RegistryEntry>;
     for (const ref of registry.references(entry)) {
-      const target =
-        staged.get(keyOf(ref.registry, ref.id))?.entry ?? lookup(registries, ref.registry, ref.id);
-      diagnostics.push(...checkReference(ref, target, source));
+      diagnostics.push(...checkReference(ref, find(ref.registry, ref.id), source));
     }
+    for (const d of registry.check(entry, find)) diagnostics.push({ ...d, source });
   }
   if (diagnostics.some((d) => d.severity === "error")) return { ok: false, diagnostics };
   for (const { key, input } of staged.values()) {

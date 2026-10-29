@@ -1,5 +1,5 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { parseWorldSave } from "@living-diorama/content-schema";
+import { defaultBody, parseWorldSave } from "@living-diorama/content-schema";
 import {
   envelope,
   openEnvelope,
@@ -98,11 +98,11 @@ describe("simulation host", () => {
     expect(ready.scene.terrain.heights.length).toBeGreaterThan(0);
     expect(ready.navigations).toHaveLength(1);
     const mossling = ready.species[SPECIES_ID];
-    // The built-in mossling says no thickness, so it gets the default.
+    // The built-in mossling has no body plan, so it is a walker with the default thickness.
     expect(mossling).toEqual({
       appearance: expect.any(String),
       sizeClass: expect.any(String),
-      body: { thickness: 0.4 },
+      body: defaultBody(),
     });
     expect(ready.assets[mossling!.appearance]).toMatchObject({ kind: "image" });
     for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
@@ -247,7 +247,7 @@ describe("simulation host", () => {
         species: {
           appearance: species.appearance,
           sizeClass: "medium",
-          body: { thickness: 0.6 },
+          body: { ...defaultBody(), thickness: 0.6 },
         },
         asset: { kind: "image", url: appearanceUrl },
         limits: [],

@@ -5,6 +5,7 @@ Versioned data contracts for worlds, terrain, regions, connections, structures, 
 ## Owns
 
 - Schema definitions and their schema versions, and the params schemas of the core affordances.
+- The species body plan: thickness, template, the style per medium (the land gait) and anchors in drawing pixels, with their defaults ([ADR 0020](../../docs/adr/0020-body-plans-swimming-and-live-edits.md) §10–§11, §13).
 - The species library's drawing and entry schemas, and the migrations that bring older library files up to date ([ADR 0014](../../docs/adr/0014-species-library.md)).
 - The world save schema: the simulation's state as plain data, mirrored field for field (action state and behavior memory stay `unknown`).
 - Validation of content data, with structured, readable diagnostics.

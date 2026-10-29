@@ -1,5 +1,6 @@
 import {
   BODY_THICKNESS,
+  defaultBody,
   error,
   formatDiagnostic,
   LIBRARY_ENTRY_SCHEMA_VERSION,
@@ -225,7 +226,7 @@ export async function openSpeciesLibrary(
         name,
         appearance: ids.appearanceId,
         sizeClass,
-        body: { thickness: thickness ?? BODY_THICKNESS.default },
+        body: { ...defaultBody(), thickness: thickness ?? BODY_THICKNESS.default },
         ...structuredClone(DRAWN_SPECIES_DEFAULTS),
       };
       const entry = parseLibraryEntry({

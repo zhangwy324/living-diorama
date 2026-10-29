@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   allConnections,
+  BODY_TEMPLATE_ANCHORS,
+  BODY_TEMPLATES,
   BODY_THICKNESS,
   allRegions,
+  defaultAnchor,
+  defaultBody,
+  DRAWING_SIZE,
   formatDiagnostic,
   parseContentId,
   parsePropDefinition,
@@ -300,6 +305,96 @@ describe("SpeciesDefinition", () => {
     expect(diagnostics(odd).map((d) => d.path)).toEqual(
       expect.arrayContaining([["body", "thickness"], ["body"]]),
     );
+  });
+
+  it("reads a species without a body plan as a walker with the walk gait", () => {
+    expect(parseSpeciesDefinition(species)).toMatchObject({
+      ok: true,
+      value: { body: defaultBody() },
+    });
+    expect(defaultBody()).toEqual({
+      thickness: BODY_THICKNESS.default,
+      template: "walker",
+      locomotion: { land: { gait: "walk" } },
+      anchors: {},
+    });
+    expect(
+      parseSpeciesDefinition({ ...species, body: { locomotion: { land: {} } } }),
+    ).toMatchObject({ ok: true, value: { body: { locomotion: { land: { gait: "walk" } } } } });
+  });
+
+  it("keeps a body plan's template, gait and anchors", () => {
+    const body = {
+      thickness: 0.3,
+      template: "swimmer",
+      locomotion: { land: { gait: "hop" } },
+      anchors: { tail: { x: 0, y: 127.5 } },
+    };
+    expect(parseSpeciesDefinition({ ...species, body })).toMatchObject({
+      ok: true,
+      value: { body },
+    });
+    const corner = { ...body, template: "walker", anchors: { feet: { x: 256, y: 256 } } };
+    expect(parseSpeciesDefinition({ ...species, body: corner }).ok).toBe(true);
+  });
+
+  it("rejects an unknown gait, template or medium", () => {
+    expect(
+      messages(
+        parseSpeciesDefinition({ ...species, body: { locomotion: { land: { gait: "run" } } } }),
+      ),
+    ).toEqual([
+      "error: body.locomotion.land.gait: Unknown land gait (expected one of walk, hop) (invalid_value)",
+    ]);
+    expect(messages(parseSpeciesDefinition({ ...species, body: { template: "flyer" } }))).toEqual([
+      "error: body.template: Unknown body template (expected one of walker, hopper, swimmer) (invalid_value)",
+    ]);
+    expect(
+      diagnostics(parseSpeciesDefinition({ ...species, body: { locomotion: { air: {} } } })).map(
+        (d) => d.code,
+      ),
+    ).toEqual(["unrecognized_keys"]);
+  });
+
+  it("rejects an anchor outside the drawing", () => {
+    const at = (x: number, y: number) =>
+      parseSpeciesDefinition({ ...species, body: { anchors: { feet: { x, y } } } });
+    expect(messages(at(-1, 10))).toEqual([
+      `error: body.anchors.feet.x: An anchor's x must be within the drawing, 0 to ${DRAWING_SIZE} (too_small)`,
+    ]);
+    expect(messages(at(10, DRAWING_SIZE + 0.5))).toEqual([
+      `error: body.anchors.feet.y: An anchor's y must be within the drawing, 0 to ${DRAWING_SIZE} (too_big)`,
+    ]);
+  });
+
+  it("rejects an anchor its template doesn't have", () => {
+    const anchors = { feet: { x: 128, y: 250 }, tail: { x: 10, y: 128 } };
+    expect(messages(parseSpeciesDefinition({ ...species, body: { anchors } }))).toEqual([
+      "error: body.anchors.tail: A walker has no tail anchor (it has feet) (custom)",
+    ]);
+    expect(
+      messages(parseSpeciesDefinition({ ...species, body: { template: "hopper", anchors } })),
+    ).toEqual([
+      "error: body.anchors.feet: A hopper has no feet anchor (it has none) (custom)",
+      "error: body.anchors.tail: A hopper has no tail anchor (it has none) (custom)",
+    ]);
+    expect(
+      diagnostics(
+        parseSpeciesDefinition({ ...species, body: { anchors: { nose: { x: 1, y: 1 } } } }),
+      ).map((d) => d.code),
+    ).toEqual(["unrecognized_keys"]);
+  });
+
+  it("places default anchors on the drawn shape's bounds", () => {
+    const bounds = { left: 40, top: 60, right: 200, bottom: 230 };
+    expect(defaultAnchor("feet", bounds)).toEqual({ x: 120, y: 230 });
+    expect(defaultAnchor("tail", bounds)).toEqual({ x: 40, y: 145 });
+    for (const template of BODY_TEMPLATES) {
+      for (const name of BODY_TEMPLATE_ANCHORS[template]) {
+        const body = { template, anchors: { [name]: defaultAnchor(name, bounds) } };
+        expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
+      }
+    }
   });
 
   it("rejects bad versions, sizes, capabilities and empty behaviors", () => {
