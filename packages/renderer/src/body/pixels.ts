@@ -1,3 +1,5 @@
+import { DRAWING_SIZE } from "@living-diorama/content-schema";
+
 /** RGBA pixels, rows top first. `ImageData` fits. */
 export interface Pixels {
   width: number;
@@ -9,7 +11,7 @@ export interface Pixels {
 export type ImageReader = (url: string) => Promise<Pixels>;
 
 /** Images are read at this size along their longer side (roadmap §2.6 R4). */
-export const BODY_IMAGE_SIZE = 256;
+export const BODY_IMAGE_SIZE = DRAWING_SIZE;
 
 /** A pixel at or above this alpha belongs to the drawing. */
 export const ALPHA_THRESHOLD = 128;

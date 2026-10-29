@@ -1,3 +1,4 @@
+import { defaultBody } from "@living-diorama/content-schema";
 import { envelope, runSimulationHost, type SimulationSnapshot } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
@@ -156,7 +157,7 @@ describe("simulation client", () => {
     });
     expect(callbacks.onSpeciesRegistered).toHaveBeenCalledWith(
       "user:puddle",
-      { appearance: drawn.appearance, sizeClass: "medium", body: { thickness: 0.4 } },
+      { appearance: drawn.appearance, sizeClass: "medium", body: defaultBody() },
       { kind: "image", url: "blob:http://localhost/puddle" },
     );
 

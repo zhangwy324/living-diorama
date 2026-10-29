@@ -1,6 +1,7 @@
 import {
   error,
   isContentId,
+  LOCOMOTION_MEDIA,
   REGION_KINDS,
   parsePropDefinition,
   parseSpeciesDefinition,
@@ -8,9 +9,11 @@ import {
   parseWorldDefinition,
   validate,
   type Affordances,
+  type BodyShape,
   type ContentId,
   type Diagnostic,
   type DiagnosticPath,
+  type LocomotionMedium,
   type PropDefinition,
   type RegionKind,
   type Result,
@@ -20,7 +23,7 @@ import {
   type WorldDefinition,
 } from "@living-diorama/content-schema";
 import semver from "semver";
-import { Registry, type Reference, type RegistryEntry } from "./registry";
+import { Registry, type Lookup, type Reference, type RegistryEntry } from "./registry";
 
 export const REGISTRY_NAMES = [
   "worlds",
@@ -126,12 +129,46 @@ export interface SenseType extends RangedEntry {
 /** A trait, e.g. `core:nocturnal`. A species without it has the default. */
 export type TraitType = RangedEntry;
 
-/** Where and how a locomotion capability moves a creature (ADR 0005 §3). */
+/**
+ * Where a locomotion capability's animation profile comes from (ADR 0020 §8): a profile name such
+ * as `"swim"`, or `{ fromStyle: "land" }` to use the species' style in that medium, its land gait
+ * (`walk` or `hop`, each a profile of the same name). The renderer draws an unknown profile with
+ * no motion.
+ */
+export type AnimationSource = string | { readonly fromStyle: LocomotionMedium };
+
+/** Where and how a locomotion capability moves a creature (ADR 0005 §3, ADR 0020 §8–§9). */
 export interface LocomotionRule {
   /** Region kinds this locomotion works in, e.g. `["land", "cave"]` for walking. */
   readonly regionKinds: readonly RegionKind[];
   /** Steepest walkable surface in degrees. No limit if omitted. */
   readonly maxSlopeDeg?: number;
+  /** The animation profile while moving this way. No motion if omitted. */
+  readonly animation?: AnimationSource;
+  /**
+   * How far the body sits below the surface while moving this way, as a share of its height from
+   * 0 to 1. 0 if omitted.
+   */
+  readonly submersion?: number;
+}
+
+/**
+ * The animation profile of a creature of a species with `body` while it moves by `rule`, or
+ * undefined for none (ADR 0020 §8).
+ */
+export function animationProfile(rule: LocomotionRule, body: BodyShape): string | undefined {
+  const source = rule.animation;
+  if (source === undefined || typeof source === "string") return source;
+  const medium = source.fromStyle;
+  switch (medium) {
+    case "land":
+      return body.locomotion.land.gait;
+    default: {
+      // A new medium must say here which of the species' styles gives its profile.
+      const unhandled: never = medium;
+      throw new Error(`No animation profile for the style of medium "${String(unhandled)}"`);
+    }
+  }
 }
 
 /** A capability species can have and connections can require, e.g. `core:walk`. */
@@ -323,6 +360,18 @@ function validateRanged(entry: RangedEntry, source: string): Diagnostic[] {
   return found;
 }
 
+/** A non-blank profile name, or exactly `{ fromStyle }` naming a medium of the body plan. */
+function isAnimationSource(value: unknown): value is AnimationSource {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === 1 &&
+    keys[0] === "fromStyle" &&
+    (LOCOMOTION_MEDIA as readonly unknown[]).includes((value as { fromStyle: unknown }).fromStyle)
+  );
+}
+
 function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[] {
   const rule = entry.locomotion;
   if (rule === undefined) return [];
@@ -357,6 +406,30 @@ function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[]
         "invalid_value",
         "maxSlopeDeg must be a number in (0, 90]",
         ["locomotion", "maxSlopeDeg"],
+        source,
+      ),
+    );
+  }
+  if (rule.animation !== undefined && !isAnimationSource(rule.animation)) {
+    found.push(
+      error(
+        "invalid_value",
+        `animation must be a profile name or { fromStyle } with one of ${LOCOMOTION_MEDIA.join(", ")}`,
+        ["locomotion", "animation"],
+        source,
+      ),
+    );
+  }
+  const submersion = rule.submersion;
+  if (
+    submersion !== undefined &&
+    !(isFiniteNumber(submersion) && submersion >= 0 && submersion <= 1)
+  ) {
+    found.push(
+      error(
+        "invalid_value",
+        "submersion must be a number in [0, 1]",
+        ["locomotion", "submersion"],
         source,
       ),
     );
@@ -558,6 +631,26 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
   ...rangedReferences("traits", species.traits),
 ];
 
+/**
+ * A species needs a way of moving (ADR 0020 §1): at least one of its capabilities must have a
+ * locomotion rule. Unregistered capabilities are left to reference resolution.
+ */
+function checkSpeciesLocomotion(species: SpeciesDefinition, lookup: Lookup): Diagnostic[] {
+  const found = Object.keys(species.capabilities).map(
+    (id) => lookup("capabilities", id) as CapabilityType | undefined,
+  );
+  if (found.some((capability) => capability === undefined || capability.locomotion !== undefined)) {
+    return [];
+  }
+  return [
+    error(
+      "no_locomotion",
+      "A species needs at least one way of moving: a capability with a locomotion rule",
+      ["capabilities"],
+    ),
+  ];
+}
+
 /** References from an affordance map, each entry's params checked against the type's schema. */
 const affordanceReferences = (affordances: Affordances): Reference[] =>
   Object.entries(affordances).map(([id, params]) => {
@@ -596,6 +689,7 @@ export function createRegistries(): Registries {
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,
+      check: checkSpeciesLocomotion,
     }),
     surfaces: new Registry<SurfaceType>("surfaces", {
       validate: validateCodeEntry<SurfaceType>((entry, source) =>

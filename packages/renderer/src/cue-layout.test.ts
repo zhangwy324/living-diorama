@@ -1,3 +1,4 @@
+import { defaultBody } from "@living-diorama/content-schema";
 import type { Cue, CreatureSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -211,7 +212,11 @@ describe("cue layout in CreatureBodies", () => {
   const make = () => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
-      resolveSpecies: () => ({ appearance: "x", sizeClass: "small", body: { thickness: 0.25 } }),
+      resolveSpecies: () => ({
+        appearance: "x",
+        sizeClass: "small",
+        body: { ...defaultBody(), thickness: 0.25 },
+      }),
       resolveAsset: () => undefined,
     });
     // Far off, like the strip: small creatures are a few dozen pixels tall.

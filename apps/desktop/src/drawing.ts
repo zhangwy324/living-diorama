@@ -1,5 +1,6 @@
 import {
   DRAWING_SCHEMA_VERSION,
+  DRAWING_SIZE,
   STROKE_POINT_STRIDE,
   type Drawing,
   type DrawingOperation,
@@ -11,7 +12,7 @@ import { floodFill } from "./fill";
 // is the drawing the library keeps (ADR 0014 §5).
 
 /** The drawing canvas's width and height in units: the body image's size (ADR 0011 §1). */
-export const CANVAS_SIZE = 256;
+export const CANVAS_SIZE = DRAWING_SIZE;
 
 /**
  * Pressure is drawn in steps of 1/64, so a pen's varying pressure becomes a few runs of one
