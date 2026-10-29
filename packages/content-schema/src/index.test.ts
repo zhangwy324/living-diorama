@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allConnections,
-  BODY_TEMPLATE_ANCHORS,
-  BODY_TEMPLATES,
+  ANCHOR_NAMES,
   BODY_THICKNESS,
   allRegions,
   defaultAnchor,
@@ -307,14 +306,13 @@ describe("SpeciesDefinition", () => {
     );
   });
 
-  it("reads a species without a body plan as a walker with the walk gait", () => {
+  it("reads a species without a body plan with the walk gait and default anchors", () => {
     expect(parseSpeciesDefinition(species)).toMatchObject({
       ok: true,
       value: { body: defaultBody() },
     });
     expect(defaultBody()).toEqual({
       thickness: BODY_THICKNESS.default,
-      template: "walker",
       locomotion: { land: { gait: "walk" } },
       anchors: {},
     });
@@ -323,10 +321,9 @@ describe("SpeciesDefinition", () => {
     ).toMatchObject({ ok: true, value: { body: { locomotion: { land: { gait: "walk" } } } } });
   });
 
-  it("keeps a body plan's template, gait and anchors", () => {
+  it("keeps a body plan's gait and anchors", () => {
     const body = {
       thickness: 0.3,
-      template: "swimmer",
       locomotion: { land: { gait: "hop" } },
       anchors: { tail: { x: 0, y: 127.5 } },
     };
@@ -334,15 +331,11 @@ describe("SpeciesDefinition", () => {
       ok: true,
       value: { body },
     });
-    const corner = {
-      ...body,
-      template: "walker",
-      anchors: { centerOfGravity: { x: 256, y: 256 } },
-    };
+    const corner = { ...body, anchors: { centerOfGravity: { x: 256, y: 256 } } };
     expect(parseSpeciesDefinition({ ...species, body: corner }).ok).toBe(true);
   });
 
-  it("rejects an unknown gait, template or medium", () => {
+  it("rejects an unknown gait or medium, and a template", () => {
     expect(
       messages(
         parseSpeciesDefinition({ ...species, body: { locomotion: { land: { gait: "run" } } } }),
@@ -350,9 +343,12 @@ describe("SpeciesDefinition", () => {
     ).toEqual([
       "error: body.locomotion.land.gait: Unknown land gait (expected one of walk, hop) (invalid_value)",
     ]);
-    expect(messages(parseSpeciesDefinition({ ...species, body: { template: "flyer" } }))).toEqual([
-      "error: body.template: Unknown body template (expected one of walker, hopper, swimmer) (invalid_value)",
-    ]);
+    // Templates are gone (ADR 0020, Follow-up: no body templates); the body plan is strict.
+    expect(
+      diagnostics(parseSpeciesDefinition({ ...species, body: { template: "walker" } })).map(
+        (d) => d.code,
+      ),
+    ).toEqual(["unrecognized_keys"]);
     expect(
       diagnostics(parseSpeciesDefinition({ ...species, body: { locomotion: { air: {} } } })).map(
         (d) => d.code,
@@ -371,21 +367,13 @@ describe("SpeciesDefinition", () => {
     ]);
   });
 
-  it("rejects an anchor its template doesn't have", () => {
+  it("takes both anchors on any species, and no other", () => {
     const anchors = { centerOfGravity: { x: 128, y: 128 }, tail: { x: 10, y: 128 } };
-    expect(messages(parseSpeciesDefinition({ ...species, body: { anchors } }))).toEqual([
-      "error: body.anchors.tail: A walker has no tail anchor (it has centerOfGravity) (custom)",
-    ]);
-    expect(
-      messages(parseSpeciesDefinition({ ...species, body: { template: "hopper", anchors } })),
-    ).toEqual([
-      "error: body.anchors.tail: A hopper has no tail anchor (it has centerOfGravity) (custom)",
-    ]);
-    expect(
-      messages(parseSpeciesDefinition({ ...species, body: { template: "swimmer", anchors } })),
-    ).toEqual([
-      "error: body.anchors.centerOfGravity: A swimmer has no centerOfGravity anchor (it has tail) (custom)",
-    ]);
+    for (const capabilities of [{ "core:land": 1 }, { "core:swim": 1 }]) {
+      expect(parseSpeciesDefinition({ ...species, capabilities, body: { anchors } })).toMatchObject(
+        { ok: true, value: { body: { anchors } } },
+      );
+    }
     expect(
       diagnostics(
         parseSpeciesDefinition({ ...species, body: { anchors: { nose: { x: 1, y: 1 } } } }),
@@ -393,20 +381,13 @@ describe("SpeciesDefinition", () => {
     ).toEqual(["unrecognized_keys"]);
   });
 
-  it("ignores an anchor left undefined, even one the template doesn't have", () => {
-    const body = { template: "swimmer", anchors: { centerOfGravity: undefined } };
-    expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
-  });
-
   it("places default anchors on the drawn shape's bounds", () => {
     const bounds = { left: 40, top: 60, right: 200, bottom: 230 };
     expect(defaultAnchor("centerOfGravity", bounds)).toEqual({ x: 120, y: 145 });
     expect(defaultAnchor("tail", bounds)).toEqual({ x: 40, y: 145 });
-    for (const template of BODY_TEMPLATES) {
-      for (const name of BODY_TEMPLATE_ANCHORS[template]) {
-        const body = { template, anchors: { [name]: defaultAnchor(name, bounds) } };
-        expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
-      }
+    for (const name of ANCHOR_NAMES) {
+      const body = { anchors: { [name]: defaultAnchor(name, bounds) } };
+      expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
     }
   });
 

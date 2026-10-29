@@ -23,7 +23,7 @@ function validDrawing() {
 
 function validEntry() {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     species: {
       schemaVersion: 1,
       id: "user:3f9c2a1e-0000-4000-8000-000000000000",
@@ -33,7 +33,6 @@ function validEntry() {
       sizeClass: "small",
       body: {
         thickness: 0.3,
-        template: "walker",
         locomotion: { land: { gait: "walk" } },
         anchors: { centerOfGravity: { x: 128, y: 140 } },
       },
@@ -149,20 +148,19 @@ describe("parseLibraryEntry", () => {
     expect(parseLibraryEntry(input).ok).toBe(false);
   });
 
-  it("reads a species without a body plan as a walker", () => {
+  it("reads a species without a body plan with the walk gait and default anchors", () => {
     const entry = validEntry();
     const species: Record<string, unknown> = { ...entry.species };
     delete species.body;
     const result = parseLibraryEntry({ ...entry, species });
     expect(result.ok && result.value.species.body).toEqual({
       thickness: 0.4,
-      template: "walker",
       locomotion: { land: { gait: "walk" } },
       anchors: {},
     });
   });
 
-  it.each([[1], [2]])("doesn't migrate a version %i entry", (schemaVersion) => {
+  it.each([[1], [2], [3]])("doesn't migrate a version %i entry", (schemaVersion) => {
     expect(codes(parseLibraryEntry({ ...validEntry(), schemaVersion }))).toEqual([
       "missing_migration",
     ]);

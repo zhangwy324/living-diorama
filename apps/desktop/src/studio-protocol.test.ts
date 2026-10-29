@@ -15,7 +15,7 @@ import {
 import type { Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
-import { templatePlan } from "./body-plan";
+import { defaultPlan } from "./body-plan";
 import {
   countBySpecies,
   librarySnapshot,
@@ -56,7 +56,7 @@ const releaseParams = (overrides: Partial<ReleaseParams> = {}): ReleaseParams =>
   name: "Puddle",
   sizeClass: "small",
   thickness: 0.25,
-  plan: templatePlan(),
+  plan: defaultPlan(),
   ...overrides,
 });
 
@@ -235,7 +235,6 @@ describe("releasing", () => {
   it("gives the species the body plan and capabilities chosen in the confirm panel", async () => {
     const { studio, world, store } = await setUp();
     const plan = {
-      template: "swimmer" as const,
       locomotion: { land: true, gait: "hop" as const, swim: true },
       anchors: { tail: { x: 30, y: 120 } },
     };
@@ -244,21 +243,20 @@ describe("releasing", () => {
     expect(registered.capabilities).toEqual({ "core:land": 1, "core:swim": 1 });
     expect(registered.body).toEqual({
       thickness: 0.25,
-      template: "swimmer",
       locomotion: { land: { gait: "hop" } },
       anchors: { tail: { x: 30, y: 120 } },
     });
-    // The library entry (version 3) keeps the plan.
+    // The library entry (version 4) keeps the plan.
     expect((await store.list())[0]?.entry).toMatchObject({
-      schemaVersion: 3,
-      species: { body: { template: "swimmer" }, capabilities: { "core:swim": 1 } },
+      schemaVersion: 4,
+      species: { body: { anchors: { tail: { x: 30, y: 120 } } }, capabilities: { "core:swim": 1 } },
     });
   });
 
   it("refuses a body plan with no way of moving before saving anything", async () => {
     const { studio, store } = await setUp();
     const plan = {
-      ...templatePlan(),
+      ...defaultPlan(),
       locomotion: { land: false, gait: "walk" as const, swim: false },
     };
     await expect(studio.request("release", releaseParams({ plan }))).rejects.toThrow(NO_LOCOMOTION);
@@ -273,7 +271,12 @@ describe("releasing", () => {
     };
     world.registerSpecies.mockResolvedValueOnce(noSpawn);
     await expect(
-      studio.request("release", releaseParams({ plan: templatePlan("swimmer") })),
+      studio.request(
+        "release",
+        releaseParams({
+          plan: { ...defaultPlan(), locomotion: { land: false, gait: "walk", swim: true } },
+        }),
+      ),
     ).rejects.toThrow(
       "Puddle has nowhere to appear in this world: no starting spot in the water suits it.",
     );

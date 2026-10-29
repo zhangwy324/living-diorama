@@ -1,15 +1,8 @@
-import {
-  BODY_TEMPLATE_ANCHORS,
-  type AnchorName,
-  type Anchors,
-  type BodyTemplate,
-  type LandGait,
-} from "@living-diorama/content-schema";
+import type { AnchorName, Anchors, LandGait } from "@living-diorama/content-schema";
 
 // A drawn species' body plan as the player chooses it in the Studio (ADR 0020 §11, §12, §14):
-// its template, where it can move, its land gait and its anchors. The one app-owned map from a
-// template to its default locomotion lives here, shared by the Studio and the species library, so
-// the panel starts from what the release will register. Kept free of content imports, like
+// where it can move, its land gait and its anchors. Shared by the Studio and the species library,
+// so the panel starts from what the release will register. Kept free of content imports, like
 // `startup.ts`.
 
 /** Where a drawn species can move, and how it moves on land. */
@@ -24,17 +17,19 @@ export interface LocomotionChoice {
 
 /** What the Studio sends with a release. */
 export interface BodyPlanChoice {
-  template: BodyTemplate;
   locomotion: LocomotionChoice;
-  /** Placed anchors, in drawing pixels; left out, an anchor sits where `defaultAnchor` puts it. */
+  /**
+   * Placed anchors, in drawing pixels; left out, an anchor sits where `defaultAnchor` puts it. One
+   * whose way of moving is off is kept, so it comes back, but not released (`planBody`).
+   */
   anchors: Anchors;
 }
 
-/** What each template starts from (ADR 0020 §11). The player can change it afterwards. */
-export const TEMPLATE_LOCOMOTION: Readonly<Record<BodyTemplate, Readonly<LocomotionChoice>>> = {
-  walker: { land: true, gait: "walk", swim: false },
-  hopper: { land: true, gait: "hop", swim: false },
-  swimmer: { land: false, gait: "walk", swim: true },
+/** What a new creature starts from: on land, walking. */
+export const DEFAULT_LOCOMOTION: Readonly<LocomotionChoice> = {
+  land: true,
+  gait: "walk",
+  swim: false,
 };
 
 /** The capabilities behind each way of moving. App configuration, like `STARTUP`. */
@@ -44,29 +39,32 @@ export const SWIM_CAPABILITY = "core:swim";
 /** A drawn species' speed factor for each of its capabilities (ADR 0020 §14). */
 export const DRAWN_SPEED_FACTOR = 1;
 
-/** A fresh plan for `template`: its locomotion and no anchors placed. */
-export const templatePlan = (template: BodyTemplate = "walker"): BodyPlanChoice => ({
-  template,
-  locomotion: { ...TEMPLATE_LOCOMOTION[template] },
+/** A fresh plan: on land, walking, no anchors placed. */
+export const defaultPlan = (): BodyPlanChoice => ({
+  locomotion: { ...DEFAULT_LOCOMOTION },
   anchors: {},
 });
 
-/** The anchors `template` has (walker and hopper: center of gravity, swimmer: tail). */
-export const templateAnchors = (template: BodyTemplate): readonly AnchorName[] =>
-  BODY_TEMPLATE_ANCHORS[template];
-
 /**
- * Switches `plan` to `template`: its default locomotion, and only the placed anchors the new
- * template also has, so the release passes validation (ADR 0020 §10). A fresh object.
+ * The anchors that matter for these ways of moving, land first: the center of gravity, which land
+ * movement tilts and squashes about, and the tail, which sets the swim's axis.
  */
-export function changeTemplate(plan: BodyPlanChoice, template: BodyTemplate): BodyPlanChoice {
-  const allowed = templateAnchors(template);
-  const anchors: Anchors = {};
-  for (const name of allowed) {
-    const anchor = plan.anchors[name];
-    if (anchor) anchors[name] = { ...anchor };
+export const planAnchors = ({
+  land,
+  swim,
+}: Pick<LocomotionChoice, "land" | "swim">): AnchorName[] => [
+  ...(land ? (["centerOfGravity"] as const) : []),
+  ...(swim ? (["tail"] as const) : []),
+];
+
+/** The placed anchors that matter for the plan's ways of moving, as copies. */
+export function activeAnchors({ locomotion, anchors }: BodyPlanChoice): Anchors {
+  const active: Anchors = {};
+  for (const name of planAnchors(locomotion)) {
+    const anchor = anchors[name];
+    if (anchor) active[name] = { ...anchor };
   }
-  return { template, locomotion: { ...TEMPLATE_LOCOMOTION[template] }, anchors };
+  return active;
 }
 
 /** At least one way of moving: on land, swimming or both (ADR 0020 §1). */
@@ -85,11 +83,10 @@ export function locomotionCapabilities({
 }
 
 /** The species' `body` for this plan and thickness (`BodyShape`'s input). */
-export function planBody({ template, locomotion, anchors }: BodyPlanChoice, thickness: number) {
+export function planBody(plan: BodyPlanChoice, thickness: number) {
   return {
     thickness,
-    template,
-    locomotion: { land: { gait: locomotion.gait } },
-    anchors: structuredClone(anchors),
+    locomotion: { land: { gait: plan.locomotion.gait } },
+    anchors: activeAnchors(plan),
   };
 }

@@ -12,7 +12,7 @@ import { HexColorSchema } from "./primitives";
 /** Current data-format version of a drawing. */
 export const DRAWING_SCHEMA_VERSION = 2;
 /** Current data-format version of a library entry. */
-export const LIBRARY_ENTRY_SCHEMA_VERSION = 3;
+export const LIBRARY_ENTRY_SCHEMA_VERSION = 4;
 
 const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 1 held the strokes as the source of truth. Version 2 holds a record of operations
@@ -28,8 +28,9 @@ const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
   }),
 };
 
-// Version 3 adds the body plan (ADR 0020 §13). Entries of versions 1 and 2 are not migrated: no
-// backward compatibility is required yet (AGENTS.md), so they fail to load.
+// Version 3 adds the body plan (ADR 0020 §13); version 4 drops its template (ADR 0020, Follow-up:
+// no body templates). Older entries are not migrated: no backward compatibility is required yet
+// (AGENTS.md), so they fail to load.
 const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
 
 /** Values per stroke point: x and y in canvas pixels, then pressure. */

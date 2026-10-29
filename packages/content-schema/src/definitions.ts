@@ -111,20 +111,12 @@ export const LOCOMOTION_MEDIA = Object.keys(
 ) as readonly LocomotionMedium[];
 
 /**
- * The anchors each body template has (ADR 0020 §10): a walker's and a hopper's center of gravity,
- * a swimmer's tail. More templates come later.
+ * The named points on a body (ADR 0020 §10): the center of gravity, which land movement tilts and
+ * squashes about, and the tail, which sets the swim's axis. Every species may have both, and each
+ * is optional.
  */
-export const BODY_TEMPLATE_ANCHORS = {
-  walker: ["centerOfGravity"],
-  hopper: ["centerOfGravity"],
-  swimmer: ["tail"],
-} as const satisfies Record<string, readonly string[]>;
-export type BodyTemplate = keyof typeof BODY_TEMPLATE_ANCHORS;
-export const BODY_TEMPLATES = Object.keys(BODY_TEMPLATE_ANCHORS) as readonly BodyTemplate[];
-export type AnchorName = (typeof BODY_TEMPLATE_ANCHORS)[BodyTemplate][number];
-export const ANCHOR_NAMES = [
-  ...new Set(Object.values(BODY_TEMPLATE_ANCHORS).flat()),
-] as readonly AnchorName[];
+export const ANCHOR_NAMES = ["centerOfGravity", "tail"] as const;
+export type AnchorName = (typeof ANCHOR_NAMES)[number];
 
 const drawingPixel = (axis: "x" | "y") => {
   const error = `An anchor's ${axis} must be within the drawing, 0 to ${DRAWING_SIZE}`;
@@ -136,8 +128,7 @@ export const AnchorSchema = z.strictObject({ x: drawingPixel("x"), y: drawingPix
 export type Anchor = z.output<typeof AnchorSchema>;
 
 /**
- * The template's anchors the player placed or accepted, by name. An anchor left out sits where
- * `defaultAnchor` puts it.
+ * The anchors the player placed, by name. An anchor left out sits where `defaultAnchor` puts it.
  */
 export const AnchorsSchema = z.strictObject(
   Object.fromEntries(ANCHOR_NAMES.map((name) => [name, AnchorSchema.optional()])) as Record<
@@ -149,50 +140,28 @@ export type Anchors = z.output<typeof AnchorsSchema>;
 
 /**
  * A species' body plan: how its body is built from its appearance (ADR 0011, ADR 0017 §11) and how
- * it moves (ADR 0020 §11). Every field has a default, so a species without a body plan is a walker
- * with the walk gait, default anchors and the default thickness (ADR 0020 §13).
+ * it moves (ADR 0020 §11). Where it can move is in its capabilities, not here. Every field has a
+ * default, so a species without a body plan has the walk gait, default anchors and the default
+ * thickness (ADR 0020 §13).
  */
-export const BodyShapeSchema = z
-  .strictObject({
-    /** Depth from front to back as a share of the drawn height. */
-    thickness: z
-      .number()
-      .gte(BODY_THICKNESS.min, {
-        error: `Thickness must be at least ${BODY_THICKNESS.min} of the height`,
-      })
-      .lte(BODY_THICKNESS.max, {
-        error: `Thickness must be at most ${BODY_THICKNESS.max} of the height`,
-      })
-      .default(BODY_THICKNESS.default),
-    /**
-     * What the body plan starts from: which anchors apply and what the Studio's confirm panel
-     * offers first. It doesn't decide where the species can move; its capabilities do.
-     */
-    template: z
-      .enum(BODY_TEMPLATES as [BodyTemplate, ...BodyTemplate[]], {
-        error: `Unknown body template (expected one of ${BODY_TEMPLATES.join(", ")})`,
-      })
-      .default("walker"),
-    /** The style per medium: for now the land gait. */
-    locomotion: BodyLocomotionSchema.prefault({}),
-    /** Only the template's anchors are allowed. */
-    anchors: AnchorsSchema.default({}),
-  })
-  .superRefine((body, ctx) => {
-    // An unknown template is reported on its own field.
-    const allowed: readonly string[] = BODY_TEMPLATE_ANCHORS[body.template] ?? [];
-    for (const [name, anchor] of Object.entries(body.anchors)) {
-      if (anchor === undefined || allowed.includes(name)) continue;
-      ctx.addIssue({
-        code: "custom",
-        message: `A ${body.template} has no ${name} anchor (it has ${allowed.length > 0 ? allowed.join(", ") : "none"})`,
-        path: ["anchors", name],
-      });
-    }
-  });
+export const BodyShapeSchema = z.strictObject({
+  /** Depth from front to back as a share of the drawn height. */
+  thickness: z
+    .number()
+    .gte(BODY_THICKNESS.min, {
+      error: `Thickness must be at least ${BODY_THICKNESS.min} of the height`,
+    })
+    .lte(BODY_THICKNESS.max, {
+      error: `Thickness must be at most ${BODY_THICKNESS.max} of the height`,
+    })
+    .default(BODY_THICKNESS.default),
+  /** The style per medium: for now the land gait. */
+  locomotion: BodyLocomotionSchema.prefault({}),
+  anchors: AnchorsSchema.default({}),
+});
 export type BodyShape = z.output<typeof BodyShapeSchema>;
 
-/** A body plan with every default: a walker with the walk gait (ADR 0020 §13). A fresh object. */
+/** A body plan with every default: the walk gait and default anchors (ADR 0020 §13). A fresh object. */
 export const defaultBody = (): BodyShape => BodyShapeSchema.parse({});
 
 /** The drawn shape's bounds in drawing pixels: left and top inclusive, right and bottom exclusive. */
@@ -222,7 +191,7 @@ export const SpeciesDefinitionSchema = z.strictObject({
   ...header("species"),
   appearance: AssetRefSchema,
   sizeClass: SizeClassSchema,
-  /** The body plan. Left out, every setting takes its default: a walker with the walk gait. */
+  /** The body plan. Left out, every setting takes its default: the walk gait and default anchors. */
   body: BodyShapeSchema.prefault({}),
   /**
    * Locomotion and other capabilities → speed factor relative to `baseSpeed` (ADR 0004). Where

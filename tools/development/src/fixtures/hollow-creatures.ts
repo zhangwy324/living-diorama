@@ -11,7 +11,7 @@ const species = (
   id: string,
   name: string,
   capabilities: Record<string, number>,
-  body: { template: string; locomotion: { land: { gait: string } } },
+  body: { locomotion: { land: { gait: string } } },
 ) => ({
   schemaVersion: 1,
   id,
@@ -31,21 +31,21 @@ export const otter = species(
   "fixture:otter",
   "Otter",
   { "core:land": 1, "core:swim": 1 },
-  { template: "walker", locomotion: { land: { gait: "walk" } } },
+  { locomotion: { land: { gait: "walk" } } },
 );
 /** Only swims, so it appears at the river's spawn point and never leaves the water. */
 export const carp = species(
   "fixture:carp",
   "Carp",
   { "core:swim": 1 },
-  { template: "swimmer", locomotion: { land: { gait: "walk" } } },
+  { locomotion: { land: { gait: "walk" } } },
 );
 /** Only moves on land, hopping. */
 export const toad = species(
   "fixture:toad",
   "Toad",
   { "core:land": 1 },
-  { template: "hopper", locomotion: { land: { gait: "hop" } } },
+  { locomotion: { land: { gait: "hop" } } },
 );
 
 export const HOLLOW_CREATURES = [otter, carp, toad] as const;

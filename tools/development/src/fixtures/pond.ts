@@ -117,7 +117,7 @@ const species = (id: string, name: string, capabilities: Record<string, number>)
 /** Walks and swims, at half its walking speed in water; hops on land. */
 export const newt = {
   ...species("fixture:newt", "Newt", { "core:land": 1, "core:swim": 0.5 }),
-  body: { template: "hopper", locomotion: { land: { gait: "hop" } } },
+  body: { locomotion: { land: { gait: "hop" } } },
 };
 /** Only swims. */
 export const minnow = species("fixture:minnow", "Minnow", { "core:swim": 1 });

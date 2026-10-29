@@ -93,7 +93,6 @@ describe("water-only creatures in Woodland Hollow (ADR 0020 §6)", () => {
     capabilities: SWIM,
     baseSpeed: 0.5,
     behaviors: ["core:wander"],
-    body: { template: "swimmer" },
   });
   const URL = "blob:http://localhost/drawing";
   const pool = { regionId: "river", x: 4.25, z: 14.25 };

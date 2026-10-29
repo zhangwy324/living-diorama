@@ -331,16 +331,12 @@ describe("CreatureBodies", () => {
       expect(Math.max(...walking) - Math.min(...walking)).toBeGreaterThan(0.02);
     });
 
-    it("keeps a walker's and a hopper's feet on the ground as they tilt and squash", async () => {
+    it("keeps a walking and a hopping body on the ground as it tilts and squashes", async () => {
       // The default center of gravity, and one placed off-centre and high on the body: the body
       // tilts about the ground below it, so it neither dips below the ground nor floats above it.
       for (const anchors of [{}, { centerOfGravity: { x: 4, y: 30 } }]) {
-        for (const [template, animation] of [
-          ["walker", "walk"],
-          ["walker", "hop"],
-          ["hopper", "hop"],
-        ] as const) {
-          const { layer, bodies } = make(undefined, { template, anchors });
+        for (const animation of ["walk", "hop"]) {
+          const { layer, bodies } = make(undefined, { anchors });
           await loaded(bodies);
           const lowest: number[] = [];
           moving(240, { animation }, bodies, () => lowest.push(box(layer).min.y));
@@ -362,7 +358,7 @@ describe("CreatureBodies", () => {
     it("sways a swimmer about a point near its front, so its tail sweeps", async () => {
       // The tail placed at the drawing's top-left corner: the line through the body runs along
       // its top, and the pivot sits on it a quarter of the way back from the front.
-      const swimmer = { template: "swimmer" as const, anchors: { tail: { x: 0, y: 0 } } };
+      const swimmer = { anchors: { tail: { x: 0, y: 0 } } };
       const { layer, bodies } = make(undefined, swimmer);
       await loaded(bodies);
       const tails: number[] = [];
@@ -385,7 +381,7 @@ describe("CreatureBodies", () => {
     });
 
     it("keeps a resting swimmer bobbing gently in the water, without swaying", async () => {
-      const { layer, bodies } = make(undefined, { template: "swimmer" });
+      const { layer, bodies } = make();
       await loaded(bodies);
       const tops: number[] = [];
       const forwards: number[] = [];

@@ -1,44 +1,23 @@
-import { BODY_TEMPLATES, BodyShapeSchema } from "@living-diorama/content-schema";
+import { BodyShapeSchema } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
 import {
-  TEMPLATE_LOCOMOTION,
+  DEFAULT_LOCOMOTION,
+  activeAnchors,
   canMove,
-  changeTemplate,
+  defaultPlan,
   locomotionCapabilities,
+  planAnchors,
   planBody,
-  templatePlan,
   type BodyPlanChoice,
 } from "./body-plan";
 
-describe("the template map", () => {
-  it("starts a walker walking, a hopper hopping and a swimmer in the water only", () => {
-    expect(TEMPLATE_LOCOMOTION).toEqual({
-      walker: { land: true, gait: "walk", swim: false },
-      hopper: { land: true, gait: "hop", swim: false },
-      swimmer: { land: false, gait: "walk", swim: true },
-    });
-    expect(Object.keys(TEMPLATE_LOCOMOTION).sort()).toEqual([...BODY_TEMPLATES].sort());
-  });
-
-  it("gives each template's plan the capabilities it moves with, a speed factor of 1 each", () => {
-    expect(locomotionCapabilities(templatePlan("walker").locomotion)).toEqual({ "core:land": 1 });
-    expect(locomotionCapabilities(templatePlan("hopper").locomotion)).toEqual({ "core:land": 1 });
-    expect(locomotionCapabilities(templatePlan("swimmer").locomotion)).toEqual({ "core:swim": 1 });
-    expect(locomotionCapabilities({ land: true, swim: true })).toEqual({
-      "core:land": 1,
-      "core:swim": 1,
-    });
-  });
-
-  it("gives a fresh plan each time, a walker by default", () => {
-    const plan = templatePlan();
-    expect(plan).toEqual({
-      template: "walker",
-      locomotion: TEMPLATE_LOCOMOTION.walker,
-      anchors: {},
-    });
+describe("a new creature's plan", () => {
+  it("starts on land, walking, with no points placed, fresh each time", () => {
+    expect(DEFAULT_LOCOMOTION).toEqual({ land: true, gait: "walk", swim: false });
+    const plan = defaultPlan();
+    expect(plan).toEqual({ locomotion: DEFAULT_LOCOMOTION, anchors: {} });
     plan.locomotion.swim = true;
-    expect(templatePlan().locomotion.swim).toBe(false);
+    expect(defaultPlan().locomotion.swim).toBe(false);
   });
 });
 
@@ -48,75 +27,61 @@ describe("locomotion choices", () => {
     expect(canMove({ land: false, swim: true })).toBe(true);
     expect(canMove({ land: true, swim: true })).toBe(true);
     expect(canMove({ land: false, swim: false })).toBe(false);
+  });
+
+  it("give the capabilities it moves with, a speed factor of 1 each; the gait gives none", () => {
+    expect(locomotionCapabilities({ land: true, swim: false })).toEqual({ "core:land": 1 });
+    expect(locomotionCapabilities({ land: false, swim: true })).toEqual({ "core:swim": 1 });
+    expect(locomotionCapabilities({ land: true, swim: true })).toEqual({
+      "core:land": 1,
+      "core:swim": 1,
+    });
     expect(locomotionCapabilities({ land: false, swim: false })).toEqual({});
+  });
+
+  it("decide the points: the center of gravity on land, the tail swimming, land first", () => {
+    expect(planAnchors({ land: true, swim: false })).toEqual(["centerOfGravity"]);
+    expect(planAnchors({ land: false, swim: true })).toEqual(["tail"]);
+    expect(planAnchors({ land: true, swim: true })).toEqual(["centerOfGravity", "tail"]);
+    expect(planAnchors({ land: false, swim: false })).toEqual([]);
   });
 });
 
-describe("changing the template", () => {
-  const walker: BodyPlanChoice = {
-    template: "walker",
-    locomotion: { land: true, gait: "hop", swim: true },
-    anchors: { centerOfGravity: { x: 100, y: 120 } },
-  };
-
-  it("drops the anchors the new template doesn't have", () => {
-    expect(changeTemplate(walker, "swimmer").anchors).toEqual({});
-    const swimmer = { ...templatePlan("swimmer"), anchors: { tail: { x: 20, y: 120 } } };
-    expect(changeTemplate(swimmer, "walker").anchors).toEqual({});
+describe("the species' body", () => {
+  it("carries the land gait, the anchors and the thickness", () => {
+    expect(planBody(both(), 0.3)).toEqual({
+      thickness: 0.3,
+      locomotion: { land: { gait: "hop" } },
+      anchors: { centerOfGravity: { x: 100, y: 120 }, tail: { x: 20, y: 110 } },
+    });
   });
 
-  it("keeps the anchors it shares, as copies", () => {
-    for (const template of ["walker", "hopper"] as const) {
-      const kept = changeTemplate(walker, template);
-      expect(kept.anchors).toEqual({ centerOfGravity: { x: 100, y: 120 } });
-      expect(kept.anchors.centerOfGravity).not.toBe(walker.anchors.centerOfGravity);
-    }
+  it("keeps the gait for a creature that doesn't move on land, so it comes back", () => {
+    const plan = { ...both(), locomotion: { land: false, gait: "hop" as const, swim: true } };
+    expect(planBody(plan, 0.4).locomotion).toEqual({ land: { gait: "hop" } });
   });
 
-  it("starts from the new template's locomotion", () => {
-    expect(changeTemplate(walker, "swimmer").locomotion).toEqual(TEMPLATE_LOCOMOTION.swimmer);
-    expect(changeTemplate(walker, "hopper").locomotion).toEqual(TEMPLATE_LOCOMOTION.hopper);
+  it("leaves out a placed point whose way of moving is off, as copies", () => {
+    const swimmer = { ...both(), locomotion: { land: false, gait: "walk" as const, swim: true } };
+    expect(planBody(swimmer, 0.4).anchors).toEqual({ tail: { x: 20, y: 110 } });
+    const walker = { ...both(), locomotion: DEFAULT_LOCOMOTION };
+    expect(activeAnchors(walker)).toEqual({ centerOfGravity: { x: 100, y: 120 } });
+    expect(activeAnchors(walker).centerOfGravity).not.toBe(walker.anchors.centerOfGravity);
   });
 
-  it("always leaves a body plan the schema accepts", () => {
-    for (const from of BODY_TEMPLATES) {
-      for (const to of BODY_TEMPLATES) {
-        const placed: BodyPlanChoice = {
-          ...templatePlan(from),
-          anchors:
-            from === "swimmer" ? { tail: { x: 3, y: 4 } } : { centerOfGravity: { x: 1, y: 2 } },
-        };
-        expect(BodyShapeSchema.safeParse(planBody(changeTemplate(placed, to), 0.4)).success).toBe(
-          true,
-        );
+  it("is always one the schema accepts", () => {
+    for (const land of [true, false]) {
+      for (const swim of [true, false]) {
+        const plan = { ...both(), locomotion: { land, gait: "walk" as const, swim } };
+        expect(BodyShapeSchema.safeParse(planBody(plan, 0.4)).success).toBe(true);
       }
     }
   });
 });
 
-describe("the species' body", () => {
-  it("carries the template, the land gait, the anchors and the thickness", () => {
-    expect(planBody(walker(), 0.3)).toEqual({
-      thickness: 0.3,
-      template: "walker",
-      locomotion: { land: { gait: "hop" } },
-      anchors: { centerOfGravity: { x: 100, y: 120 } },
-    });
-  });
-
-  it("keeps the gait for a swimmer that doesn't move on land, so it comes back", () => {
-    const plan = {
-      ...templatePlan("swimmer"),
-      locomotion: { land: false, gait: "hop" as const, swim: true },
-    };
-    expect(planBody(plan, 0.4).locomotion).toEqual({ land: { gait: "hop" } });
-  });
-});
-
-function walker(): BodyPlanChoice {
+function both(): BodyPlanChoice {
   return {
-    template: "walker",
-    locomotion: { land: true, gait: "hop", swim: false },
-    anchors: { centerOfGravity: { x: 100, y: 120 } },
+    locomotion: { land: true, gait: "hop", swim: true },
+    anchors: { centerOfGravity: { x: 100, y: 120 }, tail: { x: 20, y: 110 } },
   };
 }

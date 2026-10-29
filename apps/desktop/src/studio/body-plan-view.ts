@@ -2,27 +2,20 @@ import {
   DRAWING_SIZE,
   type Anchor,
   type AnchorName,
-  type BodyTemplate,
   type LandGait,
 } from "@living-diorama/content-schema";
 import type { PreviewMotion } from "@living-diorama/renderer";
 import { SWIM_SUBMERSION } from "@living-diorama/simulation";
 import {
   DRAWN_SPEED_FACTOR,
-  templateAnchors,
+  planAnchors,
   type BodyPlanChoice,
   type LocomotionChoice,
 } from "../body-plan";
 import { DRAWN_SPECIES_DEFAULTS } from "../startup";
 
-// The confirm panel's words and small rules (ADR 0020 §12): what each template, gait and anchor is
-// called, which ways of moving the preview plays, and placing anchors by clicking the drawing.
-
-export const TEMPLATE_LABELS: Readonly<Record<BodyTemplate, { name: string; blurb: string }>> = {
-  walker: { name: "Walker", blurb: "Walks on its feet" },
-  hopper: { name: "Hopper", blurb: "Bounces along" },
-  swimmer: { name: "Swimmer", blurb: "Lives in the water" },
-};
+// The confirm panel's words and small rules (ADR 0020 §12): what each gait and anchor is called,
+// which ways of moving the preview plays, and placing anchors by clicking the drawing.
 
 export const GAIT_LABELS: Readonly<Record<LandGait, string>> = { walk: "Walks", hop: "Hops" };
 
@@ -35,15 +28,12 @@ export const GAIT_PREVIEW_LABELS: Readonly<Record<LandGait, string>> = {
 /** The preview moves at a drawn creature's pace: its base speed times a speed factor of 1. */
 export const PREVIEW_SPEED = DRAWN_SPECIES_DEFAULTS.baseSpeed * DRAWN_SPEED_FACTOR;
 
-export const ANCHOR_LABELS: Readonly<
-  Record<AnchorName, { name: string; help: string; them: string }>
-> = {
+export const ANCHOR_LABELS: Readonly<Record<AnchorName, { name: string; help: string }>> = {
   centerOfGravity: {
     name: "Center of gravity",
     help: "where the body balances. Only left–right matters; it's what the body rocks and squashes around",
-    them: "it",
   },
-  tail: { name: "Tail", help: "the end that swishes as it swims", them: "it" },
+  tail: { name: "Tail", help: "the end that swishes as it swims" },
 };
 
 /** The panel's heading: the reveal names the creature when it has a name. */
@@ -103,9 +93,12 @@ export function drawingPoint(
   return { x: pixel(clientX - box.left, box.width), y: pixel(clientY - box.top, box.height) };
 }
 
-/** `plan` with its template's anchor `name` placed at `point`. Other templates' anchors are refused. */
+/**
+ * `plan` with anchor `name` placed at `point`. An anchor its ways of moving don't use is refused,
+ * since the player can't see it.
+ */
 export function placeAnchor(plan: BodyPlanChoice, name: AnchorName, point: Anchor): BodyPlanChoice {
-  if (!templateAnchors(plan.template).includes(name)) return plan;
+  if (!planAnchors(plan.locomotion).includes(name)) return plan;
   return { ...plan, anchors: { ...plan.anchors, [name]: { ...point } } };
 }
 
@@ -115,19 +108,43 @@ export function placeAnchor(plan: BodyPlanChoice, name: AnchorName, point: Ancho
  * nothing was placed.
  */
 export const afterDrawingEdit = (plan: BodyPlanChoice): BodyPlanChoice =>
-  Object.values(plan.anchors).some((anchor) => anchor !== undefined) ? resetAnchors(plan) : plan;
+  Object.values(plan.anchors).some((anchor) => anchor !== undefined)
+    ? { ...plan, anchors: {} }
+    : plan;
 
-/** What the anchor layer says to a screen reader: each point, placed or at its default. */
-export function anchorNote(plan: BodyPlanChoice): string {
-  return templateAnchors(plan.template)
-    .map((name) => {
-      const { name: label, them } = ANCHOR_LABELS[name];
-      return plan.anchors[name]
-        ? `${label} placed. Click the drawing to move ${them}.`
-        : `${label} not placed, so the default position is used. Click the drawing to place ${them}.`;
-    })
-    .join(" ");
+/**
+ * The anchor a click on the drawing places: the one chosen if it is still shown, else the first.
+ * Undefined with no way of moving, as nothing is shown then.
+ */
+export const placingAnchor = (
+  shown: readonly AnchorName[],
+  chosen: AnchorName | undefined,
+): AnchorName | undefined => (chosen !== undefined && shown.includes(chosen) ? chosen : shown[0]);
+
+/**
+ * What the anchor layer says to a screen reader: each point, placed or at its default, and which
+ * one a click places.
+ */
+export function anchorNote(plan: BodyPlanChoice, placing: AnchorName | undefined): string {
+  const points = planAnchors(plan.locomotion).map((name) =>
+    plan.anchors[name]
+      ? `${ANCHOR_LABELS[name].name} placed.`
+      : `${ANCHOR_LABELS[name].name} not placed, so the default position is used.`,
+  );
+  if (placing === undefined) return points.join(" ");
+  const verb = plan.anchors[placing] ? "move" : "place";
+  return [...points, `Click the drawing to ${verb} the ${anchorWord(placing)}.`].join(" ");
 }
 
-/** `plan` with every anchor back where `defaultAnchor` puts it. */
-export const resetAnchors = (plan: BodyPlanChoice): BodyPlanChoice => ({ ...plan, anchors: {} });
+/** An anchor's name in running text: "center of gravity", "tail". */
+export const anchorWord = (name: AnchorName) => ANCHOR_LABELS[name].name.toLowerCase();
+
+/**
+ * `plan` with the points its ways of moving show back where `defaultAnchor` puts them. A placed
+ * point hidden by a way of moving that is off is kept, so it comes back with it.
+ */
+export function resetAnchors(plan: BodyPlanChoice): BodyPlanChoice {
+  const shown: readonly string[] = planAnchors(plan.locomotion);
+  const kept = Object.entries(plan.anchors).filter(([name]) => !shown.includes(name));
+  return { ...plan, anchors: Object.fromEntries(kept) };
+}
