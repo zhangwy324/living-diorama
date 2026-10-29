@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::placement::{
     Band, MonitorInfo, Move, NormalWindow, Rect, Shape, Situation, Trigger, choose_monitor,
     clamp_strip_height, decide, monitor_of, normal_window, strip_rect,
 };
-use crate::platform::{self, DisplayEvent, Platform};
+use crate::platform::{self, DisplayEvent, Platform, SessionEvent};
 use crate::settings::{self, Settings};
 use crate::tray;
 
@@ -97,6 +97,36 @@ struct SettingsFile {
     generation: AtomicU64,
 }
 
+/// How far quitting has got, apart from the shell's lock: the session-end wait reads it from inside
+/// a window procedure, where the lock may already be held further up the stack.
+#[derive(Default)]
+struct QuitProgress {
+    /// The OS session is ending, so the OS ends the process, not `app.exit` (ADR 0019 §4).
+    session_ending: AtomicBool,
+    /// The frontend has answered `quit-requested`.
+    frontend_done: AtomicBool,
+}
+
+impl QuitProgress {
+    /// Notes the frontend's answer; returns whether the app should exit now.
+    fn frontend_finished(&self) -> bool {
+        self.frontend_done.store(true, Ordering::SeqCst);
+        !self.session_ending.load(Ordering::SeqCst)
+    }
+
+    /// Notes that the session end was cancelled; returns whether the frontend has already
+    /// answered, so the app should exit now.
+    fn session_end_cancelled(&self) -> bool {
+        self.session_ending.store(false, Ordering::SeqCst);
+        self.frontend_done.load(Ordering::SeqCst)
+    }
+
+    /// Whether the quit timeout should exit the app; while the session ends, the OS does.
+    fn timeout_exits(&self) -> bool {
+        !self.session_ending.load(Ordering::SeqCst)
+    }
+}
+
 /// Loads the settings, turns the `main` window into the strip, creates the tray and shows the
 /// window, without activating it, once it is in place.
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -120,6 +150,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         path: Mutex::new(path),
         generation: AtomicU64::new(0),
     });
+    app.manage(QuitProgress::default());
 
     app.manage(PlatformState(platform::current()));
 
@@ -148,6 +179,22 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
         }),
     )?;
+    let ending = app.handle().clone();
+    let finishing = app.handle().clone();
+    // Without the hook the app still runs; the autosave then protects the world at session end.
+    if let Err(error) = platform.watch_session_end(
+        &window,
+        QUIT_TIMEOUT,
+        Box::new(move |event| on_session_event(&ending, event)),
+        Box::new(move || {
+            finishing
+                .state::<QuitProgress>()
+                .frontend_done
+                .load(Ordering::SeqCst)
+        }),
+    ) {
+        log::warn!("Could not watch for the end of the OS session: {error}");
+    }
     let watched = window.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => note_normal_window(&watched),
@@ -744,21 +791,52 @@ pub fn quit(app: &AppHandle) {
     save_now(app);
     if let Err(error) = app.emit_to(MAIN, QUIT_REQUESTED, ()) {
         log::warn!("Could not ask the frontend to shut down: {error}");
-        app.exit(0);
+        // As if it had answered: no answer will come.
+        if app.state::<QuitProgress>().frontend_finished() {
+            app.exit(0);
+        }
         return;
     }
+    exit_after_timeout(app);
+}
+
+/// Exits after `QUIT_TIMEOUT` unless the OS session is ending by then, in which case the OS ends
+/// the process.
+fn exit_after_timeout(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(QUIT_TIMEOUT);
-        log::warn!("The frontend did not shut down in time, exiting anyway");
-        app.exit(0);
+        if app.state::<QuitProgress>().timeout_exits() {
+            log::warn!("The frontend did not shut down in time, exiting anyway");
+            app.exit(0);
+        }
     });
+}
+
+/// Shutdown, restart and sign-out go through Quit, but the OS ends the process once the frontend
+/// has answered or `QUIT_TIMEOUT` has passed (ADR 0019 §4). A cancelled session end leaves the
+/// quit to finish as Quit does: the frontend has already shut down.
+fn on_session_event(app: &AppHandle, event: SessionEvent) {
+    let progress = app.state::<QuitProgress>();
+    match event {
+        SessionEvent::Ending => {
+            progress.session_ending.store(true, Ordering::SeqCst);
+            quit(app);
+        }
+        SessionEvent::Cancelled => {
+            if progress.session_end_cancelled() {
+                app.exit(0);
+            } else {
+                exit_after_timeout(app);
+            }
+        }
+    }
 }
 
 /// The frontend's commands that share a name with an action above; a command is named after its
 /// function.
 pub mod commands {
-    use tauri::{AppHandle, WebviewWindow};
+    use tauri::{AppHandle, Manager, WebviewWindow};
 
     #[tauri::command]
     pub fn set_paused(app: AppHandle, paused: bool) {
@@ -780,11 +858,14 @@ pub mod commands {
         super::hide(&app);
     }
 
-    /// The strip's answer to `quit-requested`: it has shut down, so the app exits.
+    /// The strip's answer to `quit-requested`: it has shut down, so the app exits, or, while the
+    /// OS session ends, the OS ends it.
     #[tauri::command]
     pub fn quit_ready(app: AppHandle, window: WebviewWindow) {
         if super::accepts_quit_ready(window.label()) {
-            app.exit(0);
+            if app.state::<super::QuitProgress>().frontend_finished() {
+                app.exit(0);
+            }
         } else {
             log::warn!("Ignored quit_ready from the {} window", window.label());
         }
@@ -864,11 +945,42 @@ fn accepts_quit_ready(label: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::accepts_quit_ready;
+    use super::{QuitProgress, accepts_quit_ready};
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn only_the_strip_answers_quit() {
         assert!(accepts_quit_ready("main"));
         assert!(!accepts_quit_ready("studio"));
+    }
+
+    #[test]
+    fn a_quit_exits_on_the_answer_or_the_timeout() {
+        let progress = QuitProgress::default();
+        assert!(progress.timeout_exits());
+        assert!(progress.frontend_finished());
+    }
+
+    #[test]
+    fn at_session_end_the_os_ends_the_process() {
+        let progress = QuitProgress::default();
+        progress.session_ending.store(true, Ordering::SeqCst);
+        assert!(!progress.timeout_exits());
+        assert!(!progress.frontend_finished());
+        assert!(progress.frontend_done.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_cancelled_session_end_finishes_the_quit() {
+        let answered = QuitProgress::default();
+        answered.session_ending.store(true, Ordering::SeqCst);
+        answered.frontend_finished();
+        assert!(answered.session_end_cancelled());
+
+        let waiting = QuitProgress::default();
+        waiting.session_ending.store(true, Ordering::SeqCst);
+        assert!(!waiting.session_end_cancelled());
+        assert!(waiting.timeout_exits());
+        assert!(waiting.frontend_finished());
     }
 }

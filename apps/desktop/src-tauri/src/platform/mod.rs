@@ -3,6 +3,7 @@
 //! here and nothing else changes.
 
 use std::path::Path;
+use std::time::Duration;
 
 use tauri::WebviewWindow;
 
@@ -19,6 +20,15 @@ pub enum DisplayEvent {
     /// A full-screen app opened (`true`) or the last one closed (`false`). Reported only while the
     /// strip reserves space.
     FullScreen(bool),
+}
+
+/// What `Platform::watch_session_end` reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionEvent {
+    /// The OS session is ending: shutdown, restart or sign-out. The OS ends the process soon after.
+    Ending,
+    /// The session end reported by `Ending` was cancelled, so the process lives on.
+    Cancelled,
 }
 
 pub trait Platform: Send + Sync {
@@ -48,6 +58,18 @@ pub trait Platform: Send + Sync {
         &self,
         window: &WebviewWindow,
         on_event: Box<dyn Fn(DisplayEvent) + 'static>,
+    ) -> tauri::Result<()>;
+
+    /// Calls `on_event` on the main thread when the OS session starts to end, and if that end is
+    /// cancelled. While it ends, the process is held back until `finished` returns true or
+    /// `timeout` has passed since `Ending`, whichever comes first; then the OS ends it. Call once,
+    /// on the main thread.
+    fn watch_session_end(
+        &self,
+        window: &WebviewWindow,
+        timeout: Duration,
+        on_event: Box<dyn Fn(SessionEvent) + 'static>,
+        finished: Box<dyn Fn() -> bool + 'static>,
     ) -> tauri::Result<()>;
 
     /// The area along the bottom of a monitor that the strip may reserve, left by the taskbar and
@@ -113,6 +135,16 @@ impl Platform for Unsupported {
         &self,
         _window: &WebviewWindow,
         _on_event: Box<dyn Fn(DisplayEvent) + 'static>,
+    ) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    fn watch_session_end(
+        &self,
+        _window: &WebviewWindow,
+        _timeout: Duration,
+        _on_event: Box<dyn Fn(SessionEvent) + 'static>,
+        _finished: Box<dyn Fn() -> bool + 'static>,
     ) -> tauri::Result<()> {
         Ok(())
     }

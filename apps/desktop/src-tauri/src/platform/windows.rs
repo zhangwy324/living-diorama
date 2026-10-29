@@ -1,13 +1,15 @@
-//! Windows implementation. Both hooks are window subclasses on the strip's top-level window:
-//! Tauri's own window procedure still runs for every message, the subclasses only look first.
-//! Reserving space registers the strip as an AppBar (`SHAppBarMessage`), the mechanism the taskbar
-//! itself uses, so the shell shrinks other windows' work area.
+//! Windows implementation. The hooks are window subclasses: Tauri's own window procedure still
+//! runs for every message, the subclasses only look first. Two are on the strip's top-level window,
+//! the session-end one on tao's hidden event-loop window. Reserving space registers the strip as an
+//! AppBar (`SHAppBarMessage`), the mechanism the taskbar itself uses, so the shell shrinks other
+//! windows' work area.
 
 use std::cell::Cell;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tauri::WebviewWindow;
 use windows::Wdk::System::SystemServices::RtlGetVersion;
@@ -16,23 +18,28 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAK, DWMWA_CLOAKED, DWMWA_TRANSITIONS_FORCEDISABLED, DwmGetWindowAttribute,
     DwmSetWindowAttribute,
 };
+use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use windows::Win32::UI::Shell::{
     ABE_BOTTOM, ABM_ACTIVATE, ABM_GETAUTOHIDEBAREX, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
     ABM_WINDOWPOSCHANGED, ABN_FULLSCREENAPP, ABN_POSCHANGED, APPBARDATA, DefSubclassProc,
     RemoveWindowSubclass, SHAppBarMessage, SetWindowSubclass,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId,
-    IsIconic, IsWindow, IsWindowVisible, PostMessageW, SPI_SETWORKAREA, STYLESTRUCT,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-    SetWindowLongPtrW, SetWindowPos, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE,
-    WM_DPICHANGED, WM_NCDESTROY, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGED,
+    DispatchMessageW, EnumThreadWindows, EnumWindows, GWL_EXSTYLE, GetClassNameW,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    IsWindowVisible, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
+    PeekMessageW, PostMessageW, PostQuitMessage, QS_ALLINPUT, ReplyMessage, SPI_SETWORKAREA,
+    STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, TranslateMessage, WA_INACTIVE,
+    WM_ACTIVATE, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ENDSESSION, WM_NCDESTROY,
+    WM_QUERYENDSESSION, WM_QUIT, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGED,
     WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
+use windows::core::w;
 
-use super::{DisplayEvent, Platform};
+use super::{DisplayEvent, Platform, SessionEvent};
 use crate::placement::Rect;
 
 #[derive(Default)]
@@ -56,6 +63,11 @@ static NORMAL_SHAPE: AtomicBool = AtomicBool::new(false);
 
 const STRIP_STYLE_SUBCLASS: usize = 1;
 const DISPLAY_SUBCLASS: usize = 2;
+/// On tao's event-loop window, not the strip, but kept apart from the strip's IDs all the same.
+const SESSION_END_SUBCLASS: usize = 3;
+/// The class of the hidden window tao's event loop runs on. It is the window that exits the
+/// process on `WM_ENDSESSION` (tao 0.37), so the session end is held back there.
+const TAO_EVENT_TARGET_CLASS: &str = "Tao Thread Event Target";
 /// Posted to ourselves so `on_event` runs from the message loop, not inside the handling of
 /// the message that triggered it (Tauri runs window calls synchronously on the main thread).
 const WM_DISPLAYS_CHANGED: u32 = WM_APP + 1;
@@ -133,6 +145,41 @@ impl Platform for Windows {
         }));
         let result =
             unsafe { subclass(hwnd, Some(display_proc), DISPLAY_SUBCLASS, watcher as usize) };
+        if result.is_err() {
+            drop(unsafe { Box::from_raw(watcher) });
+        }
+        result
+    }
+
+    fn watch_session_end(
+        &self,
+        window: &WebviewWindow,
+        timeout: Duration,
+        on_event: Box<dyn Fn(SessionEvent) + 'static>,
+        finished: Box<dyn Fn() -> bool + 'static>,
+    ) -> tauri::Result<()> {
+        let strip = hwnd(window)?;
+        let target = event_target_window().ok_or_else(|| {
+            tauri::Error::Io(std::io::Error::other(format!(
+                "no {TAO_EVENT_TARGET_CLASS:?} window on the main thread"
+            )))
+        })?;
+        let watcher = Box::into_raw(Box::new(SessionWatcher {
+            strip,
+            timeout,
+            on_event,
+            finished,
+            started: Cell::new(None),
+            waiting: Cell::new(false),
+        }));
+        let result = unsafe {
+            subclass(
+                target,
+                Some(session_end_proc),
+                SESSION_END_SUBCLASS,
+                watcher as usize,
+            )
+        };
         if result.is_err() {
             drop(unsafe { Box::from_raw(watcher) });
         }
@@ -482,9 +529,251 @@ fn request(hwnd: HWND, watcher: &DisplayWatcher) {
     }
 }
 
+/// The session-end hook's state, in its window procedure's data on the main thread.
+struct SessionWatcher {
+    /// The strip: the window Windows names when it shows why the session end waits.
+    strip: HWND,
+    timeout: Duration,
+    on_event: Box<dyn Fn(SessionEvent)>,
+    finished: Box<dyn Fn() -> bool>,
+    /// When the session started to end, while it is ending.
+    started: Cell<Option<Instant>>,
+    /// Set while `WM_ENDSESSION` waits. The wait runs the thread's messages, so the window
+    /// procedure is entered again meanwhile.
+    waiting: Cell<bool>,
+}
+
+impl SessionWatcher {
+    /// Reports `Ending`, the first time only.
+    fn begin(&self) {
+        if self.started.get().is_some() {
+            return;
+        }
+        // Before reporting, so a session-end message arriving while `on_event` runs sees it.
+        self.started.set(Some(Instant::now()));
+        if let Err(error) = unsafe { ShutdownBlockReasonCreate(self.strip, w!("Saving the world")) }
+        {
+            log::warn!("Could not tell Windows why the session end waits: {error}");
+        }
+        log::info!("The Windows session is ending; saving the world");
+        (self.on_event)(SessionEvent::Ending);
+    }
+
+    /// Forgets the session end, if one started.
+    fn end(&self) {
+        if self.started.take().is_some() {
+            let _ = unsafe { ShutdownBlockReasonDestroy(self.strip) };
+        }
+    }
+}
+
+/// What the session-end hook does with a message.
+#[derive(Debug, PartialEq, Eq)]
+enum SessionStep {
+    /// `WM_QUERYENDSESSION`: agree at once, then start the save.
+    Begin,
+    /// `WM_ENDSESSION`, ending: wait for the save, at most until the timeout, then let tao exit.
+    Wait,
+    /// `WM_ENDSESSION` again during that wait: answered here, so tao doesn't exit under the wait.
+    Swallow,
+    /// `WM_ENDSESSION`, cancelled, after the session started to end.
+    Cancel,
+    /// Everything else goes on to tao.
+    Pass,
+}
+
+fn session_step(msg: u32, ending: bool, started: bool, waiting: bool) -> SessionStep {
+    match msg {
+        WM_QUERYENDSESSION => SessionStep::Begin,
+        WM_ENDSESSION if ending && waiting => SessionStep::Swallow,
+        WM_ENDSESSION if ending => SessionStep::Wait,
+        WM_ENDSESSION if started => SessionStep::Cancel,
+        _ => SessionStep::Pass,
+    }
+}
+
+/// On tao's event-loop window. Windows asks with `WM_QUERYENDSESSION`, then ends the session with
+/// `WM_ENDSESSION`, after which tao exits the process at once. Answering the query first lets the
+/// save start outside Windows' sent message; the end then waits for it, running the thread's
+/// messages as a modal loop does, so the web view and Tauri's commands keep working.
+unsafe extern "system" fn session_end_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    id: usize,
+    data: usize,
+) -> LRESULT {
+    if msg == WM_NCDESTROY {
+        unsafe {
+            let _ = RemoveWindowSubclass(hwnd, Some(session_end_proc), id);
+            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            drop(Box::from_raw(data as *mut SessionWatcher));
+            return result;
+        }
+    }
+    let watcher = unsafe { &*(data as *const SessionWatcher) };
+    let step = session_step(
+        msg,
+        wparam.0 != 0,
+        watcher.started.get().is_some(),
+        watcher.waiting.get(),
+    );
+    match step {
+        SessionStep::Begin => {
+            let _ = unsafe { ReplyMessage(LRESULT(1)) };
+            watcher.begin();
+            return LRESULT(1);
+        }
+        SessionStep::Wait => {
+            // Without a query first, as with a forced sign-out, the end is the first word.
+            watcher.begin();
+            watcher.waiting.set(true);
+            let started = watcher.started.get().unwrap_or_else(Instant::now);
+            if !pump_until(started + watcher.timeout, &*watcher.finished) {
+                log::warn!("The world was not saved in time; letting the session end");
+            }
+            watcher.waiting.set(false);
+            watcher.end();
+            // tao exits the process now.
+        }
+        SessionStep::Swallow => return LRESULT(0),
+        SessionStep::Cancel => {
+            watcher.end();
+            log::info!("The Windows session end was cancelled");
+            (watcher.on_event)(SessionEvent::Cancelled);
+        }
+        SessionStep::Pass => {}
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// Runs the thread's messages until `done` returns true or `deadline` passes; returns whether
+/// `done` did. A `WM_QUIT` is put back for the outer loop and ends the wait.
+fn pump_until(deadline: Instant, done: &dyn Fn() -> bool) -> bool {
+    loop {
+        if done() {
+            return true;
+        }
+        let Some(left) = remaining(deadline, Instant::now()) else {
+            return false;
+        };
+        unsafe {
+            MsgWaitForMultipleObjectsEx(None, wait_millis(left), QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+        };
+        let mut msg = MSG::default();
+        while remaining(deadline, Instant::now()).is_some()
+            && unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool()
+        {
+            if msg.message == WM_QUIT {
+                unsafe { PostQuitMessage(msg.wParam.0 as i32) };
+                return done();
+            }
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            if done() {
+                return true;
+            }
+        }
+    }
+}
+
+/// The time left until `deadline`, or `None` once it has come.
+fn remaining(deadline: Instant, now: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|left| !left.is_zero())
+}
+
+/// A wait in whole milliseconds that doesn't end before `left` does, never 0 (a busy loop) nor
+/// `INFINITE`.
+fn wait_millis(left: Duration) -> u32 {
+    left.as_nanos()
+        .div_ceil(1_000_000)
+        .clamp(1, u128::from(u32::MAX - 1)) as u32
+}
+
+/// tao's event-loop window on this thread, if there is one.
+fn event_target_window() -> Option<HWND> {
+    unsafe extern "system" fn visit(hwnd: HWND, found: LPARAM) -> windows::core::BOOL {
+        let mut name = [0u16; 64];
+        let length = unsafe { GetClassNameW(hwnd, &mut name) }.max(0) as usize;
+        if is_event_target_class(&name[..length]) {
+            unsafe { *(found.0 as *mut Option<HWND>) = Some(hwnd) };
+            return false.into();
+        }
+        true.into()
+    }
+    let mut found: Option<HWND> = None;
+    // Stopping early reports an error; `found` says whether the window was found.
+    let _ = unsafe {
+        EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(visit),
+            LPARAM((&raw mut found) as isize),
+        )
+    };
+    found
+}
+
+fn is_event_target_class(name: &[u16]) -> bool {
+    String::from_utf16_lossy(name) == TAO_EVENT_TARGET_CLASS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_end_waits_once_and_cancels_only_what_started() {
+        use SessionStep::*;
+        assert_eq!(session_step(WM_QUERYENDSESSION, false, false, false), Begin);
+        assert_eq!(session_step(WM_QUERYENDSESSION, false, true, true), Begin);
+        assert_eq!(session_step(WM_ENDSESSION, true, true, false), Wait);
+        // A forced end comes without a query.
+        assert_eq!(session_step(WM_ENDSESSION, true, false, false), Wait);
+        assert_eq!(session_step(WM_ENDSESSION, true, true, true), Swallow);
+        assert_eq!(session_step(WM_ENDSESSION, false, true, false), Cancel);
+        assert_eq!(session_step(WM_ENDSESSION, false, false, false), Pass);
+        assert_eq!(session_step(WM_ACTIVATE, true, true, false), Pass);
+    }
+
+    #[test]
+    fn the_wait_ends_at_the_deadline() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(3000);
+        assert_eq!(remaining(deadline, now), Some(Duration::from_millis(3000)));
+        assert_eq!(remaining(deadline, deadline), None);
+        assert_eq!(
+            remaining(deadline, deadline + Duration::from_millis(1)),
+            None
+        );
+    }
+
+    #[test]
+    fn waits_whole_milliseconds_rounded_up() {
+        assert_eq!(wait_millis(Duration::from_nanos(1)), 1);
+        assert_eq!(wait_millis(Duration::from_micros(1500)), 2);
+        assert_eq!(wait_millis(Duration::from_secs(3)), 3000);
+        assert_eq!(wait_millis(Duration::from_secs(u64::MAX)), u32::MAX - 1);
+    }
+
+    #[test]
+    fn a_wait_that_never_finishes_stops_at_the_deadline() {
+        let start = Instant::now();
+        assert!(!pump_until(start + Duration::from_millis(50), &|| false));
+        assert!(start.elapsed() >= Duration::from_millis(50));
+        assert!(pump_until(start + Duration::from_secs(10), &|| true));
+    }
+
+    #[test]
+    fn finds_tao_by_its_window_class() {
+        let class: Vec<u16> = TAO_EVENT_TARGET_CLASS.encode_utf16().collect();
+        assert!(is_event_target_class(&class));
+        assert!(!is_event_target_class(&class[..class.len() - 1]));
+    }
 
     #[test]
     fn strip_style_is_a_tool_window_without_app_window() {
