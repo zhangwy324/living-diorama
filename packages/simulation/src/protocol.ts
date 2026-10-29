@@ -93,7 +93,7 @@ export type RequestCommand =
   | { type: "edit"; requestId?: string; edit: unknown }
   /**
    * What an edit would do, without doing it (ADR 0021 §10), answered by `edit_checked`, also when
-   * the edit would be refused. Never answered by `rejected`.
+   * the edit would be refused. Answered by `rejected` (`edit_failed`) only if checking it threw.
    */
   | { type: "validate_edit"; requestId?: string; edit: unknown };
 
@@ -368,7 +368,7 @@ export type SimulationMessage =
    * for `catch_up`, `invalid_gap` or `invalid_time_of_day`; for `edit`, the shape's (from
    * `parseWorldEdit`) or why the edit doesn't fit the world (e.g. `unknown_placement`,
    * `placement_id_in_use`, `unknown_prop`, `outside_world`, `edit_breaks_navigation`,
-   * `no_relocation`).
+   * `no_relocation`), or `edit_failed` if applying or checking it threw, which changes nothing.
    */
   | {
       type: "rejected";

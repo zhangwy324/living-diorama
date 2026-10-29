@@ -499,6 +499,11 @@ export class Simulation {
    * and failed attempts to reach a placement the edit moved or scaled are forgotten, since they
    * were about where it stood before; other back-offs are kept. Every action that carries on
    * plans its route again (`ActionProvider.replan`) and is interrupted if it has none.
+   *
+   * Never throws: it runs after the new world is swapped in, so every pack-supplied hook it calls
+   * (`target`, `checkState`, `interrupted`, `replan`, `forgetPlacements`) is guarded, and one
+   * that throws ends that creature's action (or loses that memory) instead. A throw from
+   * `applyEdit` therefore comes from planning, before anything changed.
    */
   #reconcile(plan: PlannedEdit) {
     const exists = placementExists(this.state.model);
@@ -523,13 +528,14 @@ export class Simulation {
       const running = creature.action;
       if (running) {
         const provider = this.#actions.get(running.id);
-        let hit = to !== undefined || touched(provider?.target?.(running.state));
-        if (!hit && provider?.checkState) {
-          try {
-            hit = !provider.checkState(running.state, exists);
-          } catch {
-            hit = true;
-          }
+        // A hook that throws counts as a hit: the action is dropped rather than the edit failing
+        // half way, since the world is already swapped in.
+        let hit = to !== undefined;
+        try {
+          hit ||= touched(provider?.target?.(running.state));
+          if (!hit && provider?.checkState) hit = !provider.checkState(running.state, exists);
+        } catch {
+          hit = true;
         }
         if (hit) interrupt(running);
       }

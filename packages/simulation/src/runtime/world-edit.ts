@@ -33,7 +33,7 @@ export interface PlannedEdit {
   derived: DerivedWorld;
   /** The generated-ID counter after the edit. */
   nextPropId: number;
-  /** Placements that were there before and that the edit moved, turned or scaled. */
+  /** Placements that were there before and that the edit moved or scaled (not only turned). */
   changed: ReadonlySet<string>;
   /** Placements that were there before and that the edit removed. */
   removed: ReadonlySet<string>;

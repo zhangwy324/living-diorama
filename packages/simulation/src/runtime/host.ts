@@ -82,6 +82,21 @@ export function describeContent({ state }: Simulation): WorldContent {
   };
 }
 
+/**
+ * Runs an edit or a dry run, turning a throw (a bug, or a pack hook that throws while the edit is
+ * planned) into a rejection with `edit_failed`.
+ */
+function guardEdit<T extends { ok: boolean }>(
+  run: () => T,
+): T | { ok: false; diagnostics: Diagnostic[] } {
+  try {
+    return run();
+  } catch (cause) {
+    const message = `The edit failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return { ok: false, diagnostics: [error("edit_failed", message, [], "world edit")] };
+  }
+}
+
 /** Checks the options and the untrusted save text, then restores; never throws on either. */
 function restoreSave(
   sim: Simulation,
@@ -334,7 +349,9 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       }
       case "edit": {
         const parsed = parseWorldEdit(command.edit, "world edit");
-        const result = parsed.ok ? sim.applyEdit(parsed.value) : parsed;
+        // `applyEdit` throws only while planning, before anything changed (`#reconcile` never
+        // throws), so a throw is a rejection and the world goes on as it was.
+        const result = parsed.ok ? guardEdit(() => sim.applyEdit(parsed.value)) : parsed;
         if (!result.ok) {
           diagnostics = [...result.diagnostics];
           break;
@@ -348,7 +365,11 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       }
       case "validate_edit": {
         const parsed = parseWorldEdit(command.edit, "world edit");
-        const check = parsed.ok ? sim.validateEdit(parsed.value) : parsed;
+        const check = parsed.ok ? guardEdit(() => sim.validateEdit(parsed.value)) : parsed;
+        if (!check.ok && check.diagnostics.some((d) => d.code === "edit_failed")) {
+          diagnostics = [...check.diagnostics];
+          break;
+        }
         send({ type: "edit_checked", ...requestId, check });
         return;
       }

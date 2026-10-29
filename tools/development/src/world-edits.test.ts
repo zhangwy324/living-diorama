@@ -12,6 +12,7 @@ import {
   assignPlacementIds,
   hungerNeed,
   Simulation,
+  type ActionProvider,
   type EditEnvironment,
   type PathState,
   type SimulationEvent,
@@ -148,6 +149,48 @@ describe("applying an edit to a world definition", () => {
     expect(next).toBe(5);
   });
 
+  it("counts a turn alone as no change to the placement, but still turns it", () => {
+    const result = applyWorldEdit(
+      world,
+      assignPlacementIds(world, edit({ ops: [{ op: "prop.move", id: "pine-1", rotationY: 2 }] }), 1)
+        .edit,
+      env,
+    );
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    expect(result.value.changed).toEqual([]);
+    expect(result.value.world.props.find((p) => p.id === "pine-1")?.transform.rotationY).toBe(2);
+    expect(result.value.inverse.ops).toEqual([
+      { op: "prop.move", id: "pine-1", rotationY: pine.transform.rotationY },
+    ]);
+  });
+
+  it("counts a placement removed and added back under its ID as changed", () => {
+    const result = applyWorldEdit(
+      world,
+      assignPlacementIds(
+        world,
+        edit({
+          ops: [
+            { op: "prop.remove", id: "bush-1" },
+            { op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 }, id: "bush-1" },
+          ],
+        }),
+        1,
+      ).edit,
+      env,
+    );
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    const { added, changed, removed, world: edited, inverse } = result.value;
+    expect([added, changed, removed]).toEqual([[], ["bush-1"], []]);
+    expect(edited.props.filter((p) => p.id === "bush-1")).toMatchObject([{ prop: "hollow:rock" }]);
+    // Undone: the rock goes, and the bush comes back.
+    const undone = applyWorldEdit(edited, inverse, env);
+    if (!undone.ok) throw new Error(undone.diagnostics.map(formatDiagnostic).join("\n"));
+    expect(undone.value.world.props.filter((p) => p.id === "bush-1")).toMatchObject([
+      { prop: "hollow:bush" },
+    ]);
+  });
+
   it("refuses the whole edit when an op doesn't fit the world", () => {
     const refused = (input: WorldEditInput) => {
       const result = applyWorldEdit(world, assignPlacementIds(world, edit(input), 1).edit, env);
@@ -185,6 +228,26 @@ describe("applying an edit to a world definition", () => {
 });
 
 describe("Simulation edits", () => {
+  it("doesn't interrupt an action at a placement that is only turned", () => {
+    const simulation = hollowSim();
+    const creature = spawn(simulation, MOSSLING, "meadow");
+    creature.needs[hungerNeed.id] = 0.95;
+    simulation.step();
+    expect(creature.action).toMatchObject({ id: "core:eat" });
+    const target = (creature.action!.state as { placementId: string }).placementId;
+    const known = creature.knowledge.places["core:food"]!.find((p) => p.placementId === target)!;
+    known.failures = { noRoute: 1, stuck: 0, retryTick: 0, cell: { x: 0, z: 0 } };
+    const action = creature.action;
+    const result = simulation.applyEdit(
+      edit({ ops: [{ op: "prop.move", id: target, rotationY: 1 }] }),
+    );
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    expect(creature.action).toBe(action);
+    expect(known.failures).toBeDefined();
+    expect(result.footprints).toEqual([]);
+    expect(simulation.state.model.propsById.get(target)?.transform.rotationY).toBe(1);
+  });
+
   it("validates without changing anything, then applies what it validated", () => {
     const simulation = hollowSim();
     spawn(simulation, MOSSLING, "meadow");
@@ -508,5 +571,83 @@ describe("Simulation edits", () => {
     expect(b.events).toEqual(a.events);
     expect(b.results).toEqual(a.results);
     expect(b.model.definition).toEqual(a.model.definition);
+  });
+});
+
+describe("edits and actions from other packs", () => {
+  const throwing = (id: string, hooks: Partial<ActionProvider>): ActionProvider => ({
+    id,
+    version: "1.0.0",
+    start: () => ({ ok: true, state: {} }),
+    step: () => ({ status: "running" }),
+    ...hooks,
+  });
+  /** A path walker without `replan`, as a third-party action may be. */
+  const stroll: ActionProvider = {
+    id: "test:stroll",
+    version: "1.0.0",
+    start: () => ({ ok: true, state: { points: [], next: 0 } }),
+    step: (state, context) =>
+      context.walk(state as PathState) === "arrived" ? { status: "done" } : { status: "running" },
+  };
+  const actions = [
+    throwing("test:bad-target", {
+      target: () => {
+        throw new Error("target");
+      },
+    }),
+    throwing("test:bad-interrupt", {
+      target: () => "rock-1",
+      interrupted: () => {
+        throw new Error("interrupted");
+      },
+    }),
+    stroll,
+  ];
+  const setUp = () => {
+    const simulation = createSimulation({
+      register: (r: Registries) => {
+        registerBuiltInContent(r);
+        for (const action of actions) r.actions.register(action);
+      },
+      worldId: HOLLOW.worldId,
+      seed: 1,
+    });
+    const creatures = ["test:bad-target", "test:bad-interrupt", "test:stroll"].map((id) => {
+      const creature = spawn(simulation, MOSSLING, "meadow");
+      const { x, z, regionId } = creature.position;
+      const state =
+        id === "test:stroll" ? { points: [{ regionId, x: x + 3, z }], next: 0 } : { n: 1 };
+      creature.action = { id, behavior: "core:wander", state, startTick: 0 };
+      return creature;
+    });
+    return { simulation, creatures };
+  };
+
+  it("drops an action whose target or interrupted hook throws, and applies the edit", () => {
+    const { simulation, creatures } = setUp();
+    const [badTarget, badInterrupt] = creatures;
+    const result = simulation.applyEdit(edit({ ops: [{ op: "prop.remove", id: "rock-1" }] }));
+    expect(result.ok).toBe(true);
+    expect(simulation.state.model.propsById.has("rock-1")).toBe(false);
+    for (const creature of [badTarget!, badInterrupt!]) {
+      expect(creature.action).toBeUndefined();
+      expect(creature.lastResult).toMatchObject({ outcome: "interrupted", reason: "world_edited" });
+    }
+    simulation.step();
+  });
+
+  it("leaves an action without replan to carry on with its state as it was", () => {
+    const { simulation, creatures } = setUp();
+    const strolling = creatures[2]!;
+    const state = strolling.action!.state;
+    const before = JSON.stringify(state);
+    expect(
+      simulation.applyEdit(
+        edit({ ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: -20, z: 5 } }] }),
+      ).ok,
+    ).toBe(true);
+    expect(strolling.action?.state).toBe(state);
+    expect(JSON.stringify(state)).toBe(before);
   });
 });

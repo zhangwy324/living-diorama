@@ -34,9 +34,13 @@ export interface EditedWorld {
   world: WorldDefinition;
   /** Each op's inverse, in reverse order; exact up to the ground snap. */
   inverse: AppliedWorldEdit;
-  /** Placements the edit added and still has, in the order first named. */
+  /** Placements the edit added and still has, in the order first named. One removed and added
+   * back under the same ID counts as changed, not added. */
   added: string[];
-  /** Placements that were there before and that it moved, turned or scaled, and still has. */
+  /**
+   * Placements that were there before and that it moved or scaled, and still has. One only turned
+   * isn't listed: its footprint and spots stay where they were.
+   */
   changed: string[];
   /** Placements that were there before and that it removed. */
   removed: string[];
@@ -181,7 +185,9 @@ export function applyWorldEdit(
           ...(op.position && { position: { x: position.x, z: position.z } }),
           ...(op.rotationY !== undefined && { rotationY }),
         });
-        touched.push(op.id);
+        // A turn alone leaves the footprint and every spot where they were (spots don't depend on
+        // a prop's rotation), so only a move counts as changing the placement.
+        if (op.position) touched.push(op.id);
         break;
       }
       case "prop.scale":
