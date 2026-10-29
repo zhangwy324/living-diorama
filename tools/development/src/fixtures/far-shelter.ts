@@ -4,8 +4,9 @@ import type { Registries } from "@living-diorama/extension-api";
 // A tiny synthetic world for a home a creature can't get to (issue #171): a meadow sloping down
 // into a pond to the west, a round tree standing in the pond, and another round tree out in the
 // meadow to the east, too far to see from where the creature starts. The wader walks well but
-// barely swims, so the stuck watchdog stops every trip to the tree in the pond, just after it
-// jumps in. Swimming that slowly, it may then not get back out either. Used by tests.
+// makes no headway in water, so the stuck watchdog stops every trip to the tree in the pond right
+// where it lands after jumping in. It hasn't moved from there, so its way out starts with the
+// jump back. Used by tests.
 
 const rect = (x0: number, z0: number, x1: number, z1: number): Vec2[] => [
   { x: x0, z: z0 },
@@ -86,7 +87,10 @@ export const fixtureRoundTree = {
   affordances: { "core:shelter": {} },
 };
 
-/** Walks like a mossling but swims at a thousandth of that, too slow for the stuck watchdog. */
+/**
+ * Walks like a mossling. Its swim speed is too small to move it at all (each step rounds away),
+ * so in water it stays exactly where it landed: stuck, but never stranded.
+ */
 export const wader = {
   schemaVersion: 1,
   id: "fixture:wader",
@@ -94,7 +98,7 @@ export const wader = {
   name: "Wader",
   appearance: "fixture:sprites/wader.png",
   sizeClass: "medium",
-  capabilities: { "core:land": 1, "core:swim": 0.001 },
+  capabilities: { "core:land": 1, "core:swim": 1e-20 },
   baseSpeed: 0.6,
   behaviors: ["core:rest"],
   senses: { "core:vision": 8 },

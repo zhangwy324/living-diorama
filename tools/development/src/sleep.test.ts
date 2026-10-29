@@ -1548,9 +1548,9 @@ describe("a home it can't get to (issue #171)", () => {
       });
     }
     const events: SimulationEvent[] = [];
-    /** Runs `ticks`, or until it is asleep, if `untilAsleep`. */
-    const run = (ticks: number, untilAsleep = true) => {
-      for (let t = 0; t < ticks && !(untilAsleep && creature.asleep); t++) {
+    /** Runs `ticks`, or until `done`: by default, until it is asleep. */
+    const run = (ticks: number, done = () => creature.asleep) => {
+      for (let t = 0; t < ticks && !done(); t++) {
         simulation.setTimeOfDay(
           minutesAfter(START, (simulation.tick * 1000) / simulation.tickRateHz),
         );
@@ -1602,28 +1602,28 @@ describe("a home it can't get to (issue #171)", () => {
     expect(creature.home).toBe("pond-tree");
   });
 
-  it("with home backed off at bedtime, searches at once, and mostly finds the tree", () => {
-    const found = [1, 2, 3, 4, 5, 6, 7, 8].filter((seed) => {
-      const { creature, run, of, started } = wading(seed, SEARCH_AFTER_SHELTER_FAILURES, 0);
-      run(DAY);
-      // Searches rather than sleep in the open: at the tree once seen, else in the open after
-      // its three walks.
-      const tries = started();
-      expect(tries.slice(0, -1).every((t) => t === "search")).toBe(true);
-      expect(tries.length).toBeGreaterThan(1);
-      expect(tries.length).toBeLessThanOrEqual(SHELTER_SEARCH_RADII.length + 1);
-      expect(creature.asleep).toBe(true);
-      expect(of("fell_asleep")[0]!.tick).toBeLessThan(36_000);
-      expect(creature.home).toBe(tries.at(-1) ?? "pond-tree");
-      return creature.home === "meadow-tree";
-    });
-    expect(found.length).toBeGreaterThanOrEqual(6);
+  it("moves to the tree within four nights, whatever the seed", { timeout: 120_000 }, () => {
+    const SEEDS = Array.from({ length: 32 }, (_, k) => k + 1);
+    for (const failedAt of [-DAY, 0]) {
+      for (const seed of SEEDS) {
+        const { creature, run, started } = wading(seed, SEARCH_AFTER_SHELTER_FAILURES, failedAt);
+        run(4 * DAY, () => creature.asleep && creature.home === "meadow-tree");
+        expect([failedAt, seed, creature.home, creature.asleep]).toEqual([
+          failedAt,
+          seed,
+          "meadow-tree",
+          true,
+        ]);
+        // With home backed off at bedtime, it searches at once instead of sleeping in the open.
+        if (failedAt === 0) expect([seed, started()[0]]).toEqual([seed, "search"]);
+      }
+    }
   });
 
   it("does the same for the same seed", { timeout: 30_000 }, () => {
     const outcome = (seed: number) => {
       const { creature, events, run } = wading(seed, SEARCH_AFTER_SHELTER_FAILURES);
-      run(2 * DAY, false);
+      run(2 * DAY, () => false);
       return { events, creature: JSON.stringify(creature) };
     };
     const first = outcome(5);
@@ -1639,7 +1639,7 @@ describe("a home it can't get to (issue #171)", () => {
     expect(started()).toEqual(["pond-tree"]);
     const before = structuredClone(failuresOf(creature));
     simulation.catchUp({ gapMs: 3 * 3_600_000, minutes: 0 });
-    run(600, false);
+    run(600, () => false);
     expect(failuresOf(creature)).toEqual(before);
     expect(started()).toEqual(["pond-tree"]);
     expect(creature.asleep).toBe(true);

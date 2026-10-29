@@ -201,7 +201,9 @@ export function chooseShelter(
 ): PlaceChoice | undefined {
   const { home, world } = observation;
   let routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id) || failing.has(id));
-  if (routed.length === 0) routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id));
+  if (routed.length === 0 && failing.size > 0) {
+    routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id));
+  }
   const nearest = routed[0];
   if (home === null || backedOff.has(home) || failing.has(home)) return nearest;
   // Home's route, from the candidates already routed if it is among them.
@@ -405,6 +407,9 @@ interface SleepState {
   newHome: boolean;
 }
 
+/** The params `core:sleep` takes, for `invalid_params`. */
+const SLEEP_PARAMS = "{ placementId?, newHome? }";
+
 /**
  * Walks to the creature's spot at `params.placementId`, a place offering `core:shelter`, or,
  * without one, stays where it is, unless another creature sleeps too close there: it then walks to
@@ -414,13 +419,11 @@ interface SleepState {
  * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
  * reaches 0. Emits `fell_asleep` on lying down and `woke_up` on waking, also when interrupted. The
  * first shelter a creature sleeps at becomes its home, and so does one started with
- * `params.newHome` true, as `core:rest` does once home keeps failing (issue #171). Records in the creature's knowledge whether
- * it reached its spot at a shelter: no spot or route there, stuck on the way, or arrived (issue
- * #161, as `core:eat` does). With `params.asleep` true it starts already there and asleep, for
- * catch-up (`startAsleep`).
+ * `params.newHome` true, as `core:rest` does once home keeps failing (issue #171). Records in the
+ * creature's knowledge whether it reached its spot at a shelter: no spot or route there, stuck on
+ * the way, or arrived (issue #161, as `core:eat` does). With `params.asleep` true it starts
+ * already there and asleep, for catch-up (`startAsleep`).
  */
-const SLEEP_PARAMS = "{ placementId?, newHome? }";
-
 export const sleepAction: ActionProvider = {
   id: SLEEP,
   version: "1.0.0",
