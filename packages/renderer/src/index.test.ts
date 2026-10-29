@@ -1,4 +1,4 @@
-import type { SceneData, SceneProp } from "@living-diorama/simulation";
+import type { NavigationOverlay, SceneData, SceneProp } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { buildDioramaScene, createSun, defaultFraming } from "./index";
@@ -167,6 +167,118 @@ describe("buildDioramaScene", () => {
     for (const mesh of meshesIn(layers.props.group)) {
       expect((mesh.material as THREE.Material).clippingPlanes).toHaveLength(0);
     }
+  });
+});
+
+describe("replaceProps", () => {
+  const navigation = (walkable: boolean): NavigationOverlay => ({
+    profileKey: "test",
+    regions: [
+      {
+        regionId: "meadow",
+        anchor: { x: 0, y: 1, z: 0 },
+        cells: [
+          {
+            walkable,
+            corners: [
+              { x: 0, y: 1, z: 0 },
+              { x: 1, y: 1, z: 0 },
+              { x: 1, y: 1, z: 1 },
+              { x: 0, y: 1, z: 1 },
+            ],
+          },
+        ],
+      },
+    ],
+    portals: [],
+  });
+
+  it("swaps props and navigation overlays, keeping the terrain, water and structures", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const model = pine();
+    const load = vi.fn(async () => model);
+    const built = buildDioramaScene(scene, {
+      resolveAsset: (ref) => (ref === "test:pine" ? { kind: "model", url: "pine.glb" } : undefined),
+      loadModel: load,
+      navigation: navigation(true),
+    });
+    await built.ready;
+    const kept = [built.layers.terrain, built.layers.water, built.layers.structures].map((l) => [
+      ...l.group.children,
+    ]);
+    const walkability = built.overlays.group.getObjectByName("walkability") as THREE.Mesh;
+    const walkabilityFreed = vi.fn();
+    walkability.geometry.addEventListener("dispose", walkabilityFreed);
+    built.editing.select("b");
+
+    const moved = { ...scene, props: [prop("b", "test:pine", -1.5), prop("d", "test:pine", 1.5)] };
+    expect(await built.replaceProps(moved, navigation(false))).toBe(true);
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(
+      [built.layers.terrain, built.layers.water, built.layers.structures].map((l) => [
+        ...l.group.children,
+      ]),
+    ).toEqual(kept);
+    const [instances] = meshesIn(built.layers.props.group) as THREE.InstancedMesh[];
+    expect(meshesIn(built.layers.props.group)).toHaveLength(1);
+    expect(instances!.count).toBe(2);
+    // The new walkability replaces the old, which is freed.
+    expect(walkabilityFreed).toHaveBeenCalled();
+    const redrawn = built.overlays.group.getObjectByName("walkability") as THREE.Mesh;
+    expect(redrawn).not.toBe(walkability);
+    expect(built.overlays.group.getObjectsByProperty("name", "walkability")).toHaveLength(1);
+    // The selection ring followed the moved prop.
+    expect(built.world.getObjectByName("prop-selection")!.position.x).toBeCloseTo(-1.5);
+
+    // Without navigation the overlays drop walkability and the graph.
+    await built.replaceProps(moved);
+    expect(built.overlays.group.getObjectByName("walkability")).toBeUndefined();
+    expect(built.overlays.group.getObjectByName("region-graph")).toBeUndefined();
+  });
+});
+
+describe("replaceProps overtaken", () => {
+  it("leaves the overlays and the selection as the newer call placed them", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let arrive: (model: THREE.Object3D) => void = () => undefined;
+    const built = buildDioramaScene(scene, {
+      resolveAsset: (ref) => ({ kind: "model", url: `${ref}.glb` }),
+      loadModel: (url) =>
+        url === "test:slow.glb"
+          ? new Promise((resolve) => (arrive = resolve))
+          : Promise.resolve(pine()),
+    });
+    await built.ready;
+    built.editing.select("b");
+    const navigation = (): NavigationOverlay => ({
+      profileKey: "test",
+      regions: [{ regionId: "r", anchor: { x: 0, y: 1, z: 0 }, cells: [] }],
+      portals: [],
+    });
+    // The older call waits on a slow model; the newer one lands first.
+    const older = built.replaceProps(
+      { ...scene, props: [prop("b", "test:slow", -1)] },
+      navigation(),
+    );
+    const newer = built.replaceProps(
+      { ...scene, props: [prop("b", "test:pine", 1.5)] },
+      navigation(),
+    );
+    expect(await newer).toBe(true);
+    const graph = built.overlays.group.getObjectByName("region-graph");
+    const freed = vi.fn();
+    graph!.traverse((o) => {
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments)
+        o.geometry.addEventListener("dispose", freed);
+    });
+    arrive(pine());
+    expect(await older).toBe(false);
+    // The newer call's overlays stay, unfreed, and the ring stays on its prop.
+    expect(built.overlays.group.getObjectByName("region-graph")).toBe(graph);
+    expect(built.overlays.group.getObjectsByProperty("name", "region-graph")).toHaveLength(1);
+    expect(freed).not.toHaveBeenCalled();
+    expect(built.world.getObjectByName("prop-selection")!.position.x).toBeCloseTo(1.5);
   });
 });
 

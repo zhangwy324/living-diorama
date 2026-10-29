@@ -15,3 +15,4 @@ export { type RenderSpecies, type SpeciesResolver } from "./creatures";
 export { SnapshotInterpolator, lerpHeading, type CreaturePose } from "./interpolation";
 export { LAYER_NAMES, type ClipPlane, type LayerName } from "./layers";
 export type { AssetResolver, ModelLoader, RenderAsset } from "./props";
+export type { PropPick, PropPreview } from "./prop-editing";

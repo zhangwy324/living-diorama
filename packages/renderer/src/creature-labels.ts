@@ -153,7 +153,7 @@ const segments = (color: string, opacity: number) => {
 export class CreatureLabels {
   readonly group = new THREE.Group();
   readonly #createSurface: () => LabelSurface;
-  readonly #places: Map<string, Vec3>;
+  #places: Map<string, Vec3>;
   readonly #scene: SceneData;
   readonly #labels = new Map<string, Label>();
   readonly #free: Label[] = [];
@@ -183,6 +183,11 @@ export class CreatureLabels {
     if (cells.length === 0 && drawn === 0) return;
     this.#cells.geometry.dispose();
     this.#cells.geometry = new THREE.BufferGeometry().setFromPoints(cells);
+  }
+
+  /** Takes the placements' positions from `scene`, e.g. after its props were edited. */
+  setPlaces(scene: SceneData): void {
+    this.#places = placementPositions(scene);
   }
 
   /**
