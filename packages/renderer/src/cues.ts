@@ -110,7 +110,8 @@ export function bodyMotion(
 export const Z_COUNT = 3;
 /** ...and this many when they are small on screen, so they don't run together. */
 export const Z_COUNT_SMALL = 2;
-const Z_PERIOD = 3.6;
+/** Seconds each z takes to rise and fade. */
+export const Z_PERIOD = 3.6;
 /** Each z leans by this much, alternately left and right, like hand lettering (radians, ~9°). */
 export const Z_TILT = 0.16;
 
@@ -125,53 +126,40 @@ export interface ZMotion {
   tilt: number;
   /** Before the sleeping weight. */
   opacity: number;
-  /** Counts the z's rises, so a change of look can wait for the next one. */
-  cycle: number;
 }
 
-export const restingZ = (): ZMotion => ({
-  rise: 0,
-  drift: 0,
-  scale: 0,
-  tilt: 0,
-  opacity: 0,
-  cycle: 0,
-});
+export const restingZ = (): ZMotion => ({ rise: 0, drift: 0, scale: 0, tilt: 0, opacity: 0 });
 
 /**
- * Z number `index` at `p`, 0–1 through its rise. It starts small and quickly, then slows as it
- * grows and fades (an ease-out). Writes into `out`.
+ * The z numbered `serial` (counting the creature's z's as they start) at `p`, 0–1 through its
+ * rise. It starts small and quickly, then slows as it grows and fades (an ease-out); every other
+ * z leans the other way. Writes into `out`.
  */
-export function zAt(p: number, index: number, out: ZMotion): ZMotion {
-  const eased = 1 - (1 - p) ** 2;
+export function zAt(p: number, serial: number, out: ZMotion): ZMotion {
+  const t = Math.min(1, Math.max(0, p));
+  const eased = 1 - (1 - t) ** 2;
   out.rise = eased * 1.8;
-  out.drift = 0.35 + eased * 0.6 + 0.12 * Math.sin(TAU * p);
+  out.drift = 0.35 + eased * 0.6 + 0.12 * Math.sin(TAU * t);
   out.scale = 0.45 + 0.55 * eased;
-  out.tilt = index % 2 === 0 ? Z_TILT : -Z_TILT;
-  out.opacity = Math.min(1, p / 0.2, (1 - p) / 0.35);
+  out.tilt = serial % 2 === 0 ? Z_TILT : -Z_TILT;
+  out.opacity = Math.min(1, t / 0.2, (1 - t) / 0.35);
   return out;
 }
+
+/** Z's smaller than this on screen rise two at a time instead of three... */
+const Z_SMALL_PX = 18;
+/** ...give or take this much, so a size near the line doesn't flip the count back and forth. */
+const Z_HYSTERESIS_PX = 1;
 
 /**
- * Z number `index` of `count` rising from a creature with `phase` at `time` seconds. Writes into
- * `out`.
+ * How many z's should rise for a z this many CSS pixels tall, given the `previous` target. The
+ * count only aims the stream: a change takes effect as the next z starts.
  */
-export function zMotion(
-  time: number,
-  index: number,
-  count: number,
-  phase: number,
-  out: ZMotion,
-): ZMotion {
-  const t = time / Z_PERIOD + index / count + phase;
-  const cycle = Math.floor(t);
-  zAt(t - cycle, index, out);
-  out.cycle = cycle;
-  return out;
+export function zTarget(zPx: number, previous?: number): number {
+  if (zPx < Z_SMALL_PX - Z_HYSTERESIS_PX) return Z_COUNT_SMALL;
+  if (zPx > Z_SMALL_PX + Z_HYSTERESIS_PX) return Z_COUNT;
+  return previous ?? (zPx < Z_SMALL_PX ? Z_COUNT_SMALL : Z_COUNT);
 }
-
-/** How many z's rise for a z this many CSS pixels tall. */
-export const zCount = (zPx: number) => (zPx < Z_SMALL_PX ? Z_COUNT_SMALL : Z_COUNT);
 
 const BUBBLE_PERIOD = 1.6;
 /** Up-and-down of the food bubble, in units of its size; within ±0.06. */
@@ -182,8 +170,6 @@ export const bubbleBob = (time: number, phase: number) =>
 export const BUBBLE_PX = { share: 0.7, min: 26, max: 44 };
 export const Z_PX = { share: 0.4, min: 15, max: 24 };
 export const RING_PX = { share: 0.5, min: 16, max: 30 };
-/** Z's smaller than this on screen rise two at a time instead of three. */
-const Z_SMALL_PX = 18;
 
 export const cuePixels = (limits: typeof BUBBLE_PX, creaturePx: number) =>
   Math.min(limits.max, Math.max(limits.min, limits.share * creaturePx));
@@ -424,7 +410,7 @@ const RING_FILL = rgb("#f2a531");
  * track, with a dark outline so it reads by day and by night. Clear inside and around it.
  */
 export function ringPixels(size: number, progress: number): Uint8Array {
-  const band = (x: number, y: number) => Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.29) - 0.11;
+  const band = (x: number, y: number) => Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.28) - 0.11;
   const sweep = wedge(0.5, 0.5, progress);
   return rasterize(size, [
     { distance: grow(band, 0.09), color: OUTLINE },
@@ -454,18 +440,22 @@ export const MIP_BIAS = -0.75;
 
 /** Makes a cue material sample its texture sharper (`MIP_BIAS`); all cues share one program. */
 export function sharpen(material: THREE.SpriteMaterial): THREE.SpriteMaterial {
-  material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <map_fragment>",
-      THREE.ShaderChunk.map_fragment.replace(
-        MAP_SAMPLE,
-        `texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`,
-      ),
-    );
-  };
-  material.customProgramCacheKey = () => "cue-sharp";
+  material.onBeforeCompile = sampleSharper;
+  material.customProgramCacheKey = sharpKey;
   return material;
 }
+
+function sampleSharper(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <map_fragment>",
+    THREE.ShaderChunk.map_fragment.replace(
+      MAP_SAMPLE,
+      `texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`,
+    ),
+  );
+}
+
+const sharpKey = () => "cue-sharp";
 
 /**
  * Cue sprites draw over the scene: a bubble behind a tree would say nothing. A creature hidden by
@@ -538,13 +528,31 @@ class SpritePool {
 export interface CreatureCueSprites {
   bubble: THREE.Sprite | undefined;
   ring: THREE.Sprite | undefined;
+  /** The rising z's, oldest first. */
   zs: THREE.Sprite[];
+  /** When each z started rising, in animation seconds, and its serial number (for its lean). */
+  zStarts: number[];
+  zSerials: number[];
+  /**
+   * How many z's should rise at once (`zTarget`). It sets the gap before the next z starts, so a
+   * change never cuts a z short or moves one mid-rise.
+   */
+  zTarget: number | undefined;
+  /** When the next z starts, or undefined while no z's rise. */
+  zNext: number | undefined;
+  /** The next z's serial number. */
+  zSerial: number;
 }
 
 export const noCueSprites = (): CreatureCueSprites => ({
   bubble: undefined,
   ring: undefined,
   zs: [],
+  zStarts: [],
+  zSerials: [],
+  zTarget: undefined,
+  zNext: undefined,
+  zSerial: 0,
 });
 
 /** Where a creature's sprites go this frame. */
@@ -625,29 +633,17 @@ export class CueSprites {
     const sleeping = ease(weights.sleeping);
     if (sleeping * visible > HIDDEN) {
       const zPx = cuePixels(Z_PX, anchor.creaturePx);
-      const count = zCount(zPx);
-      const map = this.night ? this.#zMaps.night : this.#zMaps.day;
-      if (sprites.zs.length > count) {
-        for (const sprite of sprites.zs.splice(count)) this.#zs.release(sprite);
-      }
-      while (sprites.zs.length < count) {
-        const sprite = this.#zs.acquire();
-        sprite.material.map = map;
-        sprites.zs.push(sprite);
-      }
+      sprites.zTarget = zTarget(zPx, sprites.zTarget);
+      if (this.reducedMotion) this.#holdZs(sprites);
+      else this.#streamZs(sprites, time, phase);
       const size = zPx * unitsPerPixel;
-      let index = 0;
+      const count = sprites.zs.length;
+      let k = 0;
       for (const sprite of sprites.zs) {
+        const serial = sprites.zSerials[k] ?? k;
         const z = this.reducedMotion
-          ? zAt((index + 0.5) / count, index, this.#z)
-          : zMotion(time, index, count, phase, this.#z);
-        index++;
-        // A new look waits for the z's next rise, where it starts faint.
-        const { userData } = sprite;
-        if (sprite.material.map !== map && (this.reducedMotion || userData.zCycle !== z.cycle)) {
-          sprite.material.map = map;
-        }
-        userData.zCycle = z.cycle;
+          ? zAt((count - k - 0.5) / count, serial, this.#z)
+          : zAt((time - (sprites.zStarts[k] ?? time)) / Z_PERIOD, serial, this.#z);
         sprite.position
           .copy(top)
           .addScaledVector(right, z.drift * size)
@@ -655,6 +651,7 @@ export class CueSprites {
         sprite.scale.set(size * z.scale, size * z.scale, 1);
         sprite.material.rotation = z.tilt;
         sprite.material.opacity = sleeping * z.opacity * visible;
+        k++;
       }
     } else {
       this.#releaseZs(sprites);
@@ -732,5 +729,75 @@ export class CueSprites {
   #releaseZs(sprites: CreatureCueSprites): void {
     for (const sprite of sprites.zs) this.#zs.release(sprite);
     sprites.zs.length = 0;
+    sprites.zStarts.length = 0;
+    sprites.zSerials.length = 0;
+    sprites.zNext = undefined;
+  }
+
+  /** Starts a z at `start`, in the current day or night look, which it keeps all its rise. */
+  #startZ(sprites: CreatureCueSprites, start: number): void {
+    const sprite = this.#zs.acquire();
+    sprite.material.map = this.night ? this.#zMaps.night : this.#zMaps.day;
+    sprites.zs.push(sprite);
+    sprites.zStarts.push(start);
+    sprites.zSerials.push(sprites.zSerial++);
+  }
+
+  /**
+   * Keeps z's rising one after another, `Z_PERIOD / zTarget` apart, each for `Z_PERIOD`. A new
+   * target only changes the gap before the next z, so the count follows it smoothly. The first
+   * z's start as if they had been rising for a while, staggered by the creature's phase.
+   */
+  #streamZs(sprites: CreatureCueSprites, time: number, phase: number): void {
+    const target = sprites.zTarget ?? Z_COUNT;
+    const latest = sprites.zStarts[sprites.zStarts.length - 1];
+    // Afresh when z's start, after a gap longer than a rise (a hidden page), or if time went back.
+    if (
+      sprites.zNext === undefined ||
+      time >= sprites.zNext + Z_PERIOD ||
+      (latest !== undefined && time < latest)
+    ) {
+      this.#releaseZs(sprites);
+      const gap = Z_PERIOD / target;
+      const last = time - ((((time / gap + phase * target) % 1) + 1) % 1) * gap;
+      for (let k = target - 1; k >= 0; k--) this.#startZ(sprites, last - k * gap);
+      sprites.zNext = last + gap;
+    }
+    // Hands back z's that have finished rising first, keeping the rest in order.
+    let kept = 0;
+    let k = 0;
+    for (const sprite of sprites.zs) {
+      const start = sprites.zStarts[k] ?? time;
+      const serial = sprites.zSerials[k] ?? k;
+      k++;
+      if (time - start >= Z_PERIOD) {
+        this.#zs.release(sprite);
+        continue;
+      }
+      sprites.zs[kept] = sprite;
+      sprites.zStarts[kept] = start;
+      sprites.zSerials[kept] = serial;
+      kept++;
+    }
+    sprites.zs.length = kept;
+    sprites.zStarts.length = kept;
+    sprites.zSerials.length = kept;
+    // Then starts any z's due, reusing the sprites just handed back. Each starts after the
+    // oldest one alive, so none of them has finished yet.
+    while (time >= sprites.zNext) {
+      this.#startZ(sprites, sprites.zNext);
+      sprites.zNext += Z_PERIOD / target;
+    }
+  }
+
+  /** Reduced motion: a still stack of `zTarget` z's, all in the current look. */
+  #holdZs(sprites: CreatureCueSprites): void {
+    const target = sprites.zTarget ?? Z_COUNT;
+    if (sprites.zs.length !== target || sprites.zNext !== undefined) {
+      this.#releaseZs(sprites);
+      for (let k = 0; k < target; k++) this.#startZ(sprites, 0);
+    }
+    const map = this.night ? this.#zMaps.night : this.#zMaps.day;
+    for (const sprite of sprites.zs) sprite.material.map = map;
   }
 }

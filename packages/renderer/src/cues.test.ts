@@ -13,6 +13,7 @@ import {
   ScreenScale,
   Z_COUNT,
   Z_COUNT_SMALL,
+  Z_PERIOD,
   Z_PX,
   Z_TILT,
   bodyMotion,
@@ -27,8 +28,8 @@ import {
   sharpen,
   stepCueWeights,
   zAt,
-  zCount,
-  zMotion,
+  zTarget,
+  noCueSprites,
   zPixels,
   type CueAnchor,
   type CueWeights,
@@ -109,8 +110,8 @@ describe("body motion", () => {
 describe("sprite motion", () => {
   it("rises each z and fades it in and out, bounded", () => {
     for (const time of times) {
-      for (let index = 0; index < Z_COUNT; index++) {
-        const z = zMotion(time, index, Z_COUNT, 0.9, restingZ());
+      for (let serial = 0; serial < Z_COUNT; serial++) {
+        const z = zAt(((time / Z_PERIOD) % 1.2) - 0.1, serial, restingZ());
         expect(z.rise).toBeGreaterThanOrEqual(0);
         expect(z.rise).toBeLessThanOrEqual(1.8);
         expect(z.opacity).toBeGreaterThanOrEqual(0);
@@ -142,18 +143,18 @@ describe("sprite motion", () => {
     expect(zAt(0.5, 1, restingZ()).tilt).toBe(-Z_TILT);
   });
 
-  it("counts each z's rises, starting a new one as it wraps round", () => {
-    const z = restingZ();
-    const before = zMotion(3.59, 0, 2, 0, z).cycle;
-    expect(zMotion(3.61, 0, 2, 0, z).cycle).toBe(before + 1);
-    expect(z.opacity).toBeLessThan(0.05);
-  });
-
-  it("rises two z's at a time when they are small on screen, three otherwise", () => {
-    expect(zCount(Z_PX.min)).toBe(Z_COUNT_SMALL);
+  it("aims for two z's when they are small on screen, three otherwise, with hysteresis", () => {
+    expect(zTarget(Z_PX.min)).toBe(Z_COUNT_SMALL);
     expect(Z_COUNT_SMALL).toBe(2);
-    expect(zCount(Z_PX.max)).toBe(Z_COUNT);
+    expect(zTarget(Z_PX.max)).toBe(Z_COUNT);
     expect(Z_PX.min).toBeGreaterThanOrEqual(15);
+    // Near the line at 18 px the previous target holds, so a size wavering there doesn't flip it.
+    for (const px of [17.2, 18, 18.8]) {
+      expect(zTarget(px, Z_COUNT_SMALL)).toBe(Z_COUNT_SMALL);
+      expect(zTarget(px, Z_COUNT)).toBe(Z_COUNT);
+    }
+    expect(zTarget(16.9, Z_COUNT)).toBe(Z_COUNT_SMALL);
+    expect(zTarget(19.1, Z_COUNT_SMALL)).toBe(Z_COUNT);
   });
 
   it("gives each creature a stable phase in 0–1", () => {
@@ -221,6 +222,26 @@ describe("cue textures", () => {
     expect(reach(1, 0)).toBeCloseTo(reach(0, 1), 1);
   });
 
+  it("keeps every texture's outline inside it, clear at the edges", () => {
+    // The margins are tight: an outline that reached the edge would be cut off flat.
+    const edgesClear = (data: Uint8Array, size: number) => {
+      for (let k = 0; k < size; k++) {
+        for (const [column, row] of [
+          [k, 0],
+          [k, size - 1],
+          [0, k],
+          [size - 1, k],
+        ] as const) {
+          expect(data[(row * size + column) * 4 + 3]).toBe(0);
+        }
+      }
+    };
+    edgesClear(bubblePixels(128), 128);
+    edgesClear(zPixels(64), 64);
+    edgesClear(zPixels(64, true), 64);
+    for (const progress of [0, 0.5, 1]) edgesClear(ringPixels(64, progress), 64);
+  });
+
   it("outlines the bubble about 2 CSS px thick at its smallest", () => {
     const size = 128;
     const bubble = bubblePixels(size);
@@ -271,6 +292,7 @@ describe("cue textures", () => {
   it("samples cue textures sharper, through the sprite shader's own map lookup", () => {
     // A three.js upgrade that renames the lookup fails here instead of silently blurring.
     expect(THREE.ShaderChunk.map_fragment).toContain(MAP_SAMPLE);
+    expect(THREE.ShaderLib.sprite.fragmentShader).toContain("#include <map_fragment>");
     const material = sharpen(new THREE.SpriteMaterial());
     const shader = {
       fragmentShader: "void main() {\n#include <map_fragment>\n}",
@@ -502,9 +524,9 @@ describe("cue sprites", () => {
     expect(Math.min(...heights)).toBeGreaterThanOrEqual(0);
   });
 
-  it("shows two small z's in the strip and three once they are bigger", () => {
+  it("follows a new z count smoothly: no z vanishes mid-rise or jumps", () => {
     const cues = new CueSprites();
-    const sprites = { bubble: undefined, ring: undefined, zs: [] as THREE.Sprite[] };
+    const sprites = noCueSprites();
     const anchor = (creaturePx: number): CueAnchor => ({
       top: new THREE.Vector3(0, 1, 0),
       creaturePx,
@@ -513,13 +535,81 @@ describe("cue sprites", () => {
       visible: 1,
     });
     const sleeping = { eating: 0, sleeping: 1, hungry: 0 };
-    cues.place(sprites, sleeping, anchor(20), 1, 0);
+    const step = 1 / 30;
+    // Each z's height and opacity on the previous frame, by its serial number (sprites are reused).
+    const snapshot = () =>
+      new Map(
+        sprites.zs.map((z, k) => [
+          sprites.zSerials[k]!,
+          { y: z.position.y, opacity: z.material.opacity },
+        ]),
+      );
+    let last = new Map<number, { y: number; opacity: number }>();
+    const run = (creaturePx: number, from: number, to: number) => {
+      let most = 0;
+      for (let t = from; t < to; t += step) {
+        cues.place(sprites, sleeping, anchor(creaturePx), t, 0.3);
+        const now = snapshot();
+        for (const [serial, before] of last) {
+          const after = now.get(serial);
+          // A z that goes was faint, at the end of its rise...
+          if (!after) expect(before.opacity).toBeLessThan(0.05);
+          // ...and one that stays keeps rising, by less than a few pixels a frame.
+          else {
+            expect(after.y).toBeGreaterThanOrEqual(before.y);
+            expect(after.y - before.y).toBeLessThan(0.03);
+          }
+        }
+        // A z that comes starts faint.
+        for (const [serial, z] of now) if (!last.has(serial)) expect(z.opacity).toBeLessThan(0.2);
+        last = now;
+        most = Math.max(most, sprites.zs.length);
+      }
+      return most;
+    };
+    cues.place(sprites, sleeping, anchor(20), 0, 0.3); // 8 px z's: two
+    last = snapshot();
     expect(sprites.zs).toHaveLength(Z_COUNT_SMALL);
-    cues.place(sprites, sleeping, anchor(100), 1.1, 0);
+    expect(run(20, step, 8)).toBe(Z_COUNT_SMALL);
+    // Bigger on screen (40 px z's): a third z joins as the next ones start, no sooner.
+    cues.place(sprites, sleeping, anchor(100), 8, 0.3);
+    expect(sprites.zs.length).toBeLessThanOrEqual(Z_COUNT_SMALL + 1);
+    last = snapshot();
+    run(100, 8 + step, 16);
     expect(sprites.zs).toHaveLength(Z_COUNT);
-    expect(sprites.zs.map((z) => z.material.rotation)).toEqual([Z_TILT, -Z_TILT, Z_TILT]);
-    cues.place(sprites, sleeping, anchor(20), 1.2, 0);
+    // Neighbours lean opposite ways.
+    const [first, second] = sprites.zs;
+    expect(first!.material.rotation).toBe(-second!.material.rotation);
+    // And back to two, the third left to finish its rise. (Smaller, so every z steps down once.)
+    cues.place(sprites, sleeping, anchor(20), 16, 0.3);
+    expect(sprites.zs).toHaveLength(Z_COUNT);
+    last = snapshot();
+    run(20, 16 + step, 24);
     expect(sprites.zs).toHaveLength(Z_COUNT_SMALL);
+    expect(cues.active).toBe(Z_COUNT_SMALL);
+    cues.dispose();
+  });
+
+  it("starts z's afresh after a gap or if time goes back", () => {
+    const cues = new CueSprites();
+    const sprites = noCueSprites();
+    const anchor: CueAnchor = {
+      top: new THREE.Vector3(0, 1, 0),
+      creaturePx: 20,
+      unitsPerPixel: 0.01,
+      right: new THREE.Vector3(1, 0, 0),
+      visible: 1,
+    };
+    const sleeping = { eating: 0, sleeping: 1, hungry: 0 };
+    for (const time of [0, 0.5, 100, 40, 40.1]) {
+      cues.place(sprites, sleeping, anchor, time, 0.6);
+      expect(sprites.zs).toHaveLength(Z_COUNT_SMALL);
+      for (const z of sprites.zs) expect(z.material.opacity).toBeGreaterThanOrEqual(0);
+      for (const start of sprites.zStarts) {
+        expect(start).toBeLessThanOrEqual(time);
+        expect(time - start).toBeLessThan(Z_PERIOD);
+      }
+    }
     expect(cues.active).toBe(Z_COUNT_SMALL);
     cues.dispose();
   });
@@ -549,7 +639,7 @@ describe("cue sprites", () => {
   it("holds z's and the bubble still with reduced motion", () => {
     const cues = new CueSprites();
     cues.reducedMotion = true;
-    const sprites = { bubble: undefined, ring: undefined, zs: [] as THREE.Sprite[] };
+    const sprites = noCueSprites();
     const anchor: CueAnchor = {
       top: new THREE.Vector3(0, 1, 0),
       creaturePx: 20,
