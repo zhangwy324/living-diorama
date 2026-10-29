@@ -358,7 +358,8 @@ body,
   font-size: 11px;
   line-height: 1.2;
   text-align: center;
-  color: rgb(238 243 232 / 60%);
+  /* About 6.6:1 on the panel: small text, so well clear of AA's 4.5:1. */
+  color: rgb(238 243 232 / 75%);
 }
 
 .sizes input:focus-visible + span {

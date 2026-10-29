@@ -90,6 +90,9 @@ export function CreatureDetails(props: {
               value={size}
               checked={props.sizeClass === size}
               onChange={() => props.onSizeClass(size)}
+              // A click on the size already shown fires no change, but taking the suggestion
+              // is a pick too, so later drawing doesn't move it (issue #49).
+              onClick={() => props.onSizeClass(size)}
             />
             <span>{sizeLabel(size)}</span>
             {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
