@@ -737,6 +737,31 @@ describe("running actions dropped by catch-up (issue #164)", () => {
     expect(after.knowledge).toEqual(eater.knowledge);
   });
 
+  it("record no back-off for a sleep cut short on the way to its shelter (#161)", () => {
+    // A live world run until a creature is walking to a shelter at bedtime.
+    const running = create(3, at(21));
+    for (let k = 0; k < 3; k++) running.spawn(MOSSLING);
+    const walking = (save: WorldSave) =>
+      save.creatures.find((c) => {
+        const state = c.action?.state as { arrived: boolean; placementId: string | null };
+        return c.action?.id === "core:sleep" && state.placementId !== null && !state.arrived;
+      });
+    let before: WorldSave | undefined;
+    for (let k = 0; k < 600 && !before; k++) {
+      run(running, 5, minutesAfter(at(21), (running.tick * 1000) / HZ));
+      const save = running.save(0);
+      if (walking(save)) before = save;
+    }
+    const sleeper = walking(before!)!;
+    const spy = vi.spyOn(sleepAction as Required<ActionProvider>, "interrupted");
+    running.catchUp({ gapMs: 3 * HOUR, minutes: at(0) });
+    expect(spy.mock.calls.map(([, , reason]) => reason)).toContain("catch_up");
+    const after = running.save(0).creatures.find((c) => c.id === sleeper.id)!;
+    expect(after.knowledge.places["core:shelter"]).toEqual(
+      sleeper.knowledge.places["core:shelter"],
+    );
+  });
+
   it("leave catch-up's draws unchanged when their hook draws", () => {
     const options = { nowMs: SAVED_AT + 11 * HOUR, minutes: at(7, 40) };
     spyOnInterrupted(() => {});
