@@ -11,8 +11,11 @@ import { CellState, type RegionMask } from "./walkability";
 // region's leg.
 //
 // A region can split into several walkable areas for one profile, e.g. a rock that a large
-// creature can't pass (ADR 0013). Areas are linked by the same crossings routes use, so what
-// `reachableCells` returns is exactly what `findRoute` can reach.
+// creature can't pass (ADR 0013), or land that only a detour through other regions joins. Areas
+// are linked by the same crossings routes use. A route stays inside its region only when start
+// and goal share an area; otherwise it takes the door graph like a route between regions, even
+// when both ends are in one region. So what `reachableCells` returns is exactly what `findRoute`
+// can reach.
 //
 // For a profile that moves on land and in water, derived banks (ADR 0020 §4) add crossings both
 // ways between land and water, picked from the bank's cell pairs and spaced like a portal's. The
@@ -192,7 +195,7 @@ export class Pathfinder {
       return fail("goal_not_walkable", `${describe(to)} is not walkable`);
     }
 
-    if (from.regionId === to.regionId) {
+    if (from.regionId === to.regionId && this.#sameArea(from.regionId, startCell, goalCell)) {
       const points = findGridPath(startMask, point(from), point(to));
       return points
         ? {
@@ -234,7 +237,16 @@ export class Pathfinder {
     return { ok: true, route: { legs, length } };
   }
 
-  /** Cheapest crossings from a start cell to a goal cell in another region (Dijkstra on doors). */
+  /** Whether two walkable cells of a region lie in one walkable area. */
+  #sameArea(regionId: string, a: number, b: number): boolean {
+    const { ofCell } = this.#regionAreas(regionId);
+    return ofCell[a] === ofCell[b];
+  }
+
+  /**
+   * Cheapest crossings from a start cell to a goal cell in another region, or in another area of
+   * the same region (Dijkstra on doors).
+   */
   #crossingSequence(
     startRegion: string,
     startCell: number,
