@@ -23,6 +23,7 @@ export * from "./protocol";
 export * from "./runtime/clock";
 export * from "./runtime/host";
 export * from "./runtime/rng";
+export * from "./runtime/save";
 export * from "./runtime/simulation";
 export * from "./runtime/time-of-day";
 export * from "./runtime/world-state";

@@ -122,6 +122,13 @@ export const feedBehavior: BehaviorProvider = {
       ? { action: FOLLOW_PATH, params: { destination }, utility, reason: "explore for food" }
       : null;
   },
+  forgetPlacements(memory, exists) {
+    const { target, avoid } = memory as FeedMemory;
+    if (typeof target === "string" && !exists(target)) delete memory.target;
+    if (isRecord(avoid)) {
+      memory.avoid = Object.fromEntries(Object.entries(avoid).filter(([id]) => exists(id)));
+    }
+  },
 };
 
 interface EatState {

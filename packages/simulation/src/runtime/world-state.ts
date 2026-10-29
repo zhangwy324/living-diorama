@@ -79,6 +79,18 @@ export interface WorldStateOptions {
   minutes?: number;
 }
 
+/** Everything `WorldState.load` replaces. */
+export interface LoadedWorld {
+  seed: number;
+  rng: RngState;
+  nextCreature: number;
+  introducedSpecies: readonly string[];
+  tick: number;
+  minutes: number;
+  dayPhase: DayPhase;
+  creatures: readonly CreatureState[];
+}
+
 /** A profile's pathfinder and where its creatures don't fit, as warnings. */
 export interface PlannedNavigation {
   pathfinder: Pathfinder;
@@ -118,8 +130,12 @@ export class WorldState {
   readonly #limits: Map<string, Diagnostic[]>;
   /** Per profile key, the errors of a profile that does not work in this world. */
   readonly #failed = new Map<string, Diagnostic[]>();
-  readonly #rng: Rng;
-  readonly #root: Rng;
+  /** The seed the root stream comes from; a restored world keeps its saved one (ADR 0019 §8). */
+  #seed: number;
+  /** The root stream: creature streams fork from it by ID (ADR 0006 §3). Never drawn from. */
+  #root: Rng;
+  /** The world's own stream, e.g. for picking spawn points. */
+  #rng: Rng;
   #nextCreature = 1;
 
   private constructor(
@@ -136,6 +152,7 @@ export class WorldState {
     this.#pathfinders = pathfinders;
     this.#limits = limits;
     this.maxCreatures = maxCreatures;
+    this.#seed = seed;
     this.#root = Rng.fromSeed(seed);
     this.#rng = this.#root.fork("world");
   }
@@ -171,6 +188,44 @@ export class WorldState {
         minutes,
       ),
     };
+  }
+
+  /** The seed the world's random streams come from. */
+  get seed(): number {
+    return this.#seed;
+  }
+
+  /** The number the next creature ID takes (`creature-<n>`). */
+  get nextCreature(): number {
+    return this.#nextCreature;
+  }
+
+  /** A copy of the world stream's state. */
+  get rngState(): RngState {
+    const { words, key } = this.#rng.state;
+    return { words: [...words], key };
+  }
+
+  /**
+   * Replaces everything that changes as the world runs with `loaded`, e.g. a restored save: the
+   * seed (the root stream is rebuilt from it), the world stream, the creature ID counter, the
+   * introduced species, the tick, the time of day and day phase, and the creatures. Takes
+   * ownership of the creatures and of `rng`. Expects `loaded` to have been checked against this
+   * world (`checkSave`): every creature's species registered, `nextCreature` above every
+   * creature's number.
+   */
+  load(loaded: LoadedWorld): void {
+    this.#seed = loaded.seed;
+    this.#root = Rng.fromSeed(loaded.seed);
+    this.#rng = new Rng(loaded.rng);
+    this.#nextCreature = loaded.nextCreature;
+    this.introducedSpecies.clear();
+    for (const id of loaded.introducedSpecies) this.introducedSpecies.add(id);
+    this.tick = loaded.tick;
+    this.minutes = loaded.minutes;
+    this.dayPhase = loaded.dayPhase;
+    this.creatures.clear();
+    for (const creature of loaded.creatures) this.creatures.set(creature.id, creature);
   }
 
   /** The navigation of every profile the world was checked for. */

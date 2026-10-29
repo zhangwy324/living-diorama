@@ -35,6 +35,9 @@ describe("time of day", () => {
     expect(wrapMinutes(at(25, 30))).toBe(at(1, 30));
     expect(wrapMinutes(-30)).toBe(at(23, 30));
     expect(Object.is(wrapMinutes(-at(24)), 0)).toBe(true);
+    // -1e-14 + 1440 rounds to 1440, which is midnight of the next day.
+    expect(wrapMinutes(-1e-14)).toBe(0);
+    expect(wrapMinutes(at(24) - 1e-12)).toBeLessThan(at(24));
     expect(dayPhaseAt(at(24 + 7))).toBe("dawn");
     expect(dayPhaseAt(-at(3))).toBe("night");
   });

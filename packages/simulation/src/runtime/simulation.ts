@@ -1,12 +1,14 @@
 import {
   error,
   SIZE_CLASSES,
+  WORLD_SAVE_SCHEMA_VERSION,
   type Diagnostic,
   type RegionKind,
   type RegionPosition,
   type Result,
   type SizeClass,
   type SpeciesDefinition,
+  type WorldSave,
 } from "@living-diorama/content-schema";
 import {
   addEntries,
@@ -42,6 +44,8 @@ import { navProfile, profileForSpecies } from "../navigation/profile";
 import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } from "../protocol";
 import type { ConnectionModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
+import { clonePlain } from "./plain";
+import { checkSave, type RestoreReport } from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
   normalizeHeading,
@@ -127,17 +131,6 @@ type Chosen = Evaluation & { proposal: Proposal };
 const usable = (proposal: Proposal | null | undefined): proposal is Proposal =>
   proposal !== null && proposal !== undefined && Number.isFinite(proposal.utility);
 
-/** A deep copy of plain data (behavior memory). */
-function clonePlain<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(clonePlain) as T;
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, clonePlain(v as unknown)]),
-    ) as T;
-  }
-  return value;
-}
-
 /** A species registered while the world runs, and where its creatures don't fit. */
 export interface RegisteredSpecies {
   species: SpeciesDefinition;
@@ -153,6 +146,14 @@ export interface SnapshotOptions {
 export interface SpawnOptions {
   /** Released from the Studio (ADR 0018 amendments, §13). */
   released?: boolean;
+}
+
+/** The present, which the simulation never reads itself (ADR 0006 §1, ADR 0019 §3). */
+export interface RestoreOptions {
+  /** The wall-clock time now, in milliseconds since the epoch; the gap is measured to it. */
+  nowMs: number;
+  /** The time of day now, in minutes since local midnight. */
+  minutes: number;
 }
 
 export interface SimulationOptions extends WorldStateOptions {
@@ -385,6 +386,84 @@ export class Simulation {
     }
     this.state.minutes = wrapMinutes(minutes);
   }
+
+  /**
+   * The world as a save (ADR 0019): plain data that passes `parseWorldSave` and survives a JSON
+   * round trip. Copies everything, so later ticks don't change it. Best taken between steps.
+   * `savedAt` is the wall-clock time, in milliseconds since the epoch, which the simulation never
+   * reads itself (ADR 0006 §1).
+   */
+  save(savedAt: number): WorldSave {
+    const { state } = this;
+    const creatures = [...state.creatures.values()].map((c) => clonePlain(c));
+    return {
+      schemaVersion: WORLD_SAVE_SCHEMA_VERSION,
+      savedAt,
+      world: { id: state.model.definition.id, version: state.model.definition.version },
+      seed: state.seed,
+      tick: state.tick,
+      minutes: state.minutes,
+      dayPhase: state.dayPhase,
+      rng: state.rngState,
+      nextCreature: state.nextCreature,
+      introducedSpecies: [...state.introducedSpecies],
+      species: Object.fromEntries(creatures.map((c) => [c.speciesId, c.speciesVersion])),
+      creatures,
+    };
+  }
+
+  /**
+   * Replaces this world with a save that `parseWorldSave` accepted (ADR 0019 §3, §7), keeping the
+   * registered content, including species registered since the world was created. Fails, leaving
+   * the world as it was, when the save is of another world or world version or its fields
+   * disagree; the caller then carries on with a fresh world. Otherwise creatures whose species is
+   * missing or of another major version are dropped, references to placements the world no
+   * longer has are pruned, and the report lists both. Whatever the world held before is gone,
+   * including events not yet returned by `step`.
+   *
+   * The world resumes at the saved tick, time of day and day phase; then the time of day is set
+   * to `options.minutes` as `setTimeOfDay` does, so the next step announces a phase change only
+   * if the phase really changed since the save. Never throws on the save's content.
+   */
+  restore(save: WorldSave, { nowMs, minutes }: RestoreOptions): Result<RestoreReport> {
+    if (!Number.isFinite(nowMs)) {
+      throw new RangeError(`The wall-clock time must be a finite number, got ${nowMs}`);
+    }
+    if (!Number.isFinite(minutes)) {
+      throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
+    }
+    const checked = checkSave(save, this.state.model, this.state.registries, this.#behaviors);
+    if (!checked.ok) return checked;
+    const { creatures, droppedCreatures, prunedPlacements } = checked.value;
+    this.state.load({
+      seed: save.seed,
+      rng: { words: [...save.rng.words], key: save.rng.key },
+      nextCreature: save.nextCreature,
+      introducedSpecies: save.introducedSpecies,
+      tick: save.tick,
+      minutes: save.minutes,
+      dayPhase: save.dayPhase,
+      creatures,
+    });
+    // Caches of the world that was replaced. Cues come back on the first step.
+    this.#paths.clear();
+    this.#actionCues.clear();
+    this.#perceptionOffsets.clear();
+    this.#events = [];
+    this.setTimeOfDay(minutes);
+    const gapMs = Math.max(0, nowMs - save.savedAt);
+    this.#catchUp(gapMs);
+    return { ok: true, value: { gapMs, droppedCreatures, prunedPlacements } };
+  }
+
+  /**
+   * Catch-up for the wall-clock time the world was away (ADR 0019 §5, §6, ADR 0018 §19). Runs
+   * once a save is restored and its time of day set to the present, after decision-7 pruning.
+   * Not applied yet: every gap is treated as no gap, so the world resumes exactly and only the
+   * time of day moves. M15 PR 3 fills this in.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- PR 3 reads the gap.
+  #catchUp(gapMs: number): void {}
 
   /**
    * A creature's spot at a placement, as its behaviors and actions would find it from where it
