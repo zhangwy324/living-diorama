@@ -1,5 +1,12 @@
 // Feeds the local time of day to the simulation (ADR 0018 §5): the worker never reads a clock,
 // so the main thread sends it at init, whenever the minute changes, and on resume.
+//
+// The clock is checked on the worker's snapshots (issue #127). WebView2 throttles timers on a
+// hidden page, so a timer alone let the time of day lag by a minute or more while the strip was
+// hidden; snapshot messages are not throttled (ADR 0019 §4, issue #117). A slow timer remains as a
+// backstop for when no snapshots come, i.e. while paused, so the paused world's light still follows
+// the clock. A wall-clock jump, such as an OS sleep, is told from consecutive snapshots far apart
+// in wall time only, never from a check that ran late.
 
 /** The wall clock and page the feed watches; injectable for tests. */
 export interface WallClock {
@@ -32,10 +39,13 @@ export const systemWallClock: WallClock = {
   },
 };
 
-/** How often the clock is checked for a new minute or a jump. */
+/** The clock is checked for a new minute at most this often, in wall-clock time. */
 export const CHECK_MS = 5_000;
-/** A check this much later than due means the clock jumped, e.g. the OS slept. */
-const JUMP_MS = 3 * CHECK_MS;
+/**
+ * Consecutive snapshots this far apart in wall time mean the clock jumped, e.g. the OS slept. The
+ * worker sends them at the tick rate (10 Hz), also while the strip is hidden.
+ */
+export const JUMP_MS = 3 * CHECK_MS;
 
 export interface TimeOfDayFeed {
   /** The time of day to start the world at. */
@@ -45,6 +55,12 @@ export interface TimeOfDayFeed {
    * Does nothing once stopped.
    */
   start(): void;
+  /**
+   * A snapshot arrived: checks the clock, at most every `CHECK_MS`, or at once after a jump.
+   * Returns the wall-clock time since the previous snapshot (since `start` for the first),
+   * negative if the clock went backwards, and 0 before `start` or after `stop`.
+   */
+  snapshot(): number;
   /** Sends the time of day now, e.g. on unpausing. */
   resync(): void;
   /**
@@ -65,7 +81,8 @@ export function timeOfDayFeed(
   let started = false;
   let stopped = false;
   let stops: (() => void)[] = [];
-  let lastCheck = clock.now();
+  let lastCheck = 0;
+  let lastSnapshot = 0;
   let sent: number | undefined;
   const current = () => fixed ?? clock.minutesAt(clock.now());
   const resync = () => {
@@ -73,9 +90,10 @@ export function timeOfDayFeed(
     sent = current();
     send(sent);
   };
-  const check = () => {
-    const now = clock.now();
-    const jumped = now - lastCheck > JUMP_MS || now < lastCheck;
+  /** Sends the time if the minute changed; throttled unless `jumped`. */
+  const check = (now: number, jumped: boolean) => {
+    // A clock set back is never throttled, or no check would run until it caught up again.
+    if (!jumped && now >= lastCheck && now - lastCheck < CHECK_MS) return;
     lastCheck = now;
     if (jumped || current() !== sent) resync();
   };
@@ -87,8 +105,16 @@ export function timeOfDayFeed(
       if (started || stopped) return;
       started = true;
       sent = current();
-      lastCheck = clock.now();
-      stops = [clock.every(CHECK_MS, check), clock.onVisible(resync)];
+      lastCheck = lastSnapshot = clock.now();
+      stops = [clock.every(CHECK_MS, () => check(clock.now(), false)), clock.onVisible(resync)];
+    },
+    snapshot() {
+      if (!started) return 0;
+      const now = clock.now();
+      const gap = now - lastSnapshot;
+      lastSnapshot = now;
+      check(now, gap > JUMP_MS || gap < 0);
+      return gap;
     },
     resync,
     fix(minutes) {
