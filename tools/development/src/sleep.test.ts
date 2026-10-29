@@ -401,6 +401,7 @@ function sleepContext({
     emit: (event: unknown) => emitted.push(event),
     home: null as string | null,
     setHome: (id: string) => homes.push(id),
+    noteReach: () => {},
   } satisfies ActionContext;
   return { context, emitted, homes, walked: () => walked, turned, turning, at: () => position };
 }

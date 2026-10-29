@@ -4,6 +4,8 @@ import {
   checkSave,
   feedBehavior,
   minutesAfter,
+  recordReach,
+  rememberPlace,
   type BehaviorProvider,
   type Simulation,
   type SimulationEvent,
@@ -84,6 +86,26 @@ describe("world save", () => {
       species: { [MOSSLING]: expect.any(String) },
     });
     expect(save.creatures.map((c) => c.id)).toEqual(["creature-1", "creature-3", "creature-4"]);
+  });
+
+  it("keeps what a creature knows of failing to reach places, through disk and a restore", () => {
+    const simulation = populated(600);
+    const creature = simulation.state.creatures.get("creature-1")!;
+    const food = simulation.state.model.propsByAffordance.get("core:food")![0]!;
+    rememberPlace(creature.knowledge, "core:food", food.id, simulation.tick, 8);
+    const attempt = { tick: simulation.tick, tickSeconds: 1 / HZ, cell: { x: -2, z: 3 } };
+    recordReach(creature.knowledge, "core:food", food.id, "stuck", attempt);
+    recordReach(creature.knowledge, "core:food", food.id, "no_route", attempt);
+    const save = throughDisk(simulation.save(SAVED_AT));
+    const saved = save.creatures.find((c) => c.id === creature.id)!;
+    expect(saved.knowledge).toEqual(creature.knowledge);
+    expect(saved.knowledge.places["core:food"]!.find((p) => p.placementId === food.id)).toEqual({
+      placementId: food.id,
+      lastSeenTick: simulation.tick,
+      failures: { noRoute: 1, stuck: 1, retryTick: 600 + 120 * HZ, cell: { x: -2, z: 3 } },
+    });
+    const back = restored(save).simulation.state.creatures.get(creature.id)!;
+    expect(back.knowledge).toEqual(creature.knowledge);
   });
 
   it("is a copy: running on doesn't change it", () => {
@@ -262,10 +284,14 @@ describe("a save that doesn't fit the world", () => {
     creature.home = "gone-home";
     creature.knowledge.places["core:food"] = [
       ...(creature.knowledge.places["core:food"] ?? []),
-      { placementId: "gone-food", lastSeenTick: 1 },
+      // Its failures to reach the place go with it.
+      {
+        placementId: "gone-food",
+        lastSeenTick: 1,
+        failures: { noRoute: 1, stuck: 0, retryTick: 9, cell: { x: 0, z: 0 } },
+      },
     ];
     creature.usedStructures.push("gone-bridge");
-    creature.memory["core:feed"] = { target: "gone-food", avoid: { "gone-food": 999 } };
     const { simulation, report } = restored(save);
     expect(report.prunedPlacements).toEqual([
       { creatureId: creature.id, placementId: "gone-home", where: "home" },
@@ -276,8 +302,6 @@ describe("a save that doesn't fit the world", () => {
     expect(after.home).toBeNull();
     expect(Object.values(after.knowledge.places).flat()).toEqual(known);
     expect(after.usedStructures).not.toContain("gone-bridge");
-    // `core:feed` forgets the placement in its own memory.
-    expect(after.memory["core:feed"]).toEqual({ avoid: {} });
     run(simulation, 50);
   });
 

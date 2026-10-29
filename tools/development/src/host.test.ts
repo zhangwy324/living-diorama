@@ -1,5 +1,9 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { defaultBody, parseWorldSave } from "@living-diorama/content-schema";
+import {
+  defaultBody,
+  parseWorldSave,
+  WORLD_SAVE_SCHEMA_VERSION,
+} from "@living-diorama/content-schema";
 import {
   envelope,
   openEnvelope,
@@ -625,7 +629,10 @@ describe("saving and restoring in the host", () => {
       [text({})],
       [text([1, 2, 3])],
       [text({ ...valid, creatures: "many" })],
-      [text({ ...valid, schemaVersion: 2 }), ["unsupported_save_version"]],
+      [
+        text({ ...valid, schemaVersion: WORLD_SAVE_SCHEMA_VERSION + 1 }),
+        ["unsupported_save_version"],
+      ],
       [
         text({ ...valid, world: { id: "hollow:elsewhere", version: "1.0.0" } }),
         ["save_world_mismatch"],

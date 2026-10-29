@@ -5,7 +5,7 @@ import type { ActionEvent } from "./action-event";
 import type { PhaseSpan } from "../runtime/catch-up";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
-import type { CreatureKnowledge } from "./knowledge";
+import type { CreatureKnowledge, ReachOutcome } from "./knowledge";
 
 // The code contracts behind action and behavior registry entries (ADR 0006 §7, §8). Like
 // surface providers, an implementation is a registered entry with extra methods; an entry
@@ -141,6 +141,13 @@ export interface ActionContext extends PlaceQueries, OpenGroundQueries {
    * Does nothing if there is no such placement or it is home already.
    */
   setHome(placementId: string): void;
+  /**
+   * Records in the creature's knowledge how its attempt to reach the known place `placementId`,
+   * remembered under `affordanceId`, ended (ADR 0018 amendments, §11): `reached` clears its
+   * failures; `no_route` (no spot or route there) and `stuck` each count and back the place off
+   * for longer (`recordReach`). Does nothing for a place the creature doesn't know.
+   */
+  noteReach(affordanceId: string, placementId: string, outcome: ReachOutcome): void;
 }
 
 export type ActionStart =

@@ -28,14 +28,32 @@ export type RngStateSave = z.output<typeof RngStateSchema>;
  */
 export const DayPhaseSchema = z.enum(["dawn", "day", "dusk", "night"]);
 
-/** A prop or structure placement a creature has seen, and the tick it was last seen. */
+/** A cell of the coarse exploration grid, by integer index. */
+const GridCellSchema = z.strictObject({ x: z.int(), z: z.int() });
+
+/**
+ * Failed attempts to reach a known place since the creature last reached it, and the tick until
+ * which it is skipped (ADR 0018 amendments, §11).
+ */
+export const ReachFailuresSchema = z.strictObject({
+  noRoute: z.int().nonnegative(),
+  stuck: z.int().nonnegative(),
+  retryTick: tick,
+  cell: GridCellSchema,
+});
+
+/**
+ * A prop or structure placement a creature has seen, the tick it was last seen, and its failures
+ * to reach it.
+ */
 export const KnownPlaceSchema = z.strictObject({
   placementId: LocalIdSchema,
   lastSeenTick: tick,
+  failures: ReachFailuresSchema.optional(),
 });
 
 /** A cell of the coarse exploration grid a creature visited, by integer index. */
-export const VisitedCellSchema = z.strictObject({ x: z.int(), z: z.int(), tick });
+export const VisitedCellSchema = z.strictObject({ ...GridCellSchema.shape, tick });
 
 /** What a creature knows of the world (ADR 0018 §10, §16). */
 export const CreatureKnowledgeSchema = z.strictObject({

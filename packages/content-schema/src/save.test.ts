@@ -37,7 +37,16 @@ function busyCreature() {
     progress: { x: 1.5, z: -2, stalledTicks: 3 },
     needs: { "core:hunger": 0.4, "core:tiredness": 1 },
     knowledge: {
-      places: { "core:food": [{ placementId: "mushroom-1", lastSeenTick: 80 }] },
+      places: {
+        "core:food": [
+          { placementId: "mushroom-1", lastSeenTick: 80 },
+          {
+            placementId: "bush-2",
+            lastSeenTick: 70,
+            failures: { noRoute: 0, stuck: 2, retryTick: 250, cell: { x: -1, z: 0 } },
+          },
+        ],
+      },
       recentCells: [{ x: -1, z: 0, tick: 100 }],
     },
     home: "log-1",
@@ -121,10 +130,10 @@ describe("parseWorldSave", () => {
   it("rejects another save version with one clear diagnostic", () => {
     expect(
       messages(
-        parseWorldSave({ ...validSave(), schemaVersion: 2, unexpected: true }, "world.json"),
+        parseWorldSave({ ...validSave(), schemaVersion: 1, unexpected: true }, "world.json"),
       ),
     ).toEqual([
-      "error: world.json schemaVersion: World save version 2 is not supported (supported: 1) (unsupported_save_version)",
+      "error: world.json schemaVersion: World save version 1 is not supported (supported: 2) (unsupported_save_version)",
     ]);
   });
 
@@ -204,7 +213,18 @@ describe("parseWorldSave", () => {
           needs: { "core:hunger": 1.2 },
           home: undefined,
           variation: { ...creature.variation, needs: { "core:hunger": 0 } },
-          knowledge: { ...creature.knowledge, recentCells: [{ x: 0.5, z: 0, tick: 1 }] },
+          knowledge: {
+            places: {
+              "core:food": [
+                {
+                  placementId: "bush-2",
+                  lastSeenTick: 70,
+                  failures: { noRoute: -1, stuck: 0, retryTick: 250, cell: { x: 0, z: 0 } },
+                },
+              ],
+            },
+            recentCells: [{ x: 0.5, z: 0, tick: 1 }],
+          },
           asleep: "no",
         },
       ],
@@ -217,6 +237,7 @@ describe("parseWorldSave", () => {
       at("rng", "key"),
       at("lastResult", "outcome"),
       at("needs", "core:hunger"),
+      at("knowledge", "places", "core:food", 0, "failures", "noRoute"),
       at("knowledge", "recentCells", 0, "x"),
       at("home"),
       at("variation", "needs", "core:hunger"),

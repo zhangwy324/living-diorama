@@ -35,6 +35,12 @@ export interface PerceptionInput {
   tick: number;
   propsByAffordance: ReadonlyMap<string, readonly PropModel[]>;
   affordance(id: string): AffordanceType | undefined;
+  /**
+   * Whether the creature has a spot it can reach at the place from where it stands. Asked only
+   * for a noticed place it failed to reach, from a grid cell other than the one it failed from.
+   * Without it, failures are never cleared by seeing a place.
+   */
+  canReach?(placementId: string): boolean;
 }
 
 /**
@@ -42,6 +48,10 @@ export interface PerceptionInput {
  * or within touch (`TOUCH_DISTANCE` of its edge) that offers an affordance with a `remember` cap,
  * and records the grid cell the creature is in. When more places of one affordance are in view
  * than the cap, only the nearest are noted, so a scan never forgets what it has just seen.
+ *
+ * A noticed place the creature failed to reach, seen from a grid cell other than the one of its
+ * failures, has them cleared if the creature can reach it from here (ADR 0018 amendments, §11);
+ * if it can't, that cell becomes the failures' cell, so each cell is asked about once.
  */
 export function perceive({
   knowledge,
@@ -51,7 +61,9 @@ export function perceive({
   tick,
   propsByAffordance,
   affordance,
+  canReach,
 }: PerceptionInput): void {
+  const here = gridCellAt(x, z);
   for (const [id, props] of propsByAffordance) {
     const cap = affordance(id)?.remember;
     if (cap === undefined || cap < 1) continue;
@@ -67,6 +79,14 @@ export function perceive({
     for (const { prop } of noticed.slice(0, cap)) {
       rememberPlace(knowledge, id, prop.id, tick, cap);
     }
+    if (!canReach) continue;
+    for (const place of knowledge.places[id] ?? []) {
+      const { failures } = place;
+      if (!failures || place.lastSeenTick !== tick) continue;
+      if (failures.cell.x === here.x && failures.cell.z === here.z) continue;
+      if (canReach(place.placementId)) delete place.failures;
+      else failures.cell = { ...here };
+    }
   }
-  visitCell(knowledge, gridCellAt(x, z), tick);
+  visitCell(knowledge, here, tick);
 }
