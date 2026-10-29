@@ -503,6 +503,8 @@ export const COLORSPACE_FRAGMENT = "#include <colorspace_fragment>";
 export function premultiplied(material: THREE.SpriteMaterial): THREE.SpriteMaterial {
   sharpen(material);
   material.premultipliedAlpha = true;
+  // Fog would mix in after the opacity scale, so a fading picture would keep its fog colour.
+  material.fog = false;
   material.onBeforeCompile = sampleSharperPremultiplied;
   material.customProgramCacheKey = premultipliedKey;
   return material;

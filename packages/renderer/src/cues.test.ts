@@ -320,6 +320,7 @@ describe("cue textures", () => {
     expect(THREE.ShaderLib.sprite.fragmentShader).toContain(COLORSPACE_FRAGMENT);
     const material = premultiplied(new THREE.SpriteMaterial());
     expect(material.premultipliedAlpha).toBe(true);
+    expect(material.fog).toBe(false);
     const shader = {
       fragmentShader: `void main() {
 #include <map_fragment>
