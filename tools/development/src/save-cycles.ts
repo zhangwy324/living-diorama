@@ -2,6 +2,7 @@ import { formatDiagnostic, parseWorldSave, type WorldSave } from "@living-dioram
 import {
   creaturePhaseStarts,
   hungerNeed,
+  isFailingShelter,
   phaseSpans,
   Rng,
   SLEEPER_GAP,
@@ -117,7 +118,8 @@ const PER_CREATURE_EVENTS = new Set([
  * per-creature events), every creature fed, asleep in its sleeping phase, awake otherwise, and
  * rested if its sleeping phase ended during the gap. Asleep, a creature with a home lies at its
  * spot there clear of the other sleepers; if home is full, it sleeps anywhere but there, and
- * `onFullHome` is called with it (issue #158). A creature resumed asleep counts as asleep from
+ * `onFullHome` is called with it (issue #158). No creature sleeps at a shelter it keeps failing to
+ * reach, home or not, and one whose home is failing may sleep anywhere else (issue #175). A creature resumed asleep counts as asleep from
  * that first step. `checkSleep` says which creatures sleep at night (the sleep check's filter).
  */
 export function catchUpProblems(
@@ -161,7 +163,16 @@ export function catchUpProblems(
     if (sleeping !== creature.asleep) {
       problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at its ${phase}`);
     }
-    if (sleeping && creature.home !== null) {
+    // Never at a shelter it keeps failing to reach (issue #175); a failing home is no exception.
+    const bed = sleepsAt(creature);
+    if (bed !== null && isFailingShelter(creature.knowledge, bed)) {
+      problems.push(`${who}: asleep at ${bed}, a shelter it keeps failing to reach`);
+    }
+    if (
+      sleeping &&
+      creature.home !== null &&
+      !isFailingShelter(creature.knowledge, creature.home)
+    ) {
       // Its spot clear of the others asleep, as catch-up chose it; none clear while home has a
       // spot at all means home is full, and it sleeps elsewhere (issue #158).
       const spot = simulation.spotFor(who, creature.home, { clearOfSleepers: SLEEPER_GAP });
