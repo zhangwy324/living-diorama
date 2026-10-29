@@ -17,7 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { carp, otter, registerHollowCreatures, toad } from "./fixtures/hollow-creatures";
+import { beaver, carp, otter, registerHollowCreatures, toad } from "./fixtures/hollow-creatures";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
 import { saveThroughText } from "./save-cycles";
@@ -39,8 +39,8 @@ import { renderDebugMap } from "./worldgen/debug-map";
 //
 // `--species` picks who lives in the world, a comma-separated list of names from its species
 // table, `--creatures` of each. Woodland Hollow has `mossling` (the default), `amphibian`,
-// `swimmer` and `hopper`, the last three the test species of `fixtures/hollow-creatures.ts`
-// (ADR 0020).
+// `water-amphibian` (one that prefers the water, #163), `swimmer` and `hopper`, all but the
+// mossling the test species of `fixtures/hollow-creatures.ts` (ADR 0020).
 
 /** The app's tick rate, the only one saves are made and loaded at. */
 const APP_TICK_RATE_HZ = 10;
@@ -52,6 +52,7 @@ const WORLDS = {
     species: {
       mossling: "hollow:mossling",
       amphibian: otter.id,
+      "water-amphibian": beaver.id,
       swimmer: carp.id,
       hopper: toad.id,
     } as Record<string, string>,

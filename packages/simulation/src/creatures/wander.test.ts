@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { Rng } from "../runtime/rng";
 import type { ReachableRegion } from "./contracts";
 import { pickWeighted } from "./shared";
-import { OTHER_MEDIUM_CHANCE, pickWanderRegion } from "./wander";
+import { OTHER_MEDIUM_CHANCE, otherMediumChance, pickWanderRegion } from "./wander";
 
 // Wander's region pick (#140): keep to the medium the creature is in, and to what it reaches in
-// it; switch now and then.
+// it; switch now and then, more or less often by the species' water preference (#163).
 
 const region =
   (kind: RegionKind) =>
@@ -20,11 +20,16 @@ const land = region("land");
 const water = region("water");
 
 /** How often each region is picked from `here` over many draws, and with which `sameMedium`. */
-function shares(here: string, regions: ReachableRegion[], draws = 20_000) {
+function shares(
+  here: string,
+  regions: ReachableRegion[],
+  waterPreference?: number,
+  draws = 20_000,
+) {
   const rng = Rng.fromSeed(140);
   const counts = new Map<string, number>();
   for (let k = 0; k < draws; k++) {
-    const { regionId, sameMedium } = pickWanderRegion(here, regions, rng);
+    const { regionId, sameMedium } = pickWanderRegion(here, regions, rng, waterPreference);
     const key = `${regionId}${sameMedium ? "" : " (other medium)"}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -80,6 +85,52 @@ describe("wander's region pick", () => {
         });
       }
       // Same draws used, so the creature's stream carries on as it did.
+      expect(a.state).toEqual(b.state);
+    }
+  });
+
+  it("switches medium by the water preference, both ways", () => {
+    const fromLand = [land("west"), water("river", 400, 0)];
+    const fromWater = [land("west", 100, 0), water("river")];
+    for (const w of [0, 0.2, 0.8, 1]) {
+      const intoWater = shares("west", fromLand, w)("river (other medium)");
+      const outOfWater = shares("river", fromWater, w)("west (other medium)");
+      expect(intoWater).toBeCloseTo(2 * w * OTHER_MEDIUM_CHANCE, 2);
+      expect(outOfWater).toBeCloseTo(2 * (1 - w) * OTHER_MEDIUM_CHANCE, 2);
+    }
+    // At the ends it never leaves the medium it prefers.
+    expect(shares("river", fromWater, 1)("west (other medium)")).toBe(0);
+    expect(shares("west", fromLand, 0)("river (other medium)")).toBe(0);
+  });
+
+  it("draws exactly as before the preference at the default 0.5", () => {
+    expect(otherMediumChance(false, 0.5)).toBe(OTHER_MEDIUM_CHANCE);
+    expect(otherMediumChance(true, 0.5)).toBe(OTHER_MEDIUM_CHANCE);
+    // The pick of #140, with `OTHER_MEDIUM_CHANCE` whatever the medium.
+    const before = (here: string, regions: readonly ReachableRegion[], rng: Rng) => {
+      const others = regions.filter((r) => r.regionId !== here);
+      const otherMedium = others.filter((r) => r.sameMediumArea === 0);
+      if (otherMedium.length > 0 && rng.chance(OTHER_MEDIUM_CHANCE)) {
+        return { regionId: pickWeighted(otherMedium, rng) ?? here, sameMedium: false };
+      }
+      const sameMedium = others
+        .filter((r) => r.sameMediumArea > 0)
+        .map((r) => ({ ...r, walkableArea: r.sameMediumArea }));
+      const regionId =
+        sameMedium.length > 0 && rng.chance(0.3) ? (pickWeighted(sameMedium, rng) ?? here) : here;
+      return { regionId, sameMedium: true };
+    };
+    const regions = [land("west"), land("east", 100, 0), water("river", 400, 0)];
+    const inRiver = [land("west", 100, 0), land("east", 80, 0), water("river"), water("pond", 30)];
+    for (const [here, reachable] of [
+      ["west", regions],
+      ["river", inRiver],
+    ] as const) {
+      const a = Rng.fromSeed(163);
+      const b = Rng.fromSeed(163);
+      for (let k = 0; k < 5_000; k++) {
+        expect(pickWanderRegion(here, reachable, a, 0.5)).toEqual(before(here, reachable, b));
+      }
       expect(a.state).toEqual(b.state);
     }
   });

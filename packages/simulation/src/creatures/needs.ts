@@ -73,4 +73,9 @@ export const coreTraits: TraitType[] = [
   { id: "core:nocturnal", version: "1.0.0", default: 0, min: 0, max: 1, integer: true },
   /** Scales how fast hunger rises. */
   { id: "core:appetite", version: "1.0.0", default: 1, min: 0.5, max: 2 },
+  /**
+   * 0 keeps to land, 1 to water, 0.5 has no preference: how often `core:wander` heads into the
+   * water from land and back out (#163). Matters only to a creature that walks and swims.
+   */
+  { id: "core:water_preference", version: "1.0.0", default: 0.5, min: 0, max: 1 },
 ];

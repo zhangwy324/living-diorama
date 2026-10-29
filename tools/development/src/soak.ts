@@ -1,14 +1,15 @@
 import { parseArgs } from "node:util";
-import { carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
+import { beaver, carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
 import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 import { spread } from "./time-spread";
 
 // `pnpm soak`: the long-run invariant and living-behavior checks over many more seeds and a
 // higher tick rate than `pnpm check` runs (ADR 0006 §12, ADR 0018 §20), with the meal and sleep
 // checks on. Defaults: 32 seeds × one simulated day from noon at the app's 10 Hz, 3 mosslings each,
-// plus one amphibian and one water-only swimmer (the test species of
-// `fixtures/hollow-creatures.ts`), so the per-capability invariants of ADR 0020 run on banks and
-// in the river too. Each run also saves and restores at random ticks drawn from its seed, through
+// plus two amphibians, one with no preference between land and water and one that prefers the
+// water (#163), and one water-only swimmer (the test species of `fixtures/hollow-creatures.ts`), so
+// the per-capability invariants of ADR 0020 run on banks and in the river too. Each amphibian
+// species' bank jumps and share of time in water are reported per seed and over all seeds. Each run also saves and restores at random ticks drawn from its seed, through
 // JSON text and the schema (ADR 0019): a restore without a gap must carry on exactly as the
 // unbroken run, compared tick by tick for 10 simulated minutes, and one restore after a long gap
 // per run is checked against the catch-up rules (ADR 0018 §19).
@@ -25,7 +26,7 @@ const { values } = parseArgs({
     hz: { type: "string", default: "10" },
     // Mosslings per run.
     creatures: { type: "string", default: "3" },
-    // Leave out the amphibian and the swimmer.
+    // Leave out the amphibians and the swimmer.
     "mosslings-only": { type: "boolean", default: false },
     // Saves and restores per run; one of them after a long gap unless --no-long-gap.
     restores: { type: "string", default: "4" },
@@ -38,7 +39,21 @@ const seeds = Number(values.seeds);
 const tickRateHz = Number(values.hz);
 const ticks = Math.round(Number(values.hours) * 3600 * tickRateHz);
 const creatures = Number(values.creatures);
-const alsoSpawn = values["mosslings-only"] ? {} : { [otter.id]: 1, [carp.id]: 1 };
+/**
+ * The amphibian species reported on, by the name the report gives them, each with its totals over
+ * all seeds: bank jumps, the seeds in which it made any, those in which it spent time both on land
+ * and in the water (#140), its ticks in water and out of it, and each seed's share of time in
+ * water (#163).
+ */
+const AMPHIBIANS = [
+  { name: "amphibian", id: otter.id },
+  { name: "water-loving amphibian", id: beaver.id },
+].map((species) => ({
+  ...species,
+  totals: { jumps: 0, seedsWithJumps: 0, seedsInBothMedia: 0, water: 0, land: 0 },
+  shares: [] as number[],
+}));
+const alsoSpawn = values["mosslings-only"] ? {} : { [otter.id]: 1, [beaver.id]: 1, [carp.id]: 1 };
 const saveRestore = {
   cycles: Number(values.restores),
   compareTicks: Math.round(Number(values["compare-minutes"]) * 60 * tickRateHz),
@@ -48,13 +63,6 @@ let failed = 0;
 let restores = 0;
 let comparedTicks = 0;
 let largestSave = 0;
-/**
- * Bank jumps by the amphibians, the seeds in which they made any, and those in which they spent
- * time both on land and in the water (#140).
- */
-let bankJumps = 0;
-let seedsWithJumps = 0;
-let seedsInBothMedia = 0;
 /** Per seed with any, how many minutes apart its earliest and latest bedtimes, and wake times. */
 const bedSpreads: number[] = [];
 const wakeSpreads: number[] = [];
@@ -63,8 +71,8 @@ for (let seed = 1; seed <= seeds; seed++) {
   /** Creatures that used a structure, and each creature's jumps across a bank, by ID. */
   const structureUsers = new Set<string>();
   const jumpsBy = new Map<string, number>();
-  /** Ticks in water and out of it, summed over all the seed's amphibians (one by default). */
-  const amphibianTicks = { water: 0, land: 0 };
+  /** Per amphibian species, ticks in water and out of it, summed over its creatures. */
+  const amphibianTicks = new Map(AMPHIBIANS.map(({ id }) => [id, { water: 0, land: 0 }]));
   const report = runWithInvariants({
     register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
@@ -85,9 +93,10 @@ for (let seed = 1; seed <= seeds; seed++) {
       }
       const { creatures, model } = simulation.state;
       for (const c of creatures.values()) {
-        if (c.speciesId !== otter.id) continue;
+        const ticksOf = amphibianTicks.get(c.speciesId);
+        if (!ticksOf) continue;
         const kind = model.regions.get(c.position.regionId)?.kind;
-        amphibianTicks[kind === "water" ? "water" : "land"]++;
+        ticksOf[kind === "water" ? "water" : "land"]++;
       }
     },
   });
@@ -111,20 +120,26 @@ for (let seed = 1; seed <= seeds; seed++) {
       : [`${report.saveRestore.restores} of ${saveRestore.cycles} restores done`]),
   ];
   if (problems.length > 0) failed++;
-  const jumps = of(otter.id).reduce((n, id) => n + (jumpsBy.get(id) ?? 0), 0);
-  bankJumps += jumps;
-  if (jumps > 0) seedsWithJumps++;
-  if (amphibianTicks.water > 0 && amphibianTicks.land > 0) seedsInBothMedia++;
+  const swims: string[] = [];
+  for (const { name, id: speciesId, totals, shares } of AMPHIBIANS) {
+    const ticksOf = amphibianTicks.get(speciesId) ?? { water: 0, land: 0 };
+    const jumps = of(speciesId).reduce((n, id) => n + (jumpsBy.get(id) ?? 0), 0);
+    totals.jumps += jumps;
+    if (jumps > 0) totals.seedsWithJumps++;
+    if (ticksOf.water > 0 && ticksOf.land > 0) totals.seedsInBothMedia++;
+    totals.water += ticksOf.water;
+    totals.land += ticksOf.land;
+    const inWater = ticksOf.water / Math.max(1, ticksOf.water + ticksOf.land);
+    shares.push(inWater);
+    swims.push(`${name} ${jumps} bank jumps, ${percent(inWater)} of time in water`);
+  }
   // A restore after a long gap may skip a night's events, so a seed may have no times at all.
   const sleepers = Object.entries(report.creatures).filter(([, c]) => c.sleepChecked);
   const bedtimes = sleepers.flatMap(([, c]) => c.bedtimes);
   const wakeTimes = sleepers.flatMap(([, c]) => c.wakeTimes);
   if (bedtimes.length > 0) bedSpreads.push(Math.max(...bedtimes) - Math.min(...bedtimes));
   if (wakeTimes.length > 0) wakeSpreads.push(Math.max(...wakeTimes) - Math.min(...wakeTimes));
-  const inWater = amphibianTicks.water / Math.max(1, amphibianTicks.water + amphibianTicks.land);
-  const swam = values["mosslings-only"]
-    ? ""
-    : `, ${jumps} amphibian bank jumps, ${(inWater * 100).toFixed(0)}% of amphibian time in water`;
+  const swam = values["mosslings-only"] ? "" : `, ${swims.join(", ")}`;
   console.log(
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
       `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
@@ -139,10 +154,14 @@ console.log(
     `largest save ${(largestSave / 1024).toFixed(0)} KiB of JSON`,
 );
 if (!values["mosslings-only"]) {
-  console.log(
-    `${bankJumps} amphibian bank jumps, in ${seedsWithJumps}/${seeds} seeds; ` +
-      `on land and in water in ${seedsInBothMedia}/${seeds} seeds`,
-  );
+  for (const { name, totals: t, shares } of AMPHIBIANS) {
+    console.log(
+      `${name}: ${t.jumps} bank jumps, in ${t.seedsWithJumps}/${seeds} seeds; ` +
+        `on land and in water in ${t.seedsInBothMedia}/${seeds} seeds; ` +
+        `${percent(t.water / Math.max(1, t.water + t.land))} of time in water ` +
+        `(${percent(Math.min(...shares))}–${percent(Math.max(...shares))} per seed)`,
+    );
+  }
 }
 console.log(
   `spread across each seed's sleepers: bedtimes ${spreadRange(bedSpreads)}, ` +
@@ -152,6 +171,10 @@ console.log(
   `${seeds - failed}/${seeds} seeds clean in ${((performance.now() - started) / 1000).toFixed(0)} s`,
 );
 process.exitCode = failed > 0 ? 1 : 0;
+
+function percent(share: number): string {
+  return `${(share * 100).toFixed(0)}%`;
+}
 
 function describeLongGap(longGap: { gapMs: number; at: string } | undefined): string {
   return longGap
