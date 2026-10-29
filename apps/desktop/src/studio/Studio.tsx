@@ -46,6 +46,7 @@ import { MyCreatures } from "./MyCreatures";
 import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
 import { useReducedMotion } from "./reduced-motion";
 import { keepTrying } from "./retry";
+import { shownSize, suggestSize } from "./size-suggestion";
 import { NO_NAME, canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 import { hasWarningTint, WarningToggle } from "./WarningToggle";
@@ -101,7 +102,9 @@ export function Studio() {
   const [closing, setClosing] = useState(false);
   const previewBox = useRef<HTMLDivElement>(null);
   const preview = useRef<BodyPreview>(undefined);
-  const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
+  // Undefined until the player picks a size, so the one suggested from the drawing shows (issue
+  // #49). A pick is never overridden until the next creature.
+  const [pickedSize, setPickedSize] = useState<SizeClass>();
   const [thickness, setThickness] = useState<number>(BODY_THICKNESS.default);
   // Undefined until the player types one, so the suggestion shows.
   const [name, setName] = useState<string>();
@@ -130,6 +133,8 @@ export function Studio() {
   const [placingChoice, setPlacingChoice] = useState<AnchorName>();
   // The drawn shape's bounds, from the latest check, for the anchors' defaults.
   const [bounds, setBounds] = useState<DrawingBounds>();
+  const suggestedSize = suggestSize(bounds);
+  const sizeClass = shownSize(pickedSize, suggestedSize, DEFAULT_SIZE_CLASS);
   const planHeadingRef = useRef<HTMLHeadingElement>(null);
   const nextButton = useRef<HTMLButtonElement>(null);
   // Where the focus goes when the step changes: the panel's heading on Next, the Next button on
@@ -383,7 +388,7 @@ export function Studio() {
       releaseId.current = undefined;
       setName(undefined);
       setSuggestion(suggestName(randomNameSeed(), [...libraryNames(), released.name]));
-      setSizeClass(DEFAULT_SIZE_CLASS);
+      setPickedSize(undefined);
       setThickness(BODY_THICKNESS.default);
       setPlan(defaultPlan());
       setPreviewMode(undefined);
@@ -581,9 +586,10 @@ export function Studio() {
                   setSuggestion(anotherName(shownName, libraryNames()));
                 }}
                 sizeClass={sizeClass}
+                suggestedSize={suggestedSize}
                 onSizeClass={(next) => {
                   releaseId.current = undefined;
-                  setSizeClass(next);
+                  setPickedSize(next);
                 }}
                 thickness={thickness}
                 onThickness={(next) => {

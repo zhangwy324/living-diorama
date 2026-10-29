@@ -5,7 +5,10 @@ import { BODY_THICKNESS, SIZE_CLASSES, type SizeClass } from "@living-diorama/co
 
 export const SIZES = Object.keys(SIZE_CLASSES) as SizeClass[];
 
-/** A new drawing's size: the mossling's, the size the built-in world is made for. */
+/**
+ * The size shown until the drawing suggests one (issue #49): the mossling's, the size the
+ * built-in world is made for.
+ */
 export const DEFAULT_SIZE_CLASS: SizeClass = "medium";
 
 /** The reroll button's label and tooltip. */
@@ -28,6 +31,8 @@ export function CreatureDetails(props: {
   /** Replaces the name, typed or suggested, with a new suggestion. */
   onSuggestName(): void;
   sizeClass: SizeClass;
+  /** The size suggested from the drawing (issue #49), marked in the picker; none while empty. */
+  suggestedSize?: SizeClass | undefined;
   onSizeClass(size: SizeClass): void;
   /** Depth as a share of the height. */
   thickness: number;
@@ -87,6 +92,8 @@ export function CreatureDetails(props: {
               onChange={() => props.onSizeClass(size)}
             />
             <span>{sizeLabel(size)}</span>
+            {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
+            <small className="suggested">{props.suggestedSize === size ? "suggested" : ""}</small>
           </label>
         ))}
       </fieldset>

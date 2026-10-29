@@ -351,6 +351,16 @@ body,
   background: rgb(110 160 90 / 80%);
 }
 
+.sizes .suggested {
+  display: block;
+  min-height: 1.4em;
+  padding-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  color: rgb(238 243 232 / 60%);
+}
+
 .sizes input:focus-visible + span {
   outline: 2px solid #eef3e8;
   outline-offset: 1px;
