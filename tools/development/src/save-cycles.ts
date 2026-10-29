@@ -1,5 +1,6 @@
 import { formatDiagnostic, parseWorldSave, type WorldSave } from "@living-diorama/content-schema";
 import {
+  creaturePhaseStarts,
   hungerNeed,
   phaseSpans,
   Rng,
@@ -141,17 +142,21 @@ export function catchUpProblems(
       `${state.creatures.size} creatures after catch-up, ${save.creatures.length} saved`,
     );
   }
-  const spans = phaseSpans(state.minutes, catchUp.gapMs);
   for (const creature of state.creatures.values()) {
+    // Its own day (issue #85), by its present offsets. Below, only the end of a night in the gap
+    // matters, which is its dawn start, and only while it is awake now: its morning offset then
+    // changed last when that night began, so the present one is the one that moved that dawn.
+    const spans = phaseSpans(state.minutes, catchUp.gapMs, creaturePhaseStarts(creature.day));
+    const phase = creature.day.phase;
     const who = creature.id;
     const hunger = creature.needs[hungerNeed.id];
     if (hunger !== undefined && !(hunger < hungerNeed.actAt)) {
       problems.push(`${who}: hunger ${hunger} after catch-up, not fed`);
     }
     if (!checkSleep(creature) || creature.releasedAtTick !== undefined) continue;
-    const { sleeping } = sleepCycle(state.dayPhase, false);
+    const { sleeping } = sleepCycle(phase, false);
     if (sleeping !== creature.asleep) {
-      problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at ${state.dayPhase}`);
+      problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at its ${phase}`);
     }
     if (sleeping && creature.home !== null) {
       const spot = simulation.spotFor(who, creature.home);

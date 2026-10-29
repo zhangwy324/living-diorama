@@ -13,13 +13,28 @@ export const MINUTES_PER_DAY = 24 * 60;
 export type DayPhase = (typeof DayPhaseSchema.options)[number];
 export const DAY_PHASES: readonly DayPhase[] = DayPhaseSchema.options;
 
-/** Where each phase starts, in minutes since midnight; it runs until the next one starts. */
-const PHASE_STARTS: readonly (readonly [number, DayPhase])[] = [
-  [6 * 60, "dawn"],
-  [8 * 60, "day"],
-  [18 * 60, "dusk"],
-  [20 * 60, "night"],
-];
+/**
+ * Where each phase starts, in minutes since midnight; it runs until the next one starts. A
+ * creature's own day (issue #85) has starts of its own, derived from these.
+ */
+export type PhaseStarts = Readonly<Record<DayPhase, number>>;
+
+/** The world's day: dawn 06–08, day 08–18, dusk 18–20, night 20–06. */
+export const WORLD_PHASE_STARTS: PhaseStarts = {
+  dawn: 6 * 60,
+  day: 8 * 60,
+  dusk: 18 * 60,
+  night: 20 * 60,
+};
+
+/** The starts, wrapped into a day and in the order the day passes them from midnight. */
+function startTable(starts: PhaseStarts): (readonly [number, DayPhase])[] {
+  return DAY_PHASES.map((p) => [wrapMinutes(starts[p]), p] as const).sort(([x], [y]) => x - y);
+}
+
+const WORLD_TABLE = startTable(WORLD_PHASE_STARTS);
+const tableFor = (starts: PhaseStarts) =>
+  starts === WORLD_PHASE_STARTS ? WORLD_TABLE : startTable(starts);
 
 /** Wraps any finite number of minutes into [0, MINUTES_PER_DAY). */
 export function wrapMinutes(minutes: number): number {
@@ -30,20 +45,32 @@ export function wrapMinutes(minutes: number): number {
   return positive >= MINUTES_PER_DAY ? 0 : positive;
 }
 
-/** The phase at `minutes` since midnight: dawn 06–08, day 08–18, dusk 18–20, night 20–06. */
-export function dayPhaseAt(minutes: number): DayPhase {
+/**
+ * The phase at `minutes` since midnight: the one whose start (of `starts`, by default the
+ * world's) was passed last.
+ */
+export function dayPhaseAt(minutes: number, starts: PhaseStarts = WORLD_PHASE_STARTS): DayPhase {
   const m = wrapMinutes(minutes);
-  let phase: DayPhase = "night";
-  for (const [start, p] of PHASE_STARTS) if (m >= start) phase = p;
+  const table = tableFor(starts);
+  // Before the first start of the day, the last one's phase runs on from yesterday.
+  let phase = (table.at(-1) as readonly [number, DayPhase])[1];
+  for (const [start, p] of table) if (m >= start) phase = p;
   return phase;
 }
 
-/** Minutes from `minutes` since midnight to the start of the next phase, more than 0. */
-export function minutesToNextPhase(minutes: number): number {
+/**
+ * Minutes from `minutes` since midnight to the next start of `starts` (by default the world's),
+ * more than 0. It and `dayPhaseAt` compare against the same starts, so the phase changes there.
+ */
+export function minutesToNextPhase(
+  minutes: number,
+  starts: PhaseStarts = WORLD_PHASE_STARTS,
+): number {
   const m = wrapMinutes(minutes);
-  const next = PHASE_STARTS.find(([start]) => start > m)?.[0];
+  const table = tableFor(starts);
+  const next = table.find(([start]) => start > m)?.[0];
   // Past the last start, the next phase starts with the first one tomorrow.
-  return (next ?? (PHASE_STARTS[0]?.[0] ?? 0) + MINUTES_PER_DAY) - m;
+  return (next ?? (table[0]?.[0] ?? 0) + MINUTES_PER_DAY) - m;
 }
 
 /**

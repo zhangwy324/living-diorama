@@ -34,4 +34,4 @@ export const SCHEMA_VERSIONS = {
 export type DefinitionKind = keyof typeof SCHEMA_VERSIONS;
 
 /** Current data-format version of a world save (ADR 0019). */
-export const WORLD_SAVE_SCHEMA_VERSION = 2;
+export const WORLD_SAVE_SCHEMA_VERSION = 3;

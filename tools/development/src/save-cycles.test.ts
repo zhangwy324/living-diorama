@@ -137,7 +137,7 @@ describe("catchUpProblems", () => {
     expect(problems).toEqual([
       expect.stringContaining("first step after catch-up emitted"),
       expect.stringContaining(`${creature.id}: hunger 0.95`),
-      expect.stringContaining(`${creature.id}: awake at night`),
+      expect.stringContaining(`${creature.id}: awake at its night`),
       expect.stringContaining(`${creature.id}: away from its home`),
     ]);
   });

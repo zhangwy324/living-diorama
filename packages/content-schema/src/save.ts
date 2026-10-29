@@ -28,6 +28,19 @@ export type RngStateSave = z.output<typeof RngStateSchema>;
  */
 export const DayPhaseSchema = z.enum(["dawn", "day", "dusk", "night"]);
 
+/**
+ * Minutes a creature's own day moves a phase start by (issue #85). The simulation draws within
+ * 30 minutes either way; this only bounds what a save may hold.
+ */
+const dayShift = z.number().gt(-60).lt(60);
+
+/** A creature's own day (`CreatureDay`, issue #85). */
+export const CreatureDaySchema = z.strictObject({
+  phase: DayPhaseSchema,
+  morning: dayShift,
+  evening: dayShift.optional(),
+});
+
 /** A cell of the coarse exploration grid, by integer index. */
 const GridCellSchema = z.strictObject({ x: z.int(), z: z.int() });
 
@@ -101,6 +114,7 @@ export const CreatureSaveSchema = z.strictObject({
     senses: z.record(ContentIdSchema, z.number().positive()),
   }),
   spotAngle: z.number(),
+  day: CreatureDaySchema,
   asleep: z.boolean(),
   phaseReactionTick: tick.optional(),
   releasedAtTick: tick.optional(),

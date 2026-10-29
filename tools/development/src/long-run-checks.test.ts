@@ -7,7 +7,12 @@ import type {
   SimulationEvent,
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { LongRunChecks, type CreatureTick, type LongRunCheckOptions } from "./long-run-checks";
+import {
+  LongRunChecks,
+  type CreatureTick,
+  type EventTime,
+  type LongRunCheckOptions,
+} from "./long-run-checks";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { LIVING_BEHAVIOR_CHECKS, reachesFood, runWithInvariants } from "./simulation-run";
 
@@ -16,6 +21,7 @@ import { LIVING_BEHAVIOR_CHECKS, reachesFood, runWithInvariants } from "./simula
 const HZ = 10;
 const withoutTick = (violation: string) => violation.replace(/^seed \d+, tick \d+: /, "");
 const HOUR = 3600 * HZ;
+const NOON: EventTime = { dayPhase: "day", minutes: 12 * 60 };
 
 function checker(options: LongRunCheckOptions = {}) {
   const violations: string[] = [];
@@ -123,7 +129,7 @@ describe("long-run checks", () => {
 
     const on = checker({ meals: {} });
     on.live(0, 2 * HOUR, "day");
-    on.checks.event(meal(2 * HOUR));
+    on.checks.event(meal(2 * HOUR), NOON);
     on.live(2 * HOUR, 3 * HOUR, "day");
     expect(on.violations).toEqual([]);
     on.live(5 * HOUR, 2, "day");
@@ -131,7 +137,7 @@ describe("long-run checks", () => {
 
     // Time asleep doesn't count: 2 h awake, a 10-hour night, 1 h awake is no gap.
     const night = checker({ meals: {} });
-    night.checks.event(meal(0));
+    night.checks.event(meal(0), NOON);
     night.live(0, 2 * HOUR, "dusk");
     night.live(2 * HOUR, 10 * HOUR, "night", { asleep: true });
     night.live(12 * HOUR, HOUR, "dawn");
@@ -140,7 +146,7 @@ describe("long-run checks", () => {
     expect(night.violations).toEqual(["c1: no meal for 3 h awake"]);
     expect(on.checks.creatures.get("c1")!.meals).toBe(1);
     // Other events don't count.
-    on.checks.event({ type: "creature_stuck", tick: 1, creatureId: "c1" } as SimulationEvent);
+    on.checks.event({ type: "creature_stuck", tick: 1, creatureId: "c1" } as SimulationEvent, NOON);
     expect(on.checks.creatures.get("c1")!.meals).toBe(1);
 
     // A creature its `creatures` filter leaves out.
@@ -204,6 +210,40 @@ describe("long-run checks", () => {
     });
   });
 
+  it("records bedtimes and rested wakes, and fails falling asleep by day unless tired", () => {
+    const fell = (tiredness: number, tick = 1) =>
+      ({ type: "fell_asleep", tick, creatureId: "c1", placementId: null, tiredness }) as const;
+    const woke = (reason: "rested" | "interrupted") =>
+      ({ type: "woke_up", tick: 1, creatureId: "c1", reason, tiredness: 0 }) as const;
+    const { checks, violations, live } = checker({ sleep: {} });
+    live(0, 1, "day");
+    checks.event(fell(0.5, 0), { dayPhase: "dusk", minutes: 19 * 60 + 50 });
+    // Falling asleep again after waking for food is no bedtime, before midnight or after.
+    checks.event(fell(0.5, 2 * HOUR), { dayPhase: "night", minutes: 21 * 60 + 50 });
+    checks.event(fell(0.5, 5 * HOUR), { dayPhase: "night", minutes: 60 });
+    // The next night is.
+    checks.event(fell(0.5, 24 * HOUR), { dayPhase: "night", minutes: 20 * 60 + 25 });
+    checks.event(woke("interrupted"), { dayPhase: "night", minutes: 30 });
+    checks.event(woke("rested"), { dayPhase: "dawn", minutes: 6 * 60 + 20 });
+    // A nap: tired enough to act.
+    checks.event(fell(0.92), NOON);
+    checks.event(woke("rested"), { dayPhase: "day", minutes: 15 * 60 });
+    expect(checks.creatures.get("c1")).toMatchObject({
+      bedtimes: [19 * 60 + 50, 20 * 60 + 25],
+      wakeTimes: [6 * 60 + 20],
+    });
+    expect(violations).toEqual([]);
+    checks.event(fell(0.89), NOON);
+    expect(violations).toEqual(["c1: fell asleep by day at tiredness 0.89 (below 0.9)"]);
+    // Not for a creature the sleep check leaves out, nor without the sleep check.
+    const nocturnal = checker({ sleep: {} });
+    nocturnal.live(0, 1, "day", { checkSleep: false });
+    nocturnal.checks.event(fell(0.3), NOON);
+    const off = checker();
+    off.checks.event(fell(0.3), NOON);
+    expect([...nocturnal.violations, ...off.violations]).toEqual([]);
+  });
+
   it("counts time hungry by the cue or by hunger", () => {
     const { checks, live } = checker();
     live(0, 10, "day", { cues: ["hungry"] });
@@ -263,13 +303,14 @@ describe("long-run checks", () => {
       startMinutes: 19 * 60,
       ticks: 4 * 3600 * 2,
     };
-    // They eat over dusk, go to bed as night begins and sleep it through without eating; only
-    // time awake counts towards the meal check, so the night is no gap.
+    // They eat over dusk, go to bed as their own night begins, up to half an hour after the
+    // world's (issue #85), and sleep it through without eating; only time awake counts towards the
+    // meal check, so the night is no gap.
     const checked = runWithInvariants({ ...hollow, ...LIVING_BEHAVIOR_CHECKS });
     expect(checked.violations).toEqual([]);
     for (const c of Object.values(checked.creatures)) {
       expect(c.meals).toBeGreaterThan(0);
-      expect(c.asleepAtNightTicks / c.nightTicks).toBeGreaterThan(0.99);
+      expect(c.asleepAtNightTicks / c.nightTicks).toBeGreaterThan(0.8);
     }
 
     // A hungry creature that can reach no food is left out of the meal check, as is one without

@@ -313,7 +313,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;
-      checks.event(event);
+      checks.event(event, { dayPhase: simulation.state.dayPhase, minutes });
       if (event.type === "first_use_of_structure") report.firstStructureUse ??= event.tick;
       if (event.type === "entered_region") {
         // Regions change only through a connection that joins them, in a direction it allows,

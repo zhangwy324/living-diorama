@@ -238,7 +238,10 @@ console.log(`wrote ${base}.ndjson${!values["no-map"] && mapInputs ? ` and ${base
 if (values.save !== undefined) console.log(`saved the world to ${resolve(values.save)}`);
 process.exitCode = report.violations.length > 0 ? 1 : 0;
 
-/** Per creature: meals, sleep, time hungry, and decisions and interruptions (ADR 0018 §20). */
+/**
+ * Per creature: meals, sleep, time hungry, decisions and interruptions (ADR 0018 §20), and the
+ * spread of its bedtimes and wake times over the nights of the run (issue #85).
+ */
 function describeCreatures({ creatures, tickRateHz }: RunReport): string[] {
   const hours = (ticks: number) => `${(ticks / tickRateHz / 3600).toFixed(1)} h`;
   return Object.entries(creatures).map(([id, c]) => {
@@ -251,9 +254,19 @@ function describeCreatures({ creatures, tickRateHz }: RunReport): string[] {
       `${id}: ${c.meals} meals (${MEAL_EVENT}), asleep ${hours(c.asleepTicks)}${night}, ` +
       `hungry ${hours(c.hungryTicks)} (cue or hunger ≥ ${HUNGRY_FROM}), ` +
       `${c.decisions} decisions (${per10s.toFixed(2)} per 10 s), ` +
-      `${c.interruptions} interruptions (at most ${c.peakInterruptionsPerMinute} in a minute)`
+      `${c.interruptions} interruptions (at most ${c.peakInterruptionsPerMinute} in a minute), ` +
+      `bed ${spread(c.bedtimes)}, woke ${spread(c.wakeTimes)}`
     );
   });
+}
+
+/** Earliest and latest of some times of day, how far apart, and how many: "never" for none. */
+function spread(times: readonly number[]): string {
+  if (times.length === 0) return "never";
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  const range = `${formatClockTime(min)}–${formatClockTime(max)}`;
+  return `${range} (${Math.round(max - min)} min apart, ${times.length}×)`;
 }
 
 /** A save file, read and checked as the app's worker does; throws with the reason otherwise. */

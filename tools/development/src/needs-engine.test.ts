@@ -1,6 +1,7 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import type { NeedType, Registries, TraitType } from "@living-diorama/extension-api";
 import {
+  DAY_SHIFT_MINUTES,
   followPathAction,
   INTERRUPT_MARGIN,
   PHASE_REACTION_SECONDS,
@@ -329,7 +330,8 @@ describe("triggers", () => {
       for (const c of simulation.state.creatures.values()) {
         for (const id of Object.keys(c.needs)) c.needs[id] = 0;
       }
-      simulation.setTimeOfDay(18 * 60);
+      // Late enough that every creature's own dusk has begun, however its day is moved (#85).
+      simulation.setTimeOfDay(18 * 60 + DAY_SHIFT_MINUTES);
       run(PHASE_REACTION_SECONDS * 10 + 1);
       return traces
         .filter((t) => t.triggers.some((x) => x.kind === "day_phase"))

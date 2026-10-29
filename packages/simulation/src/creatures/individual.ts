@@ -1,5 +1,6 @@
 import type { SpeciesDefinition } from "@living-diorama/content-schema";
 import type { NeedType, Registries } from "@living-diorama/extension-api";
+import { drawDayShift } from "../runtime/creature-day";
 import { Rng, type RngState } from "../runtime/rng";
 
 // Individual state that comes from data (ADR 0018 §1, §4, §16 and amendments): which needs a
@@ -45,7 +46,8 @@ export function speciesTraits(
  * that declares `variation` (needs first, then senses, each in declaration order), then each
  * need's starting value, uniformly below its `startBelow` (default `actAt`, so spawned creatures
  * don't all act at once),
- * then the angle at which it stands beside a place it eats or sleeps at (ADR 0018 amendments, §11).
+ * then the angle at which it stands beside a place it eats or sleeps at (ADR 0018 amendments, §11),
+ * then the offset of its first morning (`CreatureDay`, issue #85).
  * The draws come from the stream forked as `"individual"` off the creature's own stream, so they
  * never shift the sequence its behaviors see.
  */
@@ -54,7 +56,12 @@ export function drawIndividual(
   needs: readonly NeedType[],
   species: SpeciesDefinition,
   registries: Registries,
-): { variation: IndividualVariation; needs: Record<string, number>; spotAngle: number } {
+): {
+  variation: IndividualVariation;
+  needs: Record<string, number>;
+  spotAngle: number;
+  morning: number;
+} {
   const rng = new Rng(creatureRng).fork("individual");
   const variation: IndividualVariation = { needs: {}, senses: {} };
   for (const need of needs) {
@@ -68,7 +75,7 @@ export function drawIndividual(
     needs.map((n) => [n.id, rng.range(0, n.startBelow ?? n.actAt)]),
   );
   const spotAngle = rng.range(-Math.PI, Math.PI);
-  return { variation, needs: values, spotAngle };
+  return { variation, needs: values, spotAngle, morning: drawDayShift(rng) };
 }
 
 const factor = (rng: Rng, variation: number) => rng.range(1 - variation, 1 + variation);
