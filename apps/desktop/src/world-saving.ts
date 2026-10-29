@@ -26,7 +26,10 @@ export interface WorldSavingOptions {
   store: WorldStore | undefined;
   /** The creatures in the world now, from the latest snapshot. */
   creatures(): readonly { id: string }[];
-  /** Wall-clock time in milliseconds; injectable for tests. */
+  /**
+   * A monotonic clock in milliseconds, `performance.now` by default, so setting the wall clock
+   * back can't stall the autosave; injectable for tests.
+   */
   now?(): number;
   /**
    * Calls `callback` whenever the page becomes hidden, until the returned function is called;
@@ -39,9 +42,9 @@ export interface WorldSaving {
   /**
    * Restores the saved world, or spawns the starting creatures when there is no usable save
    * (ADR 0019 §3, §7), then saves it and starts saving whenever the page is hidden. Call once,
-   * after the library has registered its species. Never rejects: whatever goes wrong is logged and the world starts
-   * fresh. If the store fails to load, nothing is saved this session, so a save that is there but
-   * unreadable for now is never overwritten.
+   * after the library has registered its species. Never rejects: whatever goes wrong is logged
+   * and the world starts fresh. If the store fails to load, nothing is saved this session, so a
+   * save that is there but unreadable for now is never overwritten.
    */
   open(): Promise<void>;
   /**
@@ -111,7 +114,7 @@ export function describeRestore(report: RestoreReport): { lines: string[]; notab
 /** Keeps `world` in `store` (ADR 0019). Nothing happens until `open`. */
 export function worldSaving(
   world: SavedWorld,
-  { store, creatures, now = Date.now, onHidden = onPageHidden }: WorldSavingOptions,
+  { store, creatures, now = () => performance.now(), onHidden = onPageHidden }: WorldSavingOptions,
 ): WorldSaving {
   let opened = false;
   let stopped = false;

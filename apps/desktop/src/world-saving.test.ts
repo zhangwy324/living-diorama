@@ -278,6 +278,43 @@ describe("worldSaving saves", () => {
     expect(fake.calls).toEqual(["save", "save"]);
   });
 
+  it("does nothing when due before open or without a store, and starts counting only once open", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const fake = fakeWorld();
+    const page = manualPage();
+    const saving = worldSaving(fake.world, {
+      store: recordingStore(null).store,
+      creatures: () => [],
+      ...page.options,
+    });
+    await saving.saveIfDue();
+    expect(fake.calls).toEqual([]);
+    const unstored = worldSaving(fake.world, { store: undefined, creatures: () => [] });
+    await unstored.open();
+    await unstored.saveIfDue();
+    expect(fake.calls).toEqual(["spawn starting"]);
+    fake.calls.length = 0;
+    // The save on open is the first one asked for, so the autosave counts from it.
+    await open(saving, fake);
+    page.advance(AUTOSAVE_MS - 1);
+    await saving.saveIfDue();
+    expect(fake.calls).toEqual(["spawn starting", "save"]);
+  });
+
+  it("shares a save that waits when due", async () => {
+    const { fake, saving, page } = await opened();
+    const inFlight = saving.save();
+    await flush();
+    const waiting = saving.save();
+    page.advance(AUTOSAVE_MS);
+    expect(saving.saveIfDue()).toBe(waiting);
+    await fake.answerSave();
+    await inFlight;
+    await fake.answerSave();
+    await waiting;
+    expect(fake.calls).toEqual(["save", "save"]);
+  });
+
   it("saves when the page is hidden until stopped", async () => {
     const { fake, saving, page, written } = await opened();
     expect(page.watching()).toBe(true);
