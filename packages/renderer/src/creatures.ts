@@ -209,7 +209,7 @@ export class CreatureBodies {
     for (const creature of this.#ordered) {
       const { anchor, box } = creature;
       anchor.shift
-        ?.copy(right)
+        .copy(right)
         .multiplyScalar(box.shiftX * anchor.unitsPerPixel)
         .addScaledVector(up, box.shiftY * anchor.unitsPerPixel);
       anchor.zThin = box.thin;

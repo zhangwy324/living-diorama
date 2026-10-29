@@ -49,8 +49,6 @@ export interface CueBox {
   /** How far the bubble or ring is shifted now, eased towards where the layout wants it. */
   shiftX: number;
   shiftY: number;
-  /** Whether it was laid out last frame: one joining starts where the layout puts it. */
-  active: boolean;
   /** Whether its z's are thinned because they overlap an earlier sleeper's. */
   thin: boolean;
   /** The layout's working: where this frame's layout puts it, and the current pass's push. */
@@ -73,7 +71,6 @@ export const emptyCueBox = (): CueBox => ({
   zWeight: 0,
   shiftX: 0,
   shiftY: 0,
-  active: false,
   thin: false,
   targetX: 0,
   targetY: 0,
@@ -140,18 +137,11 @@ export function layoutCues(boxes: readonly CueBox[], dt: number): void {
   push(boxes);
   const step = Math.max(0, Number.isFinite(dt) ? dt : 0);
   const follow = step > SNAP_SECONDS ? 1 : 1 - Math.exp(-step / SHIFT_SECONDS);
+  // Every shift eases, including a faint cue's back to 0 (its target), so nothing jumps as a
+  // cue fades across `MIN_LAYOUT_WEIGHT`: one fading in eases out from 0 as it grows.
   for (const box of boxes) {
-    if (box.weight < MIN_LAYOUT_WEIGHT) {
-      box.active = false;
-      box.shiftX = 0;
-      box.shiftY = 0;
-      continue;
-    }
-    // A cue joining starts where it belongs; one already shown eases there.
-    const k = box.active ? follow : 1;
-    box.shiftX += (box.targetX - box.shiftX) * k;
-    box.shiftY += (box.targetY - box.shiftY) * k;
-    box.active = true;
+    box.shiftX += (box.targetX - box.shiftX) * follow;
+    box.shiftY += (box.targetY - box.shiftY) * follow;
   }
   thin(boxes);
 }
@@ -180,18 +170,19 @@ function push(boxes: readonly CueBox[]): void {
         const need = a.radius + b.radius + CUE_MARGIN_PX;
         const d2 = dx * dx + dy * dy;
         if (d2 >= need * need) continue;
-        let d = Math.sqrt(d2);
-        // On top of each other: the earlier one goes left.
+        const d = Math.sqrt(d2);
+        const overlap = need - d;
+        // Divides (dx, dy) down to a unit direction. On top of each other: the earlier one goes left.
+        let unit = d;
         if (d < 1e-6) {
           dx = -1;
           dy = 0;
-          d = 1;
+          unit = 1;
         }
-        const overlap = need - d;
         // Each gives way by the other's share, so a faint cue hardly moves a clear one.
         const total = a.weight + b.weight;
-        const ka = ((b.weight / total) * overlap) / d;
-        const kb = ((a.weight / total) * overlap) / d;
+        const ka = ((b.weight / total) * overlap) / unit;
+        const kb = ((a.weight / total) * overlap) / unit;
         a.pushX += dx * ka;
         a.pushY += dy * ka;
         b.pushX -= dx * kb;

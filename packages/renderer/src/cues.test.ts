@@ -533,6 +533,8 @@ describe("cue sprites", () => {
       unitsPerPixel: 0.01,
       right: new THREE.Vector3(1, 0, 0),
       visible: 1,
+      shift: new THREE.Vector3(),
+      zThin: false,
     });
     const sleeping = { eating: 0, sleeping: 1, hungry: 0 };
     const step = 1 / 30;
@@ -599,6 +601,8 @@ describe("cue sprites", () => {
       unitsPerPixel: 0.01,
       right: new THREE.Vector3(1, 0, 0),
       visible: 1,
+      shift: new THREE.Vector3(),
+      zThin: false,
     };
     const sleeping = { eating: 0, sleeping: 1, hungry: 0 };
     for (const time of [0, 0.5, 100, 40, 40.1]) {
@@ -646,6 +650,8 @@ describe("cue sprites", () => {
       unitsPerPixel: 0.01,
       right: new THREE.Vector3(1, 0, 0),
       visible: 1,
+      shift: new THREE.Vector3(),
+      zThin: false,
     };
     const weights = { eating: 0, sleeping: 1, hungry: 1 };
     const positions = () =>

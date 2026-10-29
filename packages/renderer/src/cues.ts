@@ -600,11 +600,11 @@ export interface CueAnchor {
   visible: number;
   /**
    * How far the bubble and ring move, in world space, to keep clear of other creatures' cues
-   * (`layoutCues`). Undefined for none.
+   * (`layoutCues`).
    */
-  shift?: THREE.Vector3;
+  shift: THREE.Vector3;
   /** Whether this sleeper's z's are thinned, as they overlap another's on screen (`layoutCues`). */
-  zThin?: boolean;
+  zThin: boolean;
 }
 
 /** Ring textures are this many pixels square. */
@@ -707,7 +707,7 @@ export class CueSprites {
         .copy(top)
         .addScaledVector(right, -0.45 * size * sleeping)
         .setY(top.y + gap + (this.reducedMotion ? 0 : bubbleBob(time, phase)) * size);
-      if (shift) sprites.bubble.position.add(shift);
+      sprites.bubble.position.add(shift);
       sprites.bubble.scale.set(scale, scale, 1);
       sprites.bubble.material.opacity = hungry * visible;
     } else if (sprites.bubble) {
@@ -722,7 +722,7 @@ export class CueSprites {
       const size = cuePixels(RING_PX, anchor.creaturePx) * unitsPerPixel;
       const scale = size * (0.6 + 0.4 * eating);
       sprites.ring.position.copy(top).setY(top.y + gap);
-      if (shift) sprites.ring.position.add(shift);
+      sprites.ring.position.add(shift);
       sprites.ring.scale.set(scale, scale, 1);
       sprites.ring.material.map = this.#ringMap(ringStep(progress));
       sprites.ring.material.opacity = eating * visible;
@@ -831,7 +831,11 @@ export class CueSprites {
     }
   }
 
-  /** Reduced motion: a still stack of `zTarget` z's, all in the current look. */
+  /**
+   * Reduced motion: a still stack of `zTarget` z's, all in the current look. Note for whoever
+   * wires reduced motion: a change of target, such as thinning starting or stopping as sleepers
+   * come together or part (`layoutCues`), rebuilds the stack at once, so z's pop in or out.
+   */
   #holdZs(sprites: CreatureCueSprites): void {
     const target = sprites.zTarget ?? Z_COUNT;
     if (sprites.zs.length !== target || sprites.zNext !== undefined) {

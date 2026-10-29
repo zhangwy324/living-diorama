@@ -15,6 +15,8 @@ import { SceneLayer } from "./layers";
 
 const HUNGRY = { eating: 0, sleeping: 0, hungry: 1 };
 const SLEEPING = { eating: 0, sleeping: 1, hungry: 0 };
+/** A frame after a long gap, so shifts go straight to where the layout puts them. */
+const SETTLE = SNAP_SECONDS + 1;
 
 /** A creature 40 px tall on screen with its head's top at (x, y), showing `weights`. */
 const box = (x: number, y = 0, weights = HUNGRY, visible = 1): CueBox =>
@@ -28,20 +30,20 @@ const shift = (b: CueBox) => Math.hypot(b.shiftX, b.shiftY);
 describe("layoutCues", () => {
   it("pushes overlapping bubbles apart, each half way", () => {
     const boxes = [box(0), box(10)];
-    layoutCues(boxes, 1 / 30);
+    layoutCues(boxes, SETTLE);
     const [a, b] = boxes as [CueBox, CueBox];
     expect(apart(a, b)).toBeGreaterThanOrEqual(a.radius + b.radius + CUE_MARGIN_PX - 1e-6);
     expect(a.shiftX).toBeLessThan(0);
     expect(b.shiftX).toBeCloseTo(-a.shiftX);
     // Bubbles clear of each other stay put.
     const clear = [box(0), box(200)];
-    layoutCues(clear, 1 / 30);
+    layoutCues(clear, SETTLE);
     expect(clear.map(shift)).toEqual([0, 0]);
   });
 
   it("sends the earlier of two bubbles on the same spot left, and never down into a head", () => {
     const boxes = [box(0, 0), box(0, 0), box(0, -5)];
-    layoutCues(boxes, 1 / 30);
+    layoutCues(boxes, SETTLE);
     expect(boxes[0]!.shiftX).toBeLessThan(0);
     expect(boxes[1]!.shiftX).toBeGreaterThan(0);
     for (const b of boxes) expect(b.shiftY).toBeGreaterThanOrEqual(0);
@@ -49,18 +51,18 @@ describe("layoutCues", () => {
 
   it("shifts no bubble further than its own size, however many bunch up", () => {
     const boxes = Array.from({ length: 20 }, (_, k) => box((k % 5) * 2, Math.floor(k / 5) * 2));
-    layoutCues(boxes, 1 / 30);
+    layoutCues(boxes, SETTLE);
     for (const b of boxes) expect(shift(b)).toBeLessThanOrEqual(b.size + 1e-9);
     expect(boxes.some((b) => shift(b) > 0.9 * b.size)).toBe(true);
   });
 
   it("ignores hidden cues and lets a faint one give way to a clear one", () => {
     const hidden = [box(0), box(10, 0, HUNGRY, 0)];
-    layoutCues(hidden, 1 / 30);
+    layoutCues(hidden, SETTLE);
     expect(hidden.map(shift)).toEqual([0, 0]);
 
     const faint = [box(0), box(10, 0, HUNGRY, 0.25)];
-    layoutCues(faint, 1 / 30);
+    layoutCues(faint, SETTLE);
     expect(shift(faint[1]!)).toBeGreaterThan(3 * shift(faint[0]!));
   });
 
@@ -74,7 +76,7 @@ describe("layoutCues", () => {
     };
     const target = (() => {
       const boxes = [box(0), box(10)];
-      layoutCues(boxes, 1 / 30);
+      layoutCues(boxes, SETTLE);
       return boxes[0]!.shiftX;
     })();
     const at60 = settle(1 / 60);
@@ -84,17 +86,71 @@ describe("layoutCues", () => {
     expect(at20).toBeCloseTo(at60, 6);
   });
 
-  it("puts a cue that appears straight where it belongs, and snaps after a long gap", () => {
+  it("moves smoothly as a cue fades in or out across the layout's weight line", () => {
+    const dt = 1 / 30;
     const boxes = [box(0), box(10, 0, HUNGRY, 0)];
+    /** Fades the second cue's visibility from `from` to `to` over a second, noting the shifts. */
+    const fade = (from: number, to: number) => {
+      const shifts: number[][] = [];
+      for (let t = 0; t <= 1 + 1e-9; t += dt) {
+        describeCues(boxes[1]!, HUNGRY, 40, from + (to - from) * t, false, 10, 0);
+        layoutCues(boxes, dt);
+        shifts.push(boxes.map((b) => b.shiftX));
+      }
+      // Then lets it settle, still noting every frame.
+      for (let k = 0; k < 15; k++) {
+        layoutCues(boxes, dt);
+        shifts.push(boxes.map((b) => b.shiftX));
+      }
+      return shifts;
+    };
+    const steps = (shifts: number[][]) =>
+      Math.max(
+        ...shifts
+          .slice(1)
+          .map((s, k) => Math.max(...s.map((x, i) => Math.abs(x - shifts[k]![i]!)))),
+      );
+    const settled = (() => {
+      const pair = [box(0), box(10)];
+      layoutCues(pair, SETTLE);
+      return pair[1]!.shiftX;
+    })();
+    // Fading in: the newcomer eases out from where it is, nothing jumps.
+    const fadeIn = fade(0, 1);
+    expect(fadeIn[0]![1]).toBeLessThan(0.2 * settled);
+    // Easing, not a jump: no frame moves a cue a tenth of its size (snapping moved it about half).
+    const most = 0.1 * boxes[1]!.size;
+    expect(steps(fadeIn)).toBeLessThan(most);
+    expect(boxes[1]!.shiftX).toBeCloseTo(settled, 0);
+    // Fading out, through the line where it stops counting: both ease back, nothing jumps.
+    const fadeOut = fade(1, 0);
+    expect(steps(fadeOut)).toBeLessThan(most);
+    expect(Math.abs(boxes[0]!.shiftX)).toBeLessThan(0.1 * settled);
+    expect(Math.abs(boxes[1]!.shiftX)).toBeLessThan(0.1 * settled);
+  });
+
+  it("snaps to where the layout puts cues after a long gap", () => {
+    const boxes = [box(0), box(10)];
     layoutCues(boxes, 1 / 30);
-    expect(boxes[0]!.shiftX).toBe(0);
-    describeCues(boxes[1]!, HUNGRY, 40, 1, false, 10, 0); // its cue fades in
-    layoutCues(boxes, 1 / 30);
+    const eased = boxes[1]!.shiftX;
+    layoutCues(boxes, SETTLE);
+    expect(boxes[1]!.shiftX).toBeGreaterThan(2 * eased);
     const settled = boxes[1]!.shiftX;
-    expect(settled).toBeGreaterThan(0); // the newcomer is in place at once...
-    expect(boxes[0]!.shiftX).toBeGreaterThan(-settled); // ...the one shown eases aside
-    layoutCues(boxes, SNAP_SECONDS + 1);
-    expect(boxes[0]!.shiftX).toBeCloseTo(-settled);
+    layoutCues(boxes, 1 / 30);
+    expect(boxes[1]!.shiftX).toBeCloseTo(settled, 9);
+  });
+
+  it("pushes the upper of two cues stacked on screen up, as the lower can't go down", () => {
+    const boxes = [box(0, 0), box(0, 10)];
+    const [lower, upper] = boxes as [CueBox, CueBox];
+    const overlap = lower.radius + upper.radius + CUE_MARGIN_PX - 10;
+    layoutCues(boxes, SETTLE);
+    expect(lower.shiftY).toBe(0);
+    expect(lower.shiftX).toBe(0);
+    expect(upper.shiftX).toBe(0);
+    // It takes the lower one's half too, all but what's left after the last pass.
+    expect(upper.shiftY).toBeGreaterThan(0.9 * overlap);
+    expect(upper.shiftY).toBeLessThanOrEqual(overlap + 1e-9);
   });
 
   it("thins the later of two sleepers whose z's overlap, steadily", () => {
