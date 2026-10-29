@@ -142,7 +142,7 @@ describe("buildBody", () => {
     const { drawing, dispose } = buildBody(pixels, 0.8)!;
     expect(drawing.bounds).toEqual({ left: 5, top: 10, right: 45, bottom: 90 });
     const at = (x: number, y: number) => drawing.toBody({ x, y }, new THREE.Vector3()).toArray();
-    expect(at(25, 90)).toEqual([0, 0, 0]); // the default feet
+    expect(at(25, 90)).toEqual([0, 0, 0]); // the bottom middle, below the default center of gravity
     const [x, y, z] = at(5, 50); // the default tail
     expect([x, y, z]).toEqual([expect.closeTo(-0.2), expect.closeTo(0.4), 0]);
     dispose();

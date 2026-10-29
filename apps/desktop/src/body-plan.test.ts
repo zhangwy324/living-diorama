@@ -56,20 +56,21 @@ describe("changing the template", () => {
   const walker: BodyPlanChoice = {
     template: "walker",
     locomotion: { land: true, gait: "hop", swim: true },
-    anchors: { feet: { x: 100, y: 220 } },
+    anchors: { centerOfGravity: { x: 100, y: 120 } },
   };
 
   it("drops the anchors the new template doesn't have", () => {
     expect(changeTemplate(walker, "swimmer").anchors).toEqual({});
-    expect(changeTemplate(walker, "hopper").anchors).toEqual({});
     const swimmer = { ...templatePlan("swimmer"), anchors: { tail: { x: 20, y: 120 } } };
     expect(changeTemplate(swimmer, "walker").anchors).toEqual({});
   });
 
   it("keeps the anchors it shares, as copies", () => {
-    const kept = changeTemplate(walker, "walker");
-    expect(kept.anchors).toEqual({ feet: { x: 100, y: 220 } });
-    expect(kept.anchors.feet).not.toBe(walker.anchors.feet);
+    for (const template of ["walker", "hopper"] as const) {
+      const kept = changeTemplate(walker, template);
+      expect(kept.anchors).toEqual({ centerOfGravity: { x: 100, y: 120 } });
+      expect(kept.anchors.centerOfGravity).not.toBe(walker.anchors.centerOfGravity);
+    }
   });
 
   it("starts from the new template's locomotion", () => {
@@ -83,11 +84,7 @@ describe("changing the template", () => {
         const placed: BodyPlanChoice = {
           ...templatePlan(from),
           anchors:
-            from === "walker"
-              ? { feet: { x: 1, y: 2 } }
-              : from === "swimmer"
-                ? { tail: { x: 3, y: 4 } }
-                : {},
+            from === "swimmer" ? { tail: { x: 3, y: 4 } } : { centerOfGravity: { x: 1, y: 2 } },
         };
         expect(BodyShapeSchema.safeParse(planBody(changeTemplate(placed, to), 0.4)).success).toBe(
           true,
@@ -103,7 +100,7 @@ describe("the species' body", () => {
       thickness: 0.3,
       template: "walker",
       locomotion: { land: { gait: "hop" } },
-      anchors: { feet: { x: 100, y: 220 } },
+      anchors: { centerOfGravity: { x: 100, y: 120 } },
     });
   });
 
@@ -120,6 +117,6 @@ function walker(): BodyPlanChoice {
   return {
     template: "walker",
     locomotion: { land: true, gait: "hop", swim: false },
-    anchors: { feet: { x: 100, y: 220 } },
+    anchors: { centerOfGravity: { x: 100, y: 120 } },
   };
 }

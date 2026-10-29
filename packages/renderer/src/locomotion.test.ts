@@ -88,9 +88,9 @@ describe("locomotionMotion", () => {
     }
   });
 
-  it("walks with a small bob, a waddle from side to side and a slight lean, about the feet", () => {
+  it("walks with a small bob, a waddle from side to side and a slight lean, about the center of gravity", () => {
     const motions = sweep({ profile: "walk" });
-    expect(motions.every((m) => m.pivot === "feet" && m.yaw === 0)).toBe(true);
+    expect(motions.every((m) => m.pivot === "centerOfGravity" && m.yaw === 0)).toBe(true);
     const lift = range(motions, "lift");
     expect(lift.min).toBeGreaterThanOrEqual(0); // the feet never sink
     expect(lift.max).toBeGreaterThan(0.03);
@@ -112,7 +112,7 @@ describe("locomotionMotion", () => {
 
   it("hops: squashes on the ground before take-off and after landing, and arcs through the air", () => {
     const motions = sweep({ profile: "hop" });
-    expect(motions.every((m) => m.pivot === "feet")).toBe(true);
+    expect(motions.every((m) => m.pivot === "centerOfGravity")).toBe(true);
     const grounded = motions.filter((m) => m.lift === 0);
     const airborne = motions.filter((m) => m.lift > 0);
     expect(grounded.length).toBeGreaterThan(0);
@@ -206,12 +206,15 @@ describe("trackMovement while paused", () => {
 });
 
 describe("locomotionTransform", () => {
-  const body = (feetX: number): LocomotionBody => ({
+  const body = (pivotX: number): LocomotionBody => ({
     height: 0.8,
     minX: -0.3,
     maxX: 0.5,
     halfDepth: 0.1,
-    pivots: { feet: new THREE.Vector3(feetX, 0, 0), front: new THREE.Vector3(0.3, 0.4, 0) },
+    pivots: {
+      centerOfGravity: new THREE.Vector3(pivotX, 0, 0),
+      front: new THREE.Vector3(0.3, 0.4, 0),
+    },
   });
   const at = (motion: Partial<LocomotionMotion>) => ({ ...restingLocomotion(), ...motion });
   const matrix = new THREE.Matrix4();
@@ -228,8 +231,8 @@ describe("locomotionTransform", () => {
     }
   });
 
-  it("lifts a tilt about the feet by the reach from the feet, and lifts nothing else", () => {
-    // Pitching forward dips the front, 0.5 - 0.2 m ahead of the feet; back, the rear, 0.5 m behind.
+  it("lifts a tilt about the center of gravity by the reach from it, and lifts nothing else", () => {
+    // Pitching forward dips the front, 0.5 - 0.2 m ahead of the pivot; back, the rear, 0.5 m behind.
     expect(locomotionTransform(at({ pitch: 0.1 }), body(0.2), matrix)).toBeCloseTo(
       0.3 * Math.sin(0.1),
     );
@@ -252,16 +255,16 @@ describe("locomotionTransform", () => {
 });
 
 describe("placePivots", () => {
-  it("puts the feet on the ground and the swim's pivot near the front, in line with the tail", () => {
+  it("puts the center of gravity on the ground and the swim's pivot near the front, in line with the tail", () => {
     const body: LocomotionBody = {
       height: 0.8,
       minX: -0.4,
       maxX: 0.4,
       halfDepth: 0.1,
-      pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+      pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
     };
     placePivots(body, new THREE.Vector3(-0.1, 0.3, 0), new THREE.Vector3(-0.4, 0.5, 0));
-    expect(body.pivots.feet.toArray()).toEqual([-0.1, 0, 0]);
+    expect(body.pivots.centerOfGravity.toArray()).toEqual([-0.1, 0, 0]);
     // The tail mirrored onto the front (0.4), a quarter of the way back towards the tail.
     expect(body.pivots.front.x).toBeCloseTo(0.2);
     expect(body.pivots.front.y).toBe(0.5);

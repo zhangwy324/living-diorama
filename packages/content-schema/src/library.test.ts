@@ -35,7 +35,7 @@ function validEntry() {
         thickness: 0.3,
         template: "walker",
         locomotion: { land: { gait: "walk" } },
-        anchors: { feet: { x: 128, y: 240 } },
+        anchors: { centerOfGravity: { x: 128, y: 140 } },
       },
       capabilities: { "core:land": 1 },
       baseSpeed: 0.6,

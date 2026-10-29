@@ -334,7 +334,11 @@ describe("SpeciesDefinition", () => {
       ok: true,
       value: { body },
     });
-    const corner = { ...body, template: "walker", anchors: { feet: { x: 256, y: 256 } } };
+    const corner = {
+      ...body,
+      template: "walker",
+      anchors: { centerOfGravity: { x: 256, y: 256 } },
+    };
     expect(parseSpeciesDefinition({ ...species, body: corner }).ok).toBe(true);
   });
 
@@ -358,25 +362,29 @@ describe("SpeciesDefinition", () => {
 
   it("rejects an anchor outside the drawing", () => {
     const at = (x: number, y: number) =>
-      parseSpeciesDefinition({ ...species, body: { anchors: { feet: { x, y } } } });
+      parseSpeciesDefinition({ ...species, body: { anchors: { centerOfGravity: { x, y } } } });
     expect(messages(at(-1, 10))).toEqual([
-      `error: body.anchors.feet.x: An anchor's x must be within the drawing, 0 to ${DRAWING_SIZE} (too_small)`,
+      `error: body.anchors.centerOfGravity.x: An anchor's x must be within the drawing, 0 to ${DRAWING_SIZE} (too_small)`,
     ]);
     expect(messages(at(10, DRAWING_SIZE + 0.5))).toEqual([
-      `error: body.anchors.feet.y: An anchor's y must be within the drawing, 0 to ${DRAWING_SIZE} (too_big)`,
+      `error: body.anchors.centerOfGravity.y: An anchor's y must be within the drawing, 0 to ${DRAWING_SIZE} (too_big)`,
     ]);
   });
 
   it("rejects an anchor its template doesn't have", () => {
-    const anchors = { feet: { x: 128, y: 250 }, tail: { x: 10, y: 128 } };
+    const anchors = { centerOfGravity: { x: 128, y: 128 }, tail: { x: 10, y: 128 } };
     expect(messages(parseSpeciesDefinition({ ...species, body: { anchors } }))).toEqual([
-      "error: body.anchors.tail: A walker has no tail anchor (it has feet) (custom)",
+      "error: body.anchors.tail: A walker has no tail anchor (it has centerOfGravity) (custom)",
     ]);
     expect(
       messages(parseSpeciesDefinition({ ...species, body: { template: "hopper", anchors } })),
     ).toEqual([
-      "error: body.anchors.feet: A hopper has no feet anchor (it has none) (custom)",
-      "error: body.anchors.tail: A hopper has no tail anchor (it has none) (custom)",
+      "error: body.anchors.tail: A hopper has no tail anchor (it has centerOfGravity) (custom)",
+    ]);
+    expect(
+      messages(parseSpeciesDefinition({ ...species, body: { template: "swimmer", anchors } })),
+    ).toEqual([
+      "error: body.anchors.centerOfGravity: A swimmer has no centerOfGravity anchor (it has tail) (custom)",
     ]);
     expect(
       diagnostics(
@@ -386,13 +394,13 @@ describe("SpeciesDefinition", () => {
   });
 
   it("ignores an anchor left undefined, even one the template doesn't have", () => {
-    const body = { template: "hopper", anchors: { feet: undefined } };
+    const body = { template: "swimmer", anchors: { centerOfGravity: undefined } };
     expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
   });
 
   it("places default anchors on the drawn shape's bounds", () => {
     const bounds = { left: 40, top: 60, right: 200, bottom: 230 };
-    expect(defaultAnchor("feet", bounds)).toEqual({ x: 120, y: 230 });
+    expect(defaultAnchor("centerOfGravity", bounds)).toEqual({ x: 120, y: 145 });
     expect(defaultAnchor("tail", bounds)).toEqual({ x: 40, y: 145 });
     for (const template of BODY_TEMPLATES) {
       for (const name of BODY_TEMPLATE_ANCHORS[template]) {

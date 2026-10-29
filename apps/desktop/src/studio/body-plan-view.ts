@@ -38,7 +38,11 @@ export const PREVIEW_SPEED = DRAWN_SPECIES_DEFAULTS.baseSpeed * DRAWN_SPEED_FACT
 export const ANCHOR_LABELS: Readonly<
   Record<AnchorName, { name: string; help: string; them: string }>
 > = {
-  feet: { name: "Feet", help: "where it stands and steps from", them: "them" },
+  centerOfGravity: {
+    name: "Center of gravity",
+    help: "where the body balances. Only left–right matters; it's what the body rocks and squashes around",
+    them: "it",
+  },
   tail: { name: "Tail", help: "the end that swishes as it swims", them: "it" },
 };
 
@@ -115,9 +119,7 @@ export const afterDrawingEdit = (plan: BodyPlanChoice): BodyPlanChoice =>
 
 /** What the anchor layer says to a screen reader: each point, placed or at its default. */
 export function anchorNote(plan: BodyPlanChoice): string {
-  const anchors = templateAnchors(plan.template);
-  if (anchors.length === 0) return "A hopper has no points to place.";
-  return anchors
+  return templateAnchors(plan.template)
     .map((name) => {
       const { name: label, them } = ANCHOR_LABELS[name];
       return plan.anchors[name]

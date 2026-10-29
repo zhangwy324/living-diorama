@@ -51,7 +51,7 @@ export const templatePlan = (template: BodyTemplate = "walker"): BodyPlanChoice 
   anchors: {},
 });
 
-/** The anchors `template` has (walker: feet, swimmer: tail, hopper: none). */
+/** The anchors `template` has (walker and hopper: center of gravity, swimmer: tail). */
 export const templateAnchors = (template: BodyTemplate): readonly AnchorName[] =>
   BODY_TEMPLATE_ANCHORS[template];
 
