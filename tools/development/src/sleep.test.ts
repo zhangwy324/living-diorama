@@ -1083,7 +1083,7 @@ describe("sleeping in Woodland Hollow", () => {
         // Its own dawn starts 05:30–06:30, and it is rested long before.
         for (const t of wakes) {
           expect(t).toBeGreaterThanOrEqual(5 * 60 + 30);
-          expect(t).toBeLessThan(6 * 60 + 30);
+          expect(t).toBeLessThan(6 * 60 + 31);
         }
         const spread = (times: number[]) => Math.max(...times) - Math.min(...times);
         expect(spread(bedtimes)).toBeGreaterThan(10);

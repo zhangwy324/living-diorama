@@ -92,8 +92,8 @@ export interface CreatureStats {
   nightTicks: number;
   asleepAtNightTicks: number;
   /**
-   * Times of day, in minutes since midnight, it fell asleep in the evening: in the world's dusk
-   * or night, before midnight (issue #85).
+   * Times of day, in minutes since midnight, it went to bed: the first time it fell asleep in a
+   * night, in the world's dusk or night before midnight (issue #85).
    */
   bedtimes: number[];
   /** Times of day it woke rested in the morning: in the world's night or dawn, after midnight. */
@@ -124,6 +124,7 @@ export interface CreatureTick {
 export class LongRunChecks {
   readonly creatures = new Map<string, CreatureStats>();
   readonly #ticksPerMinute: number;
+  readonly #ticksPerHalfDay: number;
   /** Per creature, the ticks of its interruptions within the last minute. */
   readonly #recentInterruptions = new Map<string, number[]>();
   /** Per creature, its ticks awake since its last meal, or since it was first seen. */
@@ -132,6 +133,8 @@ export class LongRunChecks {
   readonly #failedInARow = new Map<string, number>();
   /** Creatures the sleep check skips. */
   readonly #noSleepCheck = new Set<string>();
+  /** Per creature, the tick of its last bedtime. */
+  readonly #lastBedtimeTick = new Map<string, number>();
 
   constructor(
     private readonly tickRateHz: number,
@@ -139,6 +142,7 @@ export class LongRunChecks {
     private readonly violation: (message: string) => void,
   ) {
     this.#ticksPerMinute = 60 * tickRateHz;
+    this.#ticksPerHalfDay = 12 * 3600 * tickRateHz;
   }
 
   #stats(id: string, speciesId = ""): CreatureStats {
@@ -200,8 +204,12 @@ export class LongRunChecks {
   event(event: SimulationEvent, { dayPhase, minutes }: EventTime) {
     if (event.type === "fell_asleep") {
       const { creatureId, tiredness } = event;
-      if ((dayPhase === "dusk" || dayPhase === "night") && minutes >= NOON) {
+      // The first in a night: falling asleep again after waking for food is no bedtime.
+      const last = this.#lastBedtimeTick.get(creatureId);
+      const evening = (dayPhase === "dusk" || dayPhase === "night") && minutes >= NOON;
+      if (evening && (last === undefined || event.tick - last > this.#ticksPerHalfDay)) {
         this.#stats(creatureId).bedtimes.push(minutes);
+        this.#lastBedtimeTick.set(creatureId, event.tick);
       }
       const checked = this.options.sleep && !this.#noSleepCheck.has(creatureId);
       if (checked && dayPhase === "day" && tiredness < tirednessNeed.actAt) {

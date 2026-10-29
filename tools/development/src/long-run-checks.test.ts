@@ -211,16 +211,18 @@ describe("long-run checks", () => {
   });
 
   it("records bedtimes and rested wakes, and fails falling asleep by day unless tired", () => {
-    const fell = (tiredness: number) =>
-      ({ type: "fell_asleep", tick: 1, creatureId: "c1", placementId: null, tiredness }) as const;
+    const fell = (tiredness: number, tick = 1) =>
+      ({ type: "fell_asleep", tick, creatureId: "c1", placementId: null, tiredness }) as const;
     const woke = (reason: "rested" | "interrupted") =>
       ({ type: "woke_up", tick: 1, creatureId: "c1", reason, tiredness: 0 }) as const;
     const { checks, violations, live } = checker({ sleep: {} });
     live(0, 1, "day");
-    checks.event(fell(0.5), { dayPhase: "dusk", minutes: 19 * 60 + 50 });
-    checks.event(fell(0.5), { dayPhase: "night", minutes: 20 * 60 + 25 });
-    // After midnight: falling asleep again after waking for food is no bedtime.
-    checks.event(fell(0.5), { dayPhase: "night", minutes: 60 });
+    checks.event(fell(0.5, 0), { dayPhase: "dusk", minutes: 19 * 60 + 50 });
+    // Falling asleep again after waking for food is no bedtime, before midnight or after.
+    checks.event(fell(0.5, 2 * HOUR), { dayPhase: "night", minutes: 21 * 60 + 50 });
+    checks.event(fell(0.5, 5 * HOUR), { dayPhase: "night", minutes: 60 });
+    // The next night is.
+    checks.event(fell(0.5, 24 * HOUR), { dayPhase: "night", minutes: 20 * 60 + 25 });
     checks.event(woke("interrupted"), { dayPhase: "night", minutes: 30 });
     checks.event(woke("rested"), { dayPhase: "dawn", minutes: 6 * 60 + 20 });
     // A nap: tired enough to act.

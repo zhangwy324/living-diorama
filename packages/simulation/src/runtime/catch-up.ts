@@ -1,11 +1,12 @@
-import { creatureShift, settleDay, type CreatureDay } from "./creature-day";
+import { creaturePhaseStarts, settleDay, type CreatureDay } from "./creature-day";
 import type { Rng } from "./rng";
 import {
   dayPhaseAt,
   minutesToNextPhase,
   wrapMinutes,
+  WORLD_PHASE_STARTS,
   type DayPhase,
-  type PhaseShift,
+  type PhaseStarts,
 } from "./time-of-day";
 
 // Catch-up after a gap (ADR 0018 §19, ADR 0019 §5, §6): when a saved world is restored in real
@@ -47,15 +48,19 @@ export interface PhaseSpan {
  * The day phases a gap of `gapMs` ending at `toMinutes` (the present time of day) passed through,
  * oldest first, with the hours spent in each. The gap is taken to end now rather than to start at
  * the saved time of day, so a capped gap covers the hours just before the present, and a clock
- * change since the save (a time zone, daylight saving) can't put the two out of step. With
- * `shift`, the phases' starts move by it throughout.
+ * change since the save (a time zone, daylight saving) can't put the two out of step. `starts`,
+ * by default the world's, hold throughout.
  */
-export function phaseSpans(toMinutes: number, gapMs: number, shift?: PhaseShift): PhaseSpan[] {
+export function phaseSpans(
+  toMinutes: number,
+  gapMs: number,
+  starts: PhaseStarts = WORLD_PHASE_STARTS,
+): PhaseSpan[] {
   return spans(
     toMinutes,
     gapMs,
-    (at) => dayPhaseAt(at, shift),
-    (at) => minutesToNextPhase(at, shift),
+    (at) => dayPhaseAt(at, starts),
+    (at) => minutesToNextPhase(at, starts),
   );
 }
 
@@ -75,7 +80,7 @@ export function creaturePhaseSpans(
     return day.phase;
   };
   const result = spans(toMinutes, gapMs, phaseAt, (at) =>
-    minutesToNextPhase(at, creatureShift(day)),
+    minutesToNextPhase(at, creaturePhaseStarts(day)),
   );
   settleDay(day, toMinutes, rng);
   return result;

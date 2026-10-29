@@ -1,5 +1,5 @@
 import type { Rng } from "./rng";
-import { dayPhaseAt, type DayPhase, type PhaseShift } from "./time-of-day";
+import { dayPhaseAt, WORLD_PHASE_STARTS, type DayPhase, type PhaseStarts } from "./time-of-day";
 
 // A creature's own day (issue #85): the world's day phases with their starts moved by an offset
 // the creature draws each day, so its bedtime and waking vary from night to night within a
@@ -27,19 +27,25 @@ export interface CreatureDay {
 /** A day's offset, uniformly within `DAY_SHIFT_MINUTES` either way. */
 export const drawDayShift = (rng: Rng) => rng.range(-DAY_SHIFT_MINUTES, DAY_SHIFT_MINUTES);
 
-/** How far each phase's start is moved in this day. */
-export function creatureShift(day: Omit<CreatureDay, "phase">): PhaseShift {
-  return (phase) =>
-    phase === "dawn" || phase === "day" ? day.morning : (day.evening ?? day.morning);
+/**
+ * Where each phase of the creature's day starts, in minutes since midnight: the baseline, the
+ * world's day, moved by its offsets. The one place a creature's day departs from the world's, so
+ * a baseline that moves its sleep (issue #101) belongs here, as absolute starts of its own.
+ */
+export function creaturePhaseStarts(day: Omit<CreatureDay, "phase">): PhaseStarts {
+  const base = WORLD_PHASE_STARTS;
+  const evening = day.evening ?? day.morning;
+  return {
+    dawn: base.dawn + day.morning,
+    day: base.day + day.morning,
+    dusk: base.dusk + evening,
+    night: base.night + evening,
+  };
 }
 
-/**
- * The creature's phase at `minutes` since midnight: the world's day with its phase starts moved
- * by its offsets. The one place a creature's day departs from the world's, so a baseline that
- * moves its sleep (issue #101) belongs here too.
- */
+/** The creature's phase at `minutes` since midnight, by `creaturePhaseStarts`. */
 export function creaturePhaseAt(day: Omit<CreatureDay, "phase">, minutes: number): DayPhase {
-  return dayPhaseAt(minutes, creatureShift(day));
+  return dayPhaseAt(minutes, creaturePhaseStarts(day));
 }
 
 /**

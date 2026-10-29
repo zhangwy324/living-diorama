@@ -1,6 +1,6 @@
 import { formatDiagnostic, parseWorldSave, type WorldSave } from "@living-diorama/content-schema";
 import {
-  creatureShift,
+  creaturePhaseStarts,
   hungerNeed,
   phaseSpans,
   Rng,
@@ -143,9 +143,10 @@ export function catchUpProblems(
     );
   }
   for (const creature of state.creatures.values()) {
-    // Its own day (issue #85). Its present offsets also moved the starts and ends of the nights
-    // in the gap: a 12-hour gap spans at most one of each, and a morning moves only at night.
-    const spans = phaseSpans(state.minutes, catchUp.gapMs, creatureShift(creature.day));
+    // Its own day (issue #85), by its present offsets. Below, only the end of a night in the gap
+    // matters, which is its dawn start, and only while it is awake now: its morning offset then
+    // changed last when that night began, so the present one is the one that moved that dawn.
+    const spans = phaseSpans(state.minutes, catchUp.gapMs, creaturePhaseStarts(creature.day));
     const phase = creature.day.phase;
     const who = creature.id;
     const hunger = creature.needs[hungerNeed.id];

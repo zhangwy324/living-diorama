@@ -2,43 +2,76 @@ import { describe, expect, it } from "vitest";
 import { creaturePhaseSpans, phaseSpans } from "./catch-up";
 import {
   creaturePhaseAt,
-  creatureShift,
+  creaturePhaseStarts,
   DAY_SHIFT_MINUTES,
   settleDay,
   type CreatureDay,
 } from "./creature-day";
 import { Rng } from "./rng";
-import { DAY_PHASES, dayPhaseAt, minutesToNextPhase } from "./time-of-day";
+import {
+  DAY_PHASES,
+  dayPhaseAt,
+  MINUTES_PER_DAY,
+  minutesToNextPhase,
+  WORLD_PHASE_STARTS,
+  type PhaseStarts,
+} from "./time-of-day";
 
 const at = (hours: number, minutes = 0) => hours * 60 + minutes;
 
-describe("shifted day phases", () => {
-  const shift = (minutes: Partial<Record<string, number>>) => (phase: string) =>
-    minutes[phase] ?? 0;
+describe("day phases from starts of their own", () => {
+  const starts = (moved: Partial<PhaseStarts>): PhaseStarts => ({
+    ...WORLD_PHASE_STARTS,
+    ...moved,
+  });
 
-  it("moves each phase's start on its own, either way", () => {
-    const late = shift({ dawn: 20, dusk: -15 });
+  it("puts each phase from its own start to the next, wherever they are", () => {
+    const late = starts({ dawn: at(6, 20), dusk: at(17, 45) });
     expect(dayPhaseAt(at(6, 19), late)).toBe("night");
     expect(dayPhaseAt(at(6, 20), late)).toBe("dawn");
     expect(dayPhaseAt(at(17, 44), late)).toBe("day");
     expect(dayPhaseAt(at(17, 45), late)).toBe("dusk");
-    expect(dayPhaseAt(at(20), late)).toBe("night");
-    expect(dayPhaseAt(at(12), shift({ day: -59 }))).toBe("day");
+    expect(minutesToNextPhase(at(6, 10), late)).toBe(10);
+    expect(minutesToNextPhase(at(17, 50), late)).toBe(130);
+    // Far from the world's, as a user's baseline might be (#101): night from midnight.
+    const owl = starts({ dusk: at(22), night: at(24) });
+    expect(dayPhaseAt(at(23, 59), owl)).toBe("dusk");
+    expect(dayPhaseAt(at(0), owl)).toBe("night");
+    expect(minutesToNextPhase(at(21), owl)).toBe(60);
+    expect(minutesToNextPhase(at(23), owl)).toBe(60);
   });
 
-  it("counts minutes to the next moved start", () => {
-    const moved = shift({ dawn: 20, day: 20, dusk: -15, night: -15 });
-    expect(minutesToNextPhase(at(6, 10), moved)).toBe(10);
-    expect(minutesToNextPhase(at(7), moved)).toBe(80);
-    // Already in its dusk, from 17:45: its night starts at 19:45.
-    expect(minutesToNextPhase(at(17, 50), moved)).toBe(115);
-    expect(minutesToNextPhase(at(23), moved)).toBe(7 * 60 + 20);
+  it("agrees with itself for arbitrary offsets: the phase changes where the next start is", () => {
+    // Full-precision offsets, unlike the stream's multiples of 60 / 2^32.
+    let k = 0;
+    const offset = () => ((++k * 0.6180339887498949) % 1) * 60 - 30;
+    for (let n = 0; n < 2_000; n++) {
+      const day = { morning: offset(), evening: offset() };
+      const own = creaturePhaseStarts(day);
+      for (const phase of DAY_PHASES) {
+        // At its moved start, a phase has begun, and the next start is a whole phase away.
+        const start = own[phase];
+        expect(dayPhaseAt(start, own)).toBe(phase);
+        const to = minutesToNextPhase(start, own);
+        expect(to).toBeGreaterThan(30);
+        expect(to).toBeLessThan(MINUTES_PER_DAY - 30);
+      }
+      const now = offset() * 48 + 720;
+      const gapMs = (offset() + 30) * 12 * 60_000 + 1;
+      const spans = phaseSpans(now, gapMs, own);
+      expect(spans.at(-1)?.phase).toBe(dayPhaseAt(now, own));
+      expect(spans.reduce((h, s) => h + s.hours, 0)).toBeCloseTo(gapMs / 3_600_000, 6);
+      const walked: CreatureDay = { phase: creaturePhaseAt(day, now - gapMs / 60_000), ...day };
+      const ownSpans = creaturePhaseSpans(walked, now, gapMs, () => Rng.fromSeed(n));
+      expect(ownSpans.at(-1)?.phase).toBe(walked.phase);
+      expect(walked.phase).toBe(creaturePhaseAt(walked, now));
+    }
   });
 
-  it("leaves the world's day alone without a shift", () => {
+  it("gives the world's day by default", () => {
     for (let m = 0; m < 24 * 60; m += 7) {
-      expect(dayPhaseAt(m, () => 0)).toBe(dayPhaseAt(m));
-      expect(minutesToNextPhase(m, () => 0)).toBeCloseTo(minutesToNextPhase(m), 9);
+      expect(dayPhaseAt(m, starts({}))).toBe(dayPhaseAt(m));
+      expect(minutesToNextPhase(m, starts({}))).toBe(minutesToNextPhase(m));
     }
   });
 });
@@ -115,7 +148,7 @@ describe("a creature's own day", () => {
       creaturePhaseSpans(still, at(9), 11 * 60 * 60_000, () => Rng.fromSeed(5)).map((s) => s.phase),
     ).toEqual(phaseSpans(at(9), 11 * 60 * 60_000).map((s) => s.phase));
     // Its morning stayed; the gap's dawn drew the evening to come.
-    expect(creatureShift(still)("dawn")).toBe(0);
-    expect(creatureShift(still)("dusk")).toBe(still.evening);
+    expect(creaturePhaseStarts(still).dawn).toBe(WORLD_PHASE_STARTS.dawn);
+    expect(creaturePhaseStarts(still).dusk).toBe(WORLD_PHASE_STARTS.dusk + still.evening!);
   });
 });

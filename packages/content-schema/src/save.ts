@@ -30,7 +30,7 @@ export const DayPhaseSchema = z.enum(["dawn", "day", "dusk", "night"]);
 
 /**
  * Minutes a creature's own day moves a phase start by (issue #85). The simulation draws within
- * 30 minutes either way; anything under an hour keeps the phases in order.
+ * 30 minutes either way; this only bounds what a save may hold.
  */
 const dayShift = z.number().gt(-60).lt(60);
 
