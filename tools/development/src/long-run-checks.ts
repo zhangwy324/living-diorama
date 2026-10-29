@@ -1,9 +1,10 @@
-import type {
-  CreatureState,
-  DayPhase,
-  DecisionTrace,
-  Simulation,
-  SimulationEvent,
+import {
+  phaseSpans,
+  type CreatureState,
+  type DayPhase,
+  type DecisionTrace,
+  type Simulation,
+  type SimulationEvent,
 } from "@living-diorama/simulation";
 
 // The living-behavior checks of the long runs (ADR 0018 §20 and its amendments), kept apart from
@@ -23,6 +24,10 @@ export const MEAL_EVENT = "ate";
 /** A creature counts as hungry with the `hungry` cue or with this much hunger. */
 export const HUNGRY_FROM = 0.8;
 const HUNGER_NEED = "core:hunger";
+/** Hours of night in a day (ADR 0018 §5): 20:00 to 06:00. */
+const NIGHT_HOURS = phaseSpans(0, 24 * 3_600_000)
+  .filter((span) => span.phase === "night")
+  .reduce((hours, span) => hours + span.hours, 0);
 
 /**
  * Which creatures a check applies to; all by default. The runner calls it once per creature, when
@@ -54,7 +59,10 @@ export interface LongRunCheckOptions {
    * Each creature is asleep for at least `minShare` (default 0.5) of the night ticks it lived
    * through, once it has lived through `minNightHours` (default 1), and, once it has lived a
    * whole simulated day, for at most `maxHoursPerDay` (default 14) a day on average, so one that
-   * never wakes fails too. Off unless given; `creatures` chooses those held to it, e.g. those
+   * never wakes fails too. The day is weighed by phase: its share of night ticks asleep counts for
+   * the night's 10 hours and its share of other ticks asleep for the other 14, so a run whose
+   * ticks are not a fair sample of the day (one that skipped hours in a catch-up) is judged as an
+   * unbroken one. Off unless given; `creatures` chooses those held to it, e.g. those
    * that sleep at night (a nocturnal creature sleeps by day, so it is left out).
    */
   sleep?: {
@@ -172,6 +180,14 @@ export class LongRunChecks {
     this.#awakeSinceMeal.set(event.creatureId, 0);
   }
 
+  /**
+   * After a restore with catch-up, which feeds every creature (ADR 0018 §19): the time awake
+   * before the gap no longer counts towards a gap between meals.
+   */
+  caughtUp() {
+    this.#awakeSinceMeal.clear();
+  }
+
   /** After each tick, with every creature alive. */
   tick(tick: number, dayPhase: DayPhase, creatures: Iterable<CreatureTick>) {
     const { meals } = this.options;
@@ -206,7 +222,7 @@ export class LongRunChecks {
 
   /** At the end of the run: the bounds that hold on average. */
   finish() {
-    const { sleep, maxDecisionsPer10Seconds = MAX_DECISIONS_PER_10_SECONDS } = this.options;
+    const { maxDecisionsPer10Seconds = MAX_DECISIONS_PER_10_SECONDS } = this.options;
     for (const [id, stats] of this.creatures) {
       // One decision for free, the creature's first.
       const allowed = 1 + (maxDecisionsPer10Seconds * stats.ticks) / (10 * this.tickRateHz);
@@ -216,22 +232,35 @@ export class LongRunChecks {
             `(at most ${maxDecisionsPer10Seconds} per 10 s)`,
         );
       }
-      if (!sleep || this.#noSleepCheck.has(id)) continue;
-      const dayTicks = 24 * 3600 * this.tickRateHz;
-      const maxHours = sleep.maxHoursPerDay ?? MAX_SLEEP_HOURS_PER_DAY;
-      const hoursPerDay = (24 * stats.asleepTicks) / Math.max(1, stats.ticks);
-      if (stats.ticks >= dayTicks && hoursPerDay > maxHours) {
-        this.violation(`${id}: asleep ${hoursPerDay.toFixed(1)} h a day (at most ${maxHours})`);
-      }
-      const minNightTicks = (sleep.minNightHours ?? 1) * 3600 * this.tickRateHz;
-      if (stats.nightTicks < minNightTicks) continue;
-      const share = stats.asleepAtNightTicks / stats.nightTicks;
-      const minShare = sleep.minShare ?? 0.5;
-      if (share < minShare) {
-        this.violation(
-          `${id}: asleep ${(100 * share).toFixed(0)}% of the night (at least ${100 * minShare}%)`,
-        );
-      }
+      this.#checkSleep(id, stats);
+    }
+  }
+
+  /** The sleep bounds over the whole run. */
+  #checkSleep(id: string, stats: CreatureStats) {
+    const { sleep } = this.options;
+    if (!sleep || this.#noSleepCheck.has(id)) return;
+    const { ticks, asleepTicks, nightTicks, asleepAtNightTicks } = stats;
+    const dayTicks = 24 * 3600 * this.tickRateHz;
+    const maxHours = sleep.maxHoursPerDay ?? MAX_SLEEP_HOURS_PER_DAY;
+    // Hours asleep in a day, weighed by phase; a phase it never lived through counts at its
+    // overall share.
+    const overall = asleepTicks / Math.max(1, ticks);
+    const otherTicks = ticks - nightTicks;
+    const atNight = nightTicks > 0 ? asleepAtNightTicks / nightTicks : overall;
+    const otherwise = otherTicks > 0 ? (asleepTicks - asleepAtNightTicks) / otherTicks : overall;
+    const hoursPerDay = NIGHT_HOURS * atNight + (24 - NIGHT_HOURS) * otherwise;
+    if (ticks >= dayTicks && hoursPerDay > maxHours) {
+      this.violation(`${id}: asleep ${hoursPerDay.toFixed(1)} h a day (at most ${maxHours})`);
+    }
+    const minNightTicks = (sleep.minNightHours ?? 1) * 3600 * this.tickRateHz;
+    if (nightTicks < minNightTicks) return;
+    const share = asleepAtNightTicks / nightTicks;
+    const minShare = sleep.minShare ?? 0.5;
+    if (share < minShare) {
+      this.violation(
+        `${id}: asleep ${(100 * share).toFixed(0)}% of the night (at least ${100 * minShare}%)`,
+      );
     }
   }
 }

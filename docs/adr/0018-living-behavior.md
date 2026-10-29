@@ -62,6 +62,8 @@ This ADR amends ADR 0002 (prop placements and the new `prop` kind), ADR 0004 §7
 
 16. **Individual state and variation.** Creature state gains `needs` (ID → value), `memory` (seen food and shelter, recent regions), `home` and `variation`. Variation is drawn once at spawn from the creature's own RNG stream and stored: hunger and tiredness rates and vision range each scaled by 0.85–1.15. Everything stays plain data (ADR 0006 §4), and `CreatureInstance` is widened to match in step 6. Spawned creatures start with random needs below their `actAt`, so they don't all eat at once (tiredness below its `startBelow` of 0.1, from PR 6).
 
+    _Amended by [ADR 0019](0019-world-saving.md) §2 (M15 PR 1):_ `CreatureInstance` was replaced rather than widened. Creatures are saved as `CreatureSave` entries of `WorldSaveSchema` in `content-schema`, which mirror `CreatureState`.
+
 17. **Events.** New events: `ate`, `fell_asleep`, `woke_up` and `new_home_selected` (per creature), and `day_phase_changed` (a world event, with no `creatureId`; the event base is split into creature and world events). The decision trace gains the need values and each proposal's reason.
 
 18. **Sanctuary.** No deaths and no harm. A creature whose hunger reaches 1 walks at 80% speed and doesn't wander until it eats. That is the only consequence.
