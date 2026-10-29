@@ -70,12 +70,18 @@ function recordingStore(json: string | null) {
   return { store, written };
 }
 
-const manualTimer = () => {
-  let callback: (() => void) | undefined;
+/** A wall clock the test moves on, and a page the test hides. */
+const manualPage = () => {
+  let time = 1_000_000;
+  let hidden: (() => void) | undefined;
   return {
-    every: (_ms: number, fn: () => void) => ((callback = fn), () => (callback = undefined)),
-    fire: () => callback?.(),
-    running: () => callback !== undefined,
+    options: {
+      now: () => time,
+      onHidden: (fn: () => void) => ((hidden = fn), () => (hidden = undefined)),
+    },
+    advance: (ms: number) => (time += ms),
+    hide: () => hidden?.(),
+    watching: () => hidden !== undefined,
   };
 };
 
@@ -99,7 +105,7 @@ describe("worldSaving startup", () => {
     const saving = worldSaving(fake.world, {
       store,
       creatures: () => [],
-      every: manualTimer().every,
+      ...manualPage().options,
     });
     await open(saving, fake);
     expect(fake.calls).toEqual(['restore {"saved":true}', "save"]);
@@ -116,7 +122,7 @@ describe("worldSaving startup", () => {
     const saving = worldSaving(fake.world, {
       store,
       creatures: () => [],
-      every: manualTimer().every,
+      ...manualPage().options,
     });
     await open(saving, fake);
     expect(fake.calls).toEqual(['restore {"other":true}', "spawn starting", "save"]);
@@ -129,7 +135,7 @@ describe("worldSaving startup", () => {
     const saving = worldSaving(fake.world, {
       store: recordingStore(null).store,
       creatures: () => [],
-      every: manualTimer().every,
+      ...manualPage().options,
     });
     await open(saving, fake);
     expect(fake.calls).toEqual(["spawn starting", "save"]);
@@ -138,17 +144,17 @@ describe("worldSaving startup", () => {
   it("starts fresh but never saves this session when the save can't be read", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fake = fakeWorld();
-    const timer = manualTimer();
+    const page = manualPage();
     const store: WorldStore = {
       load: () => Promise.reject(new Error("world.json is locked")),
       save: vi.fn(() => Promise.resolve()),
     };
-    const saving = worldSaving(fake.world, { store, creatures: () => [], every: timer.every });
+    const saving = worldSaving(fake.world, { store, creatures: () => [], ...page.options });
     await saving.open();
     await saving.save(); // as on quit
     expect(fake.calls).toEqual(["spawn starting"]);
     expect(store.save).not.toHaveBeenCalled();
-    expect(timer.running()).toBe(false);
+    expect(page.watching()).toBe(false);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("without saving"));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("world.json is locked"));
   });
@@ -156,16 +162,16 @@ describe("worldSaving startup", () => {
   it("neither loads nor saves without a store, as under a count override", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const fake = fakeWorld();
-    const timer = manualTimer();
+    const page = manualPage();
     const saving = worldSaving(fake.world, {
       store: undefined,
       creatures: () => [],
-      every: timer.every,
+      ...page.options,
     });
     await saving.open();
     await saving.save();
     expect(fake.calls).toEqual(["spawn starting"]);
-    expect(timer.running()).toBe(false);
+    expect(page.watching()).toBe(false);
   });
 
   it("logs what a restore left out or caught up as a warning", async () => {
@@ -188,7 +194,7 @@ describe("worldSaving startup", () => {
     const saving = worldSaving(fake.world, {
       store: recordingStore("{}").store,
       creatures: () => [],
-      every: manualTimer().every,
+      ...manualPage().options,
     });
     await open(saving, fake);
     const logged = String(warn.mock.calls[0]?.[0]);
@@ -202,16 +208,16 @@ describe("worldSaving saves", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const fake = fakeWorld();
     const recording = recordingStore(json);
-    const timer = manualTimer();
+    const page = manualPage();
     const saving = worldSaving(fake.world, {
       store: recording.store,
       creatures: () => [{ id: "creature-1" }, { id: "creature-2" }],
-      every: timer.every,
+      ...page.options,
     });
     await open(saving, fake);
     fake.calls.length = 0;
     recording.written.length = 0;
-    return { fake, saving, timer, ...recording };
+    return { fake, saving, page, ...recording };
   }
 
   it("does nothing before the world is open", async () => {
@@ -251,17 +257,39 @@ describe("worldSaving saves", () => {
     expect(written).toEqual(["save-2", "save-3"]);
   });
 
-  it("saves every minute until stopped", async () => {
-    const { fake, saving, timer } = await opened();
-    expect(timer.running()).toBe(true);
-    timer.fire();
+  it("saves when due, a minute after the last save was asked for", async () => {
+    const { fake, saving, page } = await opened();
+    expect(AUTOSAVE_MS).toBe(60_000);
+    page.advance(AUTOSAVE_MS - 1);
+    await saving.saveIfDue();
+    expect(fake.calls).toEqual([]);
+    page.advance(1);
+    const due = saving.saveIfDue();
     await fake.answerSave();
+    await due;
     expect(fake.calls).toEqual(["save"]);
+    // Any save, such as one after a spawn, puts the next autosave off a minute.
+    page.advance(AUTOSAVE_MS / 2);
+    const afterSpawn = saving.save();
+    await fake.answerSave();
+    await afterSpawn;
+    page.advance(AUTOSAVE_MS / 2);
+    await saving.saveIfDue();
+    expect(fake.calls).toEqual(["save", "save"]);
+  });
+
+  it("saves when the page is hidden until stopped", async () => {
+    const { fake, saving, page, written } = await opened();
+    expect(page.watching()).toBe(true);
+    page.hide();
+    await fake.answerSave();
+    expect(written).toEqual(["save-2"]);
     saving.stop();
-    expect(timer.running()).toBe(false);
+    expect(page.watching()).toBe(false);
+    page.advance(AUTOSAVE_MS);
+    await saving.saveIfDue();
     await saving.save();
     expect(fake.calls).toEqual(["save"]);
-    expect(AUTOSAVE_MS).toBe(60_000);
   });
 
   it("keeps saving after a store failure", async () => {
