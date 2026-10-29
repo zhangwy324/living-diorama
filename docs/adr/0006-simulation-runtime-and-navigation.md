@@ -16,6 +16,8 @@
 
 4. **World state.** `WorldState.create(registries, { worldId, seed })` runs `checkWorld` and refuses a world with errors. It holds the world model, one `Pathfinder` per distinct navigation profile, and the creatures in an id-keyed `Map` with deterministic insertion order. Creature IDs come from a counter (`creature-1`, …). `CreatureState` is plain data so it can be saved later. It is a runtime record, separate from the `CreatureInstance` content schema, which stays the save format and is not widened until persistence arrives.
 
+   _Amended by [ADR 0019](0019-world-saving.md) §2 (M15 PR 1):_ `CreatureInstance` is gone. The save format is `WorldSaveSchema` in `content-schema`, whose `CreatureSave` mirrors `CreatureState` field for field; the simulation checks at type level that the two agree.
+
 ### Navigation
 
 5. **Grid search in every region, including decks.** Every region already has a walkability mask (ADR 0005 §4), so one 8-connected grid A\* that never cuts a blocked corner covers ground and decks alike. A deck-specific "portal-to-portal" planner would mean branching on surface type. Paths are smoothed by string-pulling with a conservative line of sight: every cell the segment touches must be walkable, and passing exactly through a cell corner needs both side cells walkable, the same rule as a diagonal grid step. A smoothed path therefore never leaves walkable cells.

@@ -27,8 +27,10 @@ gh repo clone zhangwy324/living-diorama-design docs/design
 - Line endings are LF in the repo and working tree (`.gitattributes`); only `.bat`/`.cmd`/`.ps1` use CRLF.
 - Keep the repo on a local NTFS path (not a network or WSL path) for fast file watching and Rust builds.
 - Rust build output (`target/`) can grow to several GB; exclude it from antivirus real-time scanning if builds are slow.
-- To run `pnpm dev` with another number of mosslings than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). `0` starts with none. Release builds honour it too when it is set at build time (ADR 0016 §10); the release workflow fails if it is set.
-- To keep `pnpm dev` away from your own drawn creatures, set `LIVING_DIORAMA_DEV_DATA_DIR` to a folder before starting it (PowerShell: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-dev"; pnpm dev`). The species library then lives in `library/` under that folder instead of `%APPDATA%\com.livingdiorama.desktop\library`. Release builds ignore it; settings and logs stay where they are.
+- To run `pnpm dev` with another number of mosslings than the default 3, put `VITE_CREATURE_COUNT=20` in `apps/desktop/.env.development.local` (gitignored). `0` starts with none. Release builds honour it too when it is set at build time (ADR 0016 §10); the release workflow fails if it is set. While it is set, the app neither loads nor writes the saved world (ADR 0019 §11): every launch starts fresh with that count, and the player's `world.json` is left as it was.
+- To keep `pnpm dev` away from your own drawn creatures and your saved world, set `LIVING_DIORAMA_DEV_DATA_DIR` to a folder before starting it (PowerShell: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-dev"; pnpm dev`). The species library then lives in `library/` under that folder, and the saved world in `world.json` beside it, with the save before it kept as `world.prev.json` (ADR 0019 §1), instead of under `%APPDATA%\com.livingdiorama.desktop`. Release builds ignore it; settings and logs stay where they are.
+- In development builds, `livingDiorama.world.reset()` in the dev tools console discards the saved world and starts a fresh one with the starting mosslings (ADR 0019 §9). There is no reset for players.
+- `pnpm sim --save <file>` writes the world as a headless run leaves it, in the app's save format, and `pnpm sim --load <file>` carries on from such a save instead of a fresh world: `--gap <minutes>` says how much wall-clock time passed since it was made (default 0, an exact resume; 2 minutes or more is caught up as in the app). Both run at the app's 10 Hz only and refuse another `--hz`, because a save doesn't record its tick rate. A save from `pnpm sim` can be copied into a dev data folder as `world.json`, and the app's `world.json` can be loaded with `--load`. `pnpm soak` saves and restores every run several times and checks each restore (`tools/development/README.md`).
 - `pnpm measure` samples the running app's CPU, GPU and memory into a CSV under `tools/development/out/measurements/` (ADR 0009 §5–7). Start a release build first (`pnpm tauri build --no-bundle`, then `apps\desktop\src-tauri\target\release\living-diorama.exe`). With no arguments it measures the four baseline states, 5 minutes each, and says how to put the app in each one. For the soak test run `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`; it ends with the stuck and path-failed counts the app writes to `%LOCALAPPDATA%\com.livingdiorama.desktop\event-counts.json`. Results go in [performance.md](performance.md).
 
 ## Measuring with many creatures
@@ -43,11 +45,12 @@ v0.2 measures a release build with 20 creatures, some of them drawn (ADR 0016 §
 
    Expand the strip, press Ctrl+Shift+I to open the dev tools (the strip itself takes neither right-click nor shortcuts) and run `await livingDiorama.library.saveSamples()` in the console. It saves Bramble, Pip, … Hazel through the library, as the Studio saves a drawing, and resolves with the species it could not save: `[]` when all 20 were saved. Quit the app. `$env:TEMP\diorama-measure\library` now holds 20 folders.
 
-2. **Move your own creatures aside.** The release build reads its library only from `%APPDATA%\com.livingdiorama.desktop\library`:
+2. **Move your own creatures and world aside.** The release build reads its library only from `%APPDATA%\com.livingdiorama.desktop\library`, and builds without the count override load and save the world in `world.json` beside it:
 
    ```powershell
    $data = "$env:APPDATA\com.livingdiorama.desktop"
    if (Test-Path "$data\library") { Rename-Item "$data\library" library.mine }
+   foreach ($f in "world", "world.prev") { if (Test-Path "$data\$f.json") { Rename-Item "$data\$f.json" "$f.mine.json" } }
    ```
 
 3. **Measure the built-in species** with the library empty, as it was for the M6 baseline. Build once per count; the diagnostics log says `Starting count overridden: N` when the build has one.
@@ -74,13 +77,17 @@ v0.2 measures a release build with 20 creatures, some of them drawn (ADR 0016 §
 
    Start the exe, open the Creation Studio, and in My creatures click Add once on each of the 20 species. Close the Studio, then `pnpm measure`.
 
-6. **The soak mix: 3 mosslings and 17 different drawn species.** Build without the variable, as for 3 mosslings. Start the exe, click Add once on every species in My creatures except the last three (Burdock, Tansy and Hazel), close the Studio and show the strip with the cursor off it. Then `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`.
+6. **The soak mix: 3 mosslings and 17 different drawn species.** Build without the variable, as for 3 mosslings. Delete `$data\world.json` and `$data\world.prev.json` left by the 3-mossling run, so the world starts fresh. Start the exe, click Add once on every species in My creatures except the last three (Burdock, Tansy and Hazel), close the Studio and show the strip with the cursor off it. Then `pnpm measure -States soak -Minutes 480 -IntervalSeconds 10`.
 
 7. **Afterwards** put your own library back, and build once more without the variable before using the release exe for anything else:
 
    ```powershell
    Remove-Item -Recurse "$data\library"
    if (Test-Path "$data\library.mine") { Rename-Item "$data\library.mine" library }
+   foreach ($f in "world", "world.prev") {
+     Remove-Item -ErrorAction SilentlyContinue "$data\$f.json"
+     if (Test-Path "$data\$f.mine.json") { Rename-Item "$data\$f.mine.json" "$f.json" }
+   }
    ```
 
 ## Troubleshooting
@@ -202,6 +209,20 @@ Living behavior (once, in the dev app at any scale; ADR 0018). Creatures eat, sl
 - [ ] The debug overlay's label above each creature shows its action, its home, its hunger and tiredness, how many food and shelter places it knows and its recent cells, with cyan lines to the places it knows and faint squares for its recent cells.
 - [ ] At night (`set("21:30")`, speed 1), release a new drawing from the Studio. It wanders and eats like the others but doesn't lie down in its first 10 minutes. Within a minute or so after that, it goes to a round tree, sleeps and takes it as its home.
 - [ ] `.follow()` and `.speed(1)` put the strip back on the real clock. Overnight on the real clock (or from 20:00 to 06:00 with the app running), the creatures go to bed around 20:00 and wake around 06:00, rarely waking in between.
+
+World saving (once, in the dev app at any scale; ADR 0019). The world is saved on quit, every 60 seconds and after a creature is added, taken out or released, and restored at launch. Use a data folder of its own, so the checks never touch your world: `$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-world"; pnpm dev`, with `VITE_CREATURE_COUNT` unset (the count override skips saving). The save is `world.json` in that folder, and the save before it `world.prev.json`. Turn the debug overlays on to read each creature's needs and home. Before the first check, start from a fresh world: `livingDiorama.world.reset()` in the dev tools console. Some checks edit `world.json` with the app closed; the long-gap checks move `savedAt` (milliseconds since the epoch) back, which the app reads as time away (8 hours is 28800000).
+
+- [ ] Release a drawn creature from the Studio, add another species from My creatures, and let the world run until every mossling has a home (a pink line in the overlay; `livingDiorama.time.set("20:00")` speeds this up, then `.follow()`). Note each creature's place, needs and home. Quit from the tray and relaunch within a minute: the same creatures are back, the drawn ones included, each where it was with the same needs and home, and no extra mosslings have joined. Quitting takes no longer than about 3 seconds, and with `pnpm dev` the console shows no "did not shut down in time" line.
+- [ ] A short gap resumes exactly: quit while creatures walk, eat or sleep, and relaunch within 2 minutes. Each carries on with what it was doing from where it stood, with no jump. Only the time of day has moved on.
+- [ ] Add a creature and quit straight away: it is there after relaunch.
+- [ ] A long gap by day: quit, move `savedAt` back by 8 hours (or relaunch the next morning), and relaunch between 08:00 and 18:00. The creatures are awake, each near its home, with hunger below 0.4. If the gap covered the end of a night they are rested (tiredness near 0). Nothing happens all at once: they don't all eat, wake or walk off on the first tick, and they start doing things one by one over the first 30 seconds or so.
+- [ ] A long gap at night: quit, move `savedAt` back by 3 hours or more, and relaunch after 20:30 (or before 05:00). Every mossling is already asleep beside its home tree at launch, with z's, and none walks to bed or wakes.
+- [ ] A corrupt save falls back to the backup: quit, cut `world.json` in half (so it is no longer valid JSON) and relaunch. The world comes back as of the save before last (`world.prev.json`), and the app log (Tray → Open log folder) has a warning about `world.json`. After the next save, `world.json` is valid again and the backup is still the old good save.
+- [ ] A save that is valid JSON but doesn't fit starts fresh: quit, change `"schemaVersion": 1` to `2` in `world.json` (or the world's `version`), and relaunch. The world starts fresh with 3 mosslings, the log has a warning, and the backup is not used. Do the same with both `world.json` and `world.prev.json` deleted: a fresh world, no warning needed.
+- [ ] A creature whose drawn species is gone is dropped: quit, move that species' folder out of `library/`, and relaunch. Every other creature is back, and the log lists the dropped one. Put the folder back afterwards.
+- [ ] `livingDiorama.world.reset()` replaces the world with a fresh one with 3 mosslings, and that fresh world is what comes back after a relaunch.
+- [ ] With `VITE_CREATURE_COUNT=5` in `apps/desktop/.env.development.local`, the app starts with 5 mosslings and leaves `world.json` as it was (its modified time doesn't change after several minutes and a quit). Remove the line afterwards; the saved world comes back.
+- [ ] In none of the checks above does the app crash or show an error instead of the world.
 
 ## Releasing
 

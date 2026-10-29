@@ -1,10 +1,11 @@
-import { formatDiagnostic, type Result } from "@living-diorama/content-schema";
+import { formatDiagnostic, type Result, type WorldSave } from "@living-diorama/content-schema";
 import {
   createRegistries,
   resolveReferences,
   type Registries,
 } from "@living-diorama/extension-api";
 import {
+  formatClockTime,
   hungerNeed,
   isNocturnal,
   pointInPolygon,
@@ -15,6 +16,7 @@ import {
   tirednessNeed,
   type CreatureState,
   type DecisionTrace,
+  type RestoreReport,
   type SimulationEvent,
 } from "@living-diorama/simulation";
 import {
@@ -23,6 +25,16 @@ import {
   type CreatureStats,
   type LongRunCheckOptions,
 } from "./long-run-checks";
+import {
+  catchUpProblems,
+  firstDifference,
+  planRestores,
+  restoreProblems,
+  RUN_EPOCH_MS,
+  saveThroughText,
+  type PlannedRestore,
+  type SaveRestoreOptions,
+} from "./save-cycles";
 
 const FOOD = "core:food";
 
@@ -46,9 +58,22 @@ export interface RunOptions extends LongRunCheckOptions {
    * simulation time, as the main thread's clock would at speed 1 (ADR 0018 §5).
    */
   startMinutes?: number;
+  /**
+   * A save to restore before the run (`pnpm sim --load`), with the wall-clock time and time of
+   * day to restore it at; `creatures` are spawned after it. The time of day then follows
+   * simulation time from `minutes`, and `startMinutes` is unused.
+   */
+  restore?: { save: WorldSave; nowMs: number; minutes: number };
+  /** Save and restore mid-run at random ticks, checking each restore (`pnpm soak`). */
+  saveRestore?: SaveRestoreOptions;
   onTrace?: (trace: DecisionTrace) => void;
-  /** Called after every tick, e.g. to record trajectories. */
+  /**
+   * Called after every tick, e.g. to record trajectories. After a mid-run restore, it is passed
+   * the restored simulation.
+   */
   onTick?: (simulation: Simulation, events: SimulationEvent[]) => void;
+  /** Called with the simulation as the run leaves it. */
+  onEnd?: (simulation: Simulation) => void;
 }
 
 /** Where a run starts in the day unless told otherwise. */
@@ -102,6 +127,18 @@ export interface RunReport {
   /** Per creature ID: decisions, interruptions, meals, hunger and sleep. */
   creatures: Record<string, CreatureStats>;
   elapsedMs: number;
+  /** What restoring `RunOptions.restore` dropped, pruned and caught up. */
+  restore?: RestoreReport;
+  /** Mid-run saves and restores (`RunOptions.saveRestore`). */
+  saveRestore: {
+    restores: number;
+    /** Ticks an unbroken twin ran beside a restored world. */
+    comparedTicks: number;
+    /** The largest save, in UTF-16 code units of JSON text. */
+    largestSaveBytes: number;
+    /** The restore after a long gap, if any: the gap and the time of day it ended at. */
+    longGap?: { gapMs: number; at: string };
+  };
 }
 
 const MAX_VIOLATIONS = 20;
@@ -130,19 +167,39 @@ export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures"
   return created.value;
 }
 
+/** A simulation whose decision traces collect in `traces` until taken. */
+interface Traced {
+  simulation: Simulation;
+  traces: DecisionTrace[];
+}
+
 export function runWithInvariants(options: RunOptions): RunReport {
   const started = performance.now();
   let decisions = 0;
-  /** This tick's traces, for the checks. */
-  const traces: DecisionTrace[] = [];
-  const simulation = createSimulation({
-    ...options,
-    onTrace: (trace) => {
-      decisions++;
-      traces.push(trace);
-      options.onTrace?.(trace);
-    },
-  });
+  const traced = (): Traced => {
+    const traces: DecisionTrace[] = [];
+    const simulation = createSimulation({ ...options, onTrace: (trace) => traces.push(trace) });
+    return { simulation, traces };
+  };
+  let main = traced();
+  let simulation = main.simulation;
+  /**
+   * The time of day follows simulation time from an anchor (ADR 0018 §5): `minutes` at `tick`.
+   * A restore after a gap moves both.
+   */
+  let anchor = { tick: 0, minutes: options.startMinutes ?? DEFAULT_START_MINUTES };
+  const minutesAt = (tick: number) =>
+    minutesAfter(anchor.minutes, ((tick - anchor.tick) * 1000) / simulation.tickRateHz);
+  let restoreReport: RestoreReport | undefined;
+  if (options.restore) {
+    const { save, nowMs, minutes } = options.restore;
+    const restored = simulation.restore(save, { nowMs, minutes });
+    if (!restored.ok) throw new Error(restored.diagnostics.map(formatDiagnostic).join("\n"));
+    restoreReport = restored.value;
+    anchor = { tick: simulation.tick, minutes };
+  }
+  /** The headless wall clock: simulated time and gaps since a fixed epoch, or since the restore. */
+  let wallMs = options.restore?.nowMs ?? RUN_EPOCH_MS;
   for (let n = 0; n < options.creatures; n++) {
     const spawned = simulation.spawn(options.speciesId);
     if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
@@ -164,6 +221,8 @@ export function runWithInvariants(options: RunOptions): RunReport {
     decisions: 0,
     creatures: {},
     elapsedMs: 0,
+    ...(restoreReport ? { restore: restoreReport } : {}),
+    saveRestore: { restores: 0, comparedTicks: 0, largestSaveBytes: 0 },
   };
   const violation = (message: string) => {
     if (report.violations.length < MAX_VIOLATIONS) {
@@ -185,14 +244,50 @@ export function runWithInvariants(options: RunOptions): RunReport {
     return entry;
   };
 
-  const startMinutes = options.startMinutes ?? DEFAULT_START_MINUTES;
+  const restores = options.saveRestore
+    ? planRestores(options.seed, options.ticks, options.saveRestore)
+    : [];
+  const tickMs = 1000 / simulation.tickRateHz;
+  /** The world from before a restore without a gap, run on beside the restored one. */
+  let twin: (Traced & { ticksLeft: number }) | undefined;
+  /** Set by a restore with catch-up, which is checked after the step that follows. */
+  let caughtUp: { save: WorldSave; report: RestoreReport } | undefined;
   for (let t = 0; t < options.ticks; t++) {
-    simulation.setTimeOfDay(
-      minutesAfter(startMinutes, (simulation.tick * 1000) / simulation.tickRateHz),
-    );
+    const minutes = minutesAt(simulation.tick);
+    simulation.setTimeOfDay(minutes);
     const events = simulation.step();
-    for (const trace of traces) checks.trace(trace);
-    traces.length = 0;
+    wallMs += tickMs;
+    const traces = main.traces.splice(0);
+    decisions += traces.length;
+    for (const trace of traces) {
+      checks.trace(trace);
+      options.onTrace?.(trace);
+    }
+    if (twin) {
+      twin.simulation.setTimeOfDay(minutes);
+      const expected = { events: twin.simulation.step(), traces: twin.traces.splice(0) };
+      let differs = firstDifference(expected, { events, traces });
+      if (!differs && --twin.ticksLeft === 0) {
+        // Not the debug snapshot: its route comes from a cache of the last path walked, which a
+        // restore clears, so a creature that arrived and is still at its action shows `[]` in
+        // the unbroken run and no route after a restore. The save holds the rest of it.
+        differs = firstDifference(
+          [twin.simulation.save(0), twin.simulation.snapshot()],
+          [simulation.save(0), simulation.snapshot()],
+        );
+      }
+      report.saveRestore.comparedTicks++;
+      if (differs) violation(`the restored world differs from the unbroken run: ${differs}`);
+      if (differs || twin.ticksLeft === 0) twin = undefined;
+    }
+    if (caughtUp) {
+      const sleeps = (c: CreatureState) => checkedFor(c).checkSleep;
+      const { save, report } = caughtUp;
+      for (const problem of catchUpProblems(simulation, save, report, events, sleeps)) {
+        violation(problem);
+      }
+      caughtUp = undefined;
+    }
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;
       checks.event(event);
@@ -256,8 +351,49 @@ export function runWithInvariants(options: RunOptions): RunReport {
       }
     }
     options.onTick?.(simulation, events);
+    if (restores[0]?.afterStep === t) {
+      const { gapMs } = restores.shift() as PlannedRestore;
+      const savedAt = Math.round(wallMs);
+      const saved = saveThroughText(simulation, savedAt);
+      if (!saved.ok) {
+        violation(saved.problem);
+        continue;
+      }
+      const { save } = saved;
+      report.saveRestore.largestSaveBytes = Math.max(
+        report.saveRestore.largestSaveBytes,
+        saved.bytes,
+      );
+      // A fresh world of another seed, as the app's at startup, then the save.
+      const next = traced();
+      // Without a gap the next step's time of day; after one, that plus the gap.
+      const present = minutesAfter(minutesAt(simulation.tick), gapMs);
+      wallMs += gapMs;
+      const restored = next.simulation.restore(save, { nowMs: savedAt + gapMs, minutes: present });
+      if (!restored.ok) {
+        violation(`restore failed: ${restored.diagnostics.map(formatDiagnostic).join("; ")}`);
+        continue;
+      }
+      report.saveRestore.restores++;
+      for (const problem of restoreProblems(restored.value)) violation(problem);
+      const previous = main;
+      main = next;
+      simulation = next.simulation;
+      if (gapMs === 0) {
+        twin = { ...previous, ticksLeft: options.saveRestore?.compareTicks ?? 0 };
+        if (twin.ticksLeft <= 0) twin = undefined;
+      } else {
+        twin = undefined;
+        anchor = { tick: simulation.tick, minutes: present };
+        report.saveRestore.longGap = { gapMs, at: formatClockTime(present) };
+        // Catch-up feeds every creature, so the meal check counts from here.
+        checks.caughtUp();
+        caughtUp = { save, report: restored.value };
+      }
+    }
   }
   checks.finish();
+  options.onEnd?.(simulation);
   report.decisions = decisions;
   report.creatures = Object.fromEntries(checks.creatures);
   report.elapsedMs = performance.now() - started;
