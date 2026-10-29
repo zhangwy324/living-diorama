@@ -43,7 +43,7 @@ Draw a creature in the Creation Studio and release it into the diorama, where it
 
 **My creatures**, the panel beside the preview, lists every creature you have released, with how many are in the world. **+** adds another of that creature to the world, **−** takes the newest one out, and **Delete** (the bin) deletes it after asking. Deleting removes the creature for good, along with any in the world.
 
-Your creatures are saved in `%APPDATA%\com.livingdiorama.desktop\library` and survive a relaunch. The world itself starts fresh on every launch, with the three mosslings and none of your creatures: add them back from My creatures. A drawing you haven't released is not saved. Closing the Studio asks first, but quitting the app doesn't.
+Your creatures are saved in `%APPDATA%\com.livingdiorama.desktop\library` and survive a relaunch. The world is saved too, as `world.json` in `%APPDATA%\com.livingdiorama.desktop`: every minute, whenever a creature is added or taken out, and when you quit. The next launch brings back the same creatures, yours included, with their needs, their homes and what they know. Time away counts: after a night away they wake rested and fed, and at night they are asleep at home. A saved world that can't be used is replaced by a fresh one with the three mosslings. A drawing you haven't released is not saved. Closing the Studio asks first, but quitting the app doesn't.
 
 ## Development setup
 

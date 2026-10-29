@@ -1,6 +1,8 @@
+import type { Result } from "@living-diorama/content-schema";
 import {
   connectDesktopShell,
   connectLibraryStore,
+  connectWorldStore,
   serveStudio,
 } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
@@ -10,8 +12,14 @@ import { ControlsOverlay } from "./ControlsOverlay";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
 import { installTimeDevHook } from "./dev-time";
+import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
-import { creatureCap, startSimulation, type SimulationClient } from "./simulation-client";
+import {
+  COUNT_OVERRIDE,
+  creatureCap,
+  startSimulation,
+  type SimulationClient,
+} from "./simulation-client";
 import { ShapeCameras } from "./shape-cameras";
 import { shortcutFor } from "./shortcuts";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
@@ -25,15 +33,19 @@ import {
   type StudioRequests,
   type StudioServices,
 } from "./studio-protocol";
+import { worldSaving, type WorldSaving } from "./world-saving";
 
 const shell = connectDesktopShell();
 const libraryStore = connectLibraryStore();
+// A world measured with an overridden creature count is neither loaded nor saved (ADR 0019 §11).
+const worldStore = COUNT_OVERRIDE === undefined ? connectWorldStore() : undefined;
 
 export function App() {
   const container = useRef<HTMLDivElement>(null);
   // Set while the diorama runs; cleared when it stops, so nothing is torn down twice.
   const view = useRef<DioramaView>(undefined);
   const simulation = useRef<SimulationClient>(undefined);
+  const saving = useRef<WorldSaving>(undefined);
   const cameras = useRef(new ShapeCameras());
   // The shell owns paused, expanded and full screen; these mirror its change events.
   const [paused, setPaused] = useState(false);
@@ -59,8 +71,9 @@ export function App() {
         setExpanded(value);
       }),
       shell.onFullScreenChanged(setFullScreen),
-      // Clean shutdown (ADR 0008 §14); the process exits next.
-      shell.onQuitRequested(() => {
+      // Clean shutdown (ADR 0008 §14, ADR 0019 §4): the world is saved, then the process exits.
+      shell.onQuitRequested(async () => {
+        await saving.current?.save();
         simulation.current?.shutdown();
         view.current?.dispose();
       }),
@@ -90,6 +103,7 @@ export function App() {
     if (!element) return;
     let created: DioramaView | undefined;
     let uninstallTimeHook = () => {};
+    let uninstallWorldHook = () => {};
     // Recorded at start too, so the measuring script never reads a previous run's counts.
     const counter = new EventCounter();
     const recordCounts = () =>
@@ -130,24 +144,36 @@ export function App() {
       counted = counts;
       return true;
     };
-    // The library registers its species once the world is ready (ADR 0014 §8). Development
-    // builds also reach it from the console.
-    const openLibrary = () =>
-      void openSpeciesLibrary(
+    // Creatures coming and going are saved at once (ADR 0019 §4).
+    const savedAfter = <T,>(result: Result<T>) => {
+      if (result.ok) void world.save();
+      return result;
+    };
+    // The library registers its species once the world is ready (ADR 0014 §8), and the saved
+    // world is restored only then, so its drawn creatures find their species (ADR 0019 §3). The
+    // Studio reaches the library once the world is open. Development builds also reach both from
+    // the console.
+    const openWorld = async () => {
+      const opened = await openSpeciesLibrary(
         libraryStore,
         {
           registerSpecies: client.registerSpecies,
-          spawn: client.spawn,
-          despawn: client.despawn,
+          spawn: (speciesId, options) => client.spawn(speciesId, options).then(savedAfter),
+          despawn: (creatureId) => client.despawn(creatureId).then(savedAfter),
           creatures: () => latest?.creatures ?? [],
         },
         { onChange: pushLibrary },
-      ).then((opened) => {
-        if (stopped) return;
-        library = opened;
-        pushLibrary();
-        if (import.meta.env.DEV) installLibraryDevHook(opened);
-      });
+      );
+      if (stopped) return;
+      await world.open();
+      if (stopped) return;
+      library = opened;
+      pushLibrary();
+      if (import.meta.env.DEV) {
+        installLibraryDevHook(opened);
+        uninstallWorldHook = installWorldDevHook(world);
+      }
+    };
     const client = startSimulation({
       onReady: ({ scene, navigations, ...content }) => {
         for (const [id, asset] of Object.entries(content.assets)) assets.set(id, asset);
@@ -166,8 +192,10 @@ export function App() {
         view.current = created;
         if (import.meta.env.DEV) uninstallTimeHook = installTimeDevHook(client);
         worldReady();
-        openLibrary();
+        void openWorld();
       },
+      // The restored world's ticks may be behind the empty world's, or far ahead after catch-up.
+      onRestored: () => created?.resetSnapshots(),
       onSpeciesRegistered: (id, summary, asset) => {
         species.set(id, summary);
         assets.set(summary.appearance, asset);
@@ -181,16 +209,24 @@ export function App() {
       onFailure: (summary, details) => fail({ summary, details }),
     });
     simulation.current = client;
+    const world = worldSaving(client, {
+      store: worldStore,
+      creatures: () => latest?.creatures ?? [],
+    });
+    saving.current = world;
     let stopped = false;
     const stop = () => {
       if (stopped) return;
       stopped = true;
       view.current = undefined;
       simulation.current = undefined;
+      saving.current = undefined;
+      world.stop();
       client.stop();
       studio.close();
       created?.dispose();
       uninstallTimeHook();
+      uninstallWorldHook();
     };
     return stop;
   }, []);

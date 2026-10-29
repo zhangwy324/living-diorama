@@ -5,6 +5,7 @@ import {
   type AssetSummary,
   type Limit,
   type RequestCommand,
+  type RestoreReport,
   type SimulationCommand,
   type SimulationEvent,
   type SimulationMessage,
@@ -28,7 +29,8 @@ export function parseCountOverride(raw: string | undefined): number | undefined 
   return undefined;
 }
 
-const COUNT_OVERRIDE = parseCountOverride(import.meta.env.VITE_CREATURE_COUNT);
+/** The creature-count override this build was made with, if any. */
+export const COUNT_OVERRIDE = parseCountOverride(import.meta.env.VITE_CREATURE_COUNT);
 
 /** A species the worker registered, and where its creatures don't fit in this world (ADR 0013). */
 export interface RegisteredSpecies {
@@ -55,6 +57,23 @@ export interface SimulationClient {
   spawn(speciesId: string, options?: { released?: boolean }): Promise<Result<string>>;
   /** Takes a creature out of the world. */
   despawn(creatureId: string): Promise<Result<string>>;
+  /**
+   * Adds the startup world's starting creatures (the count override's number of each, if set) and
+   * resolves once the worker has answered every spawn. A creature that can't be added is logged.
+   * For a world with no usable save (ADR 0019 §3).
+   */
+  spawnStartingCreatures(): Promise<void>;
+  /**
+   * Saves the world (ADR 0019), stamped with the wall-clock time now. Resolves with the save as
+   * JSON text, ready to store, once every command sent before it has been applied.
+   */
+  save(): Promise<Result<string>>;
+  /**
+   * Replaces the world with the save in `json`, at the wall-clock time and time of day now
+   * (ADR 0019 §3, §7). Resolves with what the restore left out and caught up, or with why the
+   * save was rejected, in which case the world is as it was. `onRestored` runs first.
+   */
+  restore(json: string): Promise<Result<RestoreReport>>;
   /** Turns debug data (routes, needs, knowledge and home) in snapshots on or off. */
   setDebug(enabled: boolean): void;
   /** Stops or restarts the simulation clock. */
@@ -73,8 +92,16 @@ export interface SimulationClient {
 }
 
 export interface SimulationCallbacks {
-  /** The worker loaded and checked the world; the starting creatures are spawned right after. */
+  /**
+   * The worker loaded and checked the world, which is still empty: the caller restores a save or
+   * spawns the starting creatures next (ADR 0019 §3).
+   */
   onReady(content: WorldContent): void;
+  /**
+   * The world was replaced by a save. The next snapshot shows it, and its tick may be older than
+   * the last one or far ahead of it. Runs before that snapshot and before `restore` resolves.
+   */
+  onRestored?(report: RestoreReport): void;
   /** A species was registered while the world runs; the renderer may now meet its creatures. */
   onSpeciesRegistered?(speciesId: string, species: SpeciesSummary, asset: AssetSummary): void;
   onSnapshot(snapshot: SimulationSnapshot, events: SimulationEvent[]): void;
@@ -105,13 +132,13 @@ export function creatureCap(config: StartupConfig, countOverride = COUNT_OVERRID
 type Pending = (result: Result<unknown>) => void;
 
 /**
- * Starts the simulation worker on the startup world, spawns its starting creatures and hands every
- * snapshot and its events to `onSnapshot`. The seed changes every launch and is logged so a run
- * can be reproduced. The worker gets the local time of day at init, whenever the minute changes
+ * Starts the simulation worker on the startup world, still empty, and hands every snapshot and its
+ * events to `onSnapshot`. The seed changes every launch and is logged so a run can be reproduced;
+ * a restored save brings its own (ADR 0019 §8). The worker gets the local time of day at init, whenever the minute changes
  * and on resume (ADR 0018 §5).
  */
 export function startSimulation(
-  { onReady, onSpeciesRegistered, onSnapshot, onFailure }: SimulationCallbacks,
+  { onReady, onSpeciesRegistered, onRestored, onSnapshot, onFailure }: SimulationCallbacks,
   config: StartupConfig = STARTUP,
   worker: WorkerLike = createWorker(),
   countOverride = COUNT_OVERRIDE,
@@ -139,10 +166,10 @@ export function startSimulation(
   const timeOfDay = timeOfDayFeed((minutes) => send({ type: "set_time_of_day", minutes }), clock);
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
-  const spawnStartingCreatures = () => {
-    for (const { speciesId, count } of config.creatures) {
-      for (let i = 0; i < (countOverride ?? count); i++) {
-        void request<string>({ type: "spawn", speciesId }).then((result) => {
+  const spawnStartingCreatures = async () => {
+    const spawning = config.creatures.flatMap(({ speciesId, count }) =>
+      Array.from({ length: countOverride ?? count }, () =>
+        request<string>({ type: "spawn", speciesId }).then((result) => {
           if (!result.ok) {
             console.warn(
               [
@@ -151,9 +178,10 @@ export function startSimulation(
               ].join("\n  "),
             );
           }
-        });
-      }
-    }
+        }),
+      ),
+    );
+    await Promise.all(spawning);
   };
 
   worker.onmessage = (event: MessageEvent) => {
@@ -172,7 +200,6 @@ export function startSimulation(
         ready = true;
         timeOfDay.start();
         onReady(message);
-        spawnStartingCreatures();
         break;
       case "snapshot":
         onSnapshot(message.snapshot, message.events);
@@ -191,6 +218,13 @@ export function startSimulation(
       case "despawned":
         answer(message.requestId, { ok: true, value: message.creatureId });
         break;
+      case "saved":
+        answer(message.requestId, { ok: true, value: message.json });
+        break;
+      case "restored":
+        onRestored?.(message.report);
+        answer(message.requestId, { ok: true, value: message.report });
+        break;
       case "rejected":
         answer(message.requestId, { ok: false, diagnostics: message.diagnostics });
         break;
@@ -199,6 +233,13 @@ export function startSimulation(
         const summary = ready ? "The simulation stopped" : "The world failed to load";
         onFailure(summary, message.diagnostics.map(formatDiagnostic));
         break;
+      }
+      default: {
+        // An answer this client doesn't read would leave its request waiting forever.
+        const unread: never = message;
+        onFailure("The simulation stopped", [
+          `Unexpected simulation message: ${(unread as { type: string }).type}`,
+        ]);
       }
     }
   };
@@ -229,6 +270,10 @@ export function startSimulation(
     spawn: (speciesId, { released = false } = {}) =>
       request({ type: "spawn", speciesId, ...(released ? { released } : {}) }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
+    spawnStartingCreatures,
+    save: () => request({ type: "save", savedAt: clock.now() }),
+    restore: (json) =>
+      request({ type: "restore", json, nowMs: clock.now(), minutes: timeOfDay.minutes }),
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
     setPaused: (paused) => {
       // Before resuming, so the snapshot sent on resume already shows the time of day.

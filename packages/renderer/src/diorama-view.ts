@@ -45,6 +45,8 @@ export interface DioramaView {
    * and the diorama is lit for its time of day (ADR 0018 §6).
    */
   pushSnapshot(snapshot: SimulationSnapshot): void;
+  /** Forgets earlier snapshots after the world was replaced by a save, so none is blended from. */
+  resetSnapshots(): void;
   /**
    * Shows or hides the debug overlays and stats. Routes, needs, knowledge and home appear only
    * once the simulation sends them, which its own `set_debug` command turns on.
@@ -340,6 +342,10 @@ export function createDioramaView(
       // Relit only when the minute changes; the next frame is then drawn at full rate.
       if (setTimeOfDay(snapshot.timeOfDay)) moved = true;
       stats.snapshot(snapshot);
+    },
+    resetSnapshots() {
+      snapshots.reset();
+      stats.reset();
     },
     setDebug(enabled) {
       overlays.group.visible = enabled;
