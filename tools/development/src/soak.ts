@@ -42,11 +42,14 @@ let failed = 0;
 let restores = 0;
 let comparedTicks = 0;
 let largestSave = 0;
+/** Bank jumps by the amphibians, and the seeds in which they made any. */
+let bankJumps = 0;
+let seedsWithJumps = 0;
 const started = performance.now();
 for (let seed = 1; seed <= seeds; seed++) {
-  /** Creatures that used a structure, and those that jumped across a bank, by ID. */
+  /** Creatures that used a structure, and each creature's jumps across a bank, by ID. */
   const structureUsers = new Set<string>();
-  const bankJumpers = new Set<string>();
+  const jumpsBy = new Map<string, number>();
   const report = runWithInvariants({
     register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
@@ -62,7 +65,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       for (const e of events) {
         if (e.type === "first_use_of_structure") structureUsers.add(e.creatureId);
         if (e.type === "entered_region" && e.connectionId === undefined) {
-          bankJumpers.add(e.creatureId);
+          jumpsBy.set(e.creatureId, (jumpsBy.get(e.creatureId) ?? 0) + 1);
         }
       }
     },
@@ -87,10 +90,10 @@ for (let seed = 1; seed <= seeds; seed++) {
       : [`${report.saveRestore.restores} of ${saveRestore.cycles} restores done`]),
   ];
   if (problems.length > 0) failed++;
-  const amphibians = of(otter.id);
-  const swam = values["mosslings-only"]
-    ? ""
-    : `, amphibian bank jumps: ${amphibians.filter((id) => bankJumpers.has(id)).length}/${amphibians.length}`;
+  const jumps = of(otter.id).reduce((n, id) => n + (jumpsBy.get(id) ?? 0), 0);
+  bankJumps += jumps;
+  if (jumps > 0) seedsWithJumps++;
+  const swam = values["mosslings-only"] ? "" : `, ${jumps} amphibian bank jumps`;
   console.log(
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
       `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
@@ -103,6 +106,9 @@ console.log(
   `${restores} saves restored, ${comparedTicks} ticks compared with unbroken runs, ` +
     `largest save ${(largestSave / 1024).toFixed(0)} KiB of JSON`,
 );
+if (!values["mosslings-only"]) {
+  console.log(`${bankJumps} amphibian bank jumps, in ${seedsWithJumps}/${seeds} seeds`);
+}
 console.log(
   `${seeds - failed}/${seeds} seeds clean in ${((performance.now() - started) / 1000).toFixed(0)} s`,
 );

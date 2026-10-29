@@ -101,15 +101,17 @@ const worldName =
   "hollow";
 const preset = WORLDS[worldName as keyof typeof WORLDS] as (typeof WORLDS)["hollow"] | undefined;
 if (!preset) throw new Error(`--world must be one of: ${Object.keys(WORLDS).join(", ")}`);
-const speciesIds = (values.species ?? Object.keys(preset.species)[0] ?? "")
-  .split(",")
-  .map((name) => {
-    const id = preset.species[name.trim()];
-    if (!id) {
-      throw new Error(`--species must be names from: ${Object.keys(preset.species).join(", ")}`);
-    }
-    return id;
-  });
+// Each named once, however often it is given.
+const names = new Set(
+  (values.species ?? Object.keys(preset.species)[0] ?? "").split(",").map((n) => n.trim()),
+);
+const speciesIds = [...names].map((name) => {
+  const id = preset.species[name];
+  if (!id) {
+    throw new Error(`--species must be names from: ${Object.keys(preset.species).join(", ")}`);
+  }
+  return id;
+});
 const [speciesId = "", ...others] = speciesIds;
 const seed = loaded?.seed ?? Number(values.seed);
 const ticks = Number(values.ticks);

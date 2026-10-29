@@ -26,11 +26,11 @@ const species = (
   body,
 });
 
-/** Walks and swims, slower in water; the drawn default size, medium. */
+/** Walks and swims, at a speed factor of 1 in both, as a drawn species does. */
 export const otter = species(
   "fixture:otter",
   "Otter",
-  { "core:land": 1, "core:swim": 0.6 },
+  { "core:land": 1, "core:swim": 1 },
   { template: "walker", locomotion: { land: { gait: "walk" } } },
 );
 /** Only swims, so it appears at the river's spawn point and never leaves the water. */

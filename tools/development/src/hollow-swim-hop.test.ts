@@ -38,32 +38,6 @@ describe("a water-only swimmer in Woodland Hollow", () => {
       submersion: SWIM_SUBMERSION,
     });
   });
-
-  it("stays in the water through a living day, swimming all the while", slow, () => {
-    const seen = new Set<string>();
-    const report = runWithInvariants({
-      ...hollow,
-      speciesId: carp.id,
-      seed: 2,
-      ticks: 24 * 3600 * 2,
-      tickRateHz: 2,
-      creatures: 2,
-      ...LIVING_BEHAVIOR_CHECKS,
-      onTick: (simulation) => {
-        for (const c of simulation.snapshot().creatures) {
-          seen.add(`${c.position.regionId}:${c.animation}:${c.submersion}`);
-        }
-      },
-    });
-    expect(report.violations).toEqual([]);
-    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
-    expect(report.eventCounts.path_failed ?? 0).toBe(0);
-    expect(report.eventCounts.entered_region ?? 0).toBe(0);
-    expect(seen).toEqual(new Set([`river:swim:${SWIM_SUBMERSION}`]));
-    // It sleeps where it is (ADR 0018 §13's fallback): water has no shelter yet.
-    for (const c of Object.values(report.creatures))
-      expect(c.asleepAtNightTicks).toBeGreaterThan(0);
-  });
 });
 
 /** A behavior that walks to `destination` once, then idles. */
@@ -147,59 +121,69 @@ describe("crossing the river", () => {
       new Set(["west-woods:walk", "bridge-deck:walk", "east-meadow:walk"]),
     );
   });
+});
 
-  it("keeps an amphibian's invariants, banks and all, through a living day", slow, () => {
-    const jumps = new Set<string>();
+describe("a living day with an amphibian, a swimmer and a hopper", () => {
+  it("keeps each to its own ways of moving, with every invariant held", slow, () => {
+    /** Per species: region, animation and submersion seen; per creature: moves made. */
+    const seen = new Map<string, Set<string>>();
+    const moves = new Map<string, string[]>();
+    const bridgeUsers = new Set<string>();
+    const speciesOf = new Map<string, string>();
     const report = runWithInvariants({
       ...hollow,
       speciesId: otter.id,
+      alsoSpawn: { [carp.id]: 1, [toad.id]: 1 },
       seed: 1,
       ticks: 24 * 3600 * 2,
       tickRateHz: 2,
-      creatures: 2,
+      creatures: 1,
       ...LIVING_BEHAVIOR_CHECKS,
-      onTick: (_simulation, events) => {
+      onTick: (simulation, events) => {
+        for (const c of simulation.snapshot().creatures) {
+          speciesOf.set(c.id, c.speciesId);
+          let set = seen.get(c.speciesId);
+          if (!set) seen.set(c.speciesId, (set = new Set()));
+          set.add(`${c.position.regionId}:${c.animation}:${c.submersion}`);
+        }
         for (const e of events) {
-          if (e.type === "entered_region" && e.connectionId === undefined) {
-            jumps.add(`${e.fromRegionId} → ${e.toRegionId}`);
-          }
+          if (e.type === "first_use_of_structure") bridgeUsers.add(e.creatureId);
+          if (e.type !== "entered_region") continue;
+          const list = moves.get(e.creatureId) ?? [];
+          list.push(`${e.fromRegionId} → ${e.toRegionId} via ${e.connectionId ?? "bank"}`);
+          moves.set(e.creatureId, list);
         }
       },
     });
     expect(report.violations).toEqual([]);
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
     expect(report.eventCounts.path_failed ?? 0).toBe(0);
+    const ofSpecies = (id: string) =>
+      [...speciesOf].flatMap(([creature, species]) => (species === id ? [creature] : []));
+    const [amphibian] = ofSpecies(otter.id);
+    const [swimmer] = ofSpecies(carp.id);
+    const [hopper] = ofSpecies(toad.id);
+
+    // The swimmer never leaves the river, swimming half submerged all the while, and sleeps
+    // where it is (ADR 0018 §13's fallback): water has no shelter yet.
+    expect(seen.get(carp.id)).toEqual(new Set([`river:swim:${SWIM_SUBMERSION}`]));
+    expect(moves.get(swimmer!)).toBeUndefined();
+    expect(report.creatures[swimmer!]!.asleepAtNightTicks).toBeGreaterThan(0);
+
+    // The hopper hops everywhere on land, crosses the bridge and never enters the river.
+    expect([...seen.get(toad.id)!].every((s) => s.endsWith(":hop:0"))).toBe(true);
+    expect([...seen.get(toad.id)!].some((s) => s.startsWith("river:"))).toBe(false);
+    expect(bridgeUsers).toContain(hopper);
+
+    // The amphibian jumps in and out of the river across the banks, both ways.
+    const jumps = moves.get(amphibian!)!.filter((m) => m.endsWith("via bank"));
+    expect(jumps.some((j) => j.includes("→ river"))).toBe(true);
+    expect(jumps.some((j) => j.startsWith("river →"))).toBe(true);
     expect(report.regionTicks.river).toBeGreaterThan(0);
-    // In and out of the river by the banks, both ways.
-    expect([...jumps].some((j) => j.endsWith("→ river"))).toBe(true);
-    expect([...jumps].some((j) => j.startsWith("river →"))).toBe(true);
   });
 });
 
 describe("a hopper in Woodland Hollow", () => {
-  it("hops everywhere it goes, bridge included, through a living day", slow, () => {
-    const seen = new Set<string>();
-    const report = runWithInvariants({
-      ...hollow,
-      speciesId: toad.id,
-      seed: 3,
-      ticks: 24 * 3600 * 2,
-      tickRateHz: 2,
-      creatures: 2,
-      ...LIVING_BEHAVIOR_CHECKS,
-      onTick: (simulation) => {
-        for (const c of simulation.snapshot().creatures) {
-          seen.add(`${c.animation}:${c.submersion}`);
-        }
-      },
-    });
-    expect(report.violations).toEqual([]);
-    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
-    expect(report.firstStructureUse).toBeDefined();
-    expect(seen).toEqual(new Set(["hop:0"]));
-    expect(report.regionTicks.river).toBeUndefined();
-  });
-
   it("shares a walker's navigation: a gait is a style, not a capability", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
     expect(simulation.state.pathfinderFor(toad.id)).toBe(
