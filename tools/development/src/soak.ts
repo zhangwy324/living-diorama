@@ -62,6 +62,8 @@ const saveRestore = {
 let failed = 0;
 let restores = 0;
 let comparedTicks = 0;
+/** Creatures put to bed by catch-up away from a full home (issue #158). */
+let fullHomes = 0;
 let largestSave = 0;
 /** Per seed with any, how many minutes apart its earliest and latest bedtimes, and wake times. */
 const bedSpreads: number[] = [];
@@ -103,6 +105,7 @@ for (let seed = 1; seed <= seeds; seed++) {
   restores += report.saveRestore.restores;
   comparedTicks += report.saveRestore.comparedTicks;
   largestSave = Math.max(largestSave, report.saveRestore.largestSaveBytes);
+  fullHomes += report.saveRestore.fullHomes;
   const counts = report.eventCounts;
   const of = (speciesId: string) =>
     Object.entries(report.creatures).flatMap(([id, c]) => (c.speciesId === speciesId ? [id] : []));
@@ -151,7 +154,8 @@ for (let seed = 1; seed <= seeds; seed++) {
 }
 console.log(
   `${restores} saves restored, ${comparedTicks} ticks compared with unbroken runs, ` +
-    `largest save ${(largestSave / 1024).toFixed(0)} KiB of JSON`,
+    `largest save ${(largestSave / 1024).toFixed(0)} KiB of JSON, ` +
+    `${fullHomes} sleepers caught up away from a full home`,
 );
 if (!values["mosslings-only"]) {
   for (const { name, totals: t, shares } of AMPHIBIANS) {

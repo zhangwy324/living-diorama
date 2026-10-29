@@ -32,6 +32,7 @@ import {
   restoreProblems,
   RUN_EPOCH_MS,
   saveThroughText,
+  shelterSpacingProblems,
   type PlannedRestore,
   type SaveRestoreOptions,
 } from "./save-cycles";
@@ -139,6 +140,11 @@ export interface RunReport {
     restores: number;
     /** Ticks an unbroken twin ran beside a restored world. */
     comparedTicks: number;
+    /**
+     * Creatures put to bed by catch-up away from a home that was full (issue #158), as the
+     * catch-up check found them.
+     */
+    fullHomes: number;
     /** The largest save, in UTF-16 code units of JSON text. */
     largestSaveBytes: number;
     /** The restore after a long gap, if any: the gap and the time of day it ended at. */
@@ -240,7 +246,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
     creatures: {},
     elapsedMs: 0,
     ...(restoreReport ? { restore: restoreReport } : {}),
-    saveRestore: { restores: 0, comparedTicks: 0, largestSaveBytes: 0 },
+    saveRestore: { restores: 0, comparedTicks: 0, largestSaveBytes: 0, fullHomes: 0 },
   };
   const violation = (message: string) => {
     if (report.violations.length < MAX_VIOLATIONS) {
@@ -305,8 +311,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
     if (caughtUp) {
       const sleeps = (c: CreatureState) => checkedFor(c).checkSleep;
-      const { save, report } = caughtUp;
-      for (const problem of catchUpProblems(simulation, save, report, events, sleeps)) {
+      const { save, report: restored } = caughtUp;
+      const fullHome = () => void report.saveRestore.fullHomes++;
+      for (const problem of catchUpProblems(simulation, save, restored, events, sleeps, fullHome)) {
         violation(problem);
       }
       caughtUp = undefined;
@@ -350,6 +357,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
         }
       }
     }
+    for (const problem of shelterSpacingProblems(simulation)) violation(problem);
     const snapshot = simulation.snapshot();
     checks.tick(
       simulation.tick,

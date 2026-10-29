@@ -1000,6 +1000,18 @@ describe("core:sleep", () => {
       expect(reaches).toEqual([]);
     });
 
+    it("finding it full on the way, then stuck, notes no failure", () => {
+      const { context, reaches, sleepers } = sleepContext({ spots: SPOTS, movingTicks: 5 });
+      const start = sleepAction.start({ placementId: "tree" }, context);
+      if (!start.ok) throw new Error("start failed");
+      sleepAction.step(start.state, context);
+      sleepers.push(...SPOTS);
+      sleepAction.step(start.state, context);
+      expect(start.state).toMatchObject({ placementId: null, arrived: false });
+      sleepAction.interrupted!(start.state, context, "stuck");
+      expect(reaches).toEqual([]);
+    });
+
     it("catching up, starts asleep only at the spot clear of them", () => {
       const { context } = sleepContext({ spots: SPOTS, sleepers: [{ x: 1.2, z: 0.2 }] });
       const at = (x: number, z: number) => ({
