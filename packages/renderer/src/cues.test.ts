@@ -7,6 +7,7 @@ import {
   BUBBLE_PX,
   CueSprites,
   FOOD_ICON,
+  COLORSPACE_FRAGMENT,
   MAP_SAMPLE,
   MIP_BIAS,
   RING_STEPS,
@@ -26,6 +27,7 @@ import {
   restingZ,
   ringPixels,
   ringStep,
+  premultiplied,
   sharpen,
   stepCueWeights,
   zAt,
@@ -314,6 +316,29 @@ describe("cue textures", () => {
     );
   });
 
+  it("fades a premultiplied picture's colour with its opacity, after encoding it", () => {
+    expect(THREE.ShaderLib.sprite.fragmentShader).toContain(COLORSPACE_FRAGMENT);
+    const material = premultiplied(new THREE.SpriteMaterial());
+    expect(material.premultipliedAlpha).toBe(true);
+    const shader = {
+      fragmentShader: `void main() {
+#include <map_fragment>
+${COLORSPACE_FRAGMENT}
+}`,
+    } as THREE.WebGLProgramParametersWithUniforms;
+    material.onBeforeCompile(shader, undefined as unknown as THREE.WebGLRenderer);
+    // Sharpened like every cue...
+    expect(shader.fragmentShader).toContain(`texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`);
+    // ...and its colour scaled by the opacity once encoded, as blending takes it as it is.
+    const encoded = shader.fragmentShader.indexOf(COLORSPACE_FRAGMENT);
+    const scaled = shader.fragmentShader.indexOf("gl_FragColor.rgb *= opacity;");
+    expect(scaled).toBeGreaterThan(encoded);
+    // Its own program, apart from the straight-alpha cues'.
+    expect(material.customProgramCacheKey()).not.toBe(
+      sharpen(new THREE.SpriteMaterial()).customProgramCacheKey(),
+    );
+  });
+
   it("draws a ring clear inside and around, filled clockwise from the top", () => {
     const red = (data: Uint8Array, x: number, y: number) =>
       data[(Math.floor(y * 64) * 64 + Math.floor(x * 64)) * 4];
@@ -417,6 +442,10 @@ describe("cue sprites", () => {
       const [icon] = named(sprites(), "cue:icon");
       expect(icon!.material.map).toBe(bush);
       expect(icon!.material.premultipliedAlpha).toBe(true);
+      // Faded by a shader that scales its colour with its opacity, not by its alpha alone.
+      expect(icon!.material.customProgramCacheKey()).toBe(
+        premultiplied(new THREE.SpriteMaterial()).customProgramCacheKey(),
+      );
       expect(icon!.material.opacity).toBe(bubble!.material.opacity);
       expect(icon!.position.toArray()).toEqual(bubble!.position.toArray());
       expect(icon!.scale.x).toBeLessThan(bubble!.scale.x);

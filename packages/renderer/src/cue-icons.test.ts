@@ -38,11 +38,15 @@ function fakeRenderer() {
 }
 
 describe("prop icons", () => {
-  it("has a picture only once its model is drawn, found by any of its placements", () => {
+  it("draws a model only once asked for, then finds it by any of its placements", () => {
     const icons = new PropIcons();
     icons.add(model().group, ["bush-1", "bush-2"]);
-    expect(icons.icon("bush-1")).toBeUndefined();
+    icons.add(model().group, ["rock-1"]);
     const { renderer, drawn, setClearColor, target } = fakeRenderer();
+    // Nothing asked for, nothing drawn: no tree or rock is drawn just for being loaded.
+    icons.render(renderer);
+    expect(drawn).toHaveLength(0);
+    expect(icons.icon("bush-1")).toBeUndefined();
     icons.render(renderer);
     expect(drawn).toHaveLength(1);
     expect(drawn[0]!.target).not.toBeNull();
@@ -54,15 +58,20 @@ describe("prop icons", () => {
     // The renderer is left drawing to the screen again, with its clear colour back.
     expect(target()).toBeNull();
     expect(setClearColor).toHaveBeenLastCalledWith(new THREE.Color("#123456"), 1);
-    // Each model is drawn once.
+    // Each model is drawn once; the rock only once it is asked for.
+    icons.icon("bush-2");
     icons.render(renderer);
     expect(drawn).toHaveLength(1);
+    expect(icons.icon("rock-1")).toBeUndefined();
+    icons.render(renderer);
+    expect(drawn).toHaveLength(2);
   });
 
   it("frees its pictures on dispose", () => {
     const icons = new PropIcons();
     icons.add(model().group, ["bush-1"]);
     const { renderer, drawn } = fakeRenderer();
+    icons.icon("bush-1");
     icons.render(renderer);
     const disposed = vi.fn();
     // The renderer frees a render target's texture with the target.

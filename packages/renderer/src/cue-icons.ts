@@ -1,8 +1,9 @@
 import * as THREE from "three";
 
 // Pictures of props for cue bubbles (issue #110): a hungry creature's bubble shows the food it
-// heads for, drawn from that prop's own model. Each model is drawn once into a small texture, in
-// a fixed daylight of its own, so the picture reads the same by day and by night.
+// heads for, drawn from that prop's own model. A model is drawn once, when a bubble first asks for
+// it, into a small texture, in a fixed daylight of its own, so the picture reads the same by day
+// and by night.
 
 /** Prop pictures are this many pixels square. */
 export const PROP_ICON_SIZE = 128;
@@ -20,38 +21,40 @@ interface PropIcon {
 }
 
 /**
- * The picture of each prop model, found by the ID of any placement of it. A model is drawn on the
- * first `render` after it is added; until then, and for a placement of no loaded model, `icon` is
- * undefined and the bubble shows its neutral food icon.
+ * The picture of each prop model, found by the ID of any placement of it. Only models a bubble
+ * asks for are drawn, so trees and rocks never are: `icon` asks, and the next `render` draws.
+ * Until then, and for a placement of no loaded model, `icon` is undefined and the bubble shows its
+ * neutral food icon.
  */
 export class PropIcons {
   readonly #byPlacement = new Map<string, PropIcon>();
   readonly #icons: PropIcon[] = [];
-  #pending = false;
+  /** Models asked for and not drawn yet. */
+  readonly #wanted = new Set<PropIcon>();
 
   /** Adds a loaded model with the IDs of its placements. The model's parts are only read. */
   add(model: THREE.Object3D, placementIds: readonly string[]): void {
     const icon: PropIcon = { model, target: undefined };
     this.#icons.push(icon);
     for (const id of placementIds) this.#byPlacement.set(id, icon);
-    this.#pending = true;
   }
 
-  /** The picture of the placement's model, once drawn. */
+  /** The picture of the placement's model once drawn; asking for one not drawn yet queues it. */
   icon(placementId: string | undefined): THREE.Texture | undefined {
     if (placementId === undefined) return undefined;
-    return this.#byPlacement.get(placementId)?.target?.texture;
+    const icon = this.#byPlacement.get(placementId);
+    if (icon?.model) this.#wanted.add(icon);
+    return icon?.target?.texture;
   }
 
-  /** Draws the models added since the last call. Cheap when there are none. */
+  /** Draws the models asked for since the last call. Cheap when there are none. */
   render(renderer: THREE.WebGLRenderer): void {
-    if (!this.#pending) return;
-    this.#pending = false;
+    if (this.#wanted.size === 0) return;
     const previous = renderer.getRenderTarget();
     const clearColor = renderer.getClearColor(new THREE.Color());
     const clearAlpha = renderer.getClearAlpha();
     renderer.setClearColor(0x000000, 0);
-    for (const icon of this.#icons) {
+    for (const icon of this.#wanted) {
       if (!icon.model) continue;
       const target = iconTarget();
       const { scene, camera, dispose } = iconStage(icon.model);
@@ -62,6 +65,7 @@ export class PropIcons {
       icon.target = target;
       icon.model = undefined;
     }
+    this.#wanted.clear();
     renderer.setRenderTarget(previous);
     renderer.setClearColor(clearColor, clearAlpha);
   }
@@ -70,7 +74,7 @@ export class PropIcons {
     for (const icon of this.#icons) icon.target?.dispose();
     this.#icons.length = 0;
     this.#byPlacement.clear();
-    this.#pending = false;
+    this.#wanted.clear();
   }
 }
 

@@ -794,6 +794,8 @@ export class Simulation {
   /**
    * The placement the creature heads for to answer a need whose cue it shows (issue #110): its
    * action's target, if the behavior that chose the action declares that need as a dependency.
+   * It doesn't say which cue it goes with: any shown need cue the behavior depends on will do, and
+   * the renderer reads it only with `hungry`, today the one need cue.
    */
   #cueTarget(creature: CreatureState): string | undefined {
     const action = creature.action;

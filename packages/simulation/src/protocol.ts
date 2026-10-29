@@ -187,7 +187,8 @@ export interface CreatureSnapshot {
   /**
    * The placement ID the creature heads for to answer a need whose cue it shows, e.g. the food it
    * goes to while `hungry` (issue #110): its action's target, when the behavior that chose the
-   * action acts on that need. Absent while it has no such target, e.g. exploring for food.
+   * action acts on that need. Absent while it has no such target, e.g. exploring for food. It
+   * doesn't say which cue it goes with, so the renderer reads it only with `hungry`.
    */
   cueTarget?: string;
   /** Waypoints still to reach, per region, from where the creature stands. Only with debug on. */

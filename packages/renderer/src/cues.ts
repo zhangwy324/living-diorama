@@ -490,6 +490,35 @@ function sampleSharper(shader: THREE.WebGLProgramParametersWithUniforms): void {
 
 const sharpKey = () => "cue-sharp";
 
+/** Where the sprite shader encodes its colour for the screen, after which it is blended. */
+export const COLORSPACE_FRAGMENT = "#include <colorspace_fragment>";
+
+/**
+ * Makes a sharpened cue material (`sharpen`) draw a texture whose colour is premultiplied by its
+ * alpha, such as a prop's picture, and fade it with `opacity`. Blending premultiplied takes the
+ * colour as it is, and three's sprite shader doesn't scale it by `opacity`: a picture fading or
+ * dimmed by `CueVisibility` would only grow see-through, keeping its full colour on top. So this
+ * scales the colour by `opacity` too, after it is encoded for the screen, where blending happens.
+ */
+export function premultiplied(material: THREE.SpriteMaterial): THREE.SpriteMaterial {
+  sharpen(material);
+  material.premultipliedAlpha = true;
+  material.onBeforeCompile = sampleSharperPremultiplied;
+  material.customProgramCacheKey = premultipliedKey;
+  return material;
+}
+
+function sampleSharperPremultiplied(shader: THREE.WebGLProgramParametersWithUniforms): void {
+  sampleSharper(shader);
+  shader.fragmentShader = shader.fragmentShader.replace(
+    COLORSPACE_FRAGMENT,
+    `${COLORSPACE_FRAGMENT}
+	gl_FragColor.rgb *= opacity;`,
+  );
+}
+
+const premultipliedKey = () => "cue-sharp-premultiplied";
+
 /**
  * Cue sprites draw over the scene: a bubble behind a tree would say nothing. A creature hidden by
  * the terrain or a structure fades its cues out instead (`CueVisibility`). Below the debug
@@ -532,15 +561,14 @@ class SpritePool {
       return reused;
     }
     // Unlit, so a cue reads the same at night; its own material for its own opacity.
-    const material = sharpen(
-      new THREE.SpriteMaterial({
-        map: this.#map,
-        transparent: true,
-        depthTest: false,
-        depthWrite: false,
-        premultipliedAlpha: this.#premultipliedAlpha,
-      }),
-    );
+    const material = new THREE.SpriteMaterial({
+      map: this.#map,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    if (this.#premultipliedAlpha) premultiplied(material);
+    else sharpen(material);
     const sprite = new THREE.Sprite(material);
     sprite.name = this.#name;
     sprite.center.copy(this.#center);
@@ -663,7 +691,8 @@ export class CueSprites {
     "cue:bubble",
   );
   readonly #zs = new SpritePool(this.group, this.#zMaps.day, new THREE.Vector2(0.5, 0), "cue:z");
-  // Prop pictures are drawn on a clear background, so their edges are premultiplied.
+  // Prop pictures are drawn on a clear background, so their colour is premultiplied by their
+  // alpha; `premultiplied` fades that colour with the opacity too.
   readonly #icons = new SpritePool(this.group, this.#plainBubbleMap, PROP_ICON_CENTER, "cue:icon", {
     renderOrder: ICON_RENDER_ORDER,
     premultipliedAlpha: true,
