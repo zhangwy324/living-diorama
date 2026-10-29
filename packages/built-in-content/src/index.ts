@@ -11,7 +11,7 @@ import woodlandHollow from "./woodland-hollow/world.json";
 
 export const packageName = "@living-diorama/built-in-content";
 
-/** The built-in pack's namespace. Engine vocabulary (`core:walk`, …) stays under `core`. */
+/** The built-in pack's namespace. Engine vocabulary (`core:land`, …) stays under `core`. */
 export const BUILT_IN_NAMESPACE = "hollow";
 
 /**

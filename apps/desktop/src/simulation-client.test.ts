@@ -64,7 +64,7 @@ const drawn = {
   name: "Puddle",
   appearance: "user:puddle/appearance.png",
   sizeClass: "medium",
-  capabilities: { "core:walk": 1 },
+  capabilities: { "core:land": 1 },
   baseSpeed: 0.5,
   behaviors: ["core:wander"],
 };
@@ -232,7 +232,7 @@ describe("simulation client", () => {
 
   it("checks the limits of a size without registering a species", async () => {
     const { client, callbacks, tick } = start();
-    const checking = client.checkLimits("large", { "core:walk": 1 });
+    const checking = client.checkLimits("large", { "core:land": 1 });
     const unknown = client.checkLimits("large", { "core:fly": 1 });
     tick();
     const checked = await checking;

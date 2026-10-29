@@ -119,6 +119,8 @@ describe("debug overlays", () => {
       position: { regionId: "west", ...world },
       world,
       heading: 0,
+      animation: undefined,
+      submersion: 0,
       cues: [],
       ...(route ? { route } : {}),
     });

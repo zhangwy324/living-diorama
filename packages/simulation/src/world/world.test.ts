@@ -109,7 +109,7 @@ describe("walkability", () => {
       name: "Walker",
       appearance: "test:walker.png",
       sizeClass: "medium",
-      capabilities: { "core:walk": 1 },
+      capabilities: { "core:land": 1 },
       baseSpeed: 1,
       behaviors: ["core:wander"],
     });
@@ -214,7 +214,7 @@ describe("walkability", () => {
     });
     const climber = {
       ...registries.species.get("test:walker")!,
-      capabilities: { "core:walk": 1, "test:climb": 0.5 },
+      capabilities: { "core:land": 1, "test:climb": 0.5 },
     };
     const profile = profileForSpecies(climber, registries);
     expect(profile.maxSlopeByKind.get("land")).toBe(Infinity);

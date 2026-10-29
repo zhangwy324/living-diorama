@@ -27,7 +27,7 @@ function drawnSpecies(name: string, sizeClass: SizeClass = "medium") {
     name,
     appearance: `user:${name}/appearance.png`,
     sizeClass,
-    capabilities: { "core:walk": 1 },
+    capabilities: { "core:land": 1 },
     baseSpeed: 0.5,
     behaviors: ["core:wander"],
   };
@@ -262,11 +262,11 @@ describe("runtime species", () => {
 });
 
 describe("limits query (ADR 0015 §8)", () => {
-  const walk = { "core:walk": 1 };
+  const land = { "core:land": 1 };
 
   it("answers with the limits a species of that size would be registered with", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    const checked = simulation.checkLimits("large", walk);
+    const checked = simulation.checkLimits("large", land);
     if (!checked.ok) throw new Error(checked.diagnostics.map(formatDiagnostic).join("\n"));
     const registered = createSimulation({ ...hollow, seed: 1 }).registerSpecies(
       drawnSpecies("boulder", "large"),
@@ -277,16 +277,16 @@ describe("limits query (ADR 0015 §8)", () => {
       { severity: "warning", structure: { id: "bridge", name: "Wooden bridge" } },
       { severity: "warning", structure: { id: "bridge", name: "Wooden bridge" } },
     ]);
-    expect(simulation.checkLimits("medium", walk)).toEqual({ ok: true, value: [] });
+    expect(simulation.checkLimits("medium", land)).toEqual({ ok: true, value: [] });
   });
 
   it("registers nothing, and keeps a new profile's navigation for later", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
     const species = simulation.state.registries.species.values().length;
     const navigations = simulation.state.navigations.length;
-    const first = simulation.checkLimits("tiny", walk);
+    const first = simulation.checkLimits("tiny", land);
     expect(simulation.state.navigations).toHaveLength(navigations + 1);
-    expect(simulation.checkLimits("tiny", walk)).toEqual(first);
+    expect(simulation.checkLimits("tiny", land)).toEqual(first);
     expect(simulation.state.navigations).toHaveLength(navigations + 1);
     expect(simulation.state.registries.species.values()).toHaveLength(species);
     expectOk(simulation, drawnSpecies("pip", "tiny"));

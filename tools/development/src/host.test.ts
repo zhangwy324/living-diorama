@@ -230,7 +230,7 @@ describe("simulation host", () => {
       appearance: "user:puddle/appearance.png",
       sizeClass: "medium",
       body: { thickness: 0.6 },
-      capabilities: { "core:walk": 1 },
+      capabilities: { "core:land": 1 },
       baseSpeed: 0.5,
       behaviors: ["core:wander"],
     };
@@ -647,8 +647,8 @@ describe("saving and restoring in the host", () => {
     expect(ticks).toEqual([12]);
   });
 
-  it("is protocol version 10, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(10);
+  it("is protocol version 11, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(11);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

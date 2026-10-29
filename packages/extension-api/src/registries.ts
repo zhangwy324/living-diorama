@@ -171,7 +171,17 @@ export function animationProfile(rule: LocomotionRule, body: BodyShape): string 
   }
 }
 
-/** A capability species can have and connections can require, e.g. `core:walk`. */
+/**
+ * How far below the surface a creature sits while it moves by `rule`, as a share of its body's
+ * height (ADR 0020 §9). The one place submersion is read, so that when it can come from the
+ * species' style in a medium (a fish deeper than a floater), as `animation` can, it takes the
+ * species' body here and nothing else changes.
+ */
+export function locomotionSubmersion(rule: LocomotionRule): number {
+  return rule.submersion ?? 0;
+}
+
+/** A capability species can have and connections can require, e.g. `core:land`. */
 export interface CapabilityType extends CodeEntry {
   /** Present when the capability is a way of moving. */
   readonly locomotion?: LocomotionRule;

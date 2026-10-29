@@ -119,7 +119,7 @@ function describe(e: SimulationEvent): string {
     case "creature_despawned":
       return `despawned in ${e.regionId}`;
     case "entered_region":
-      return `${e.fromRegionId} → ${e.toRegionId} via ${e.connectionId}`;
+      return `${e.fromRegionId} → ${e.toRegionId} via ${e.connectionId ?? "the bank"}`;
     case "first_use_of_structure":
       return `first use of ${e.structureId}`;
     case "path_failed":

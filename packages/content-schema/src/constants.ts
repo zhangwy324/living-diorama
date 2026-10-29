@@ -3,6 +3,13 @@
 export const WORLD_TOLERANCES = {
   maxWalkableSlopeDeg: 35,
   maxStepHeight: 0.25,
+  /** Largest height between land and water a creature that swims jumps in or climbs out over. */
+  maxBankJumpHeight: 0.75,
+  /**
+   * Widest horizontal gap between such a creature's body on land and its body in the water, edge
+   * to edge, it jumps across: the steep face of a bank and the cells its radius keeps clear.
+   */
+  maxBankJumpGap: 1.75,
   surfaceEpsilon: 0.001,
   positionEpsilon: 0.01,
 } as const;

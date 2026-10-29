@@ -138,7 +138,7 @@ Tray → Quit asks the page to stop first: the app saves the world, sends `shutd
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 10; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 11; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
 Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8): `save` resolves with the save's JSON text, `restore` with the restore report.
 
@@ -167,6 +167,8 @@ Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`
 Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also carries the resolved world position, so the renderer needs no surface lookups. See [world coordinates](world-coordinates.md).
 
 Each creature's `cues` say what it visibly shows, so the renderer needs no action or need IDs: its action's cue (`eating`, `sleeping`) while that action isn't walking, then each need's cue from the value the need declares (`hungry`) ([ADR 0018](adr/0018-living-behavior.md) §15).
+
+Each creature's `animation` names the animation profile of the capability it moves by where it is (`walk` or `hop` on land, the species' gait; `swim` in water), and `submersion` how far its body sits below the surface (0 on land), so the renderer never reads capability IDs or region kinds ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §8–§9). An `entered_region` after a jump across a bank, between land and water, has no `connectionId`.
 
 Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed`, `creature_stuck`, `ate` (a finished meal, with the placement and the hunger after it), `fell_asleep` (beside a shelter, or where it stood), `woke_up` (`rested` or `interrupted`) and `new_home_selected`; each carries a `creatureId`. Actions emit theirs through `ActionContext.emit`; the engine emits `new_home_selected` when an action calls `ActionContext.setHome`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
 
@@ -207,7 +209,7 @@ The tray and the page's controls both go through the host, so the host's state i
 Content is data registered into typed registries, and the engine refers to it only by ID. The flow is the same for built-in and third-party content:
 
 1. `createRegistries()` makes empty registries: `worlds`, `structures`, `props`, `species`, `surfaces`, `actions`, `behaviors`, `capabilities`, `affordances`, `assets`, `needs`, `senses`, `traits`.
-2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, `core:walk`, the affordances, needs, senses and traits, the actions (`core:idle`, `core:follow_path`, `core:eat`, `core:sleep`) and the behaviors (`core:wander`, `core:feed`, `core:rest`).
+2. `registerCoreEngine()` adds the engine's own entries under the `core` namespace: the surface types, the locomotion capabilities `core:land` and `core:swim`, the affordances, needs, senses and traits, the actions (`core:idle`, `core:follow_path`, `core:eat`, `core:sleep`) and the behaviors (`core:wander`, `core:feed`, `core:rest`).
 3. Each pack registers its entries. Registration validates each entry against its schema and rejects duplicates.
 4. `resolveReferences()` checks every reference between entries: the target exists, its version satisfies the declared range, and target-specific checks pass (surface params against the surface type's schema, a prop's model is a model asset).
 5. `checkWorld()` builds the world model and runs the semantic checks for each navigation profile (size class plus capabilities).
@@ -229,7 +231,7 @@ The `user:` namespace for drawn species is the app's convention (`user-species.t
 
 A creature only goes where it fits ([ADR 0013](adr/0013-size-limits.md)). For each profile, a region's walkable cells split into connected areas, and wander only picks cells reachable from where the creature stands.
 
-- **Limits are warnings**: a region split into areas (`disconnected_region`), a portal with no room (`portal_unusable`, naming the structure), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`). Cut-off slivers up to 1 m² don't count.
+- **Limits are warnings**: a region split into areas (`disconnected_region`), a portal with no room (`portal_unusable`, naming the structure), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`), water an amphibious creature can get into but not climb out of (`no_water_exit`). Cut-off slivers up to 1 m² don't count.
 - **Broken geometry stays an error**: a portal whose surfaces don't meet, two regions walkable at the same place and height (`ambiguous_overlap`), or no usable spawn point at all (`no_spawn_point`).
 
 This holds for pack species at startup too. Each profile's limits come back with `species_registered` and `limits` as `Limit`s, diagnostics that name the structure they are about, and the Studio turns them into the player's words. In the Woodland Hollow, large creatures can't cross the wooden bridge; the other sizes go everywhere.

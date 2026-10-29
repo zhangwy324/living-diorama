@@ -21,7 +21,7 @@ const heights = Array.from({ length: COLUMNS * ROWS }, (_, k) =>
 );
 const materials = heights.map((h) => (h < 0 ? 1 : 0));
 
-const walk = ["core:walk"];
+const land = ["core:land"];
 
 export const riverCrossingWorld = {
   schemaVersion: 2,
@@ -88,14 +88,14 @@ export const riverCrossingWorld = {
           from: "north-bank",
           to: "bridge-deck",
           portal: { a: { x: -0.5, z: -1 }, b: { x: 0.5, z: -1 } },
-          requiredCapabilities: walk,
+          requiredCapabilities: land,
         },
         {
           id: "bridge-south-end",
           from: "bridge-deck",
           to: "south-bank",
           portal: { a: { x: -0.5, z: 1 }, b: { x: 0.5, z: 1 } },
-          requiredCapabilities: walk,
+          requiredCapabilities: land,
         },
       ],
     },
@@ -158,7 +158,7 @@ export const pebble = {
   name: "Pebble",
   appearance: "fixture:sprites/pebble.png",
   sizeClass: "small",
-  capabilities: { "core:walk": 1 },
+  capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander"],
 };

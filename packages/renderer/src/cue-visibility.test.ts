@@ -205,6 +205,8 @@ describe("CueVisibility", () => {
       position: { regionId: "r", x: 0, z },
       world: { x: 0, y: 0, z },
       heading: 0,
+      animation: undefined,
+      submersion: 0,
       cues: ["hungry"],
     });
     const bubble = () => {

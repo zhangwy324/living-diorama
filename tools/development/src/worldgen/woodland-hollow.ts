@@ -77,7 +77,7 @@ const MATERIAL = Object.fromEntries(MATERIALS.map((m, i) => [m.name, i])) as Rec
   number
 >;
 
-const WALK = ["core:walk"];
+const LAND = ["core:land"];
 
 // ---- River centerline ---------------------------------------------------------------------
 
@@ -463,7 +463,7 @@ export function generateWoodlandHollow() {
           a: { x: ramp.portalX, z: ramp.southZ },
           b: { x: ramp.portalX, z: plateau.southZ },
         },
-        requiredCapabilities: WALK,
+        requiredCapabilities: LAND,
       },
     ],
     structures: [
@@ -503,7 +503,7 @@ export function generateWoodlandHollow() {
               a: point({ x: bridgeEnds[0].x, z: bridge.z - halfWidth }),
               b: point({ x: bridgeEnds[0].x, z: bridge.z + halfWidth }),
             },
-            requiredCapabilities: WALK,
+            requiredCapabilities: LAND,
           },
           {
             id: "bridge-east-end",
@@ -513,7 +513,7 @@ export function generateWoodlandHollow() {
               a: point({ x: bridgeEnds[1].x, z: bridge.z - halfWidth }),
               b: point({ x: bridgeEnds[1].x, z: bridge.z + halfWidth }),
             },
-            requiredCapabilities: WALK,
+            requiredCapabilities: LAND,
           },
         ],
       },

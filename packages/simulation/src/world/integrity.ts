@@ -8,7 +8,12 @@ import {
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import { profileForSpecies, type NavProfile } from "../navigation/profile";
-import { buildNavigation, distanceToPortal, type Navigation } from "../navigation/region-graph";
+import {
+  buildNavigation,
+  distanceToPortal,
+  isBankPair,
+  type Navigation,
+} from "../navigation/region-graph";
 import { CellState } from "../navigation/walkability";
 import { buildWorldModel, type WorldModel } from "./world-model";
 
@@ -80,23 +85,13 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
   if (!built.ok) return { diagnostics: built.diagnostics, navigations: [], limits: new Map() };
   const model = built.value;
   const report = reporter(world);
-  const { warn, connectionPath } = report;
+  const { warn } = report;
 
+  // No check here assumes the species registered now: a species that uses a connection or spawn
+  // point, a swimmer say, may be registered from the library later (ADR 0020 §5).
   const profiles = speciesProfiles(registries);
   if (profiles.length === 0) {
     warn("no_species", "No species are registered, so walkability was not checked", []);
-  }
-
-  for (const connection of model.connections) {
-    if (
-      !profiles.some((p) => connection.requiredCapabilities.every((c) => p.capabilities.has(c)))
-    ) {
-      warn(
-        "unsatisfiable_connection",
-        `No registered species has all of ${connection.requiredCapabilities.join(", ")}`,
-        [...connectionPath(connection.id), "requiredCapabilities"],
-      );
-    }
   }
 
   const limits = new Map<string, Diagnostic[]>();
@@ -106,16 +101,17 @@ export function checkWorld(world: WorldDefinition, registries: Registries): Worl
     return navigation;
   });
 
+  const movable = new Set(
+    registries.capabilities.values().flatMap((c) => c.locomotion?.regionKinds ?? []),
+  );
   world.spawnPoints.forEach((spawn, i) => {
     const region = model.regions.get(spawn.position.regionId);
-    if (!region) return;
-    if (profiles.length > 0 && !profiles.some((p) => p.maxSlopeByKind.has(region.kind))) {
-      warn(
-        "spawn_unusable",
-        `No registered species can move in the ${region.kind} region of spawn point "${spawn.id}"`,
-        ["spawnPoints", i, "position", "regionId"],
-      );
-    }
+    if (!region || movable.has(region.kind)) return;
+    warn(
+      "spawn_unusable",
+      `No registered capability moves in the ${region.kind} region of spawn point "${spawn.id}"`,
+      ["spawnPoints", i, "position", "regionId"],
+    );
   });
 
   return { diagnostics: report.diagnostics, model, navigations, limits };
@@ -144,9 +140,11 @@ export function checkNavigation(
 
 /**
  * Builds one profile's navigation and checks that the world works for it. Where its creatures
- * don't fit (a region that splits, a portal or spawn point without room) is a warning and a limit,
- * not an error: they only go where they fit (ADR 0013). A profile that fits no spawn point at all
- * can't appear, which is an error.
+ * don't fit (a region that splits, a portal or spawn point without room, water it can get into
+ * but not out of) is a warning and a limit, not an error: they only go where they fit (ADR 0013).
+ * A profile that fits no spawn point at all can't appear, which is an error. A connection that
+ * isn't for the profile (it lacks a capability, or a side is in a region kind it can't move in)
+ * is skipped (ADR 0020 §5).
  */
 function navigate(
   world: WorldDefinition,
@@ -188,7 +186,14 @@ function navigate(
 
   for (const connection of model.connections) {
     const check = nav.portals.get(connection.id);
-    if (!check || check.usable || check.reason === "missing_capability") continue;
+    if (
+      !check ||
+      check.usable ||
+      check.reason === "missing_capability" ||
+      check.reason === "not_applicable"
+    ) {
+      continue;
+    }
     const where = connection.structureId === undefined ? "" : ` of "${connection.structureId}"`;
     // Too little room is a fit limit; surfaces that don't meet are a geometry error for anyone.
     (check.reason === "no_walkable_side" ? limit : err)(
@@ -199,6 +204,7 @@ function navigate(
   }
 
   checkSeams(model, nav, label, err, warn, regionPath);
+  checkWaterExits(world, nav, label, limit, regionPath);
 
   let standable = 0;
   world.spawnPoints.forEach((spawn, i) => {
@@ -224,6 +230,45 @@ function navigate(
     ]);
   }
   return { navigation: nav, limits };
+}
+
+/**
+ * For a profile that moves on land and in water: a water region it can get into (from land, by a
+ * connection, or by appearing at a spawn point there) but not out of to land, because every bank
+ * is too high or too far and no connection leads out (ADR 0020 §4). A limit, not an error, since
+ * the species can still be released. Region-level, like `reachableRegions`.
+ */
+function checkWaterExits(
+  world: WorldDefinition,
+  nav: Navigation,
+  label: string,
+  limit: (code: string, message: string, path: DiagnosticPath) => void,
+  regionPath: (id: string) => DiagnosticPath,
+) {
+  const kinds = nav.profile.maxSlopeByKind;
+  if (!kinds.has("water") || ![...kinds.keys()].some((k) => k !== "water")) return;
+  const isLand = (id: string) => {
+    const kind = nav.masks.get(id)?.region.kind;
+    return kind !== undefined && kind !== "water" && kinds.has(kind);
+  };
+  const entered = new Set<string>();
+  for (const [id, mask] of nav.masks) {
+    if (!isLand(id) || mask.walkableCount === 0) continue;
+    for (const reached of nav.reachableRegions(id)) entered.add(reached);
+  }
+  for (const spawn of world.spawnPoints) {
+    const { regionId, x, z } = spawn.position;
+    if (nav.masks.get(regionId)?.isWalkableAt(x, z)) entered.add(regionId);
+  }
+  for (const [regionId, mask] of [...nav.masks].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (mask.region.kind !== "water" || !entered.has(regionId)) continue;
+    if ([...nav.reachableRegions(regionId)].some(isLand)) continue;
+    limit(
+      "no_water_exit",
+      `Creatures of ${label} can get into water region "${regionId}" but no bank is low and near enough to climb out and no connection leads out`,
+      regionPath(regionId),
+    );
+  }
 }
 
 /**
@@ -276,6 +321,8 @@ function checkSeams(
           const n = b.cellAt(nx, nz);
           if (n === -1 || b.states[n] !== CellState.walkable || a.isWalkableAt(nx, nz)) continue;
           if (Math.abs(b.height(n) - hA) > step) continue;
+          // A creature that swims jumps across a bank, both ways (ADR 0020 §4).
+          if (isBankPair(a, cell, b, n)) continue;
           const mx = c.x + dx / 2;
           const mz = c.z + dz / 2;
           if (joining.some((j) => distanceToPortal(j, mx, mz) <= cs)) continue;

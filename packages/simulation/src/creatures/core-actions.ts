@@ -24,10 +24,12 @@ export function pathFromRoute({ legs }: Route): PathState {
     leg.points.forEach((p, n) => {
       // The first leg starts where the creature stands; later legs start at the crossing.
       if (n === 0 && !entry) return;
+      // A bank jump has no connection (ADR 0020 §4).
+      const via = n === 0 ? entry?.connectionId : undefined;
       points.push(
-        n === 0 && entry
-          ? { regionId: leg.regionId, x: p.x, z: p.z, connectionId: entry.connectionId }
-          : { regionId: leg.regionId, x: p.x, z: p.z },
+        via === undefined
+          ? { regionId: leg.regionId, x: p.x, z: p.z }
+          : { regionId: leg.regionId, x: p.x, z: p.z, connectionId: via },
       );
     });
   });

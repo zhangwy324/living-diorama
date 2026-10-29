@@ -49,7 +49,7 @@
 
    **Locomotion** is kinematic. A creature walks its path at `baseSpeed` times the largest factor among its capabilities whose locomotion rule covers the current region's kind. Its heading follows the direction of travel (`0` faces +Z, world-coordinates.md). Height is never stored; it always comes from the current region's surface. On a crossing the region changes past the shared cell edge.
 
-   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §7 (planned, M16 PR 2, issue #121):_ setting off no longer snaps the heading to the direction of travel; the creature turns at ADR 0018's turn rate.
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §7 (M16 PR 2, issue #121):_ setting off no longer snaps the heading to the direction of travel; the creature turns at ADR 0018's turn rate.
 
 10. **`first_use_of_structure`** fires once per creature and structure placement, found through the crossed connection's or entered region's `structureId` (ADR 0004 §4).
 
@@ -65,7 +65,7 @@
     - `pnpm check` runs randomized invariant runs (4 seeds × 100k ticks × 3 creatures on Woodland Hollow, plus the river-crossing fixture); `pnpm soak` runs 32 seeds outside CI. Every tick checks that each creature is on a walkable cell of a non-water region, inside the world bounds, on its region's surface and never under a water surface, and that it changes region only through a connection joining the two.
     - Decision traces are NDJSON. The headless runner prints a summary and can draw trajectories over the worldgen debug map.
 
-    _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md), "Contradictions resolved" (planned, M16 PR 2):_ the water invariants hold per capability. Each creature is on a walkable cell of a region its locomotion covers, on that region's surface, and changes region only through a connection joining the two or a derived water entry. A walker still never enters water.
+    _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md), "Contradictions resolved" (M16 PR 2):_ the water invariants hold per capability. Each creature is on a walkable cell of a region its locomotion covers, on that region's surface, and changes region only through a connection joining the two or by a jump across a bank, either way between land and water. A walker still never enters water.
 
 ## Consequences
 

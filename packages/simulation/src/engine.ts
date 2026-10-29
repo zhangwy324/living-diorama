@@ -12,20 +12,32 @@ import { restBehavior, sleepAction } from "./creatures/rest";
 import { coreBehaviors } from "./creatures/wander";
 import { coreSurfaces } from "./world/surfaces";
 
+/** How far a swimmer sits below the water's surface, as a share of its body's height (ADR 0020 §9). */
+export const SWIM_SUBMERSION = 0.5;
+
 /**
  * Registers the engine's own entries: surface types, actions, behaviors and the core
- * capability, affordance, need, sense and trait vocabulary. Content packs register after this.
+ * capability (`core:land`, `core:swim`), affordance, need, sense and trait vocabulary. Content
+ * packs register after this.
  */
 export function registerCoreEngine(registries: Registries): Result<unknown>[] {
   return [
     ...coreSurfaces.map((surface) => registries.surfaces.register(surface)),
     registries.capabilities.register({
-      id: "core:walk",
+      id: "core:land",
       version: "1.0.0",
       locomotion: {
         regionKinds: ["land", "cave"],
         maxSlopeDeg: WORLD_TOLERANCES.maxWalkableSlopeDeg,
+        // The species' land gait, `walk` or `hop`, names the profile (ADR 0020 §1, §8).
+        animation: { fromStyle: "land" },
       },
+    }),
+    registries.capabilities.register({
+      id: "core:swim",
+      version: "1.0.0",
+      // On the water's flat surface, so no slope limit (ADR 0020 §2).
+      locomotion: { regionKinds: ["water"], animation: "swim", submersion: SWIM_SUBMERSION },
     }),
     registries.affordances.register({
       id: "core:crossable",
