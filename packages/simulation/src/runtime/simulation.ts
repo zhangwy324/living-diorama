@@ -514,13 +514,14 @@ export class Simulation {
     // included, uses the tick after the jump.
     this.state.tick += Math.round((gapMs / 1000) * this.tickRateHz);
     const failures: CatchUpFailure[] = [];
+    // All awake first, so a creature put to bed sees asleep only those put to bed before it.
+    for (const creature of this.state.creatures.values()) creature.asleep = false;
     for (const creature of this.state.creatures.values()) {
       const profile = this.#profile(creature.speciesId);
       // Everything about the moment of the save goes with the action.
       delete creature.action;
       delete creature.lastResult;
       delete creature.phaseReactionTick;
-      creature.asleep = false;
       // The engine's own draws for this creature: a stream forked off its own, salted with the tick
       // so another restore draws afresh, and leaving its behaviors' draws unchanged.
       const rng = new Rng(creature.rng).fork(`catch-up@${this.tick}`);
@@ -605,10 +606,18 @@ export class Simulation {
       return false;
     };
     const saved = creature.position;
-    if (at !== undefined) {
-      const spot = typeof at === "string" ? this.#placeQueries(creature).spotAt(at) : undefined;
+    if (typeof at === "string") {
+      const spot = this.#placeQueries(creature).spotAt(at);
       if (!spot) return fail("no_spot");
       creature.position = { ...spot };
+    } else if (at !== undefined) {
+      // A position: only one the creature could walk to (issue #122).
+      const { regionId, x, z } = at;
+      const sound = typeof regionId === "string" && Number.isFinite(x) && Number.isFinite(z);
+      if (!sound || !this.#pathfinder(creature).findRoute(creature.position, at).ok) {
+        return fail("no_route");
+      }
+      creature.position = { regionId, x, z };
     }
     let started: ActionStart;
     try {
@@ -1046,6 +1055,7 @@ export class Simulation {
         state: start.state,
         startTick: this.tick,
       };
+      if (start.asleep === true) creature.asleep = true;
       creature.progress = { x: creature.position.x, z: creature.position.z, stalledTicks: 0 };
     }
     return start;
@@ -1163,6 +1173,10 @@ export class Simulation {
     let rng: Rng | undefined;
     return {
       ...this.#placeQueries(creature),
+      // From where the creature stands when asked.
+      randomWalkablePointWithin: (maxDistance, rng) =>
+        this.#queries(creature).randomWalkablePointWithin(maxDistance, rng),
+      sleeperNear: (position, gap) => this.#sleeperNear(creature, position, gap),
       catchingUp,
       tick: this.tick,
       tickSeconds: this.tickSeconds,
@@ -1231,6 +1245,21 @@ export class Simulation {
     };
   }
 
+  /**
+   * Whether a creature other than `creature` is asleep closer to `position` (x and z only) than
+   * the two body radii plus `gap` (issue #122). A linear scan, cheap at 20 creatures.
+   */
+  #sleeperNear(creature: CreatureState, position: RegionPosition, gap: number): boolean {
+    const radius = this.#pathfinder(creature).navigation.profile.radius;
+    for (const other of this.state.creatures.values()) {
+      if (other === creature || !other.asleep) continue;
+      const reach = radius + this.#pathfinder(other).navigation.profile.radius + gap;
+      const { x, z } = other.position;
+      if (Math.hypot(x - position.x, z - position.z) < reach) return true;
+    }
+    return false;
+  }
+
   /** A prop placement as behaviors and actions see it. Its affordances are frozen. */
   #placeView(placementId: string): PlaceView | undefined {
     const prop = this.state.model.propsById.get(placementId);
@@ -1283,6 +1312,7 @@ export class Simulation {
     };
     return {
       ...this.#placeQueries(creature),
+      sleeperNear: (position, gap) => this.#sleeperNear(creature, position, gap),
       routeLength: (destination) => {
         const result = pathfinder.findRoute(creature.position, destination);
         return result.ok ? result.route.length : undefined;

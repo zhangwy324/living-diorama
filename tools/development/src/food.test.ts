@@ -199,6 +199,7 @@ function observe(
       const p = stub.points?.[point++];
       return p && { regionId: "r", ...p };
     },
+    sleeperNear: () => false,
   };
   const observation: CreatureObservation = {
     tick: 1000,
@@ -341,6 +342,8 @@ function eatContext(
     dayPhase: "day",
     needs,
     traits: {},
+    randomWalkablePointWithin: () => undefined,
+    sleeperNear: () => false,
     place: (id) =>
       id === "m"
         ? { id, x: 2, y: 0, z: 0, blockRadius: 0, affordances: { [FOOD]: { eatSeconds: 5 } } }
