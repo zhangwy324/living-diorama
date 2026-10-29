@@ -2,6 +2,7 @@ import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import {
   chooseShelter,
   emptyKnowledge,
+  isFailingShelter,
   minutesAfter,
   OPEN_SPOT_MOVES,
   recordReach,
@@ -568,6 +569,53 @@ describe("core:rest", () => {
       expect(evaluate(observe(stub(), { ...options, knowledge: once }))?.params).toEqual({
         placementId: "home",
       });
+    });
+
+    it("catching up, puts it to bed at a shelter that isn't failing, or in the open (issue #175)", () => {
+      const gap = {
+        ms: 3_600_000,
+        phases: [{ phase: "night" as const, hours: 1 }],
+        needRate: () => 0,
+      };
+      const start = (knowledge: ReturnType<typeof emptyKnowledge>, full: string[] = []) =>
+        restBehavior.catchUp!(
+          observe({ ...stub(), full }, { dayPhase: "night", knowledge, home: "home" }),
+          gap,
+          Rng.fromSeed(1),
+        )?.start;
+      const atHome = {
+        action: "core:sleep",
+        params: { placementId: "home", asleep: true },
+        at: { regionId: "home", x: 0, z: 4 },
+      };
+      const atFar = {
+        action: "core:sleep",
+        params: { placementId: "far", asleep: true },
+        at: { regionId: "far", x: 6, z: 0 },
+      };
+      const inTheOpen = { action: "core:sleep", params: { asleep: true } };
+      // Home not failing: home, as before, even with a failing shelter nearer.
+      const fine = knowing("near", "far", "home");
+      failOften(fine, "near");
+      failOften(fine, "home", 1);
+      expect(start(fine)).toEqual(atHome);
+      // Home failing: the nearest shelter that isn't, recording nothing and keeping home.
+      const knowledge = knowing("near", "far", "home");
+      failOften(knowledge, "near");
+      failOften(knowledge, "home");
+      const before = structuredClone(knowledge);
+      expect(start(knowledge)).toEqual(atFar);
+      expect(knowledge).toEqual(before);
+      // The same for the same knowledge.
+      expect(start(knowledge)).toEqual(start(structuredClone(before)));
+      // Every other shelter failing or full: in the open, not at a failing one.
+      expect(start(knowledge, ["far"])).toEqual(inTheOpen);
+      const allFailing = knowing("near", "home");
+      failOften(allFailing, "near");
+      failOften(allFailing, "home");
+      expect(start(allFailing)).toEqual(inTheOpen);
+      expect(isFailingShelter(allFailing, "home")).toBe(true);
+      expect(isFailingShelter(fine, "home")).toBe(false);
     });
 
     it("trying a failing shelter again doesn't end the search", () => {
@@ -1868,7 +1916,11 @@ describe("a home it can't get to (issue #171)", () => {
     expect(outcome(6).events).not.toEqual(first.events);
   });
 
-  it("catch-up records no failure and doesn't search", () => {
+  /** Where the creature sleeps: the shelter, or null in the open. */
+  const bed = (creature: CreatureState) =>
+    (creature.action?.state as { placementId: string | null }).placementId;
+
+  it("catch-up records no failure, doesn't search, and puts it to bed in the open", () => {
     const { simulation, creature, run, started } = wading(1, SEARCH_AFTER_SHELTER_FAILURES);
     // On its way home, before it reaches the pond.
     run(20);
@@ -1879,6 +1931,27 @@ describe("a home it can't get to (issue #171)", () => {
     expect(failuresOf(creature)).toEqual(before);
     expect(started()).toEqual(["pond-tree"]);
     expect(creature.asleep).toBe(true);
+    // Not at home in the pond, which it keeps failing to reach (issue #175).
+    expect(bed(creature)).toBeNull();
     expect(creature.home).toBe("pond-tree");
+  });
+
+  it("catch-up puts it to bed at a tree it knows that isn't failing, keeping home (issue #175)", () => {
+    const outcome = (seed: number, failures: number) => {
+      const { simulation, creature, run } = wading(seed, failures);
+      rememberPlace(creature.knowledge, SHELTER, "meadow-tree", 0, 4);
+      run(20);
+      const knowledge = structuredClone(creature.knowledge);
+      simulation.catchUp({ gapMs: 3 * 3_600_000, minutes: 0 });
+      expect(creature.knowledge).toEqual(knowledge);
+      return { bed: bed(creature), creature: JSON.stringify(creature) };
+    };
+    const failing = outcome(1, SEARCH_AFTER_SHELTER_FAILURES);
+    expect(failing.bed).toBe("meadow-tree");
+    expect(JSON.parse(failing.creature)).toMatchObject({ asleep: true, home: "pond-tree" });
+    // The same for the same seed.
+    expect(outcome(1, SEARCH_AFTER_SHELTER_FAILURES)).toEqual(failing);
+    // Failing once only, home is not failing: home, as before.
+    expect(outcome(1, SEARCH_AFTER_SHELTER_FAILURES - 1).bed).toBe("pond-tree");
   });
 });

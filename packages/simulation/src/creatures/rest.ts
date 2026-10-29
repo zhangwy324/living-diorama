@@ -15,7 +15,7 @@ import type {
   PathState,
   SpotOptions,
 } from "./contracts";
-import { isBackedOff, type KnownPlace } from "./knowledge";
+import { isBackedOff, type CreatureKnowledge, type KnownPlace } from "./knowledge";
 import { tirednessNeed } from "./needs";
 import {
   chooseNearestByRoute,
@@ -163,17 +163,24 @@ function backedOffShelters(observation: CreatureObservation): Set<string> {
 }
 
 /**
- * The known shelters it failed to reach at least `SEARCH_AFTER_SHELTER_FAILURES` times since it
- * last did, backed off or not (issue #171).
+ * Whether the creature failed to reach the known place at least `SEARCH_AFTER_SHELTER_FAILURES`
+ * times since it last did, backed off or not (issue #171).
  */
+const isFailing = ({ failures }: Readonly<KnownPlace>): boolean =>
+  failures !== undefined && failures.noRoute + failures.stuck >= SEARCH_AFTER_SHELTER_FAILURES;
+
+/**
+ * Whether `knowledge` holds the shelter `placementId` as failing (issue #171), as `core:rest` and
+ * its catch-up see it: e.g. for checking where catch-up put a creature to bed (issue #175).
+ */
+export function isFailingShelter(knowledge: CreatureKnowledge, placementId: string): boolean {
+  const known = knowledge.places[SHELTER]?.find((p) => p.placementId === placementId);
+  return known !== undefined && isFailing(known);
+}
+
+/** The known shelters that are failing (issue #171). */
 function failingShelters(observation: CreatureObservation): Set<string> {
-  return new Set(
-    knownShelters(observation).flatMap(({ placementId, failures }) =>
-      failures && failures.noRoute + failures.stuck >= SEARCH_AFTER_SHELTER_FAILURES
-        ? [placementId]
-        : [],
-    ),
-  );
+  return new Set(knownShelters(observation).flatMap((p) => (isFailing(p) ? [p.placementId] : [])));
 }
 
 /**
@@ -371,7 +378,9 @@ export const restBehavior: BehaviorProvider = {
    * placed before it sleeps too close (issue #122). Not within the release grace. Back-off after
    * failed shelter trips doesn't count here (issue #161): catch-up places the creature, it doesn't
    * walk. At a shelter it lies at a spot clear of the creatures placed before it, and a full
-   * shelter counts as none, home too (issue #158).
+   * shelter counts as none, home too (issue #158). So does a failing shelter, home too (issue
+   * #175): it isn't put to bed where it keeps failing to get to, and with every shelter it knows
+   * failing or full it sleeps in the open. Catch-up records nothing about it either way.
    */
   catchUp(observation, gap, rng) {
     const { creature, dayPhase, home, needs, traits, world } = observation;
@@ -380,14 +389,15 @@ export const restBehavior: BehaviorProvider = {
     if (tiredness === undefined) return null;
     const result: CatchUpResult = { needs: { [TIREDNESS]: tiredness } };
     if (!sleepCycle(dayPhase, nocturnal).sleeping || inReleaseGrace(observation)) return result;
-    const homePlace = home === null ? undefined : world.place(home);
+    const failing = failingShelters(observation);
+    const homePlace = home === null || failing.has(home) ? undefined : world.place(home);
     const homeSpot =
       homePlace && Object.hasOwn(homePlace.affordances, SHELTER)
         ? world.spotAt(homePlace.id, CLEAR)
         : undefined;
     const shelter = homeSpot
       ? home
-      : chooseNearestByRoute(observation, SHELTER, undefined, CLEAR)?.placementId;
+      : chooseNearestByRoute(observation, SHELTER, (id) => failing.has(id), CLEAR)?.placementId;
     const shelterSpot = homeSpot ?? (shelter ? world.spotAt(shelter, CLEAR) : undefined);
     if (shelter && shelterSpot) {
       result.start = {
@@ -397,7 +407,7 @@ export const restBehavior: BehaviorProvider = {
       };
       return result;
     }
-    // Crowded everywhere it looked, it lies down where it stands after all.
+    // Crowded or failing everywhere it looked, it lies down where it stands after all.
     const spot = clearSpot(world, creature.position, rng);
     const moved = spot && spot !== creature.position ? { at: { ...spot } } : {};
     result.start = { action: SLEEP, params: { asleep: true }, ...moved };

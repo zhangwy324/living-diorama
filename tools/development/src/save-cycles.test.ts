@@ -1,5 +1,11 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { minutesAfter, SLEEPER_GAP, type Simulation } from "@living-diorama/simulation";
+import {
+  minutesAfter,
+  recordReach,
+  SEARCH_AFTER_SHELTER_FAILURES,
+  SLEEPER_GAP,
+  type Simulation,
+} from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import {
   catchUpProblems,
@@ -20,6 +26,7 @@ const hollow = {
   speciesId: "hollow:mossling",
 };
 const HOURS = 3600 * HZ;
+const SHELTER = "core:shelter";
 
 describe("planRestores", () => {
   const options = { cycles: 4, compareTicks: 600, longGap: true };
@@ -184,6 +191,30 @@ describe("catchUpProblems", () => {
     (creature!.action!.state as { placementId: string | null }).placementId = null;
     expect(problems()).toEqual([]);
     expect(full).toEqual([creature!.id, creature!.id]);
+  });
+
+  it("finds a sleeper at a shelter it keeps failing to reach, and lets a failing home go (issue #175)", () => {
+    const { simulation, save, report, events } = caughtUp();
+    const [creature] = simulation.state.creatures.values();
+    const home = creature!.home!;
+    expect(sleepsAt(creature!)).toBe(home);
+    const problems = () =>
+      catchUpProblems(simulation, save, report, events, (c) => c.id === creature!.id);
+    expect(problems()).toEqual([]);
+    for (let k = 0; k < SEARCH_AFTER_SHELTER_FAILURES; k++) {
+      recordReach(creature!.knowledge, SHELTER, home, "stuck", {
+        tick: 0,
+        tickSeconds: 1 / HZ,
+        cell: { x: 0, z: 0 },
+      });
+    }
+    expect(problems()).toEqual([
+      `${creature!.id}: asleep at ${home}, a shelter it keeps failing to reach`,
+    ]);
+    // Asleep in the open, away from its failing home: fine.
+    (creature!.action!.state as { placementId: string | null }).placementId = null;
+    creature!.position = { ...creature!.position, x: creature!.position.x + 1 };
+    expect(problems()).toEqual([]);
   });
 
   it("finds sleepers at one shelter too close together (issue #158)", () => {
