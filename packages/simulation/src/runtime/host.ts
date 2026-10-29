@@ -1,5 +1,6 @@
 import {
   error,
+  parseWorldSave,
   type Diagnostic,
   type Result,
   type SpeciesDefinition,
@@ -18,6 +19,7 @@ import {
 } from "../protocol";
 import { describeScene } from "../world/scene";
 import { FixedClock, isValidSpeed, MAX_SPEED } from "./clock";
+import type { RestoreReport } from "./save";
 import { Simulation } from "./simulation";
 
 // Runs a simulation behind the worker protocol (ADR 0006 §11). Everything host-specific is
@@ -71,6 +73,28 @@ export function describeContent({ state }: Simulation): WorldContent {
       registries.species.values().map((s) => [s.id, summarizeSpecies(s)]),
     ),
   };
+}
+
+/** Checks the options and the untrusted save text, then restores; never throws on either. */
+function restoreSave(
+  sim: Simulation,
+  { json, nowMs, minutes }: Extract<RequestCommand, { type: "restore" }>,
+): Result<RestoreReport> {
+  if (!Number.isFinite(nowMs)) {
+    const message = `The wall-clock time must be a number of milliseconds, got ${String(nowMs)}`;
+    return { ok: false, diagnostics: [error("invalid_wall_clock", message)] };
+  }
+  if (!Number.isFinite(minutes)) return { ok: false, diagnostics: [invalidTimeOfDay(minutes)] };
+  let save: unknown;
+  try {
+    if (typeof json !== "string") throw new TypeError(`Expected text, got ${typeof json}`);
+    save = JSON.parse(json);
+  } catch (cause) {
+    const message = `The save is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return { ok: false, diagnostics: [error("invalid_save_json", message)] };
+  }
+  const parsed = parseWorldSave(save);
+  return parsed.ok ? sim.restore(parsed.value, { nowMs, minutes }) : parsed;
 }
 
 /**
@@ -175,7 +199,9 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "spawn":
       case "despawn":
       case "check_limits":
-        request(sim, command);
+      case "save":
+      case "restore":
+        request(sim, ticks, command);
         break;
       case "shutdown":
         stopped = true;
@@ -188,7 +214,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
     }
   };
 
-  const request = (sim: Simulation, command: RequestCommand) => {
+  const request = (sim: Simulation, ticks: FixedClock, command: RequestCommand) => {
     const requestId = command.requestId === undefined ? {} : { requestId: command.requestId };
     let diagnostics: Diagnostic[];
     switch (command.type) {
@@ -238,6 +264,34 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           break;
         }
         send({ type: "despawned", ...requestId, creatureId: command.creatureId });
+        return;
+      }
+      case "save": {
+        const { savedAt } = command;
+        // What the save schema accepts, so every save can be restored.
+        if (!(Number.isInteger(savedAt) && savedAt >= 0)) {
+          diagnostics = [
+            error(
+              "invalid_saved_at",
+              `The save time must be a whole number of milliseconds since the epoch, got ${String(savedAt)}`,
+            ),
+          ];
+          break;
+        }
+        send({ type: "saved", ...requestId, json: JSON.stringify(sim.save(savedAt)) });
+        return;
+      }
+      case "restore": {
+        const restored = restoreSave(sim, command);
+        if (!restored.ok) {
+          diagnostics = restored.diagnostics;
+          break;
+        }
+        // Time owed to the replaced world must not tick the restored one in a burst.
+        ticks.restart();
+        send({ type: "restored", ...requestId, report: restored.value });
+        // No tick runs while paused, so the paused world shows the restored one this way.
+        if (ticks.paused) sendSnapshot(sim, true);
         return;
       }
     }

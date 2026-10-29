@@ -1,7 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
-import type { ActionEvent } from "../protocol";
+import type { ActionEvent } from "./action-event";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
 import type { CreatureKnowledge } from "./knowledge";
