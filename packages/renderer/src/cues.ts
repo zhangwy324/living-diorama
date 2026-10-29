@@ -157,14 +157,15 @@ export interface CueView {
 export class ScreenScale {
   /** Pointing right on screen, in world space. */
   readonly right = new THREE.Vector3(1, 0, 0);
-  readonly #position = new THREE.Vector3();
+  /** The camera's position, in world space. */
+  readonly position = new THREE.Vector3();
   readonly #forward = new THREE.Vector3(0, 0, -1);
   #perPixelPerMetre = 0.002;
 
   /** Takes the camera's current state; call once a frame before `unitsPerPixel`. */
   set({ camera, heightPx }: CueView): void {
     camera.updateMatrixWorld();
-    this.#position.setFromMatrixPosition(camera.matrixWorld);
+    this.position.setFromMatrixPosition(camera.matrixWorld);
     camera.getWorldDirection(this.#forward);
     this.right.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
     const fov = THREE.MathUtils.degToRad(camera.getEffectiveFOV());
@@ -172,7 +173,7 @@ export class ScreenScale {
   }
 
   unitsPerPixel(x: number, y: number, z: number): number {
-    const p = this.#position;
+    const p = this.position;
     const depth =
       (x - p.x) * this.#forward.x + (y - p.y) * this.#forward.y + (z - p.z) * this.#forward.z;
     return Math.max(0.01, depth) * this.#perPixelPerMetre;
@@ -342,7 +343,8 @@ const texture = (data: Uint8Array, size: number) => {
 };
 
 /**
- * Cue sprites draw over the scene: a bubble behind a tree would say nothing. Below the debug
+ * Cue sprites draw over the scene: a bubble behind a tree would say nothing. A creature hidden by
+ * the terrain or a structure fades its cues out instead (`CueVisibility`). Below the debug
  * overlays (10–11) and creature labels (12), so with debug on its readouts stay on top.
  */
 const CUE_RENDER_ORDER = 9;
@@ -428,6 +430,11 @@ export interface CueAnchor {
   unitsPerPixel: number;
   /** Pointing right on screen. */
   right: THREE.Vector3;
+  /**
+   * How far the creature is in view for its cues, 0–1 (`CueVisibility`): multiplies every cue's
+   * opacity, and the sprites go back to the pool when it is 0.
+   */
+  visible: number;
 }
 
 /** Ring textures are this many pixels square. */
@@ -475,11 +482,11 @@ export class CueSprites {
     phase: number,
     progress?: number,
   ): void {
-    const { top, right, unitsPerPixel } = anchor;
+    const { top, right, unitsPerPixel, visible } = anchor;
     const gap = GAP_PX * unitsPerPixel;
 
     const sleeping = ease(weights.sleeping);
-    if (sleeping > HIDDEN) {
+    if (sleeping * visible > HIDDEN) {
       while (sprites.zs.length < Z_COUNT) sprites.zs.push(this.#zs.acquire());
       const size = cuePixels(Z_PX, anchor.creaturePx) * unitsPerPixel;
       let index = 0;
@@ -490,7 +497,7 @@ export class CueSprites {
           .addScaledVector(right, z.drift * size)
           .setY(top.y + gap + z.rise * size);
         sprite.scale.set(size * z.scale, size * z.scale, 1);
-        sprite.material.opacity = sleeping * z.opacity;
+        sprite.material.opacity = sleeping * z.opacity * visible;
       }
     } else {
       this.#releaseZs(sprites);
@@ -498,7 +505,7 @@ export class CueSprites {
 
     // A meal answers the hunger: the bubble fades out as eating fades in, and back after it.
     const hungry = ease(weights.hungry) * (1 - ease(weights.eating));
-    if (hungry > HIDDEN) {
+    if (hungry * visible > HIDDEN) {
       sprites.bubble ??= this.#bubbles.acquire();
       const size = cuePixels(BUBBLE_PX, anchor.creaturePx) * unitsPerPixel;
       // Grows in as it fades in; steps left while z's rise to the right.
@@ -508,7 +515,7 @@ export class CueSprites {
         .addScaledVector(right, -0.45 * size * sleeping)
         .setY(top.y + gap + bubbleBob(time, phase) * size);
       sprites.bubble.scale.set(scale, scale, 1);
-      sprites.bubble.material.opacity = hungry;
+      sprites.bubble.material.opacity = hungry * visible;
     } else if (sprites.bubble) {
       this.#bubbles.release(sprites.bubble);
       sprites.bubble = undefined;
@@ -516,14 +523,14 @@ export class CueSprites {
 
     // Where the bubble was, a ring fills over the meal; it grows in as eating fades in.
     const eating = ease(weights.eating);
-    if (eating > HIDDEN && progress !== undefined) {
+    if (eating * visible > HIDDEN && progress !== undefined) {
       sprites.ring ??= this.#rings.acquire();
       const size = cuePixels(RING_PX, anchor.creaturePx) * unitsPerPixel;
       const scale = size * (0.6 + 0.4 * eating);
       sprites.ring.position.copy(top).setY(top.y + gap);
       sprites.ring.scale.set(scale, scale, 1);
       sprites.ring.material.map = this.#ringMap(ringStep(progress));
-      sprites.ring.material.opacity = eating;
+      sprites.ring.material.opacity = eating * visible;
     } else if (sprites.ring) {
       this.#rings.release(sprites.ring);
       sprites.ring = undefined;

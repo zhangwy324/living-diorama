@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
 import type { ImageReader } from "./body/pixels";
 import { CreatureBodies, type SpeciesResolver } from "./creatures";
+import { CueVisibility } from "./cue-visibility";
 import { DebugStats } from "./debug-stats";
 import { createSkyLight, createSunLight, lightingAt, SUN_DIRECTION } from "./lighting";
 import { SnapshotInterpolator } from "./interpolation";
@@ -183,6 +184,8 @@ export function buildDioramaScene(
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
     readImage: options.readImage,
+    // The terrain and structures hide the cues of creatures they hide; props never do (#93).
+    visibility: new CueVisibility(scene, layers),
   });
   const overlays = createDebugOverlays(scene, options.navigation);
   world.add(overlays.group);

@@ -16,11 +16,12 @@ export function terrainHeightAt(scene: SceneData, x: number, z: number): number 
   const v = THREE.MathUtils.clamp((z - min.z) / cellSize, 0, rows - 1);
   const i = Math.min(Math.floor(u), columns - 2);
   const j = Math.min(Math.floor(v), rows - 2);
-  const at = (a: number, b: number) => heights[b * columns + a] ?? 0;
+  // Read inline rather than through a helper closure: cue visibility calls this often each frame.
+  const k = j * columns + i;
   const fu = u - i;
   const fv = v - j;
-  const top = at(i, j) * (1 - fu) + at(i + 1, j) * fu;
-  const bottom = at(i, j + 1) * (1 - fu) + at(i + 1, j + 1) * fu;
+  const top = (heights[k] ?? 0) * (1 - fu) + (heights[k + 1] ?? 0) * fu;
+  const bottom = (heights[k + columns] ?? 0) * (1 - fu) + (heights[k + columns + 1] ?? 0) * fu;
   return top * (1 - fv) + bottom * fv;
 }
 

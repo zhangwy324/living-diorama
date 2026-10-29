@@ -36,6 +36,12 @@ export class SceneLayer {
     );
     applyPlanes(this.group, this.#planes);
   }
+
+  /** Whether the layer's clipping planes cut away `point`, in world space. Reads only. */
+  isClipped(point: THREE.Vector3): boolean {
+    for (const plane of this.#planes) if (plane.distanceToPoint(point) < 0) return true;
+    return false;
+  }
 }
 
 function applyPlanes(root: THREE.Object3D, planes: THREE.Plane[]): void {
