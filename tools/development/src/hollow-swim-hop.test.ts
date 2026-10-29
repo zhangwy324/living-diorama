@@ -123,7 +123,7 @@ describe("crossing the river", () => {
   });
 });
 
-describe("a living day with an amphibian, a swimmer and a hopper", () => {
+describe("a living evening with an amphibian, a swimmer and a hopper", () => {
   it("keeps each to its own ways of moving, with every invariant held", slow, () => {
     /** Per species: region, animation and submersion seen; per creature: moves made. */
     const seen = new Map<string, Set<string>>();
@@ -135,7 +135,9 @@ describe("a living day with an amphibian, a swimmer and a hopper", () => {
       speciesId: otter.id,
       alsoSpawn: { [carp.id]: 1, [toad.id]: 1 },
       seed: 1,
-      ticks: 24 * 3600 * 2,
+      // From an hour before nightfall into the night: time to cross and settle, then sleep.
+      startMinutes: 19 * 60,
+      ticks: 3 * 3600 * 2,
       tickRateHz: 2,
       creatures: 1,
       ...LIVING_BEHAVIOR_CHECKS,
