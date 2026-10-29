@@ -159,9 +159,15 @@ export interface LocomotionRule {
 export function animationProfile(rule: LocomotionRule, body: BodyShape): string | undefined {
   const source = rule.animation;
   if (source === undefined || typeof source === "string") return source;
-  switch (source.fromStyle) {
+  const medium = source.fromStyle;
+  switch (medium) {
     case "land":
       return body.locomotion.land.gait;
+    default: {
+      // A new medium must say here which of the species' styles gives its profile.
+      const unhandled: never = medium;
+      throw new Error(`No animation profile for the style of medium "${String(unhandled)}"`);
+    }
   }
 }
 
@@ -354,6 +360,18 @@ function validateRanged(entry: RangedEntry, source: string): Diagnostic[] {
   return found;
 }
 
+/** A non-blank profile name, or exactly `{ fromStyle }` naming a medium of the body plan. */
+function isAnimationSource(value: unknown): value is AnimationSource {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === 1 &&
+    keys[0] === "fromStyle" &&
+    (LOCOMOTION_MEDIA as readonly unknown[]).includes((value as { fromStyle: unknown }).fromStyle)
+  );
+}
+
 function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[] {
   const rule = entry.locomotion;
   if (rule === undefined) return [];
@@ -392,18 +410,7 @@ function validateLocomotion(entry: CapabilityType, source: string): Diagnostic[]
       ),
     );
   }
-  const animation: unknown = rule.animation;
-  if (
-    animation !== undefined &&
-    !(typeof animation === "string" && animation.length > 0) &&
-    !(
-      typeof animation === "object" &&
-      animation !== null &&
-      (LOCOMOTION_MEDIA as readonly unknown[]).includes(
-        (animation as { fromStyle?: unknown }).fromStyle,
-      )
-    )
-  ) {
+  if (rule.animation !== undefined && !isAnimationSource(rule.animation)) {
     found.push(
       error(
         "invalid_value",

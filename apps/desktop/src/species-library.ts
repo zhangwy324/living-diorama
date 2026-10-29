@@ -1,6 +1,5 @@
 import {
   BODY_THICKNESS,
-  defaultBody,
   error,
   formatDiagnostic,
   LIBRARY_ENTRY_SCHEMA_VERSION,
@@ -12,7 +11,7 @@ import {
   type LibraryEntry,
   type Result,
   type SizeClass,
-  type SpeciesDefinition,
+  type SpeciesDefinitionInput,
 } from "@living-diorama/content-schema";
 import type { LibraryStore, StoredLibraryEntry } from "@living-diorama/desktop-integration";
 import type { Limit } from "@living-diorama/simulation";
@@ -219,14 +218,14 @@ export async function openSpeciesLibrary(
       if (entries.has(ids.speciesId) || unseen.has(ids.speciesId)) {
         return failure("species_exists", `${ids.speciesId} is already in the library`);
       }
-      const species: SpeciesDefinition = {
+      const species: SpeciesDefinitionInput = {
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,
         version: "1.0.0",
         name,
         appearance: ids.appearanceId,
         sizeClass,
-        body: { ...defaultBody(), thickness: thickness ?? BODY_THICKNESS.default },
+        body: { thickness: thickness ?? BODY_THICKNESS.default },
         ...structuredClone(DRAWN_SPECIES_DEFAULTS),
       };
       const entry = parseLibraryEntry({

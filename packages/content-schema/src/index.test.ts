@@ -385,6 +385,11 @@ describe("SpeciesDefinition", () => {
     ).toEqual(["unrecognized_keys"]);
   });
 
+  it("ignores an anchor left undefined, even one the template doesn't have", () => {
+    const body = { template: "hopper", anchors: { feet: undefined } };
+    expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
+  });
+
   it("places default anchors on the drawn shape's bounds", () => {
     const bounds = { left: 40, top: 60, right: 200, bottom: 230 };
     expect(defaultAnchor("feet", bounds)).toEqual({ x: 120, y: 230 });

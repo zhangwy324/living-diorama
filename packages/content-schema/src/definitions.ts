@@ -179,9 +179,10 @@ export const BodyShapeSchema = z
     anchors: AnchorsSchema.default({}),
   })
   .superRefine((body, ctx) => {
-    const allowed: readonly string[] = BODY_TEMPLATE_ANCHORS[body.template];
-    for (const name of Object.keys(body.anchors)) {
-      if (allowed.includes(name)) continue;
+    // An unknown template is reported on its own field.
+    const allowed: readonly string[] = BODY_TEMPLATE_ANCHORS[body.template] ?? [];
+    for (const [name, anchor] of Object.entries(body.anchors)) {
+      if (anchor === undefined || allowed.includes(name)) continue;
       ctx.addIssue({
         code: "custom",
         message: `A ${body.template} has no ${name} anchor (it has ${allowed.length > 0 ? allowed.join(", ") : "none"})`,
@@ -244,6 +245,8 @@ export const SpeciesDefinitionSchema = z.strictObject({
   traits: z.record(ContentIdSchema, z.number()).default({}),
 });
 export type SpeciesDefinition = z.output<typeof SpeciesDefinitionSchema>;
+/** A species as written, before defaults are filled in. */
+export type SpeciesDefinitionInput = z.input<typeof SpeciesDefinitionSchema>;
 
 /** A structure instance and the regions/connections it contributes, in world space. */
 export const StructurePlacementSchema = z.strictObject({

@@ -554,6 +554,12 @@ describe("resolveReferences", () => {
     ["a submersion above 1", { submersion: 1.5 }, "locomotion.submersion"],
     ["a submersion that isn't a number", { submersion: "deep" }, "locomotion.submersion"],
     ["an empty profile name", { animation: "" }, "locomotion.animation"],
+    ["a blank profile name", { animation: "  " }, "locomotion.animation"],
+    [
+      "a style with extra keys",
+      { animation: { fromStyle: "land", profile: "walk" } },
+      "locomotion.animation",
+    ],
     ["a style of an unknown medium", { animation: { fromStyle: "air" } }, "locomotion.animation"],
     ["an animation that is a number", { animation: 3 }, "locomotion.animation"],
   ])("rejects %s", (_, rule, path) => {
@@ -593,6 +599,16 @@ describe("resolveReferences", () => {
       moving.species.register({ ...species, capabilities: { "test:sing": 1, "core:walk": 1 } }),
     );
     expect(resolveReferences(moving).diagnostics).toEqual([]);
+  });
+
+  it("reports an unregistered capability only as unresolved, not as no way of moving", () => {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    expectOk(registries.species.register({ ...species, capabilities: { "test:fly": 1 } }));
+    expect(resolveReferences(registries).diagnostics.map((d) => d.code)).toEqual([
+      "unresolved_reference",
+    ]);
   });
 
   it("reports unresolved references and unsatisfied version ranges", () => {
@@ -701,6 +717,19 @@ describe("addEntries", () => {
     ]);
     expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["no_locomotion"]);
     expect(registries.species.size).toBe(0);
+  });
+
+  it("finds a species' way of moving among the entries added with it", () => {
+    const registries = resolved();
+    const swim = { id: "test:swim", version: "1.0.0", locomotion: { regionKinds: ["water"] } };
+    const result = addEntries(registries, [
+      { registry: "species", input: { ...species, capabilities: { "test:swim": 1 } } },
+      { registry: "capabilities", input: swim },
+      { registry: "assets", input: sprite },
+    ]);
+    expectOk(result);
+    expect(registries.species.has("test:pebble")).toBe(true);
+    expect(registries.capabilities.has("test:swim")).toBe(true);
   });
 
   it("rejects IDs that are registered or added twice", () => {
