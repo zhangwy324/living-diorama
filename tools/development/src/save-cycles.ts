@@ -4,6 +4,7 @@ import {
   hungerNeed,
   phaseSpans,
   Rng,
+  SLEEPER_GAP,
   sleepCycle,
   tirednessNeed,
   type CreatureState,
@@ -113,10 +114,11 @@ const PER_CREATURE_EVENTS = new Set([
 /**
  * The world one step after a restore with catch-up (ADR 0018 §19, ADR 0019 §5), and that step's
  * `events`: the tick moved on by the capped gap, nothing announced (no phase change, no
- * per-creature events), every creature fed, asleep in its sleeping phase (at home if it has one),
- * awake otherwise, and rested if its sleeping phase ended during the gap. A creature resumed
- * asleep counts as asleep from that first step. `checkSleep` says which creatures sleep at night
- * (the sleep check's filter).
+ * per-creature events), every creature fed, asleep in its sleeping phase, awake otherwise, and
+ * rested if its sleeping phase ended during the gap. Asleep, a creature with a home lies at its
+ * spot there clear of the other sleepers; if home is full, it sleeps anywhere but there, and
+ * `onFullHome` is called with it (issue #158). A creature resumed asleep counts as asleep from
+ * that first step. `checkSleep` says which creatures sleep at night (the sleep check's filter).
  */
 export function catchUpProblems(
   simulation: Simulation,
@@ -124,6 +126,7 @@ export function catchUpProblems(
   report: RestoreReport,
   events: readonly SimulationEvent[],
   checkSleep: (creature: CreatureState) => boolean,
+  onFullHome?: (creature: CreatureState) => void,
 ): string[] {
   const problems = events
     .filter((e) => e.type === "day_phase_changed" || PER_CREATURE_EVENTS.has(e.type))
@@ -159,8 +162,16 @@ export function catchUpProblems(
       problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at its ${phase}`);
     }
     if (sleeping && creature.home !== null) {
-      const spot = simulation.spotFor(who, creature.home);
-      if (!isDeepStrictEqual(spot, creature.position)) {
+      // Its spot clear of the others asleep, as catch-up chose it; none clear while home has a
+      // spot at all means home is full, and it sleeps elsewhere (issue #158).
+      const spot = simulation.spotFor(who, creature.home, { clearOfSleepers: SLEEPER_GAP });
+      const full = !spot && simulation.spotFor(who, creature.home) !== undefined;
+      if (full) {
+        onFullHome?.(creature);
+        if (sleepsAt(creature) === creature.home) {
+          problems.push(`${who}: asleep at its full home ${creature.home}`);
+        }
+      } else if (!isDeepStrictEqual(spot, creature.position)) {
         problems.push(`${who}: away from its home ${creature.home} in its sleeping phase`);
       }
     }
@@ -182,6 +193,44 @@ export function catchUpProblems(
       problems.push(
         `${who}: tiredness ${tiredness.toFixed(3)} ${hoursSinceNight.toFixed(1)} h after the night, not rested`,
       );
+    }
+  }
+  return problems;
+}
+
+/** The shelter a creature sleeps at, from its running `core:sleep`; null in the open or awake. */
+export function sleepsAt(creature: CreatureState): string | null {
+  const { action } = creature;
+  if (!creature.asleep || action?.id !== "core:sleep") return null;
+  const { placementId } = action.state as { placementId?: unknown };
+  return typeof placementId === "string" ? placementId : null;
+}
+
+/**
+ * Any two creatures asleep at the same shelter lie at least their two body radii plus
+ * `SLEEPER_GAP` apart, centre to centre and ignoring height, as in the open (issue #158).
+ */
+export function shelterSpacingProblems(simulation: Simulation): string[] {
+  const { state } = simulation;
+  const byShelter = new Map<string, CreatureState[]>();
+  for (const creature of state.creatures.values()) {
+    const shelter = sleepsAt(creature);
+    if (shelter !== null) byShelter.set(shelter, [...(byShelter.get(shelter) ?? []), creature]);
+  }
+  const radius = (c: CreatureState) =>
+    state.pathfinderFor(c.speciesId)?.navigation.profile.radius ?? 0;
+  const problems: string[] = [];
+  for (const [shelter, sleepers] of byShelter) {
+    for (const [i, a] of sleepers.entries()) {
+      for (const b of sleepers.slice(i + 1)) {
+        const apart = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
+        const reach = radius(a) + radius(b) + SLEEPER_GAP;
+        if (apart < reach) {
+          problems.push(
+            `${a.id} and ${b.id} asleep at ${shelter} ${apart.toFixed(3)} m apart, under ${reach.toFixed(3)} m`,
+          );
+        }
+      }
     }
   }
   return problems;

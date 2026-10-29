@@ -1,7 +1,14 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { minutesAfter, type Simulation } from "@living-diorama/simulation";
+import { minutesAfter, SLEEPER_GAP, type Simulation } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { catchUpProblems, firstDifference, planRestores, saveThroughText } from "./save-cycles";
+import {
+  catchUpProblems,
+  firstDifference,
+  planRestores,
+  saveThroughText,
+  shelterSpacingProblems,
+  sleepsAt,
+} from "./save-cycles";
 import { createSimulation, LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 
 // The save and restore checks of the long runs (M15 PR 7). `pnpm soak` runs them over many seeds.
@@ -117,6 +124,82 @@ describe("catchUpProblems", () => {
   it("passes a world caught up by the rules", { timeout: 30_000 }, () => {
     const { simulation, save, report, events } = caughtUp();
     expect(catchUpProblems(simulation, save, report, events, () => true)).toEqual([]);
+  });
+
+  it("expects a sleeper at its home's spot clear of the others asleep (issue #158)", () => {
+    const { simulation, save, report, events } = caughtUp();
+    const [creature, other] = simulation.state.creatures.values();
+    const home = creature!.home!;
+    const plain = simulation.spotFor(creature!.id, home)!;
+    // Another sleeper lies at its plain spot, so its spot there is the next clear one.
+    other!.asleep = true;
+    other!.position = { ...plain };
+    const clear = simulation.spotFor(creature!.id, home, { clearOfSleepers: SLEEPER_GAP })!;
+    expect(clear).not.toEqual(plain);
+    const problems = (at: typeof plain) => {
+      creature!.position = { ...at };
+      return catchUpProblems(simulation, save, report, events, (c) => c.id === creature!.id);
+    };
+    expect(problems(clear)).toEqual([]);
+    expect(problems(plain)).toEqual([
+      expect.stringContaining(`${creature!.id}: away from its home`),
+    ]);
+  });
+
+  it("with home full, expects a sleeper anywhere but there, and counts it (issue #158)", () => {
+    const { simulation, save, report, events } = caughtUp();
+    const [creature] = simulation.state.creatures.values();
+    const home = creature!.home!;
+    expect(creature!.action?.state).toMatchObject({ placementId: home, asleep: true });
+    const spawn = () => {
+      const spawned = simulation.spawn(hollow.speciesId);
+      if (!spawned.ok) throw new Error("spawn failed");
+      return spawned.value;
+    };
+    // It stands elsewhere, where a newcomer stands, while sleepers fill every spot at home.
+    creature!.position = { ...spawn().position };
+    for (let k = 0; k < 16; k++) {
+      const spot = simulation.spotFor(creature!.id, home, { clearOfSleepers: SLEEPER_GAP });
+      if (!spot) break;
+      const filler = spawn();
+      filler.asleep = true;
+      filler.position = { ...spot };
+    }
+    expect(
+      simulation.spotFor(creature!.id, home, { clearOfSleepers: SLEEPER_GAP }),
+    ).toBeUndefined();
+    expect(simulation.spotFor(creature!.id, home)).toBeDefined();
+    const full: string[] = [];
+    const problems = () =>
+      catchUpProblems(
+        simulation,
+        save,
+        report,
+        events,
+        (c) => c.id === creature!.id,
+        (c) => full.push(c.id),
+      ).filter((p) => !p.includes("creatures after catch-up"));
+    // The newcomers aren't in the save; its sleep still says home, though home is full.
+    expect(problems()).toEqual([`${creature!.id}: asleep at its full home ${home}`]);
+    (creature!.action!.state as { placementId: string | null }).placementId = null;
+    expect(problems()).toEqual([]);
+    expect(full).toEqual([creature!.id, creature!.id]);
+  });
+
+  it("finds sleepers at one shelter too close together (issue #158)", () => {
+    const { simulation } = caughtUp();
+    expect(shelterSpacingProblems(simulation)).toEqual([]);
+    const [a, b] = [...simulation.state.creatures.values()].filter((c) => sleepsAt(c) !== null);
+    expect(a && b).toBeTruthy();
+    // Both at a's shelter, b just inside the gap.
+    const radius = simulation.state.pathfinderFor(hollow.speciesId)!.navigation.profile.radius;
+    (b!.action!.state as { placementId: string }).placementId = sleepsAt(a!)!;
+    b!.position = { ...a!.position, x: a!.position.x + 2 * radius + SLEEPER_GAP - 1e-6 };
+    expect(shelterSpacingProblems(simulation)).toEqual([
+      expect.stringContaining(`${a!.id} and ${b!.id} asleep at ${sleepsAt(a!)}`),
+    ]);
+    b!.position = { ...a!.position, x: a!.position.x + 2 * radius + SLEEPER_GAP + 1e-6 };
+    expect(shelterSpacingProblems(simulation)).toEqual([]);
   });
 
   it("finds a creature awake at night, away from home, unfed, and announced events", () => {

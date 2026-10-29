@@ -60,9 +60,17 @@ export interface PlaceQueries {
    * Where the creature stands to use a place (ADR 0018 §11 and amendments): at its own angle
    * around the place, just clear of it (block radius + creature radius + 0.3 m), or else the
    * nearest walkable point it can reach close to there. Undefined if there is none or no such
-   * place.
+   * place. With `clearOfSleepers`, a spot that another creature asleep lies too close to (as
+   * `sleeperNear` with that gap) is passed over for the next one round the place, so undefined
+   * then also means the place is full (issue #158).
    */
-  spotAt(placementId: string): RegionPosition | undefined;
+  spotAt(placementId: string, options?: SpotOptions): RegionPosition | undefined;
+}
+
+/** Options for `PlaceQueries.spotAt`. */
+export interface SpotOptions {
+  /** Pass over spots another creature asleep lies too close to, with this gap in metres. */
+  readonly clearOfSleepers?: number;
 }
 
 /** Queries about open ground near the creature, shared by behaviors and actions. */

@@ -35,6 +35,7 @@ import {
   type CreatureObservation,
   type PathState,
   type PlaceQueries,
+  type SpotOptions,
   type PlaceView,
   type Proposal,
   type RunningAction,
@@ -705,12 +706,16 @@ export class Simulation {
 
   /**
    * A creature's spot at a placement, as its behaviors and actions would find it from where it
-   * stands (ADR 0018 §11); undefined for an unknown creature or placement, or a spot it can't
-   * reach. Read-only, for tools and tests.
+   * stands (ADR 0018 §11), with `options` as `spotAt` takes them (issue #158); undefined for an
+   * unknown creature or placement, or a spot it can't reach. Read-only, for tools and tests.
    */
-  spotFor(creatureId: string, placementId: string): RegionPosition | undefined {
+  spotFor(
+    creatureId: string,
+    placementId: string,
+    options?: SpotOptions,
+  ): RegionPosition | undefined {
     const creature = this.state.creatures.get(creatureId);
-    return creature && this.#placeQueries(creature).spotAt(placementId);
+    return creature && this.#placeQueries(creature).spotAt(placementId, options);
   }
 
   /** Advances one tick. Returns the events emitted since the previous step, spawns included. */
@@ -1348,20 +1353,27 @@ export class Simulation {
     return { id: prop.id, x, y, z, blockRadius: prop.blockRadius, affordances: prop.affordances };
   }
 
-  /** Place lookups and the creature's own spot at a place (ADR 0018 §11). */
+  /**
+   * Place lookups and the creature's own spot at a place (ADR 0018 §11), clear of sleepers if
+   * asked (issue #158).
+   */
   #placeQueries(creature: CreatureState): PlaceQueries {
     return {
       place: (placementId) => this.#placeView(placementId),
-      spotAt: (placementId) => {
+      spotAt: (placementId, options) => {
         const place = this.#placeView(placementId);
         if (!place) return undefined;
         const pathfinder = this.#pathfinder(creature);
+        const gap = options?.clearOfSleepers;
         return findSpot({
           place,
           radius: pathfinder.navigation.profile.radius,
           angle: creature.spotAngle,
           masks: pathfinder.navigation.masks,
           reachable: pathfinder.reachableCells(creature.position),
+          ...(gap !== undefined && {
+            clear: (spot) => !this.#sleeperNear(creature, spot, gap),
+          }),
         });
       },
     };
