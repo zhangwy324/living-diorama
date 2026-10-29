@@ -4,6 +4,7 @@ import {
   emptyKnowledge,
   minutesAfter,
   OPEN_SPOT_MOVES,
+  recordReach,
   rememberPlace,
   restBehavior,
   Rng,
@@ -22,6 +23,7 @@ import {
   type CreatureState,
   type DayPhase,
   type DecisionTrace,
+  type ReachOutcome,
   type SimulationEvent,
   type WorldQueries,
 } from "@living-diorama/simulation";
@@ -312,6 +314,89 @@ describe("core:rest", () => {
     expect(chooseShelter(observe(stub, { ...options, home: "home" }))?.placementId).toBe("near");
   });
 
+  describe("after failed trips to a shelter (issue #161)", () => {
+    const TICK = 100_000;
+    /** Records a failed trip to `id` at `tick`, as `core:sleep` does through `noteReach`. */
+    const fail = (
+      knowledge: ReturnType<typeof emptyKnowledge>,
+      id: string,
+      outcome: Exclude<ReachOutcome, "reached"> = "stuck",
+      tick = TICK,
+    ) =>
+      recordReach(knowledge, SHELTER, id, outcome, {
+        tick,
+        tickSeconds: 0.1,
+        cell: { x: 0, z: 0 },
+      });
+    const stub = (): Stub => ({
+      places: { home: { x: 0, z: 4 }, near: { x: 2, z: 0 }, far: { x: 6, z: 0 } },
+      routes: { home: 5, near: 3, far: 8 },
+      // Somewhere to search, so a search would show.
+      within: (d) => ({ x: d, z: 0 }),
+    });
+
+    it("passes over a backed-off shelter for the next one, home included", () => {
+      const knowledge = knowing("near", "far", "home");
+      fail(knowledge, "near");
+      const options = { dayPhase: "night" as const, knowledge, home: "home" };
+      // Home is no more than twice the next shelter's route: home.
+      expect(chooseShelter(observe(stub(), options))?.placementId).toBe("home");
+      // Home backed off too: the next shelter.
+      fail(knowledge, "home", "no_route");
+      expect(chooseShelter(observe(stub(), options))?.placementId).toBe("far");
+      expect(evaluate(observe(stub(), options))).toMatchObject({
+        action: "core:sleep",
+        params: { placementId: "far" },
+      });
+    });
+
+    it("with every shelter it knows backed off, sleeps in the open without searching", () => {
+      const knowledge = knowing("near", "home");
+      fail(knowledge, "near");
+      fail(knowledge, "home");
+      const memory = {};
+      const proposal = restBehavior.evaluate(
+        observe(stub(), { dayPhase: "night", knowledge, home: "home" }),
+        memory,
+        Rng.fromSeed(1),
+      );
+      expect(proposal).toMatchObject({
+        action: "core:sleep",
+        params: {},
+        reason: "night in the open",
+      });
+      expect(memory).toEqual({});
+    });
+
+    it("tries the shelter again once its back-off ends, longer after each failure", () => {
+      const knowledge = knowing("near");
+      const at = (tick: number) =>
+        evaluate(observe(stub(), { dayPhase: "night", knowledge, tick }))?.params;
+      // Stuck once: 30 s, 300 ticks.
+      fail(knowledge, "near");
+      expect(at(TICK + 299)).toEqual({});
+      expect(at(TICK + 300)).toEqual({ placementId: "near" });
+      // Stuck again on that try: 60 s.
+      fail(knowledge, "near", "stuck", TICK + 300);
+      expect(at(TICK + 899)).toEqual({});
+      expect(at(TICK + 900)).toEqual({ placementId: "near" });
+      // Reaching it clears the failures.
+      recordReach(knowledge, SHELTER, "near", "reached", {
+        tick: TICK + 900,
+        tickSeconds: 0.1,
+        cell: { x: 0, z: 0 },
+      });
+      expect(knowledge.places[SHELTER]![0]!.failures).toBeUndefined();
+    });
+
+    it("a forgotten home has no failures, so it still counts", () => {
+      const knowledge = knowing("near");
+      fail(knowledge, "near");
+      const observation = observe(stub(), { dayPhase: "night", knowledge, home: "home" });
+      expect(chooseShelter(observation)?.placementId).toBe("home");
+    });
+  });
+
   it("doesn't rest in the first 10 minutes after a Studio release", () => {
     const at = (ticksSince: number) =>
       evaluate(
@@ -344,7 +429,11 @@ function sleepContext({
   // Other sleepers, each too close within 1 m; and the points `randomWalkablePointWithin` draws.
   sleepers = [] as { x: number; z: number }[],
   points = [] as { x: number; z: number }[],
+  // Ticks each walk is still on its way before it arrives.
+  movingTicks = 0,
 } = {}) {
+  const reaches: { affordanceId: string; placementId: string; outcome: ReachOutcome }[] = [];
+  let moving = movingTicks;
   const turned: number[] = [];
   const turning: ("turning" | "facing")[] = [];
   const emitted: unknown[] = [];
@@ -384,9 +473,13 @@ function sleepContext({
         },
       };
     },
-    // Arrives at once, at the end of the path.
+    // Arrives at once, at the end of the path, unless `movingTicks` holds it up.
     walk: (path: { points: { x: number; z: number }[] }) => {
       walked++;
+      if (moving > 0) {
+        moving--;
+        return "moving" as const;
+      }
       const end = path.points.at(-1);
       if (end) position = { regionId: "r", x: end.x, z: end.z };
       return "arrived" as const;
@@ -403,9 +496,19 @@ function sleepContext({
     emit: (event: unknown) => emitted.push(event),
     home: null as string | null,
     setHome: (id: string) => homes.push(id),
-    noteReach: () => {},
+    noteReach: (affordanceId: string, placementId: string, outcome: ReachOutcome) =>
+      reaches.push({ affordanceId, placementId, outcome }),
   } satisfies ActionContext;
-  return { context, emitted, homes, walked: () => walked, turned, turning, at: () => position };
+  return {
+    context,
+    emitted,
+    homes,
+    reaches,
+    walked: () => walked,
+    turned,
+    turning,
+    at: () => position,
+  };
 }
 
 describe("core:sleep", () => {
@@ -600,6 +703,58 @@ describe("core:sleep", () => {
     expect(sleepAction.step(start.state, context)).toMatchObject({ asleep: true });
     expect(start.state).toMatchObject({ moves: 0 });
   });
+
+  it("notes whether it reached its spot at a shelter: arrived, no spot or route, or stuck", () => {
+    const reached = sleepContext({ movingTicks: 1 });
+    const start = sleepAction.start({ placementId: "tree" }, reached.context);
+    if (!start.ok) throw new Error("start failed");
+    sleepAction.step(start.state, reached.context);
+    expect(reached.reaches).toEqual([]);
+    sleepAction.step(start.state, reached.context);
+    expect(reached.reaches).toEqual([
+      { affordanceId: SHELTER, placementId: "tree", outcome: "reached" },
+    ]);
+
+    const blocked = sleepContext();
+    const noSpot = { ...blocked.context, spotAt: () => undefined };
+    expect(sleepAction.start({ placementId: "tree" }, noSpot)).toMatchObject({ reason: "no_spot" });
+    const noRoute = {
+      ...blocked.context,
+      planRoute: () => ({ ok: false as const, reason: "unreachable" as const, detail: "" }),
+    };
+    expect(sleepAction.start({ placementId: "tree" }, noRoute)).toMatchObject({
+      reason: "unreachable",
+    });
+    // Not a shelter: nothing to back off.
+    sleepAction.start({ placementId: "rock" }, blocked.context);
+    expect(blocked.reaches.map((r) => r.outcome)).toEqual(["no_route", "no_route"]);
+
+    const stuck = sleepContext({ movingTicks: 5 });
+    const walking = sleepAction.start({ placementId: "tree" }, stuck.context);
+    if (!walking.ok) throw new Error("start failed");
+    sleepAction.step(walking.state, stuck.context);
+    sleepAction.interrupted!(walking.state, stuck.context, "outranked");
+    expect(stuck.reaches).toEqual([]);
+    sleepAction.interrupted!(walking.state, stuck.context, "stuck");
+    expect(stuck.reaches).toEqual([
+      { affordanceId: SHELTER, placementId: "tree", outcome: "stuck" },
+    ]);
+  });
+
+  it("in the open, notes nothing, also when stuck moving away from a sleeper", () => {
+    const { context, reaches } = sleepContext({
+      sleepers: [{ x: 0, z: 0 }],
+      points: [{ x: 5, z: 5 }],
+      movingTicks: 5,
+    });
+    const start = sleepAction.start({}, context);
+    if (!start.ok) throw new Error("start failed");
+    sleepAction.step(start.state, context);
+    sleepAction.step(start.state, context);
+    expect(start.state).toMatchObject({ moves: 1, arrived: false });
+    sleepAction.interrupted!(start.state, context, "stuck");
+    expect(reaches).toEqual([]);
+  });
 });
 
 // ---- In the simulation -----------------------------------------------------------------------
@@ -786,6 +941,88 @@ describe("sleeping in Woodland Hollow", () => {
     expect(creature.home).toBe(home);
     const { x, z } = simulation.state.model.propsById.get(home!)!.transform.position;
     expect(Math.hypot(creature.position.x - x, creature.position.z - z)).toBeLessThan(2);
+  });
+
+  describe("shelters it can't get to (issue #161)", () => {
+    /** A mossling too slow to pass the stuck watchdog, that knows the two nearest shelters. */
+    function sluggish(seed: number) {
+      const world = setup(seed, 21 * 60, 10, (r) =>
+        r.species.register({
+          ...r.species.get(MOSSLING)!,
+          id: "test:sluggish-mossling",
+          baseSpeed: 0.001,
+        }),
+      );
+      const creature = world.spawn(undefined, "test:sluggish-mossling");
+      // No vision, so it knows only the shelters given here.
+      creature.variation.senses["core:vision"] = 0;
+      creature.needs[HUNGER] = 0;
+      const { x, z } = creature.position;
+      const shelters = [...world.simulation.state.model.propsByAffordance.get(SHELTER)!]
+        .sort(
+          (a, b) =>
+            Math.hypot(a.transform.position.x - x, a.transform.position.z - z) -
+            Math.hypot(b.transform.position.x - x, b.transform.position.z - z),
+        )
+        .slice(0, 2)
+        .map((p) => p.id);
+      for (const id of shelters) rememberPlace(creature.knowledge, SHELTER, id, 0, 4);
+      /** Wakes it as if nothing had happened, so `core:rest` decides afresh next tick. */
+      const wake = () => {
+        delete creature.action;
+        delete creature.lastResult;
+        creature.asleep = false;
+        creature.decideAtTick = world.simulation.tick;
+      };
+      const sleeps = () =>
+        world.traces.flatMap((t) =>
+          t.creatureId === creature.id &&
+          t.result === "started" &&
+          t.chosen?.action === "core:sleep"
+            ? [(t.chosen.params as { placementId?: string }).placementId ?? null]
+            : [],
+        );
+      return { ...world, creature, shelters, wake, sleeps };
+    }
+    const failuresOf = (creature: CreatureState, id: string) =>
+      creature.knowledge.places[SHELTER]!.find((p) => p.placementId === id)!.failures;
+
+    it("backs off a shelter it got stuck going to, tries the other, then sleeps in the open", () => {
+      const { creature, shelters, run, wake, sleeps, traces } = sluggish(1);
+      run(HOUR, () => creature.asleep);
+      expect(creature.asleep).toBe(true);
+      const [first, second] = sleeps();
+      expect(first).not.toBeNull();
+      expect(failuresOf(creature, first!)).toMatchObject({ stuck: 1, noRoute: 0 });
+      // Stuck, it lay down in the open at once, without searching.
+      expect(second).toBeNull();
+      expect(traces.some((t) => t.chosen?.action === "core:follow_path")).toBe(false);
+
+      // Woken while the first is backed off: it goes for the other shelter instead.
+      wake();
+      run(HOUR, () => creature.asleep);
+      const other = shelters.find((id) => id !== first)!;
+      expect(sleeps().slice(2)).toEqual([other, null]);
+      expect(failuresOf(creature, other)).toMatchObject({ stuck: 1 });
+
+      // Woken again with both backed off: in the open at once, no search, no trip.
+      wake();
+      run(2);
+      expect(sleeps().slice(4)).toEqual([null]);
+      expect(traces.some((t) => t.chosen?.action === "core:follow_path")).toBe(false);
+      expect(creature.home).toBeNull();
+    });
+
+    it("backs off the same way for the same seed", () => {
+      const knowledge = (seed: number) => {
+        const { creature, run } = sluggish(seed);
+        run(6_000);
+        return creature.knowledge;
+      };
+      const first = knowledge(4);
+      expect(first.places[SHELTER]!.some((p) => p.failures)).toBe(true);
+      expect(knowledge(4)).toEqual(first);
+    });
   });
 
   it("homeless sleepers settling on one point lie down apart, the same for the same seed", () => {
