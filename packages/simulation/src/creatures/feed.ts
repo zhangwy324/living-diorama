@@ -188,7 +188,9 @@ export const eatAction: ActionProvider = {
     context.face(eat.x, eat.z);
     context.adjustNeed(HUNGER, -eat.perTick);
     eat.ticksLeft--;
-    if (eat.ticksLeft > 0) return { status: "running", cue: "eating" };
+    // The share of the meal eaten, from the state alone: ticksLeft × perTick is the meal still left.
+    const cueProgress = 1 - (eat.ticksLeft * eat.perTick) / MEAL;
+    if (eat.ticksLeft > 0) return { status: "running", cue: "eating", cueProgress };
     context.emit({ type: "ate", placementId: eat.placementId, hunger: context.needs[HUNGER] ?? 0 });
     return { status: "done", cue: "eating" };
   },

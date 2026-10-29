@@ -127,6 +127,7 @@ interface Evaluation {
   rng: RngState;
 }
 type Chosen = Evaluation & { proposal: Proposal };
+type ShownCue = { cue: ActionCue; progress?: number };
 
 const usable = (proposal: Proposal | null | undefined): proposal is Proposal =>
   proposal !== null && proposal !== undefined && Number.isFinite(proposal.utility);
@@ -205,8 +206,8 @@ export class Simulation {
   /** The path each creature last walked, kept until its action ends; for debug routes only. */
   readonly #paths = new Map<string, PathState>();
   readonly #profiles = new Map<string, SpeciesProfile>();
-  /** The action cue each creature showed on its last tick, if any. */
-  readonly #actionCues = new Map<string, ActionCue>();
+  /** The action cue each creature showed on its last tick, if any, with the action's progress. */
+  readonly #actionCues = new Map<string, ShownCue>();
   /** Each creature's perception offset within the scan period. */
   readonly #perceptionOffsets = new Map<string, number>();
   /** Ticks between two perception scans of one creature. */
@@ -500,6 +501,7 @@ export class Simulation {
       creatures: [...this.state.creatures.values()].map((c) => {
         const { regionId, x, z } = c.position;
         const y = model.regions.get(regionId)?.surface.heightAt(x, z) ?? NaN;
+        const progress = this.#actionCues.get(c.id)?.progress;
         return {
           id: c.id,
           speciesId: c.speciesId,
@@ -508,6 +510,7 @@ export class Simulation {
           heading: c.heading,
           ...(c.action ? { currentAction: c.action.id } : {}),
           cues: this.#cues(c),
+          ...(progress === undefined ? {} : { cueProgress: progress }),
           ...(debug
             ? {
                 ...(this.#paths.has(c.id) ? { route: this.#route(c.id) } : {}),
@@ -528,7 +531,7 @@ export class Simulation {
   #cues(creature: CreatureState): Cue[] {
     const cues: Cue[] = [];
     const action = this.#actionCues.get(creature.id);
-    if (action) cues.push(action);
+    if (action) cues.push(action.cue);
     for (const need of this.#profile(creature.speciesId).needs) {
       if (need.cue && (creature.needs[need.id] ?? 0) >= need.cue.from) cues.push(need.cue.cue);
     }
@@ -602,7 +605,7 @@ export class Simulation {
     this.#perceive(creature, profile);
     const before = profile.needs.length > 0 ? { ...creature.needs } : undefined;
     const running = creature.action;
-    let cue: ActionCue | undefined;
+    let cue: ShownCue | undefined;
     // Awake unless the action says otherwise; an interruption below wakes it again.
     creature.asleep = false;
     if (running) {
@@ -615,7 +618,11 @@ export class Simulation {
       if (status.status === "running") {
         // Standing still to eat or sleep is not being stuck (ADR 0018 amendments).
         if (activity.walked) this.#watch(creature, profile, running.id);
-        else if (status.cue !== undefined && status.cue === provider?.cue) cue = status.cue;
+        else if (status.cue !== undefined && status.cue === provider?.cue) {
+          const p = status.cueProgress;
+          const shown = p !== undefined && Number.isFinite(p) ? { progress: clamp01(p) } : {};
+          cue = { cue: status.cue, ...shown };
+        }
       } else {
         this.#finish(
           creature,

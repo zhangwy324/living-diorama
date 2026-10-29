@@ -72,6 +72,18 @@ describe("SnapshotInterpolator", () => {
     expect(interpolator.sample(210)[0]!.cues).toEqual(["sleeping"]);
   });
 
+  it("blends cue progress between snapshots that both have it", () => {
+    const interpolator = new SnapshotInterpolator(100);
+    interpolator.push(snapshot(1, [{ ...at(0), cues: ["eating"], cueProgress: 0.2 }]), 0);
+    interpolator.push(snapshot(2, [{ ...at(0.1), cues: ["eating"], cueProgress: 0.4 }]), 100);
+    expect(interpolator.sample(150)[0]!.cueProgress).toBeCloseTo(0.3);
+    // Without it in the previous snapshot, it comes with the cues it belongs to.
+    interpolator.push(snapshot(3, [at(0.2)]), 200);
+    interpolator.push(snapshot(4, [{ ...at(0.3), cues: ["eating"], cueProgress: 0.1 }]), 300);
+    expect(interpolator.sample(350)[0]!.cueProgress).toBeUndefined();
+    expect(interpolator.sample(400)[0]!.cueProgress).toBe(0.1);
+  });
+
   it("ignores repeated ticks and drops creatures missing from the newest snapshot", () => {
     const interpolator = new SnapshotInterpolator(100);
     interpolator.push(snapshot(1, [at(0)]), 0);

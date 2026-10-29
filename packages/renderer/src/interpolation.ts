@@ -26,6 +26,8 @@ export interface CreaturePose {
    * newest once the pose reaches it, so cues don't lead the body. The creatures fade them.
    */
   cues: readonly Cue[];
+  /** How far through the action showing its cue the creature is, 0–1, if the action says. */
+  cueProgress?: number | undefined;
 }
 
 /** Blends two headings (radians) the short way round. */
@@ -73,10 +75,10 @@ export class SnapshotInterpolator {
     if (!this.#latest) return [];
     const t = Math.min(1, Math.max(0, (now - this.#receivedAt) / this.#intervalMs));
     const before = new Map(this.#previous?.creatures.map((c) => [c.id, c]));
-    return this.#latest.creatures.map(({ id, speciesId, world, heading, cues }) => {
+    return this.#latest.creatures.map(({ id, speciesId, world, heading, cues, cueProgress }) => {
       const from = before.get(id);
       if (!from || distance(from.world, world) > SNAP_DISTANCE) {
-        return { id, speciesId, world, heading, cues };
+        return { id, speciesId, world, heading, cues, cueProgress };
       }
       return {
         id,
@@ -89,6 +91,13 @@ export class SnapshotInterpolator {
         heading: lerpHeading(from.heading, heading, t),
         // The cues of the snapshot the pose blends from, until it arrives, so cues don't lead the body.
         cues: t < 1 ? from.cues : cues,
+        // Blended when both snapshots have it, so a progress ring fills smoothly between ticks.
+        cueProgress:
+          from.cueProgress !== undefined && cueProgress !== undefined
+            ? from.cueProgress + (cueProgress - from.cueProgress) * t
+            : t < 1
+              ? from.cueProgress
+              : cueProgress,
       };
     });
   }

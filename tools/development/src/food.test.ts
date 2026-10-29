@@ -384,8 +384,11 @@ describe("core:eat", () => {
     expect(walked()).toBe(2);
     expect(faced).toEqual([]);
     // 5 s at 10 Hz: 50 ticks of eating. Half a meal counts as half.
-    for (let t = 0; t < 25; t++) {
-      expect(eatAction.step(start.state, context)).toEqual({ status: "running", cue: "eating" });
+    // Each tick reports the share of the meal eaten so far, for the eating cue.
+    for (let t = 1; t <= 25; t++) {
+      const step = eatAction.step(start.state, context);
+      expect(step).toMatchObject({ status: "running", cue: "eating" });
+      expect(step.cueProgress).toBeCloseTo(t / 50, 9);
     }
     expect(walked()).toBe(2);
     expect(adjusted.reduce((a, b) => a + b, 0)).toBeCloseTo(-MEAL / 2, 9);
@@ -567,7 +570,11 @@ describe("feeding in Woodland Hollow", () => {
     }
     // Eat until hunger is below actAt, where feed alone would no longer propose a meal.
     for (let t = 0; t < 100 && creature.needs[HUNGER]! >= 0.35; t++) run(1);
-    expect(simulation.snapshot().creatures[0]!.cues).toEqual(["eating"]);
+    const eating = simulation.snapshot().creatures[0]!;
+    expect(eating.cues).toEqual(["eating"]);
+    // Hunger fell from 0.45 to below 0.35 of the meal's 0.8, so at least an eighth is eaten.
+    expect(eating.cueProgress).toBeGreaterThan(0.1);
+    expect(eating.cueProgress).toBeLessThan(1);
     expect(creature.needs[HUNGER]).toBeLessThan(0.35);
     // A day-phase reaction now: wander (0.1) can't beat feed's continue utility (0.2 + hunger).
     creature.phaseReactionTick = simulation.tick;

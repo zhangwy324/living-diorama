@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
 import {
   BUBBLE_PX,
+  RING_STEPS,
   SNAP_SECONDS,
   ScreenScale,
   Z_COUNT,
@@ -14,6 +15,8 @@ import {
   cuePixels,
   restingMotion,
   restingZ,
+  ringPixels,
+  ringStep,
   stepCueWeights,
   zMotion,
   zPixels,
@@ -149,16 +152,46 @@ describe("cue textures", () => {
     expect(alpha(z, 32, 0.02, 0.5)).toBe(0);
     expect(alpha(z, 32, 0.5, 0.5)).toBe(255);
   });
+
+  it("draws a ring clear inside and around, filled clockwise from the top", () => {
+    const red = (data: Uint8Array, x: number, y: number) =>
+      data[(Math.floor(y * 64) * 64 + Math.floor(x * 64)) * 4];
+    const quarter = ringPixels(64, 0.25);
+    expect(alpha(quarter, 64, 0.5, 0.5)).toBe(0);
+    expect(alpha(quarter, 64, 0.02, 0.02)).toBe(0);
+    // On the band: top-right (filled), bottom and left (cream track). Amber has less blue than cream.
+    const blue = (data: Uint8Array, x: number, y: number) =>
+      data[(Math.floor(y * 64) * 64 + Math.floor(x * 64)) * 4 + 2]!;
+    const filled = [0.5 + 0.3 * Math.SQRT1_2, 0.5 + 0.3 * Math.SQRT1_2] as const; // y up
+    const track = [0.5, 0.2] as const;
+    expect(alpha(quarter, 64, ...filled)).toBe(255);
+    expect(alpha(quarter, 64, ...track)).toBe(255);
+    expect(blue(quarter, ...filled)).toBeLessThan(120);
+    expect(blue(quarter, ...track)).toBeGreaterThan(200);
+    expect(red(quarter, ...track)).toBeGreaterThan(200);
+    expect(blue(ringPixels(64, 0), ...filled)).toBeGreaterThan(200);
+    expect(blue(ringPixels(64, 1), ...track)).toBeLessThan(120);
+  });
+
+  it("steps progress to the nearest ring texture, within its range", () => {
+    expect(ringStep(0)).toBe(0);
+    expect(ringStep(0.5)).toBe(RING_STEPS / 2);
+    expect(ringStep(1)).toBe(RING_STEPS);
+    expect(ringStep(-1)).toBe(0);
+    expect(ringStep(2)).toBe(RING_STEPS);
+    expect(ringStep(Number.NaN)).toBe(0);
+  });
 });
 
 describe("cue sprites", () => {
-  const creature = (id: string, cues: Cue[]): CreatureSnapshot => ({
+  const creature = (id: string, cues: Cue[], cueProgress?: number): CreatureSnapshot => ({
     id,
     speciesId: "test:critter",
     position: { regionId: "r", x: 0, z: 0 },
     world: { x: 0, y: 0, z: 0 },
     heading: 0,
     cues,
+    ...(cueProgress === undefined ? {} : { cueProgress }),
   });
   const make = () => {
     const layer = new SceneLayer("creatures");
@@ -209,6 +242,40 @@ describe("cue sprites", () => {
     for (let t = 2.6; t < 4; t += 0.2) bodies.update([creature("a", ["hungry"])], at(t));
     expect(bubbles()).toHaveLength(1);
     expect(bubbles()[0]!.material.opacity).toBe(1);
+  });
+
+  it("fills a ring over the meal where the bubble was, keeping it as it fades out", () => {
+    const { bodies, sprites } = make();
+    const rings = () => sprites().filter((s) => s.name === "cue:ring");
+    bodies.update([creature("a", ["eating"], 0.1)], at(0));
+    bodies.update([creature("a", ["eating"], 0.25)], at(1));
+    expect(rings()).toHaveLength(1);
+    const ring = rings()[0]!;
+    expect(ring.material.opacity).toBe(1);
+    expect(ring.material.depthTest).toBe(false);
+    expect(ring.position.y).toBeGreaterThan(0.7);
+    const quarter = ring.material.map;
+    bodies.update([creature("a", ["eating"], 0.75)], at(1.1));
+    const threeQuarters = ring.material.map;
+    expect(threeQuarters).not.toBe(quarter);
+    // The meal ends: the ring fades out at the last progress, then goes back to the pool.
+    bodies.update([creature("a", [])], at(1.2));
+    expect(rings()).toHaveLength(1);
+    expect(ring.material.map).toBe(threeQuarters);
+    expect(ring.material.opacity).toBeLessThan(1);
+    for (let t = 1.3; t < 2; t += 0.1) bodies.update([creature("a", [])], at(t));
+    expect(rings()).toHaveLength(0);
+    expect(bodies.cueSprites).toBe(0);
+    // The same step draws the same texture, made once.
+    bodies.update([creature("a", ["eating"], 0.25)], at(2.1));
+    expect(rings()[0]!.material.map).toBe(quarter);
+  });
+
+  it("shows no ring while eating without progress", () => {
+    const { bodies, sprites } = make();
+    bodies.update([creature("a", ["eating"])], at(0));
+    bodies.update([creature("a", ["eating"])], at(1));
+    expect(sprites().filter((s) => s.name === "cue:ring")).toHaveLength(0);
   });
 
   it("fades sprites out, then pools them for the next creature", () => {

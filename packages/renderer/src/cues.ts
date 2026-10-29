@@ -1,8 +1,8 @@
 import type { Cue } from "@living-diorama/simulation";
 import * as THREE from "three";
 
-// What a creature visibly shows (ADR 0018 §15): a gentle bob while eating, a lowered, slowly
-// breathing body with rising z's while sleeping, and a food bubble while hungry. The renderer knows
+// What a creature visibly shows (ADR 0018 §15): a gentle bob and a filling ring while eating, a
+// lowered, slowly breathing body with rising z's while sleeping, and a food bubble while hungry. The renderer knows
 // only the cue vocabulary, never action or need IDs. Cues fade in and out, so nothing pops.
 
 /** How far each cue is shown, 0–1, eased in and out over time. */
@@ -141,6 +141,7 @@ export const bubbleBob = (time: number, phase: number) =>
 /** Screen sizes in CSS pixels: a share of the creature's own height on screen, within limits. */
 export const BUBBLE_PX = { share: 0.7, min: 22, max: 44 };
 export const Z_PX = { share: 0.4, min: 13, max: 24 };
+export const RING_PX = { share: 0.5, min: 16, max: 30 };
 
 export const cuePixels = (limits: typeof BUBBLE_PX, creaturePx: number) =>
   Math.min(limits.max, Math.max(limits.min, limits.share * creaturePx));
@@ -282,6 +283,51 @@ export function zPixels(size: number): Uint8Array {
   ]);
 }
 
+/** The progress ring is drawn in this many steps, each a texture of its own. */
+export const RING_STEPS = 32;
+
+/** The ring texture step, 0–`RING_STEPS`, nearest to a progress of 0–1. */
+export function ringStep(progress: number): number {
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+  return Math.round(p * RING_STEPS);
+}
+
+/**
+ * Signed distance to the wedge that sweeps clockwise from 12 o'clock round `share` of a full turn
+ * about (cx, cy): the distance to its nearer edge. Exact enough for antialiasing.
+ */
+const wedge = (cx: number, cy: number, share: number) => (x: number, y: number) => {
+  if (share <= 0) return 1;
+  if (share >= 1) return -1;
+  const dx = x - cx;
+  const dy = y - cy;
+  const radius = Math.hypot(dx, dy);
+  const angle = (Math.atan2(dx, dy) + TAU) % TAU; // clockwise from up
+  const end = share * TAU;
+  const toEdge = (edge: number) => {
+    const apart = Math.abs(((((angle - edge + Math.PI) % TAU) + TAU) % TAU) - Math.PI);
+    return apart < Math.PI / 2 ? radius * Math.sin(apart) : radius;
+  };
+  const d = Math.min(toEdge(0), toEdge(end));
+  return angle <= end ? -d : d;
+};
+
+const RING_FILL = rgb("#f2a531");
+
+/**
+ * A progress ring filled clockwise from the top by `progress` (0–1): an amber arc over a cream
+ * track, with a dark outline so it reads by day and by night. Clear inside and around it.
+ */
+export function ringPixels(size: number, progress: number): Uint8Array {
+  const band = (x: number, y: number) => Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.3) - 0.12;
+  const sweep = wedge(0.5, 0.5, progress);
+  return rasterize(size, [
+    { distance: grow(band, 0.05), color: OUTLINE },
+    { distance: band, color: rgb("#fffaf0") },
+    { distance: (x, y) => Math.max(band(x, y), sweep(x, y)), color: RING_FILL },
+  ]);
+}
+
 const texture = (data: Uint8Array, size: number) => {
   const map = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   map.colorSpace = THREE.SRGBColorSpace;
@@ -359,10 +405,15 @@ class SpritePool {
 /** One creature's cue sprites. */
 export interface CreatureCueSprites {
   bubble: THREE.Sprite | undefined;
+  ring: THREE.Sprite | undefined;
   zs: THREE.Sprite[];
 }
 
-export const noCueSprites = (): CreatureCueSprites => ({ bubble: undefined, zs: [] });
+export const noCueSprites = (): CreatureCueSprites => ({
+  bubble: undefined,
+  ring: undefined,
+  zs: [],
+});
 
 /** Where a creature's sprites go this frame. */
 export interface CueAnchor {
@@ -376,11 +427,14 @@ export interface CueAnchor {
   right: THREE.Vector3;
 }
 
+/** Ring textures are this many pixels square. */
+const RING_SIZE = 64;
+
 /** Below this weight a cue's sprites go back to the pool. */
 const HIDDEN = 0.001;
 const GAP_PX = 3;
 
-/** The z's and food bubbles of every creature, pooled and drawn over the scene. */
+/** The z's, food bubbles and progress rings of every creature, pooled and drawn over the scene. */
 export class CueSprites {
   readonly group = new THREE.Group();
   readonly #bubbleMap = texture(bubblePixels(128), 128);
@@ -392,19 +446,31 @@ export class CueSprites {
     "cue:bubble",
   );
   readonly #zs = new SpritePool(this.group, this.#zMap, new THREE.Vector2(0.5, 0), "cue:z");
+  /** Ring textures by step, drawn when first needed. */
+  readonly #ringMaps: (THREE.DataTexture | undefined)[] = [];
+  readonly #rings = new SpritePool(
+    this.group,
+    this.#ringMap(0),
+    new THREE.Vector2(0.5, 0),
+    "cue:ring",
+  );
   readonly #z = restingZ();
 
   constructor() {
     this.group.name = "cues";
   }
 
-  /** Shows `sprites` for a creature with these weights at `time` seconds. */
+  /**
+   * Shows `sprites` for a creature with these weights at `time` seconds. `progress` is how far
+   * through its meal an eating creature is, 0–1, or undefined for no ring.
+   */
   place(
     sprites: CreatureCueSprites,
     weights: CueWeights,
     anchor: CueAnchor,
     time: number,
     phase: number,
+    progress?: number,
   ): void {
     const { top, right, unitsPerPixel } = anchor;
     const gap = GAP_PX * unitsPerPixel;
@@ -444,6 +510,21 @@ export class CueSprites {
       this.#bubbles.release(sprites.bubble);
       sprites.bubble = undefined;
     }
+
+    // Where the bubble was, a ring fills over the meal; it grows in as eating fades in.
+    const eating = ease(weights.eating);
+    if (eating > HIDDEN && progress !== undefined) {
+      sprites.ring ??= this.#rings.acquire();
+      const size = cuePixels(RING_PX, anchor.creaturePx) * unitsPerPixel;
+      const scale = size * (0.6 + 0.4 * eating);
+      sprites.ring.position.copy(top).setY(top.y + gap);
+      sprites.ring.scale.set(scale, scale, 1);
+      sprites.ring.material.map = this.#ringMap(ringStep(progress));
+      sprites.ring.material.opacity = eating;
+    } else if (sprites.ring) {
+      this.#rings.release(sprites.ring);
+      sprites.ring = undefined;
+    }
   }
 
   /** Hands a creature's sprites back, e.g. when it leaves. */
@@ -451,19 +532,33 @@ export class CueSprites {
     this.#releaseZs(sprites);
     if (sprites.bubble) this.#bubbles.release(sprites.bubble);
     sprites.bubble = undefined;
+    if (sprites.ring) this.#rings.release(sprites.ring);
+    sprites.ring = undefined;
   }
 
   /** Sprites in use. */
   get active(): number {
-    return this.#bubbles.active + this.#zs.active;
+    return this.#bubbles.active + this.#zs.active + this.#rings.active;
   }
 
   dispose(): void {
     this.#bubbles.dispose();
     this.#zs.dispose();
+    this.#rings.dispose();
     this.#bubbleMap.dispose();
     this.#zMap.dispose();
+    for (const map of this.#ringMaps) map?.dispose();
+    this.#ringMaps.length = 0;
     this.group.removeFromParent();
+  }
+
+  #ringMap(step: number): THREE.DataTexture {
+    let map = this.#ringMaps[step];
+    if (!map) {
+      map = texture(ringPixels(RING_SIZE, step / RING_STEPS), RING_SIZE);
+      this.#ringMaps[step] = map;
+    }
+    return map;
   }
 
   #releaseZs(sprites: CreatureCueSprites): void {

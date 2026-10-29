@@ -120,6 +120,8 @@ export interface StepReport {
    * and the action didn't walk this tick (ADR 0018 amendments, §15).
    */
   cue?: ActionCue;
+  /** How far through the action the creature is, 0–1, shown with its cue: a meal's share eaten. */
+  cueProgress?: number;
 }
 
 export type ActionStatus = (

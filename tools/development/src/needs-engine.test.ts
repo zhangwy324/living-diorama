@@ -86,7 +86,15 @@ const walkThenEat: ActionProvider = {
     return { status: "running", cue: "eating" };
   },
 };
-const testActions = [eat, nap, still, walkThenEat];
+/** Stands still for good, showing "eating" with `params.progress` as its progress. */
+const meter: ActionProvider = {
+  id: "test:meter",
+  version: "1.0.0",
+  cue: "eating",
+  start: (params) => ({ ok: true, state: isRecord(params) ? params.progress : undefined }),
+  step: (state) => ({ status: "running", cue: "eating", cueProgress: state as number }),
+};
+const testActions = [eat, nap, still, walkThenEat, meter];
 
 const behavior = (
   id: string,
@@ -617,6 +625,30 @@ describe("cues", () => {
     const eating = { action: "test:eat", params: { need: "x", delta: 0, ticks: 5 }, utility: 1 };
     expect(cuesAfter(eating, 1, 0.79)).toEqual([["eating"]]);
     expect(cuesAfter(eating, 1, 0.8)).toEqual([["eating", "hungry"]]);
+  });
+
+  it("passes an action's progress with its cue, within 0–1, and none that isn't a number", () => {
+    const progressAfter = (progress: number | undefined) => {
+      const { spawn, run, simulation } = setup({
+        behaviors: [always("test:a", { action: "test:meter", params: { progress }, utility: 1 })],
+      });
+      spawn();
+      run(2);
+      return simulation.snapshot().creatures[0]!;
+    };
+    expect(progressAfter(0.25)).toMatchObject({ cues: ["eating"], cueProgress: 0.25 });
+    expect(progressAfter(1.5).cueProgress).toBe(1);
+    expect(progressAfter(-1).cueProgress).toBe(0);
+    expect(progressAfter(Number.NaN)).not.toHaveProperty("cueProgress");
+    expect(progressAfter(undefined)).not.toHaveProperty("cueProgress");
+  });
+
+  it("shows no progress with an action that doesn't report it", () => {
+    const eating = { action: "test:eat", params: { need: "x", delta: 0, ticks: 5 }, utility: 1 };
+    const { spawn, run, simulation } = setup({ behaviors: [always("test:a", eating)] });
+    spawn();
+    run(2);
+    expect(simulation.snapshot().creatures[0]).not.toHaveProperty("cueProgress");
   });
 
   it("gives a creature that only wanders no cues and adds debug fields only on request", () => {
