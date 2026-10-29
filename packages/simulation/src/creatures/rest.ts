@@ -14,7 +14,7 @@ import type {
   OpenGroundQueries,
   PathState,
 } from "./contracts";
-import { isBackedOff } from "./knowledge";
+import { isBackedOff, type KnownPlace } from "./knowledge";
 import { tirednessNeed } from "./needs";
 import {
   chooseNearestByRoute,
@@ -30,7 +30,8 @@ import {
 // is much further than the nearest) and sleeps beside it until rested and its waking phase has
 // begun, or, napping by day, until fully rested. Knowing no shelter, it first walks out a few
 // times, further each time, looking for one, then sleeps in the open, clear of other sleepers
-// (issue #122). Starting values, to tune.
+// (issue #122). It looks the same way once every shelter it knows has failed it again and again
+// (issue #171). Starting values, to tune.
 
 const REST = "core:rest";
 const SLEEP = "core:sleep";
@@ -63,6 +64,13 @@ const AT_SPOT_METRES = 1e-3;
  * look for one, one walk per radius, before it sleeps in the open (issue #122).
  */
 export const SHELTER_SEARCH_RADII: readonly number[] = [6, 12, 20];
+/**
+ * A known shelter the creature failed to reach this many times since it last did (no route or
+ * stuck, ADR 0018 amendments) is failing (issue #171): it is passed over for any shelter that
+ * isn't, a failing home gives way to the next shelter slept at, and once every shelter it knows
+ * is failing, it looks for another instead of sleeping in the open.
+ */
+export const SEARCH_AFTER_SHELTER_FAILURES = 2;
 /** A search walk goes at least this share of its radius, so the effort shows. */
 const SEARCH_MIN_SHARE = 0.5;
 /** Points drawn for a search walk before that walk is skipped. */
@@ -127,13 +135,54 @@ export function inReleaseGrace({ creature, tick, tickSeconds }: CreatureObservat
   return released !== undefined && (tick - released) * tickSeconds < RELEASE_GRACE_SECONDS;
 }
 
+/** The shelters the creature knows that still offer shelter (issue #171). */
+function knownShelters({ knowledge, world }: CreatureObservation): KnownPlace[] {
+  return (knowledge.places[SHELTER] ?? []).filter((p) => {
+    const place = world.place(p.placementId);
+    return place !== undefined && Object.hasOwn(place.affordances, SHELTER);
+  });
+}
+
 /**
  * The known shelters the creature failed to reach lately, left out until their back-off ends
  * (issue #161). `core:sleep` records the failures in its knowledge, as `core:eat` does for food.
+ * A place that no longer offers shelter doesn't count (issue #171).
  */
-function backedOffShelters({ knowledge, tick }: CreatureObservation): Set<string> {
+function backedOffShelters(observation: CreatureObservation): Set<string> {
+  const { tick } = observation;
   return new Set(
-    (knowledge.places[SHELTER] ?? []).flatMap((p) => (isBackedOff(p, tick) ? [p.placementId] : [])),
+    knownShelters(observation).flatMap((p) => (isBackedOff(p, tick) ? [p.placementId] : [])),
+  );
+}
+
+/**
+ * The known shelters it failed to reach at least `SEARCH_AFTER_SHELTER_FAILURES` times since it
+ * last did, backed off or not (issue #171).
+ */
+function failingShelters(observation: CreatureObservation): Set<string> {
+  return new Set(
+    knownShelters(observation).flatMap(({ placementId, failures }) =>
+      failures && failures.noRoute + failures.stuck >= SEARCH_AFTER_SHELTER_FAILURES
+        ? [placementId]
+        : [],
+    ),
+  );
+}
+
+/**
+ * Whether every shelter the creature knows is failing, home included (issue #171). A home it has
+ * forgotten seeing carries no failures, so while that still offers shelter, not all are.
+ */
+function allFailing(observation: CreatureObservation, failing: ReadonlySet<string>): boolean {
+  if (failing.size === 0) return false;
+  const known = knownShelters(observation);
+  if (known.some((p) => !failing.has(p.placementId))) return false;
+  const { home, world } = observation;
+  const homePlace = home === null ? undefined : world.place(home);
+  return !(
+    homePlace &&
+    Object.hasOwn(homePlace.affordances, SHELTER) &&
+    !known.some((p) => p.placementId === home)
   );
 }
 
@@ -142,16 +191,19 @@ function backedOffShelters({ knowledge, tick }: CreatureObservation): Set<string
  * to the nearest known shelter, which then wins without becoming home. Home counts while it still
  * offers shelter and can be reached, also after the creature has forgotten seeing it. A shelter
  * backed off after failed trips is left out, home too (issue #161); a forgotten home carries no
- * failures. Undefined if the creature can reach no shelter it knows.
+ * failures. A failing shelter is chosen only if no other can be, and a failing home counts as
+ * any other shelter (issue #171). Undefined if the creature can reach no shelter it knows.
  */
 export function chooseShelter(
   observation: CreatureObservation,
   backedOff: ReadonlySet<string> = backedOffShelters(observation),
+  failing: ReadonlySet<string> = failingShelters(observation),
 ): PlaceChoice | undefined {
   const { home, world } = observation;
-  const routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id));
+  let routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id) || failing.has(id));
+  if (routed.length === 0) routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id));
   const nearest = routed[0];
-  if (home === null || backedOff.has(home)) return nearest;
+  if (home === null || backedOff.has(home) || failing.has(home)) return nearest;
   // Home's route, from the candidates already routed if it is among them.
   let length = routed.find((c) => c.placementId === home)?.length;
   if (length === undefined) {
@@ -239,7 +291,7 @@ export const restBehavior: BehaviorProvider = {
     { registry: "actions", id: FOLLOW_PATH, version: "^1.0.0" },
   ],
   evaluate(observation, memory, rng) {
-    const { action, dayPhase, lastResult, needs, traits } = observation;
+    const { action, dayPhase, home, lastResult, needs, traits } = observation;
     // Asked to continue its own sleep, or a search for shelter: only real hunger (feed from
     // hunger 0.9) wakes it.
     if (action?.behavior === REST) {
@@ -255,13 +307,16 @@ export const restBehavior: BehaviorProvider = {
     const utility = REST_BASE_UTILITY + tiredness + bonus;
     const why = waking ? "nap" : sleeping ? "night" : "bedtime";
     // A shelter it couldn't get to, just now, or lately so that every shelter it could go to is
-    // still backed off (issue #161): sleep in the open this time, without searching.
+    // still backed off (issue #161): sleep in the open this time, without searching. Unless every
+    // shelter it knows keeps failing it: then it looks for another (issue #171).
     const failed =
       lastResult?.action === SLEEP &&
       (lastResult.outcome === "failed" || lastResult.reason === "stuck");
     const backedOff = backedOffShelters(observation);
-    const shelter = failed ? undefined : chooseShelter(observation, backedOff);
-    const missed = failed || (!shelter && backedOff.size > 0);
+    const failing = failingShelters(observation);
+    const shelter = failed ? undefined : chooseShelter(observation, backedOff, failing);
+    const missed =
+      (failed || (!shelter && backedOff.size > 0)) && !allFailing(observation, failing);
     const rest = memory as RestMemory;
     if (!shelter && !missed) {
       // Knowing none, it walks out to look for one, a few times, further each time (issue #122).
@@ -275,15 +330,18 @@ export const restBehavior: BehaviorProvider = {
         };
       }
     }
-    // Finding a shelter ends the search; sleeping in the open, it remembers having searched.
-    if (shelter) {
+    // Finding a shelter ends the search; sleeping in the open, or trying a failing shelter again,
+    // it remembers having searched.
+    if (shelter && !failing.has(shelter.placementId)) {
       delete rest.searches;
       delete rest.searchedAtTick;
     }
+    // Home failing, the next other shelter it sleeps at becomes home (issue #171).
+    const newHome = !!shelter && shelter.placementId !== home && home !== null && failing.has(home);
     return shelter
       ? {
           action: SLEEP,
-          params: { placementId: shelter.placementId },
+          params: { placementId: shelter.placementId, ...(newHome && { newHome }) },
           utility,
           reason: `${why} at ${shelter.placementId}, ${shelter.length.toFixed(1)} m`,
         }
@@ -343,6 +401,8 @@ interface SleepState {
    * the waking phase ends, so a nap that runs into the evening becomes the night's sleep.
    */
   nap: boolean;
+  /** The shelter becomes its home on falling asleep there, even if it has one (issue #171). */
+  newHome: boolean;
 }
 
 /**
@@ -353,21 +413,24 @@ interface SleepState {
  * sleeps there. Checked every tick: a night's sleep ends
  * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
  * reaches 0. Emits `fell_asleep` on lying down and `woke_up` on waking, also when interrupted. The
- * first shelter a creature sleeps at becomes its home. Records in the creature's knowledge whether
+ * first shelter a creature sleeps at becomes its home, and so does one started with
+ * `params.newHome` true, as `core:rest` does once home keeps failing (issue #171). Records in the creature's knowledge whether
  * it reached its spot at a shelter: no spot or route there, stuck on the way, or arrived (issue
  * #161, as `core:eat` does). With `params.asleep` true it starts already there and asleep, for
  * catch-up (`startAsleep`).
  */
+const SLEEP_PARAMS = "{ placementId?, newHome? }";
+
 export const sleepAction: ActionProvider = {
   id: SLEEP,
   version: "1.0.0",
   cue: "sleeping",
   start(params, context) {
-    if (!isRecord(params)) {
-      return { ok: false, reason: "invalid_params", detail: { expected: "{ placementId? }" } };
+    const { placementId, newHome = false } = isRecord(params) ? params : {};
+    if (!isRecord(params) || typeof newHome !== "boolean") {
+      return { ok: false, reason: "invalid_params", detail: { expected: SLEEP_PARAMS } };
     }
     const { waking } = sleepCycle(context.dayPhase, isNocturnal(context.traits));
-    const { placementId } = params;
     if (params.asleep === true) return startAsleep(placementId, waking, context);
     if (placementId === undefined) {
       const state: SleepState = {
@@ -378,11 +441,12 @@ export const sleepAction: ActionProvider = {
         asleep: false,
         moves: 0,
         nap: waking,
+        newHome: false,
       };
       return { ok: true, state, detail: { placementId: null } };
     }
     if (typeof placementId !== "string") {
-      return { ok: false, reason: "invalid_params", detail: { expected: "{ placementId? }" } };
+      return { ok: false, reason: "invalid_params", detail: { expected: SLEEP_PARAMS } };
     }
     const place = context.place(placementId);
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
@@ -403,6 +467,7 @@ export const sleepAction: ActionProvider = {
       asleep: false,
       moves: 0,
       nap: waking,
+      newHome,
     };
     if (state.arrived) context.noteReach(SHELTER, placementId, "reached");
     return { ok: true, state, detail: { placementId, length: route.route.length } };
@@ -431,7 +496,9 @@ export const sleepAction: ActionProvider = {
       if (context.turnTo(sleep.heading) === "turning") return { status: "running" };
       sleep.asleep = true;
       context.emit({ type: "fell_asleep", placementId: sleep.placementId, tiredness });
-      if (sleep.placementId !== null && context.home === null) context.setHome(sleep.placementId);
+      if (sleep.placementId !== null && (context.home === null || sleep.newHome)) {
+        context.setHome(sleep.placementId);
+      }
     }
     return { status: "running", asleep: true, cue: "sleeping" };
   },
@@ -450,7 +517,7 @@ export const sleepAction: ActionProvider = {
   },
   checkState(state, exists) {
     if (!isRecord(state)) return false;
-    const { placementId, heading, path, arrived, asleep, moves, nap } = state;
+    const { placementId, heading, path, arrived, asleep, moves, nap, newHome } = state;
     return (
       (placementId === null || (typeof placementId === "string" && exists(placementId))) &&
       Number.isFinite(heading) &&
@@ -458,7 +525,8 @@ export const sleepAction: ActionProvider = {
       typeof arrived === "boolean" &&
       typeof asleep === "boolean" &&
       isIntFrom(moves, 0) &&
-      typeof nap === "boolean"
+      typeof nap === "boolean" &&
+      typeof newHome === "boolean"
     );
   },
 };
@@ -513,6 +581,7 @@ function startAsleep(placementId: unknown, waking: boolean, context: ActionConte
     asleep: true,
     moves: 0,
     nap: waking,
+    newHome: false,
   };
   // Catching up, the turn is done at once.
   context.turnTo(state.heading);
