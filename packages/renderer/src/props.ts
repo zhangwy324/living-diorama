@@ -62,12 +62,15 @@ export function instanceModel(
  * Loads each prop model once and adds its instances through `add` when ready. A model that has no
  * asset, is not a model, or fails to load is drawn as a fallback sized from each prop's
  * `blockRadius`, so a broken file never blanks the scene. Resolves when every model is placed.
+ * `loaded` hears of each model that loaded, with the IDs of its placements, e.g. for its picture
+ * in cue bubbles; it must not change the model.
  */
 export async function loadProps(
   props: readonly SceneProp[],
   resolve: AssetResolver,
   add: (objects: THREE.Object3D[]) => void,
   load: ModelLoader = loadGltf,
+  loaded?: (model: THREE.Object3D, placementIds: readonly string[]) => void,
 ): Promise<void> {
   const byModel = new Map<string, SceneProp[]>();
   for (const prop of props) byModel.set(prop.model, [...(byModel.get(prop.model) ?? []), prop]);
@@ -92,6 +95,11 @@ export async function loadProps(
         ),
       );
       add(instanceModel(model ?? fallbackModel(), matrices));
+      if (model)
+        loaded?.(
+          model,
+          placements.map((p) => p.id),
+        );
     }),
   );
 }

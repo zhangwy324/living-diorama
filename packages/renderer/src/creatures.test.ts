@@ -84,6 +84,14 @@ describe("SnapshotInterpolator", () => {
     expect(interpolator.sample(210)[0]!.cues).toEqual(["sleeping"]);
   });
 
+  it("carries the cue target with the cues it goes with", () => {
+    const interpolator = new SnapshotInterpolator(100);
+    interpolator.push(snapshot(1, [{ ...at(0), cues: ["hungry"] }]), 0);
+    interpolator.push(snapshot(2, [{ ...at(0.1), cues: ["hungry"], cueTarget: "bush-1" }]), 100);
+    expect(interpolator.sample(150)[0]!.cueTarget).toBeUndefined();
+    expect(interpolator.sample(200)[0]!.cueTarget).toBe("bush-1");
+  });
+
   it("blends cue progress between snapshots that both have it", () => {
     const interpolator = new SnapshotInterpolator(100);
     interpolator.push(snapshot(1, [{ ...at(0), cues: ["eating"], cueProgress: 0.2 }]), 0);

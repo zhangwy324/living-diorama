@@ -340,7 +340,8 @@ const leaf = (x: number, y: number) =>
 
 /**
  * Food in general: a round red fruit with a stem and a leaf. It stands for every food, so it
- * says "hungry" whether the creature eats mushrooms or berries from a bush.
+ * says "hungry" whether the creature eats mushrooms or berries from a bush. A bubble shows it
+ * until the creature heads for food whose picture is drawn, then that picture instead (#110).
  */
 export const FOOD_ICON: CueIcon = [
   { distance: grow(union(fruit, stem, leaf), 0.13), color: OUTLINE },
@@ -352,6 +353,13 @@ export const FOOD_ICON: CueIcon = [
 
 /** The bubble's round body, its outline's width and where its icon goes (texture units). */
 const BUBBLE = { x: 0.5, y: 0.6, radius: 0.31, outline: 0.08, icon: 0.23 };
+/**
+ * A prop's picture in the bubble (`PropIcons`) is this share of the bubble's width, centred in
+ * its round body: the width of its round body, as a model rarely fills the corners of its square.
+ */
+export const PROP_ICON_SHARE = 0.62;
+/** The prop picture's sprite centre, so it sits on the bubble's round body (issue #110). */
+const PROP_ICON_CENTER = new THREE.Vector2(0.5, 0.5 - BUBBLE.y / PROP_ICON_SHARE);
 
 /**
  * A round speech bubble with `icon` in it and a short tail at the bottom centre. The outline is
@@ -488,6 +496,8 @@ const sharpKey = () => "cue-sharp";
  * overlays (10–11) and creature labels (12), so with debug on its readouts stay on top.
  */
 const CUE_RENDER_ORDER = 9;
+/** A prop's picture draws over its bubble. */
+const ICON_RENDER_ORDER = CUE_RENDER_ORDER + 0.5;
 
 /** Sprites of one look, reused as cues come and go. */
 class SpritePool {
@@ -497,12 +507,22 @@ class SpritePool {
   readonly #map: THREE.Texture;
   readonly #center: THREE.Vector2;
   readonly #name: string;
+  readonly #renderOrder: number;
+  readonly #premultipliedAlpha: boolean;
 
-  constructor(parent: THREE.Object3D, map: THREE.Texture, center: THREE.Vector2, name: string) {
+  constructor(
+    parent: THREE.Object3D,
+    map: THREE.Texture,
+    center: THREE.Vector2,
+    name: string,
+    { renderOrder = CUE_RENDER_ORDER, premultipliedAlpha = false } = {},
+  ) {
     this.#parent = parent;
     this.#map = map;
     this.#center = center;
     this.#name = name;
+    this.#renderOrder = renderOrder;
+    this.#premultipliedAlpha = premultipliedAlpha;
   }
 
   acquire(): THREE.Sprite {
@@ -518,12 +538,13 @@ class SpritePool {
         transparent: true,
         depthTest: false,
         depthWrite: false,
+        premultipliedAlpha: this.#premultipliedAlpha,
       }),
     );
     const sprite = new THREE.Sprite(material);
     sprite.name = this.#name;
     sprite.center.copy(this.#center);
-    sprite.renderOrder = CUE_RENDER_ORDER;
+    sprite.renderOrder = this.#renderOrder;
     this.#parent.add(sprite);
     this.#all.push(sprite);
     return sprite;
@@ -552,6 +573,8 @@ class SpritePool {
 /** One creature's cue sprites. */
 export interface CreatureCueSprites {
   bubble: THREE.Sprite | undefined;
+  /** The picture of the prop the creature heads for, over its bubble (issue #110). */
+  icon: THREE.Sprite | undefined;
   ring: THREE.Sprite | undefined;
   /** The rising z's, oldest first. */
   zs: THREE.Sprite[];
@@ -573,6 +596,7 @@ export interface CreatureCueSprites {
 
 export const noCueSprites = (): CreatureCueSprites => ({
   bubble: undefined,
+  icon: undefined,
   ring: undefined,
   zs: [],
   zStarts: [],
@@ -629,6 +653,8 @@ export class CueSprites {
    */
   reducedMotion = false;
   readonly #bubbleMap = texture(bubblePixels(128), 128);
+  /** The bubble without its icon, behind a prop's picture. */
+  readonly #plainBubbleMap = texture(bubblePixels(128, []), 128);
   readonly #zMaps = { day: texture(zPixels(64), 64), night: texture(zPixels(64, true), 64) };
   readonly #bubbles = new SpritePool(
     this.group,
@@ -637,6 +663,11 @@ export class CueSprites {
     "cue:bubble",
   );
   readonly #zs = new SpritePool(this.group, this.#zMaps.day, new THREE.Vector2(0.5, 0), "cue:z");
+  // Prop pictures are drawn on a clear background, so their edges are premultiplied.
+  readonly #icons = new SpritePool(this.group, this.#plainBubbleMap, PROP_ICON_CENTER, "cue:icon", {
+    renderOrder: ICON_RENDER_ORDER,
+    premultipliedAlpha: true,
+  });
   /** Ring textures by step, drawn when first needed. */
   readonly #ringMaps: (THREE.DataTexture | undefined)[] = [];
   readonly #rings = new SpritePool(
@@ -653,7 +684,8 @@ export class CueSprites {
 
   /**
    * Shows `sprites` for a creature with these weights at `time` seconds. `progress` is how far
-   * through its meal an eating creature is, 0–1, or undefined for no ring.
+   * through its meal an eating creature is, 0–1, or undefined for no ring. `icon` is the picture
+   * of the prop it heads for, shown in its bubble in place of the neutral food icon (issue #110).
    */
   place(
     sprites: CreatureCueSprites,
@@ -662,6 +694,7 @@ export class CueSprites {
     time: number,
     phase: number,
     progress?: number,
+    icon?: THREE.Texture,
   ): void {
     const { top, right, unitsPerPixel, visible, shift } = anchor;
     const gap = CUE_GAP_PX * unitsPerPixel;
@@ -710,9 +743,20 @@ export class CueSprites {
       sprites.bubble.position.add(shift);
       sprites.bubble.scale.set(scale, scale, 1);
       sprites.bubble.material.opacity = hungry * visible;
+      sprites.bubble.material.map = icon ? this.#plainBubbleMap : this.#bubbleMap;
+      if (icon) {
+        sprites.icon ??= this.#icons.acquire();
+        sprites.icon.position.copy(sprites.bubble.position);
+        sprites.icon.scale.set(scale * PROP_ICON_SHARE, scale * PROP_ICON_SHARE, 1);
+        sprites.icon.material.map = icon;
+        sprites.icon.material.opacity = hungry * visible;
+      } else {
+        this.#releaseIcon(sprites);
+      }
     } else if (sprites.bubble) {
       this.#bubbles.release(sprites.bubble);
       sprites.bubble = undefined;
+      this.#releaseIcon(sprites);
     }
 
     // Where the bubble was, a ring fills over the meal; it grows in as eating fades in.
@@ -737,20 +781,23 @@ export class CueSprites {
     this.#releaseZs(sprites);
     if (sprites.bubble) this.#bubbles.release(sprites.bubble);
     sprites.bubble = undefined;
+    this.#releaseIcon(sprites);
     if (sprites.ring) this.#rings.release(sprites.ring);
     sprites.ring = undefined;
   }
 
   /** Sprites in use. */
   get active(): number {
-    return this.#bubbles.active + this.#zs.active + this.#rings.active;
+    return this.#bubbles.active + this.#icons.active + this.#zs.active + this.#rings.active;
   }
 
   dispose(): void {
     this.#bubbles.dispose();
+    this.#icons.dispose();
     this.#zs.dispose();
     this.#rings.dispose();
     this.#bubbleMap.dispose();
+    this.#plainBubbleMap.dispose();
     this.#zMaps.day.dispose();
     this.#zMaps.night.dispose();
     for (const map of this.#ringMaps) map?.dispose();
@@ -765,6 +812,11 @@ export class CueSprites {
       this.#ringMaps[step] = map;
     }
     return map;
+  }
+
+  #releaseIcon(sprites: CreatureCueSprites): void {
+    if (sprites.icon) this.#icons.release(sprites.icon);
+    sprites.icon = undefined;
   }
 
   #releaseZs(sprites: CreatureCueSprites): void {

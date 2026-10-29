@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
 import type { ImageReader } from "./body/pixels";
 import { CreatureBodies, type SpeciesResolver } from "./creatures";
+import { PropIcons } from "./cue-icons";
 import { CueVisibility } from "./cue-visibility";
 import { DebugStats } from "./debug-stats";
 import { createSkyLight, createSunLight, lightingAt, SUN_DIRECTION } from "./lighting";
@@ -132,6 +133,8 @@ export interface DioramaScene {
   water: WaterMaterial;
   creatures: CreatureBodies;
   overlays: DebugOverlays;
+  /** Pictures of the prop models for cue bubbles; drawn by `render` with the view's renderer. */
+  propIcons: PropIcons;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
   /**
@@ -164,12 +167,14 @@ export function buildDioramaScene(
   );
   layers.structures.add(structureMeshes(scene));
   const resolveAsset = options.resolveAsset ?? (() => undefined);
+  const propIcons = new PropIcons();
   const creatures = new CreatureBodies(layers.creatures, {
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
     readImage: options.readImage,
     // The terrain and structures hide the cues of creatures they hide; props never do (#93).
     visibility: new CueVisibility(scene, layers),
+    propIcon: (placementId) => propIcons.icon(placementId),
   });
   let shownMinute: number | undefined;
   const setTimeOfDay = (minutes: number) => {
@@ -197,8 +202,9 @@ export function buildDioramaScene(
     resolveAsset,
     (objects) => layers.props.add(...objects),
     options.loadModel ?? loadGltf,
+    (model, placementIds) => propIcons.add(model, placementIds),
   );
-  return { world, layers, water, creatures, overlays, ready, setTimeOfDay };
+  return { world, layers, water, creatures, overlays, propIcons, ready, setTimeOfDay };
 }
 
 export function createDioramaView(
@@ -213,10 +219,8 @@ export function createDioramaView(
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const { world, layers, water, creatures, overlays, ready, setTimeOfDay } = buildDioramaScene(
-    scene,
-    options,
-  );
+  const { world, layers, water, creatures, overlays, propIcons, ready, setTimeOfDay } =
+    buildDioramaScene(scene, options);
   // Species sizes cap how high bank jumps arc.
   const snapshots = new SnapshotInterpolator(undefined, options.resolveSpecies);
   const stats = new DebugStats(container.ownerDocument);
@@ -312,6 +316,8 @@ export function createDioramaView(
     const poses = snapshots.sample(now);
     creatureFrame.time = timer.getElapsed();
     creatureFrame.realTime = now / 1000;
+    // Draws the pictures of prop models loaded since the last frame, for the cue bubbles.
+    propIcons.render(renderer);
     creatures.update(poses, creatureFrame);
     if (overlays.group.visible) {
       overlays.routes.update(poses);
@@ -390,6 +396,7 @@ export function createDioramaView(
       controls.dispose();
       timer.dispose();
       creatures.dispose();
+      propIcons.dispose();
       overlays.dispose();
       renderer.dispose();
       renderer.domElement.remove();

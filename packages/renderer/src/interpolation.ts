@@ -73,6 +73,11 @@ export interface CreaturePose {
   /** How far through the action showing its cue the creature is, 0–1, if the action says. */
   cueProgress?: number | undefined;
   /**
+   * The placement the creature heads for to answer a need whose cue it shows, e.g. the food a
+   * hungry creature goes to (issue #110); taken with the cues.
+   */
+  cueTarget?: string | undefined;
+  /**
    * How it moves now (ADR 0020 §8), e.g. "walk", "hop", "swim": the profile of the snapshot the
    * pose blends from, like its cues. None or an unknown name draws no motion.
    */
@@ -285,9 +290,10 @@ function blend(
   from: CreatureSnapshot | undefined,
   t: number,
 ): CreaturePose {
-  const { id, speciesId, world, heading, cues, cueProgress, animation, submersion } = creature;
+  const { id, speciesId, world, heading, cues, cueProgress, cueTarget, animation, submersion } =
+    creature;
   if (!from || distance(from.world, world) > SNAP_DISTANCE) {
-    return { id, speciesId, world, heading, cues, cueProgress, animation, submersion };
+    return { id, speciesId, world, heading, cues, cueProgress, cueTarget, animation, submersion };
   }
   return {
     id,
@@ -300,6 +306,7 @@ function blend(
     heading: lerpHeading(from.heading, heading, t),
     // The cues of the snapshot the pose blends from, until it arrives, so cues don't lead the body.
     cues: t < 1 ? from.cues : cues,
+    cueTarget: t < 1 ? from.cueTarget : cueTarget,
     // Blended when both snapshots have it, so a progress ring fills smoothly between ticks; a
     // lower one is a new meal, taken as it is so the ring never sweeps backwards.
     cueProgress:

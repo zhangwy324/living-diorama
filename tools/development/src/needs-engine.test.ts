@@ -95,7 +95,15 @@ const meter: ActionProvider = {
   start: (params) => ({ ok: true, state: isRecord(params) ? params.progress : undefined }),
   step: (state) => ({ status: "running", cue: "eating", cueProgress: state as number }),
 };
-const testActions = [eat, nap, still, walkThenEat, meter];
+/** Stands still for good, naming `params.target`, if any, as the placement it goes to. */
+const aim: ActionProvider = {
+  id: "test:aim",
+  version: "1.0.0",
+  start: (params) => ({ ok: true, state: isRecord(params) ? params.target : undefined }),
+  step: () => ({ status: "running" }),
+  target: (state) => state as string | undefined,
+};
+const testActions = [eat, nap, still, walkThenEat, meter, aim];
 
 const behavior = (
   id: string,
@@ -651,6 +659,30 @@ describe("cues", () => {
     spawn();
     run(2);
     expect(simulation.snapshot().creatures[0]).not.toHaveProperty("cueProgress");
+  });
+
+  it("names the action's target with the cue of a need its behavior acts on (#110)", () => {
+    const targetAfter = (hungerValue: number, needs: string[], target?: string) => {
+      const aiming = { action: "test:aim", params: { target }, utility: 1 };
+      const { spawn, run, simulation } = setup({
+        // The second behavior gives the creature hunger, whatever the first depends on.
+        behaviors: [always("test:a", aiming, needs), always("test:b", null)],
+      });
+      const creature = spawn();
+      run(1);
+      creature.needs["test:hunger"] = hungerValue;
+      return simulation.snapshot().creatures[0]!;
+    };
+    expect(targetAfter(0.8, ["test:hunger"], "p1")).toMatchObject({
+      cues: ["hungry"],
+      cueTarget: "p1",
+    });
+    // No need cue showing: no target, and none again once hunger falls.
+    expect(targetAfter(0.79, ["test:hunger"], "p1")).not.toHaveProperty("cueTarget");
+    // The choosing behavior doesn't act on hunger, e.g. going home to sleep while hungry.
+    expect(targetAfter(0.9, ["test:tiredness"], "p1")).not.toHaveProperty("cueTarget");
+    // An action with no target.
+    expect(targetAfter(0.9, ["test:hunger"])).not.toHaveProperty("cueTarget");
   });
 
   it("gives a creature that only wanders no cues and adds debug fields only on request", () => {

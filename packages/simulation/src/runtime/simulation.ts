@@ -748,6 +748,7 @@ export class Simulation {
         const region = model.regions.get(regionId);
         const y = region?.surface.heightAt(x, z) ?? NaN;
         const progress = this.#actionCues.get(c.id)?.progress;
+        const cueTarget = this.#cueTarget(c);
         const { animation, submersion } = region
           ? this.#locomotion(c.speciesId, region.kind)
           : { animation: undefined, submersion: 0 };
@@ -762,6 +763,7 @@ export class Simulation {
           ...(c.action ? { currentAction: c.action.id } : {}),
           cues: this.#cues(c),
           ...(progress === undefined ? {} : { cueProgress: progress }),
+          ...(cueTarget === undefined ? {} : { cueTarget }),
           ...(debug
             ? {
                 ...(this.#paths.has(c.id) ? { route: this.#route(c.id) } : {}),
@@ -787,6 +789,25 @@ export class Simulation {
       if (need.cue && (creature.needs[need.id] ?? 0) >= need.cue.from) cues.push(need.cue.cue);
     }
     return cues;
+  }
+
+  /**
+   * The placement the creature heads for to answer a need whose cue it shows (issue #110): its
+   * action's target, if the behavior that chose the action declares that need as a dependency.
+   */
+  #cueTarget(creature: CreatureState): string | undefined {
+    const action = creature.action;
+    if (!action) return undefined;
+    const target = this.#actions.get(action.id)?.target?.(action.state);
+    if (typeof target !== "string") return undefined;
+    const dependencies = this.#behaviors.get(action.behavior)?.dependencies ?? [];
+    const cued = this.#profile(creature.speciesId).needs.some(
+      (need) =>
+        need.cue !== undefined &&
+        (creature.needs[need.id] ?? 0) >= need.cue.from &&
+        dependencies.some((d) => d.registry === "needs" && d.id === need.id),
+    );
+    return cued ? target : undefined;
   }
 
   #route(creatureId: string): RouteLegSnapshot[] {

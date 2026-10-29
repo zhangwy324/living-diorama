@@ -208,6 +208,12 @@ export interface ActionProvider extends ActionType {
    */
   interrupted?(state: unknown, context: ActionContext, reason: string): void;
   /**
+   * The placement the action goes to or uses, read from its state, e.g. the food it eats. The
+   * snapshot shows it with the cue of a need that the action's behavior acts on (`cueTarget`,
+   * issue #110). Must not change `state`.
+   */
+  target?(state: unknown): string | undefined;
+  /**
    * For an action with state: whether `state`, from a save, is one `step` can carry on from
    * (ADR 0019 §7). False if it hasn't the shape `start` gives it, or names a placement for which
    * `exists` is false. A restore drops an action whose check fails or throws, so the creature
