@@ -60,6 +60,8 @@
 
 12. **No world persistence, an opaque window and a 10 Hz tick** (roadmap §1.9 Q5–Q7) match the code and are confirmed for v1.
 
+    _Amended by [ADR 0019](0019-world-saving.md) (M15 PR 6):_ the world is now saved and restored across launches. The window and the tick are unchanged.
+
 ### Diagnostics log and icon (PR D)
 
 13. **A log file through `tauri-plugin-log`.** The official plugin gives the shell the `log` macros, a JavaScript binding and rotation, so none of that is written by hand. Only `desktop-integration` imports the binding. The file lives in the app's log directory (`%LOCALAPPDATA%\com.livingdiorama.desktop\logs`), stays on the machine and is never uploaded. It rotates at 1 MB and keeps the 5 newest files, so the log never exceeds about 6 MB. Timestamps use local time, since a person reads them, and lines from the frontend are tagged `webview` without the plugin's caller location, which would always be the forwarder.

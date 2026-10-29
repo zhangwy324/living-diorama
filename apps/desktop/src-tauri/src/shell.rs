@@ -34,8 +34,9 @@ const EXPANDED_CHANGED: &str = "expanded-changed";
 const FULL_SCREEN_CHANGED: &str = "full-screen-changed";
 /// Event asking the frontend to shut down; it answers with the `quit_ready` command.
 const QUIT_REQUESTED: &str = "quit-requested";
-/// How long quitting waits for the frontend to shut down before exiting anyway (ADR 0008 §14).
-const QUIT_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long quitting waits for the frontend to save the world and shut down before exiting anyway
+/// (ADR 0008 §14, ADR 0019 §4).
+const QUIT_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long the height must stay put before it is saved and its space reserved, so a handle drag
 /// is one write and one change of other windows' work area.
 const HEIGHT_SETTLE_DELAY: Duration = Duration::from_millis(500);

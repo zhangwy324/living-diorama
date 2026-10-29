@@ -73,6 +73,7 @@ function start(countOverride?: number, time = { now: 12 * 60 }) {
   const callbacks = {
     onReady: vi.fn(),
     onSpeciesRegistered: vi.fn(),
+    onRestored: vi.fn(),
     onSnapshot: vi.fn<(snapshot: SimulationSnapshot) => void>(),
     onFailure: vi.fn(),
   };
@@ -81,23 +82,69 @@ function start(countOverride?: number, time = { now: 12 * 60 }) {
 }
 
 describe("simulation client", () => {
-  it("starts the world and spawns the starting creatures", () => {
-    const { callbacks, tick } = start();
+  const creaturesShown = (callbacks: ReturnType<typeof start>["callbacks"]) =>
+    callbacks.onSnapshot.mock.calls.at(-1)?.[0].creatures ?? [];
+
+  it("starts the world empty, then spawns the starting creatures when asked", async () => {
+    const { client, callbacks, tick } = start();
     expect(callbacks.onReady).toHaveBeenCalledOnce();
     tick(100);
-    const [snapshot] = callbacks.onSnapshot.mock.calls.at(-1) ?? [];
+    expect(creaturesShown(callbacks)).toHaveLength(0);
+    const spawning = client.spawnStartingCreatures();
+    tick(100);
+    await spawning;
     const starting = STARTUP.creatures.reduce((sum, c) => sum + c.count, 0);
-    expect(snapshot?.creatures).toHaveLength(starting);
+    expect(creaturesShown(callbacks)).toHaveLength(starting);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 
-  it.each([0, 25])("starts with %i of each starting species under a count override", (count) => {
-    const { callbacks, tick } = start(count);
-    tick(100);
-    const [snapshot] = callbacks.onSnapshot.mock.calls.at(-1) ?? [];
-    expect(snapshot?.creatures).toHaveLength(count * STARTUP.creatures.length);
+  it("saves the world and restores it into another one", async () => {
+    const first = start();
+    const spawning = first.client.spawnStartingCreatures();
+    first.tick(100);
+    await spawning;
+    const saving = first.client.save();
+    first.tick(100);
+    const saved = await saving;
+    if (!saved.ok) throw new Error("save failed");
+    const ids = creaturesShown(first.callbacks).map((c) => c.id);
+
+    const second = start();
+    const restoring = second.client.restore(saved.value);
+    second.tick(100);
+    const restored = await restoring;
+    expect(restored.ok && restored.value.droppedCreatures).toEqual([]);
+    expect(second.callbacks.onRestored).toHaveBeenCalledOnce();
+    second.tick(100);
+    expect(creaturesShown(second.callbacks).map((c) => c.id)).toEqual(ids);
+    expect(second.callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("resolves a rejected restore with its diagnostics", async () => {
+    const { client, callbacks, tick } = start();
+    const restoring = client.restore("{not json");
+    tick();
+    const restored = await restoring;
+    expect(restored.ok ? [] : restored.diagnostics.map((d) => d.code)).toEqual([
+      "invalid_save_json",
+    ]);
+    expect(callbacks.onRestored).not.toHaveBeenCalled();
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
+
+  it.each([0, 25])(
+    "starts with %i of each starting species under a count override",
+    async (count) => {
+      const { client, callbacks, tick } = start(count);
+      const spawning = client.spawnStartingCreatures();
+      tick(100);
+      await spawning;
+      tick(100);
+      const [snapshot] = callbacks.onSnapshot.mock.calls.at(-1) ?? [];
+      expect(snapshot?.creatures).toHaveLength(count * STARTUP.creatures.length);
+      expect(callbacks.onFailure).not.toHaveBeenCalled();
+    },
+  );
 
   it("registers a species, then spawns and despawns its creature", async () => {
     const { client, callbacks, tick } = start();

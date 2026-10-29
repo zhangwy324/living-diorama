@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use serde::de::IgnoredAny;
 use tauri::AppHandle;
 
-use crate::storage::{self, read_limited};
+use crate::storage;
 
 const WORLD_FILE: &str = "world.json";
 const BACKUP_FILE: &str = "world.prev.json";
@@ -24,10 +24,31 @@ const MAX_WORLD_BYTES: u64 = 16 * 1024 * 1024;
 /// file at once.
 static SAVING: Mutex<()> = Mutex::new(());
 
-/// The saved world's text, or `None` when there is none. A missing or unreadable `world.json`
-/// falls back to the backup; a file that is too large or not JSON counts as unreadable. Problems
-/// are logged rather than returned: a lost save never stops the app.
-pub fn load(dir: &Path) -> Option<String> {
+/// Why a save file couldn't be used.
+#[derive(Debug)]
+enum ReadError {
+    Missing,
+    /// Too large, not UTF-8 or not JSON: the file is there but its contents are lost.
+    Unusable(String),
+    /// The file is there but couldn't be read, e.g. locked by another program. Its contents may be
+    /// fine, so the save must not be replaced.
+    Io(io::Error),
+}
+
+impl From<io::Error> for ReadError {
+    fn from(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound => ReadError::Missing,
+            _ => ReadError::Io(error),
+        }
+    }
+}
+
+/// The saved world's text, or `None` when there is none. A missing or unusable `world.json`
+/// (too large, not UTF-8, not JSON) falls back to the backup, logged rather than returned. A file
+/// that exists but can't be read is an error, so the caller can avoid saving over a world that
+/// may still be good.
+pub fn load(dir: &Path) -> Result<Option<String>, String> {
     for file in [WORLD_FILE, BACKUP_FILE] {
         let path = dir.join(file);
         match read_world(&path) {
@@ -35,19 +56,34 @@ pub fn load(dir: &Path) -> Option<String> {
                 if file == BACKUP_FILE {
                     log::warn!("Restoring the world from the backup {}", path.display());
                 }
-                return Some(json);
+                return Ok(Some(json));
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => log::warn!("Could not read the saved world {}: {error}", path.display()),
+            Err(ReadError::Missing) => {}
+            Err(ReadError::Unusable(reason)) => {
+                log::warn!("Could not use the saved world {}: {reason}", path.display());
+            }
+            Err(ReadError::Io(error)) => {
+                return Err(format!(
+                    "Could not read the saved world {}: {error}",
+                    path.display()
+                ));
+            }
         }
     }
-    None
+    Ok(None)
 }
 
-fn read_world(path: &Path) -> io::Result<String> {
-    let bytes = read_limited(path, MAX_WORLD_BYTES)?;
-    let json = String::from_utf8(bytes).map_err(io::Error::other)?;
-    serde_json::from_str::<IgnoredAny>(&json).map_err(io::Error::other)?;
+fn read_world(path: &Path) -> Result<String, ReadError> {
+    let size = fs::metadata(path)?.len();
+    if size > MAX_WORLD_BYTES {
+        return Err(ReadError::Unusable(format!(
+            "it is {size} bytes, more than {MAX_WORLD_BYTES}"
+        )));
+    }
+    let bytes = fs::read(path)?;
+    let json = String::from_utf8(bytes).map_err(|error| ReadError::Unusable(error.to_string()))?;
+    serde_json::from_str::<IgnoredAny>(&json)
+        .map_err(|error| ReadError::Unusable(error.to_string()))?;
     Ok(json)
 }
 
@@ -89,7 +125,7 @@ pub mod commands {
 
     #[tauri::command]
     pub async fn load_world(app: AppHandle) -> Result<Option<String>, String> {
-        Ok(load(&storage::data_dir(&app)?))
+        load(&storage::data_dir(&app)?)
     }
 
     #[tauri::command]
@@ -130,9 +166,9 @@ mod tests {
     #[test]
     fn nothing_saved_means_none() {
         let dir = TempDir::new("none");
-        assert_eq!(load(&dir.0), None); // no folder at all
+        assert_eq!(load(&dir.0).unwrap(), None); // no folder at all
         fs::create_dir_all(&dir.0).unwrap();
-        assert_eq!(load(&dir.0), None);
+        assert_eq!(load(&dir.0).unwrap(), None);
     }
 
     #[test]
@@ -140,7 +176,7 @@ mod tests {
         let dir = TempDir::new("round-trip");
         let json = r#"{ "saveVersion": 1,  "tick": 42 }"#;
         save(&dir.0, json).unwrap();
-        assert_eq!(load(&dir.0).as_deref(), Some(json));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(json));
         assert!(!dir.0.join("world.json.tmp").exists());
         assert_eq!(dir.read(BACKUP_FILE), None); // nothing to keep yet
     }
@@ -153,7 +189,7 @@ mod tests {
         save(&dir.0, r#"{"tick":3}"#).unwrap();
         assert_eq!(dir.read(WORLD_FILE).as_deref(), Some(r#"{"tick":3}"#));
         assert_eq!(dir.read(BACKUP_FILE).as_deref(), Some(r#"{"tick":2}"#));
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":3}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":3}"#));
     }
 
     #[test]
@@ -186,19 +222,38 @@ mod tests {
 
         // Missing, as after a crash between the two renames.
         fs::remove_file(dir.0.join(WORLD_FILE)).unwrap();
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":1}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":1}"#));
 
         // Not JSON.
         fs::write(dir.0.join(WORLD_FILE), "{ torn").unwrap();
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":1}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":1}"#));
 
         // Not UTF-8.
         fs::write(dir.0.join(WORLD_FILE), [0xff, 0xfe]).unwrap();
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":1}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":1}"#));
 
         // Neither file readable.
         fs::write(dir.0.join(BACKUP_FILE), "").unwrap();
-        assert_eq!(load(&dir.0), None);
+        assert_eq!(load(&dir.0).unwrap(), None);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_an_error_not_a_missing_save() {
+        let dir = TempDir::new("io-error");
+        save(&dir.0, r#"{"tick":1}"#).unwrap();
+        save(&dir.0, r#"{"tick":2}"#).unwrap();
+        // A folder named like the save exists but can't be read as a file, as a locked file can't.
+        fs::rename(dir.0.join(WORLD_FILE), dir.0.join("kept.json")).unwrap();
+        fs::create_dir_all(dir.0.join(WORLD_FILE)).unwrap();
+        let error = load(&dir.0).unwrap_err();
+        assert!(error.contains(WORLD_FILE), "{error}");
+
+        // The same for the backup, when it is the one to fall back to.
+        fs::remove_dir_all(dir.0.join(WORLD_FILE)).unwrap();
+        fs::remove_file(dir.0.join(BACKUP_FILE)).unwrap();
+        fs::create_dir_all(dir.0.join(BACKUP_FILE)).unwrap();
+        let error = load(&dir.0).unwrap_err();
+        assert!(error.contains(BACKUP_FILE), "{error}");
     }
 
     #[test]
@@ -219,7 +274,7 @@ mod tests {
         save(&dir.0, r#"{"tick":1}"#).unwrap();
         let huge = format!("\"{}\"", "x".repeat(MAX_WORLD_BYTES as usize));
         assert!(save(&dir.0, &huge).is_err());
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":1}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":1}"#));
 
         // A file that grew on disk is unreadable, so the backup is used.
         save(&dir.0, r#"{"tick":2}"#).unwrap();
@@ -228,6 +283,6 @@ mod tests {
             vec![b' '; MAX_WORLD_BYTES as usize + 1],
         )
         .unwrap();
-        assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":1}"#));
+        assert_eq!(load(&dir.0).unwrap().as_deref(), Some(r#"{"tick":1}"#));
     }
 }

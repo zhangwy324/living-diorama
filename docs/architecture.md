@@ -115,17 +115,24 @@ Rust stores, TypeScript checks ([ADR 0014](adr/0014-species-library.md)).
 - **TypeScript** (`species-library.ts`) reads the entries through `LibraryStore`, migrates and validates them with `content-schema`, and checks that each holds the species its folder names. An entry that fails is skipped with a diagnostic, and its files are left alone.
 - At launch, once the world is ready, the library registers every stored species, one at a time, and spawns none. A species the world rejects stays in the list as unavailable. Deleting a species takes its creatures out of the world and deletes its files; it stays registered, unreachable, until the next launch.
 
+### The saved world
+
+Rust stores, TypeScript checks, as for the library ([ADR 0019](adr/0019-world-saving.md)).
+
+- **Rust** (`src-tauri/src/world.rs`) keeps the save as text in `world.json` in the data directory, with the save before it as `world.prev.json`. It writes atomically, checks only that the file is JSON, and falls back to the backup when `world.json` is missing, too large, not UTF-8 or not JSON. A file that is there but can't be read (another program holds it, say) is an error instead. `WorldStore` in `desktop-integration` reaches it, with an in-memory version for tests and the browser.
+- **TypeScript** (`world-saving.ts`) restores the save once the library has registered its species, and saves every minute, after a creature is added or taken out, and on quit. Saves run one after another, so an older one never lands after a newer one. The worker parses and validates the text; a save it rejects starts the world fresh, without trying the backup. When loading fails, the world starts fresh and nothing is saved until the next launch, so a save that can't be read for now is never overwritten. With a creature-count override the world is neither loaded nor saved.
+
 ### Startup
 
 1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it as the strip and starts the tray.
 2. The page loads, starts the worker and sends `init` with the world from `startup.ts`.
 3. The worker registers the engine's entries, then the built-in pack, resolves references and runs the world checks. Any error comes back as `error` and reaches the error screen as "The world failed to load".
-4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the app sends one `spawn` per starting creature. The app then opens the species library and registers its species ([ADR 0014](adr/0014-species-library.md) §8); development builds expose it as `window.livingDiorama.library`. From then on the strip answers the Studio's requests.
+4. The worker answers `ready` with the scene data (`SceneData`), the navigation overlays and the assets and species the renderer needs. `createDioramaView()` builds the scene from it and starts loading the prop models, and the world is still empty. The app opens the species library and registers its species ([ADR 0014](adr/0014-species-library.md) §8), then loads the saved world and sends `restore` with it, the wall-clock time and the time of day. On `restored` the view forgets the empty world's snapshots and the report is logged; on `rejected`, or with nothing saved, the app sends one `spawn` per starting creature ([ADR 0019](adr/0019-world-saving.md) §3). It then saves the world and starts saving every minute. Development builds expose the library as `window.livingDiorama.library` and the saved world as `window.livingDiorama.world`. From then on the strip answers the Studio's requests.
 5. The worker sends a snapshot every tick, and the view draws it.
 
 ### Shutdown
 
-Tray → Quit asks the page to stop first: the app sends `shutdown` to the worker and disposes the view, then the host releases the reserved screen space and exits. The host waits at most one second for the page. The Studio, if open, closes with the app.
+Tray → Quit asks the page to stop first: the app saves the world, sends `shutdown` to the worker and disposes the view, then the host releases the reserved screen space and exits. The host waits at most three seconds for the page. The Studio, if open, closes with the app.
 
 ## Messages
 
@@ -133,7 +140,7 @@ Tray → Quit asks the page to stop first: the app sends `shutdown` to the worke
 
 Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 10; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
-Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns the first four into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8); the app doesn't send `save` or `restore` yet.
+Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8): `save` resolves with the save's JSON text, `restore` with the restore report.
 
 | Direction     | Message                        | Meaning                                                                                                                                                                |
 | ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

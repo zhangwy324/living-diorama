@@ -28,6 +28,7 @@ export class DebugStats {
   #frames = 0;
   #tickAtStart = 0;
   #snapshot: SimulationSnapshot | undefined;
+  #restarting = false;
 
   constructor(document: Document) {
     this.element = document.createElement("div");
@@ -46,8 +47,21 @@ export class DebugStats {
     this.element.hidden = true;
   }
 
+  /** The newest snapshot; after `reset`, the first one starts a new window. */
   snapshot(snapshot: SimulationSnapshot): void {
     this.#snapshot = snapshot;
+    if (!this.#restarting) return;
+    this.#restarting = false;
+    this.#windowStart = -Infinity;
+    this.#frames = 0;
+  }
+
+  /**
+   * Starts a new window at the next frame, so a jump in ticks (a restored save, a catch-up) never
+   * reads as a rate.
+   */
+  reset(): void {
+    this.#restarting = true;
   }
 
   /** Call once per rendered frame. Refreshes the text once per window. */

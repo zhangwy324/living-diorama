@@ -44,6 +44,7 @@ export class SnapshotInterpolator {
   #latest: SimulationSnapshot | undefined;
   #receivedAt = 0;
   #intervalMs: number;
+  #restarting = false;
 
   /** `intervalMs` is the first guess at the time between snapshots; arrivals refine it. */
   constructor(intervalMs = 100) {
@@ -52,9 +53,10 @@ export class SnapshotInterpolator {
 
   /** Adds a snapshot received at `now` (milliseconds). Snapshots of an older or the same tick are ignored. */
   push(snapshot: SimulationSnapshot, now: number): void {
-    let previous = this.#latest;
-    if (this.#latest) {
-      if (snapshot.tick <= this.#latest.tick) return;
+    let previous = this.#restarting ? undefined : this.#latest;
+    this.#restarting = false;
+    if (previous) {
+      if (snapshot.tick <= previous.tick) return;
       const gap = now - this.#receivedAt;
       if (gap > MAX_INTERVAL_MS) {
         previous = undefined;
@@ -68,6 +70,15 @@ export class SnapshotInterpolator {
     this.#previous = previous;
     this.#latest = snapshot;
     this.#receivedAt = now;
+  }
+
+  /**
+   * Takes the next snapshot as it is, whatever its tick, and blends nothing into it: for when the
+   * world was replaced (a restored save), whose ticks may run behind or far ahead of these. Until
+   * then the newest snapshot is still drawn.
+   */
+  reset(): void {
+    this.#restarting = true;
   }
 
   /** Poses of the newest snapshot's creatures at `now`. */

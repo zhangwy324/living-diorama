@@ -53,6 +53,8 @@
 
 14. **Clean shutdown.** Quit from the tray goes through Rust, which saves the settings and emits `quit-requested`; the frontend sends `shutdown` to the worker, disposes the view and answers with the `quit_ready` command. Rust exits on that answer or after one second, whichever comes first. A second Quit while waiting is ignored.
 
+    _Amended by [ADR 0019](0019-world-saving.md) §4 (M15 PR 6):_ the frontend saves the world before it sends `shutdown`, and Rust waits up to three seconds instead of one.
+
 ### Testing
 
 15. **What is automated and what is manual.** Placement maths (work area, scale factor and height to a window rectangle; monitor fallback; height clamping) and settings parsing are pure Rust functions with unit tests. `desktop-integration` and the overlay are tested against the no-op shell. The exit criteria (100%, 150% and 200% scaling; one and two monitors; sleep/resume; focus never stolen) are checked by hand against a checklist in `docs/development.md`, because they need real display configurations.
