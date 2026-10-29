@@ -1,6 +1,6 @@
 import type { SceneData } from "@living-diorama/simulation";
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildDioramaScene } from "./diorama-view";
 import {
   createSkyLight,
@@ -103,6 +103,16 @@ describe("lightingAt", () => {
     expect(night.skyIntensity * night.skyColor.getHSL({ h: 0, s: 0, l: 0 }).l).toBeGreaterThan(0.1);
   });
 
+  it("is night only at night, switching halfway through dusk and dawn", () => {
+    expect(lightingAt(NOON).night).toBe(0);
+    expect(lightingAt(MIDNIGHT).night).toBe(1);
+    expect(lightingAt(19 * 60).night).toBe(0); // dusk
+    expect(lightingAt(7 * 60).night).toBe(0); // dawn
+    expect(lightingAt(19.75 * 60).night).toBeCloseTo(0.5);
+    expect(lightingAt(6 * 60).night).toBeCloseTo(0.5);
+    expect(lightingAt(21.5 * 60).night).toBe(1);
+  });
+
   it("keeps the key light above the horizon all day", () => {
     for (let m = 0; m < 1440; m += 5) expect(lightingAt(m).keyDirection.y).toBeGreaterThan(0.2);
   });
@@ -180,5 +190,16 @@ describe("buildDioramaScene time of day", () => {
     expect(toSun.distanceTo(lightingAt(MIDNIGHT).keyDirection)).toBeLessThan(1e-9);
     expect(background.getHex()).toBe(lightingAt(MIDNIGHT).background.getHex());
     expect(sun.shadow.intensity).toBe(lightingAt(MIDNIGHT).shadowIntensity);
+  });
+
+  it("gives the cues their night look at night and their day look by day", () => {
+    const built = buildDioramaScene(scene);
+    const setNight = vi.spyOn(built.creatures, "setNight");
+    built.setTimeOfDay(21.5 * 60);
+    expect(setNight).toHaveBeenLastCalledWith(true);
+    built.setTimeOfDay(19.5 * 60);
+    expect(setNight).toHaveBeenLastCalledWith(false);
+    built.setTimeOfDay(NOON);
+    expect(setNight).toHaveBeenLastCalledWith(false);
   });
 });

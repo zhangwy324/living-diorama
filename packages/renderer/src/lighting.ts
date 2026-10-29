@@ -16,6 +16,11 @@ export interface Lighting {
   groundColor: THREE.Color;
   skyIntensity: number;
   background: THREE.Color;
+  /**
+   * How far it is night, 0 (day, dawn and dusk) to 1 (night), blended like the light. Cues read
+   * it to pick a look that stands out from the scene.
+   */
+  night: number;
 }
 
 interface Key {
@@ -29,6 +34,7 @@ interface Key {
   ground: string;
   skyIntensity: number;
   background: string;
+  night: number;
 }
 
 const DAY: Omit<Key, "at"> = {
@@ -41,6 +47,7 @@ const DAY: Omit<Key, "at"> = {
   ground: "#5b6b3a",
   skyIntensity: 1.1,
   background: "#cfe3ea",
+  night: 0,
 };
 
 // Moonlit blue-grey: a dim moon from the front right, opposite the sun, and a sky light kept
@@ -54,6 +61,7 @@ const NIGHT: Omit<Key, "at"> = {
   ground: "#363d4a",
   skyIntensity: 1.25,
   background: "#3a4a66",
+  night: 1,
 };
 
 // A low warm sun from the left at dawn and from the right at dusk.
@@ -66,6 +74,7 @@ const DAWN: Omit<Key, "at"> = {
   ground: "#4f5a3c",
   skyIntensity: 1,
   background: "#e6cdc6",
+  night: 0,
 };
 
 const DUSK: Omit<Key, "at"> = {
@@ -77,6 +86,7 @@ const DUSK: Omit<Key, "at"> = {
   ground: "#4a4a3c",
   skyIntensity: 0.95,
   background: "#d9a993",
+  night: 0,
 };
 
 const hours = (h: number) => h * 60;
@@ -105,6 +115,7 @@ const toLighting = (k: Omit<Key, "at">): Lighting => ({
   groundColor: new THREE.Color(k.ground),
   skyIntensity: k.skyIntensity,
   background: new THREE.Color(k.background),
+  night: k.night,
 });
 
 const lerp = THREE.MathUtils.lerp;
@@ -118,6 +129,7 @@ const blend = (a: Lighting, b: Lighting, t: number): Lighting => ({
   groundColor: a.groundColor.clone().lerp(b.groundColor, t),
   skyIntensity: lerp(a.skyIntensity, b.skyIntensity, t),
   background: a.background.clone().lerp(b.background, t),
+  night: lerp(a.night, b.night, t),
 });
 
 /** Daylight: the diorama's look when no time of day is set, and the Studio preview's always. */

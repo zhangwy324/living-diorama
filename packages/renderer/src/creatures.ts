@@ -193,6 +193,11 @@ export class CreatureBodies {
     return this.#creatures.size;
   }
 
+  /** Gives the z's their night look (light on dark) or their day look (dark on light). */
+  setNight(night: boolean): void {
+    this.#cues.night = night;
+  }
+
   /** Cue sprites in use. */
   get cueSprites(): number {
     return this.#cues.active;
