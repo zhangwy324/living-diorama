@@ -268,6 +268,9 @@ function puppet(script: Proposal[], spawnPointId: string, base: object = newt) {
   return { simulation, creature, snap };
 }
 
+/** Long runs take a few seconds locally and several times that on the CI runner. */
+const slow = { timeout: 30_000 };
+
 describe("swimming in the simulation", () => {
   it("jumps in from the bank, swims at its water speed, and leaves by the exit", () => {
     const { simulation, creature, snap } = puppet([walkTo(south)], "north");
@@ -344,7 +347,7 @@ describe("swimming in the simulation", () => {
     });
   });
 
-  it("keeps every per-capability invariant over long runs", () => {
+  it("keeps every per-capability invariant over long runs", slow, () => {
     for (const [speciesId, regions] of [
       [newt.id, ["north-bank", "pond", "south-bank"]],
       [minnow.id, ["pond"]],
@@ -407,7 +410,7 @@ describe("turning when setting off (#121, ADR 0020 §7)", () => {
     expect(turningTicks).toBeLessThanOrEqual(4);
   });
 
-  it("never turns faster than the turn rate over a living day in the Hollow", () => {
+  it("never turns faster than the turn rate over a living day in the Hollow", slow, () => {
     let last = new Map<string, number>();
     let worst = 0;
     const report = runWithInvariants({
