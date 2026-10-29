@@ -46,6 +46,8 @@
 
 11. **Drawn species defaults** (`core:walk`, `core:wander`, base speed 0.6, the mossling's) are app configuration, next to the startup config. Since [ADR 0018](0018-living-behavior.md) §4 they also take the mossling's `core:feed`, `core:rest` and `core:vision` 8.
 
+    _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §14 (planned, M16 PR 6):_ a drawn species takes its capabilities (`core:land`, `core:swim` or both) and its land gait from its body plan. The other defaults stay app configuration.
+
 12. **A console hook until the Studio.** Development builds put the library on `window.livingDiorama.library`, with `saveSample()` to save a sample drawing, so saving and relaunching can be checked by hand before M11 gives it a UI.
 
 ## Consequences

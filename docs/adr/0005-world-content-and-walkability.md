@@ -12,6 +12,8 @@
 
 3. **Locomotion rules live on capabilities, not in engine code.** A capability may carry `locomotion: { regionKinds, maxSlopeDeg? }`. `core:walk` is `{ regionKinds: [land, cave], maxSlopeDeg: 35 }`. A species can move in a region whose kind one of its locomotion capabilities lists, with the most permissive slope limit among them. This is how region kinds affect navigation, refining ADR 0004 §5: the engine still never branches on a kind or a capability ID, it reads the rules. A later `core:swim` or `core:climb` is a new registry entry, not engine code.
 
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §2 (planned, M16 PR 2):_ `core:walk` becomes `core:land`, and `core:swim` covers `water`. A capability may also name an animation profile and a submersion.
+
 4. **Walkability is derived at load time** for each region and navigation profile (size class plus locomotion rules), on the world's cell grid (the heightfield cells). A cell is judged at its centre:
    - outside the region's footprint: not part of the region;
    - no locomotion for the region's kind, no surface (e.g. beside a deck), or too steep (slope sampled at the centre and inside both terrain triangles): blocked;
@@ -22,11 +24,15 @@
 
    Water uses the new **`core:flat`** surface (`{ y }`): the water region stands on the water level, not the riverbed, which is just terrain.
 
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §3–§4 (planned, M16 PR 2):_ the rules apply per profile. A water region is walkable for a profile whose locomotion covers `water`, only where its surface lies above the ground; land under water stays submerged for every profile. A swimmer enters water from land by a derived one-way entry and leaves it only by an authored exit.
+
 5. **World checks** (`checkWorld`) report structured diagnostics:
    - errors: a region whose walkable area splits into several pieces, an unusable portal (no walkable cells on both sides, or a step above `maxStepHeight`), two regions walkable at the same place and height, a spawn point that is not walkable;
    - warnings: two regions touching without a portal (an invisible wall), a region with no walkable area, a connection no species can use, no species registered.
 
    They run for every registered species' profile. "Banks connected only through the bridge" is a test of the built-in world (removing the bridge disconnects them), not engine logic.
+
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §5 (planned, M16 PR 2):_ `unsatisfiable_connection` and `spawn_unusable` no longer fire at startup just because no species registered yet has the capability, since swimmers arrive from the library later. A capability that isn't registered at all still warns.
 
 6. **The built-in world is generated.** `tools/development/src/worldgen` turns a layout (river spline, plateau, ramp, bridge, groves, spawns) into the whole world definition with a seeded generator. `pnpm worldgen` writes `packages/built-in-content/src/woodland-hollow/world.json` and a top-down debug map (`tools/development/out/`). A test fails if the JSON differs from the generator's output. Heights are inline, in millimetres: the schema validates them fully and no decoder is needed. The asset heightfield path stays in the schema for larger worlds.
 

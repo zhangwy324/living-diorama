@@ -14,6 +14,8 @@
 6. **No content-named actions** (spec §15.3). Entering a cave or crossing a bridge is generic connection traversal. There is no `enter_cave` action.
 7. **Traits and senses are separate maps from capabilities** (spec §15.4). They are left out of the v1 species schema and will be added when needs and senses arrive. Capabilities gate what a creature _can_ do. Senses gate what it _perceives_. Traits tune _how_ it behaves.
 
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §1–§2 (planned, M16 PR 2):_ `core:walk` is renamed `core:land` and `core:swim` is added. Hopping is a land gait, a style that picks the animation, not a capability.
+
 ## Consequences
 
 - Navigation filters region-graph edges by the creature's capability set alone.
