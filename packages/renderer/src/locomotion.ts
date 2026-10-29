@@ -1,11 +1,12 @@
 import type { AnchorName, Vec3 } from "@living-diorama/content-schema";
+import * as THREE from "three";
 import { SNAP_SECONDS } from "./cues";
 import { SNAP_DISTANCE } from "./interpolation";
 
 // Whole-body animation per locomotion profile (ADR 0020 §8): a walk's bob and waddle, a hop's
 // squash and arc, a swim's sway and bob. Only whole-body transforms, no bones or bending. This
 // module is the one place that turns a profile into motion, so per-part animation can replace it
-// by swapping `trackMovement` and `locomotionMotion`. Profiles are plain names from the snapshot;
+// by swapping `trackMovement`, `locomotionMotion` and `locomotionTransform`. Profiles are plain names from the snapshot;
 // the renderer never sees the capabilities behind them.
 
 /** How a creature has been moving, carried from frame to frame. */
@@ -25,8 +26,10 @@ const SPEED_SMOOTHING = 0.2;
 
 /**
  * Moves `movement` on to the creature's position `world` after `dt` seconds of animation time.
- * A teleport or a break (a gap longer than `SNAP_SECONDS`) starts afresh at rest; no time passing
- * (paused) changes nothing. Mutates and returns it.
+ * A teleport or a break (a gap longer than `SNAP_SECONDS`) starts afresh at rest. While no
+ * animation time passes (the simulation is paused) the speed and distance hold, so the pose holds,
+ * and the last of the blend towards the newest snapshot is taken as it is rather than counted as a
+ * dash on resuming. Mutates and returns it.
  */
 export function trackMovement(movement: Movement, world: Vec3, dt: number): Movement {
   if (!(dt >= 0)) dt = 0;
@@ -37,10 +40,10 @@ export function trackMovement(movement: Movement, world: Vec3, dt: number): Move
     movement.speed = 0;
     return movement;
   }
-  if (dt === 0) return movement;
   last.x = world.x;
   last.y = world.y;
   last.z = world.z;
+  if (dt === 0) return movement;
   movement.speed += (distance / dt - movement.speed) * (1 - Math.exp(-dt / SPEED_SMOOTHING));
   movement.travelled += movement.speed * dt;
   return movement;
@@ -198,4 +201,55 @@ export function locomotionMotion(input: LocomotionInput, out: LocomotionMotion):
   out.pivot = "feet";
   if (profile && weight > 0) profile(input, weight, out);
   return out;
+}
+
+/** What the transform needs to know about a body, in its own metres: feet at the origin, facing +X. */
+export interface LocomotionBody {
+  height: number;
+  /** How far the body reaches back (negative) and forward along X. */
+  minX: number;
+  maxX: number;
+  /** From the middle plane to the front or back face. */
+  halfDepth: number;
+  /** Each anchor on the body. The feet are where it meets the ground, so their y is 0. */
+  pivots: Readonly<Record<AnchorName, THREE.Vector3>>;
+}
+
+const turn = new THREE.Quaternion();
+const euler = new THREE.Euler(0, 0, 0, "YZX");
+const scale = new THREE.Vector3();
+const unpivot = new THREE.Matrix4();
+
+/**
+ * Writes into `out` the body's turn and scale for `motion` about its pivot, in the body's own
+ * frame: the yaw about the vertical, the pitch about the depth axis, the roll about the drawing's
+ * forward axis. Returns how far to lift the body, in metres: the motion's own lift plus, for a tilt
+ * about the feet, enough that its front, rear or side doesn't dip into the ground. Turns about
+ * another pivot happen in water, where nothing needs lifting.
+ */
+export function locomotionTransform(
+  motion: LocomotionMotion,
+  body: LocomotionBody,
+  out: THREE.Matrix4,
+): number {
+  const pivot = body.pivots[motion.pivot];
+  euler.set(motion.roll, motion.yaw, -motion.pitch);
+  out.compose(
+    pivot,
+    turn.setFromEuler(euler),
+    scale.set(motion.scaleXZ, motion.scaleY, motion.scaleXZ),
+  );
+  out.multiply(unpivot.makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+  return motion.lift * body.height + groundClearance(motion, body, pivot);
+}
+
+/** How far a body tilted about its feet at `pivot` would dip below them. */
+function groundClearance(motion: LocomotionMotion, body: LocomotionBody, pivot: THREE.Vector3) {
+  if (motion.pivot !== "feet") return 0;
+  const { pitch, roll, scaleXZ } = motion;
+  // Measured from the feet, which may be placed anywhere along the body.
+  const front = Math.max(0, body.maxX - pivot.x);
+  const back = Math.max(0, pivot.x - body.minX);
+  const tilt = (pitch >= 0 ? front : back) * Math.sin(Math.abs(pitch));
+  return (tilt + body.halfDepth * Math.abs(Math.sin(roll))) * scaleXZ;
 }

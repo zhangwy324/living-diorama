@@ -1,10 +1,13 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   FULL_MOTION_SPEED,
   locomotionMotion,
+  locomotionTransform,
   restingLocomotion,
   restingMovement,
   trackMovement,
+  type LocomotionBody,
   type LocomotionInput,
   type LocomotionMotion,
 } from "./locomotion";
@@ -163,5 +166,68 @@ describe("trackMovement", () => {
     trackMovement(movement, at(10.5), 5); // a break, e.g. the window was hidden
     expect(movement.speed).toBe(0);
     expect(movement.last).toEqual(at(10.5));
+  });
+});
+
+describe("trackMovement while paused", () => {
+  it("takes the last of the blend as it is, so resuming doesn't start with a dash", () => {
+    const movement = restingMovement();
+    trackMovement(movement, { x: 0, y: 0, z: 0 }, 0);
+    for (let frame = 1; frame <= 60; frame++) {
+      trackMovement(movement, { x: frame * 0.01, y: 0, z: 0 }, 1 / 60);
+    }
+    const { speed, travelled } = movement;
+    // Paused: animation time stops while the pose finishes blending 6 cm further.
+    trackMovement(movement, { x: 0.66, y: 0, z: 0 }, 0);
+    expect(movement).toMatchObject({ speed, travelled });
+    // Resumed: the next frame moves on at the same pace.
+    trackMovement(movement, { x: 0.67, y: 0, z: 0 }, 1 / 60);
+    expect(movement.speed).toBeCloseTo(speed, 3);
+  });
+});
+
+describe("locomotionTransform", () => {
+  const body = (feetX: number): LocomotionBody => ({
+    height: 0.8,
+    minX: -0.3,
+    maxX: 0.5,
+    halfDepth: 0.1,
+    pivots: { feet: new THREE.Vector3(feetX, 0, 0), tail: new THREE.Vector3(-0.3, 0.4, 0) },
+  });
+  const at = (motion: Partial<LocomotionMotion>) => ({ ...restingLocomotion(), ...motion });
+  const matrix = new THREE.Matrix4();
+
+  it("turns and scales the body about its pivot", () => {
+    for (const motion of [
+      at({ pitch: 0.2, roll: -0.1, scaleY: 0.8, scaleXZ: 1.1 }),
+      at({ pivot: "tail", yaw: 0.3, roll: 0.05 }),
+    ]) {
+      const b = body(0.2);
+      locomotionTransform(motion, b, matrix);
+      const pivot = b.pivots[motion.pivot];
+      expect(pivot.clone().applyMatrix4(matrix).distanceTo(pivot)).toBeLessThan(1e-12);
+    }
+  });
+
+  it("lifts a tilt about the feet by the reach from the feet, and lifts nothing else", () => {
+    // Pitching forward dips the front, 0.5 - 0.2 m ahead of the feet; back, the rear, 0.5 m behind.
+    expect(locomotionTransform(at({ pitch: 0.1 }), body(0.2), matrix)).toBeCloseTo(
+      0.3 * Math.sin(0.1),
+    );
+    expect(locomotionTransform(at({ pitch: -0.1 }), body(0.2), matrix)).toBeCloseTo(
+      0.5 * Math.sin(0.1),
+    );
+    expect(locomotionTransform(at({ roll: 0.1, lift: 0.5 }), body(0), matrix)).toBeCloseTo(
+      0.1 * Math.sin(0.1) + 0.4,
+    );
+    expect(locomotionTransform(at({ pivot: "tail", pitch: 0.1 }), body(0), matrix)).toBe(0);
+    // The lowest corner ends up on the ground, not below it or above it.
+    const b = body(0.2);
+    const motion = at({ pitch: 0.15, scaleXZ: 1.05 });
+    const lift = locomotionTransform(motion, b, matrix);
+    const lowest = Math.min(
+      ...[b.minX, b.maxX].map((x) => new THREE.Vector3(x, 0, 0).applyMatrix4(matrix).y + lift),
+    );
+    expect(lowest).toBeCloseTo(0, 9);
   });
 });

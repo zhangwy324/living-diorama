@@ -31,9 +31,12 @@ import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import {
   locomotionMotion,
+  locomotionTransform,
   restingLocomotion,
   restingMovement,
   trackMovement,
+  type LocomotionBody,
+  type LocomotionInput,
   type LocomotionMotion,
   type Movement,
 } from "./locomotion";
@@ -61,17 +64,10 @@ export interface CreatureBodiesOptions {
   visibility?: CueVisibility;
 }
 
-interface SpeciesLook {
+/** A species as drawn: its body, its size and reach in metres, and its anchors as pivots. */
+interface SpeciesLook extends LocomotionBody {
   /** The fallback block until the drawing's body is built. */
   body: Body;
-  /** Metres from the feet to the top of the head. */
-  height: number;
-  /** Metres from the feet forward to the front of the body, for lifting it as it pecks. */
-  front: number;
-  /** Metres from the feet back to the rear of the body, for lifting it as it leans back. */
-  back: number;
-  /** Metres from the middle plane to the front or back face, for lifting it as it leans aside. */
-  halfDepth: number;
   /** The species' placed anchors; the others sit where `defaultAnchor` puts them. */
   anchors: Anchors;
   /** Each anchor on the body, in its metres: the pivots of its motion (ADR 0020 §10). */
@@ -110,36 +106,29 @@ const DEFAULT_UNITS_PER_PIXEL = 0.02;
 
 const byId = (a: Creature, b: Creature) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-/** How far a body reaches forward (+X) and back of its feet, and to each side of its middle. */
-function reachOf(body: Body): Pick<SpeciesLook, "front" | "back" | "halfDepth"> {
+/** How far a body reaches back and forward along X, and to each side of its middle plane. */
+function reachOf(body: Body): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
   body.geometry.computeBoundingBox();
   const box = body.geometry.boundingBox;
   return {
-    front: Math.max(0, box?.max.x ?? 0),
-    back: Math.max(0, -(box?.min.x ?? 0)),
+    minX: box?.min.x ?? 0,
+    maxX: box?.max.x ?? 0,
     halfDepth: Math.max(0, box?.max.z ?? 0, -(box?.min.z ?? 0)),
   };
 }
 
-/** Puts each anchor of `look` on its current body: placed, or where `defaultAnchor` puts it. */
+/**
+ * Puts each anchor of `look` on its current body: placed, or where `defaultAnchor` puts it. The
+ * feet are where the body meets the ground, so they sit on it wherever along the body they are
+ * placed.
+ */
 function placeAnchors(look: SpeciesLook): void {
   const { drawing } = look.body;
   for (const name of ANCHOR_NAMES) {
     const anchor = look.anchors[name] ?? defaultAnchor(name, drawing.bounds);
     drawing.toBody(anchor, look.pivots[name]);
   }
-}
-
-/**
- * How far a body tilted by `motion` about its feet must rise so it doesn't dip into the ground:
- * its front or rear as it pitches, a side as it rolls. Turns about another pivot happen in water,
- * where nothing needs lifting.
- */
-function groundClearance(look: SpeciesLook, motion: LocomotionMotion): number {
-  if (motion.pivot !== "feet") return 0;
-  const { pitch, roll, scaleXZ } = motion;
-  const tilt = pitch >= 0 ? frontLift(look.front, pitch) : frontLift(look.back, -pitch);
-  return (tilt + look.halfDepth * Math.abs(Math.sin(roll))) * scaleXZ;
+  look.pivots.feet.y = 0;
 }
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -162,14 +151,20 @@ export class CreatureBodies {
   // Reused every frame, so placing creatures allocates nothing.
   readonly #motion = restingMotion();
   readonly #locomotion = restingLocomotion();
+  readonly #input: LocomotionInput = {
+    profile: undefined,
+    speed: 0,
+    travelled: 0,
+    time: 0,
+    phase: 0,
+    height: 0,
+  };
   readonly #scratch = {
     base: new THREE.Matrix4(),
     cue: new THREE.Matrix4(),
     move: new THREE.Matrix4(),
-    unpivot: new THREE.Matrix4(),
     position: new THREE.Vector3(),
     scale: new THREE.Vector3(),
-    euler: new THREE.Euler(0, 0, 0, "YZX"),
     turn: new THREE.Quaternion(),
     point: new THREE.Vector3(),
   };
@@ -208,7 +203,8 @@ export class CreatureBodies {
     const { time, realTime, view } = frame;
     const dt = realTime - (this.#realTime ?? realTime);
     this.#realTime = realTime;
-    // Movement is measured on animation time, so a paused creature holds its stride.
+    // Movement is measured on animation time, which stops while the simulation is paused (the
+    // view sets its timer's timescale to 0), so a paused creature holds its pose mid-stride.
     const animationDt = time - (this.#time ?? time);
     this.#time = time;
     if (view) this.#screen.set(view);
@@ -224,12 +220,15 @@ export class CreatureBodies {
       if (pose.cues.includes("eating")) creature.progress = pose.cueProgress;
       const { speed, travelled } = trackMovement(creature.movement, pose.world, animationDt);
       const motion = bodyMotion(weights, time, phase, this.#motion);
-      const profile = pose.animation;
       const height = look.height;
-      const locomotion = locomotionMotion(
-        { profile, speed, travelled, time, phase, height },
-        this.#locomotion,
-      );
+      const input = this.#input;
+      input.profile = pose.animation;
+      input.speed = speed;
+      input.travelled = travelled;
+      input.time = time;
+      input.phase = phase;
+      input.height = height;
+      const locomotion = locomotionMotion(input, this.#locomotion);
       this.#place(mesh, pose, look, motion, locomotion);
       mesh.geometry = look.body.geometry;
       mesh.material = look.body.material;
@@ -311,10 +310,10 @@ export class CreatureBodies {
   /**
    * Sets the body's transform from its pose, cue motion and locomotion. Outermost first: the
    * position, lowered by its submersion (ADR 0020 §9), and the heading; then the cue motion about
-   * the feet (ADR 0018 §15); then the locomotion about its pivot (ADR 0020 §8, §10). So the two
-   * add up: their lifts sum, their tilts and scales compose. A sleeping or eating creature stands
-   * still, so the two rarely overlap, and when they do, as one fades, each turns about its own
-   * point.
+   * the bottom middle of the body (ADR 0018 §15); then the locomotion about its pivot (ADR 0020
+   * §8, §10, `locomotionTransform`). So the two add up: their lifts sum, their tilts and scales
+   * compose. A sleeping or eating creature stands still, so the two rarely overlap, and when they
+   * do, as one fades, each turns about its own point.
    */
   #place(
     mesh: THREE.Mesh,
@@ -323,24 +322,14 @@ export class CreatureBodies {
     cue: BodyMotion,
     move: LocomotionMotion,
   ): void {
-    const {
-      base,
-      cue: cueMatrix,
-      move: moveMatrix,
-      unpivot,
-      position,
-      scale,
-      euler,
-      turn,
-    } = this.#scratch;
+    const { base, cue: cueMatrix, move: moveMatrix, position, scale, turn } = this.#scratch;
     const height = look.height;
-    // The cue pitch turns about the feet, so the body rises as its front dips, to keep it above
-    // ground; the locomotion's tilts are lifted the same way.
+    // The cue pitch turns about the bottom middle, so the body rises as its front dips, to keep it
+    // above ground; `locomotionTransform` lifts its own tilts the same way.
     const lift =
       cue.lift * height +
-      frontLift(look.front * cue.scaleXZ, cue.pitch) +
-      move.lift * height +
-      groundClearance(look, move) -
+      frontLift(Math.max(0, look.maxX) * cue.scaleXZ, cue.pitch) +
+      locomotionTransform(move, look, moveMatrix) -
       (pose.submersion ?? 0) * height;
     // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h).
     position.set(pose.world.x, pose.world.y + lift, pose.world.z);
@@ -351,17 +340,7 @@ export class CreatureBodies {
       turn.setFromAxisAngle(Z_AXIS, -cue.pitch),
       scale.set(cue.scaleXZ, cue.scaleY, cue.scaleXZ),
     );
-    // Turned and scaled about the pivot: the yaw about the vertical, the pitch about the depth
-    // axis, the roll about the drawing's forward axis.
-    const pivot = look.pivots[move.pivot];
-    euler.set(move.roll, move.yaw, -move.pitch);
-    moveMatrix.compose(
-      pivot,
-      turn.setFromEuler(euler),
-      scale.set(move.scaleXZ, move.scaleY, move.scaleXZ),
-    );
-    unpivot.makeTranslation(-pivot.x, -pivot.y, -pivot.z);
-    mesh.matrix.copy(base).multiply(cueMatrix).multiply(moveMatrix).multiply(unpivot);
+    mesh.matrix.copy(base).multiply(cueMatrix).multiply(moveMatrix);
     mesh.matrixWorldNeedsUpdate = true;
   }
 

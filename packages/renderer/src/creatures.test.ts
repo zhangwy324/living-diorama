@@ -329,15 +329,19 @@ describe("CreatureBodies", () => {
       expect(Math.max(...walking) - Math.min(...walking)).toBeGreaterThan(0.02);
     });
 
-    it("keeps a walker's and a hopper's feet out of the ground as they tilt", async () => {
-      for (const animation of ["walk", "hop"]) {
-        const { layer, bodies } = make();
-        await loaded(bodies);
-        let deepest = Infinity;
-        moving(240, { animation }, bodies, () => {
-          deepest = Math.min(deepest, box(layer).min.y);
-        });
-        expect(deepest).toBeGreaterThanOrEqual(-1e-6);
+    it("keeps a walker's and a hopper's feet on the ground as they tilt and squash", async () => {
+      // The default feet, and feet placed off-centre and above the bottom edge, which still sit
+      // on the ground: the body neither dips below it nor floats above it when it lands.
+      for (const anchors of [{}, { feet: { x: 4, y: 30 } }]) {
+        for (const animation of ["walk", "hop"]) {
+          const { layer, bodies } = make(undefined, { template: "walker", anchors });
+          await loaded(bodies);
+          const lowest: number[] = [];
+          moving(240, { animation }, bodies, () => lowest.push(box(layer).min.y));
+          expect(Math.min(...lowest)).toBeGreaterThanOrEqual(-1e-6);
+          // On the ground at each landing: within a millimetre, many frames of the run.
+          expect(lowest.filter((y) => y < 1e-3).length).toBeGreaterThan(10);
+        }
       }
     });
 
