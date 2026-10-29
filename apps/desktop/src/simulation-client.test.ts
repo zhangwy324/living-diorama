@@ -350,12 +350,15 @@ describe("simulation client", () => {
       },
     );
 
-    it("forgets lost time counted before the restore was sent", () => {
-      const { client, snapshot, catchUps } = scripted();
+    it("forgets lost time counted before the restore was sent", async () => {
+      const { client, reply, snapshot, catchUps, idOf } = scripted();
       snapshot(0, 0);
       snapshot(100, 100);
-      void client.restore("{}");
-      // The first snapshot after it only sets the baseline, even if the answer were lost.
+      const restoring = client.restore("{}");
+      // Rejected before any snapshot, so the wait is over when the next one comes.
+      reply({ type: "rejected", requestId: idOf("restore"), command: "restore", diagnostics: [] });
+      await restoring;
+      // Its gap is measured from the last snapshot before the restore: that baseline is gone.
       snapshot(200, 3 * HOUR);
       expect(catchUps()).toEqual([]);
     });

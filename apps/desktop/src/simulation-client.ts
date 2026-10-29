@@ -273,7 +273,7 @@ export function startSimulation(
         answer(message.requestId, { ok: true, value: message.json });
         break;
       case "restored":
-        restoring--;
+        restoring = Math.max(0, restoring - 1);
         lostTime.reset();
         onRestored?.(message.report);
         answer(message.requestId, { ok: true, value: message.report });
@@ -289,7 +289,7 @@ export function startSimulation(
         break;
       }
       case "rejected":
-        if (message.command === "restore") restoring--;
+        if (message.command === "restore") restoring = Math.max(0, restoring - 1);
         answer(message.requestId, { ok: false, diagnostics: message.diagnostics });
         break;
       case "error": {
