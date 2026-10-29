@@ -75,6 +75,8 @@ This ADR amends ADR 0002 (prop placements and the new `prop` kind), ADR 0004 §7
 
     In custom day mode there is no catch-up: the world carries on exactly from the state it was saved in.
 
+    _Amended by [ADR 0019](0019-world-saving.md) §6:_ a gap under 2 minutes is no gap, not ordinary ticks: the world is restored exactly and only the time of day jumps.
+
 ### Testing
 
 20. **Long-run checks.** The randomized invariant runs (ADR 0006 §12) also check that needs stay in [0, 1], that every creature with reachable food eats at least once per simulated 3 hours, that creatures spend most of the night asleep, and that decisions per creature stay under a bound (no flicker). A headless runner option prints, per creature, meals, sleep hours and time spent hungry.
