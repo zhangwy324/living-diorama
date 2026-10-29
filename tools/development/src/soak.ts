@@ -50,6 +50,7 @@ const { values } = parseArgs({
 });
 const seeds = Number(values.seeds);
 const tickRateHz = Number(values.hz);
+if (!Number.isInteger(seeds) || seeds < 1) throw new Error(`--seeds must be a whole number ≥ 1`);
 const jobs = Math.min(seeds, Number(values.jobs));
 if (!Number.isInteger(jobs) || jobs < 1) throw new Error(`--jobs must be a whole number ≥ 1`);
 const config: SoakConfig = {
