@@ -54,7 +54,7 @@ for (let seed = 1; seed <= seeds; seed++) {
   /** Creatures that used a structure, and each creature's jumps across a bank, by ID. */
   const structureUsers = new Set<string>();
   const jumpsBy = new Map<string, number>();
-  /** Amphibian ticks in water and out of it. */
+  /** Ticks in water and out of it, summed over all the seed's amphibians (one by default). */
   const amphibianTicks = { water: 0, land: 0 };
   const report = runWithInvariants({
     register: registerHollowCreatures,
@@ -109,7 +109,7 @@ for (let seed = 1; seed <= seeds; seed++) {
   const inWater = amphibianTicks.water / Math.max(1, amphibianTicks.water + amphibianTicks.land);
   const swam = values["mosslings-only"]
     ? ""
-    : `, ${jumps} amphibian bank jumps, ${(inWater * 100).toFixed(0)}% of its time in water`;
+    : `, ${jumps} amphibian bank jumps, ${(inWater * 100).toFixed(0)}% of amphibian time in water`;
   console.log(
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
       `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +

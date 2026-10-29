@@ -25,6 +25,7 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import {
+  carp,
   minnow,
   newt,
   otter,
@@ -886,31 +887,77 @@ describe("keeping to one medium (#140)", () => {
     expect(bridged).toBeGreaterThan(30);
   });
 
-  it("still swims and walks over a living day, with few jumps", slow, () => {
-    const ticks = { water: 0, land: 0 };
-    let jumps = 0;
-    const report = runWithInvariants({
-      register: registerHollowCreatures,
-      worldId: "hollow:woodland-hollow",
-      speciesId: otter.id,
-      seed: 1,
-      ticks: 24 * 3600 * 2,
-      tickRateHz: 2,
-      creatures: 2,
-      onTick: (sim, events) => {
-        jumps += events.filter((e) => e.type === "entered_region" && !e.connectionId).length;
-        for (const c of sim.state.creatures.values()) {
-          ticks[
-            sim.state.model.regions.get(c.position.regionId)?.kind === "water" ? "water" : "land"
-          ]++;
-        }
+  it("reaches in one medium what a walker or a swimmer reaches at all", () => {
+    for (const [speciesId, from] of [
+      ["hollow:mossling", { regionId: "west-woods", x: -15, z: 7 }],
+      [carp.id, { regionId: "river", x: 4.25, z: 14.25 }],
+    ] as const) {
+      const pathfinder = navigationOf(simulation, speciesId);
+      expect(pathfinder.reachableCells(from, { sameMedium: true })).toEqual(
+        pathfinder.reachableCells(from),
+      );
+    }
+    // An amphibian reaches the river and the far bank only by changing medium.
+    const fromWoods = amphibian.reachableCells({ regionId: "west-woods", x: -15, z: 7 });
+    const inMedium = amphibian.reachableCells(
+      { regionId: "west-woods", x: -15, z: 7 },
+      { sameMedium: true },
+    );
+    expect([...fromWoods.keys()]).toContain("river");
+    expect(inMedium.has("river")).toBe(false);
+    expect(inMedium.get("west-woods")).toEqual(fromWoods.get("west-woods"));
+    // A large one doesn't fit the bridge, so the far bank is across the water only.
+    const large = createSimulation({
+      register: (r: Registries) => {
+        registerHollowCreatures(r);
+        r.species.register({ ...otter, id: "test:large-otter", sizeClass: "large" });
       },
+      worldId: "hollow:woodland-hollow",
+      seed: 1,
     });
-    expect(report.violations).toEqual([]);
-    expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
-    // Per amphibian and day: a few dozen jumps, not hundreds, and time in both media.
-    expect(jumps / 2).toBeLessThan(50);
-    expect(ticks.water / (ticks.water + ticks.land)).toBeGreaterThan(0.02);
-    expect(ticks.land / (ticks.water + ticks.land)).toBeGreaterThan(0.02);
+    const big = navigationOf(large, "test:large-otter");
+    const west = { regionId: "west-woods", x: -15, z: 7 };
+    expect(big.reachableCells(west).has("east-meadow")).toBe(true);
+    expect(big.reachableCells(west, { sameMedium: true }).has("east-meadow")).toBe(false);
   });
+
+  // Per amphibian and day: a few dozen jumps, not hundreds (#140 measured 509–717 for medium and
+  // 365–778 for large before), and time in the water too.
+  it.each([
+    ["medium", 50, 0.02],
+    ["large", 75, 0],
+  ] as const)(
+    "keeps a %s amphibian mostly to one medium over a living day, still in both",
+    slow,
+    (sizeClass, maxJumps, minWaterShare) => {
+      const ticks = { water: 0, land: 0 };
+      let jumps = 0;
+      const speciesId = `test:otter-${sizeClass}`;
+      const report = runWithInvariants({
+        register: (r: Registries) => {
+          registerHollowCreatures(r);
+          r.species.register({ ...otter, id: speciesId, sizeClass });
+        },
+        worldId: "hollow:woodland-hollow",
+        speciesId,
+        seed: 1,
+        ticks: 24 * 3600 * 2,
+        tickRateHz: 2,
+        creatures: 2,
+        onTick: (sim, events) => {
+          jumps += events.filter((e) => e.type === "entered_region" && !e.connectionId).length;
+          for (const c of sim.state.creatures.values()) {
+            const kind = sim.state.model.regions.get(c.position.regionId)?.kind;
+            ticks[kind === "water" ? "water" : "land"]++;
+          }
+        },
+      });
+      expect(report.violations).toEqual([]);
+      expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+      expect(jumps / 2).toBeLessThan(maxJumps);
+      expect(ticks.water).toBeGreaterThan(0);
+      expect(ticks.water / (ticks.water + ticks.land)).toBeGreaterThanOrEqual(minWaterShare);
+      expect(ticks.land / (ticks.water + ticks.land)).toBeGreaterThan(0.5);
+    },
+  );
 });

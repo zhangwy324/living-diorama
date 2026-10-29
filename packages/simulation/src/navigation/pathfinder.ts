@@ -7,7 +7,7 @@ import { CellState, type RegionMask } from "./walkability";
 // Hierarchical route planning (roadmap M3 task 5, ADR 0006). Each usable portal gets a few
 // crossings: pairs of edge-adjacent walkable cells, one on each side. Their cells are the doors
 // of a small graph whose in-region edge costs come from exact walking-distance fields, so the
-// region-level search picks the truly shortest sequence of regions. Grid A* then fills in each
+// region-level search picks the cheapest sequence of regions. Grid A* then fills in each
 // region's leg.
 //
 // A region can split into several walkable areas for one profile, e.g. a rock that a large
@@ -52,7 +52,7 @@ export interface Crossing {
   /** Cell centres. The region changes halfway, on the shared cell edge. */
   from: Vec2;
   to: Vec2;
-  /** Distance between the centres plus the connection's extra cost, or `BANK_CROSSING_COST`. */
+  /** Distance between the centres plus the connection's extra cost or, for a bank, `BANK_CROSSING_COST`. */
   cost: number;
 }
 
@@ -113,15 +113,17 @@ export class Pathfinder {
 
   /**
    * The walkable cells a creature standing at `from` can reach, per region: its own area and
-   * every area that crossings lead to. Empty if `from` is not walkable.
+   * every area that crossings lead to. Empty if `from` is not walkable. With `sameMedium`, only
+   * through crossings between regions of one kind: no bank jump, and no connection into a region
+   * of another kind (#140).
    */
-  reachableCells(from: RegionPosition): ReachableCells {
+  reachableCells(from: RegionPosition, { sameMedium = false } = {}): ReachableCells {
     const start = this.#areaAt(from.regionId, from.x, from.z);
     if (start === undefined) return NO_CELLS;
-    const key = areaKey(from.regionId, start);
+    const key = `${areaKey(from.regionId, start)}${sameMedium ? "|same" : ""}`;
     let found = this.#reachable.get(key);
     if (!found) {
-      found = this.#flood(from.regionId, start);
+      found = this.#flood(from.regionId, start, sameMedium);
       this.#reachable.set(key, found);
     }
     return found;
@@ -148,14 +150,16 @@ export class Pathfinder {
     return area === -1 ? undefined : area;
   }
 
-  #flood(regionId: string, start: number): ReachableCells {
+  #flood(regionId: string, start: number, sameMedium: boolean): ReachableCells {
     const seen = new Set([areaKey(regionId, start)]);
     const queue = [{ regionId, area: start }];
+    const kindOf = (id: string) => this.navigation.masks.get(id)?.region.kind;
     // Iterating while pushing visits the appended areas too.
     for (const current of queue) {
       for (const exit of this.#exits(current.regionId)) {
         const { ofCell } = this.#regionAreas(current.regionId);
         if (ofCell[exit.fromCell] !== current.area) continue;
+        if (sameMedium && kindOf(exit.toRegionId) !== kindOf(current.regionId)) continue;
         const area = this.#regionAreas(exit.toRegionId).ofCell[exit.toCell] ?? -1;
         const key = areaKey(exit.toRegionId, area);
         if (area === -1 || seen.has(key)) continue;
