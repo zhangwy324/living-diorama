@@ -91,11 +91,26 @@ export interface ActionContext extends PlaceQueries {
    * amendments, §11). A need the creature doesn't have is ignored.
    */
   adjustNeed(id: string, delta: number): void;
+  /** Radians in [-π, π); 0 faces +Z and π/2 faces +X. Change it through `turnTo` or `face`. */
+  readonly heading: number;
   /**
-   * Turns the creature to face world point (x, z) at once, e.g. the food it eats. Does nothing if
-   * it stands there. Walking turns it to its direction of travel again.
+   * The creature's own random stream (ADR 0006 §3), e.g. for a resting heading. Drawing from it
+   * moves the stream on for its later decisions too, so a run stays the same for its seed.
    */
-  face(x: number, z: number): void;
+  readonly rng: Rng;
+  /**
+   * Turns the creature in place towards `heading` (radians), the short way round, by at most
+   * `TURN_RATE` (half a turn a second) this tick, and says whether it now faces it. An action
+   * that wants a smooth turn calls it every tick until `"facing"`, and calling it again then
+   * keeps the heading. While catching up (`catchingUp`) the turn is done at once. Walking turns
+   * the creature to its direction of travel again.
+   */
+  turnTo(heading: number): "turning" | "facing";
+  /**
+   * `turnTo` the heading from the creature towards world point (x, z), e.g. the food it eats;
+   * `"facing"` at once if it stands there.
+   */
+  face(x: number, z: number): "turning" | "facing";
   /** Emits an event about the creature; the engine adds the tick and the creature ID. */
   emit(event: ActionEvent): void;
   /** The placement ID of the creature's home (ADR 0018 §14), or null if it has none. */

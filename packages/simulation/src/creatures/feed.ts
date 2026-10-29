@@ -153,7 +153,8 @@ interface EatState {
 }
 
 /**
- * Walks to the creature's spot at `params.placementId`, a place offering `core:food`, then eats
+ * Walks to the creature's spot at `params.placementId`, a place offering `core:food`, turns in
+ * place to face the food (`ActionContext.face`, no cue while turning), then eats facing it
  * for the place's `eatSeconds`, lowering hunger a little every tick: a meal cut short counts in
  * part. Emits `ate` when the meal is finished.
  */
@@ -192,7 +193,8 @@ export const eatAction: ActionProvider = {
       eat.arrived = context.walk(eat.path) === "arrived";
       return { status: "running" };
     }
-    context.face(eat.x, eat.z);
+    // Turns to the food before the meal starts, and keeps facing it while eating.
+    if (context.face(eat.x, eat.z) === "turning") return { status: "running" };
     context.adjustNeed(HUNGER, -eat.perTick);
     eat.ticksLeft--;
     // The share of the meal eaten, from the state alone: ticksLeft × perTick is the meal still left,

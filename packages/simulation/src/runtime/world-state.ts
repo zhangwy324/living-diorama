@@ -97,11 +97,22 @@ export interface PlannedNavigation {
   limits: Diagnostic[];
 }
 
-/** Wraps an angle into [-π, π). */
+/** Wraps an angle into [-π, π), leaving one already there exactly as it is. */
 export function normalizeHeading(angle: number): number {
+  if (angle >= -Math.PI && angle < Math.PI) return angle;
   const turn = 2 * Math.PI;
   const wrapped = (((angle + Math.PI) % turn) + turn) % turn;
   return wrapped - Math.PI;
+}
+
+/**
+ * `from` turned towards `to` by at most `maxStep` radians, the short way round; exactly `to`,
+ * normalised, once within `maxStep` of it.
+ */
+export function turnHeading(from: number, to: number, maxStep: number): number {
+  const target = normalizeHeading(to);
+  const delta = normalizeHeading(target - from);
+  return Math.abs(delta) <= maxStep ? target : normalizeHeading(from + Math.sign(delta) * maxStep);
 }
 
 /**
