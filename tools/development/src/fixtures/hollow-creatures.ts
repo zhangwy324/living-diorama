@@ -2,7 +2,8 @@ import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import type { Registries } from "@living-diorama/extension-api";
 
 // Test-only species for Woodland Hollow's swim and hop scenarios (ADR 0020, M16 PR 7): an
-// amphibian that walks and swims, a water-only swimmer and a land-only hopper, each living like
+// amphibian that walks and swims, a second one that prefers the water (#163), a water-only
+// swimmer and a land-only hopper, each living like
 // the mossling (wander, feed, rest, vision). The built-in pack ships only the mossling; these
 // stand in for creatures drawn in the Studio, so they live here and not in built-in content.
 // Used by tests, `pnpm sim --species` and `pnpm soak`.
@@ -12,6 +13,7 @@ const species = (
   name: string,
   capabilities: Record<string, number>,
   body: { locomotion: { land: { gait: string } } },
+  traits: Record<string, number> = {},
 ) => ({
   schemaVersion: 1,
   id,
@@ -23,6 +25,7 @@ const species = (
   baseSpeed: 0.6,
   behaviors: ["core:wander", "core:feed", "core:rest"],
   senses: { "core:vision": 8 },
+  traits,
   body,
 });
 
@@ -32,6 +35,17 @@ export const otter = species(
   "Otter",
   { "core:land": 1, "core:swim": 1 },
   { locomotion: { land: { gait: "walk" } } },
+);
+/**
+ * Like the otter, but keeps to the water (#163): wander takes it in twice as often and never out,
+ * so it leaves the water only to eat or sleep.
+ */
+export const beaver = species(
+  "fixture:beaver",
+  "Beaver",
+  { "core:land": 1, "core:swim": 1 },
+  { locomotion: { land: { gait: "walk" } } },
+  { "core:water_preference": 1 },
 );
 /** Only swims, so it appears at the river's spawn point and never leaves the water. */
 export const carp = species(
@@ -48,7 +62,7 @@ export const toad = species(
   { locomotion: { land: { gait: "hop" } } },
 );
 
-export const HOLLOW_CREATURES = [otter, carp, toad] as const;
+export const HOLLOW_CREATURES = [otter, beaver, carp, toad] as const;
 
 /** The built-in pack, then the test species above, as a second pack would register them. */
 export function registerHollowCreatures(registries: Registries) {
