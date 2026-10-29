@@ -6,7 +6,9 @@
 // hidden; snapshot messages are not throttled (ADR 0019 §4, issue #117). A slow timer remains as a
 // backstop for when no snapshots come, i.e. while paused, so the paused world's light still follows
 // the clock. A wall-clock jump, such as an OS sleep, is told from consecutive snapshots far apart
-// in wall time only, never from a check that ran late.
+// in wall time only, never from a check that ran late. Paused snapshots, which come only when a
+// command is applied, and the first one after them, are never counted as a jump: the timer and
+// the resync on resume cover the paused world. Time the world lost is told apart in `lost-time`.
 
 /** The wall clock and page the feed watches; injectable for tests. */
 export interface WallClock {
@@ -56,11 +58,11 @@ export interface TimeOfDayFeed {
    */
   start(): void;
   /**
-   * A snapshot arrived: checks the clock, at most every `CHECK_MS`, or at once after a jump.
-   * Returns the wall-clock time since the previous snapshot (since `start` for the first),
-   * negative if the clock went backwards, and 0 before `start` or after `stop`.
+   * A snapshot arrived, of a paused world if `paused`: checks the clock, at most every
+   * `CHECK_MS`, or at once after a jump, a wall-clock gap since the previous snapshot of over
+   * `JUMP_MS` or below 0. A paused snapshot, or the first after one, checks only as the timer does.
    */
-  snapshot(): number;
+  snapshot(paused: boolean): void;
   /** Sends the time of day now, e.g. on unpausing. */
   resync(): void;
   /**
@@ -83,6 +85,7 @@ export function timeOfDayFeed(
   let stops: (() => void)[] = [];
   let lastCheck = 0;
   let lastSnapshot = 0;
+  let afterPause = false;
   let sent: number | undefined;
   const current = () => fixed ?? clock.minutesAt(clock.now());
   const resync = () => {
@@ -108,13 +111,14 @@ export function timeOfDayFeed(
       lastCheck = lastSnapshot = clock.now();
       stops = [clock.every(CHECK_MS, () => check(clock.now(), false)), clock.onVisible(resync)];
     },
-    snapshot() {
-      if (!started) return 0;
+    snapshot(paused) {
+      if (!started) return;
       const now = clock.now();
       const gap = now - lastSnapshot;
       lastSnapshot = now;
-      check(now, gap > JUMP_MS || gap < 0);
-      return gap;
+      const baseline = paused || afterPause;
+      afterPause = paused;
+      check(now, !baseline && (gap > JUMP_MS || gap < 0));
     },
     resync,
     fix(minutes) {

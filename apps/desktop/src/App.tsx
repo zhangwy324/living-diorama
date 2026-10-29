@@ -194,8 +194,10 @@ export function App() {
         worldReady();
         void openWorld();
       },
-      // The restored world's ticks may be behind the empty world's, or far ahead after catch-up.
+      // The restored world's ticks may be behind the empty world's, or far ahead after catch-up,
+      // as are those of a world caught up in place (issue #113).
       onRestored: () => created?.resetSnapshots(),
+      onCaughtUp: () => created?.resetSnapshots(),
       onSpeciesRegistered: (id, summary, asset) => {
         species.set(id, summary);
         assets.set(summary.appearance, asset);

@@ -32,7 +32,14 @@ export type CatchUpPlan = { apply: true; gapMs: number } | { apply: false; reaso
  * The catch-up rules, in real time mode, for a world saved at `savedAt` and restored at `nowMs`.
  */
 export function planCatchUp(savedAt: number, nowMs: number): CatchUpPlan {
-  const gapMs = nowMs - savedAt;
+  return planGap(nowMs - savedAt);
+}
+
+/**
+ * The same rules for a gap measured some other way: wall-clock time a running world lost, e.g.
+ * while the OS slept with the app open (issue #113). Not a positive number is no gap.
+ */
+export function planGap(gapMs: number): CatchUpPlan {
   if (!(gapMs > 0)) return { apply: false, reason: "no_gap" };
   if (gapMs < SHORT_GAP_MS) return { apply: false, reason: "short_gap" };
   return { apply: true, gapMs: Math.min(gapMs, CATCH_UP_CAP_MS) };

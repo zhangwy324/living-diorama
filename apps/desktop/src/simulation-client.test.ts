@@ -1,5 +1,10 @@
 import { defaultBody } from "@living-diorama/content-schema";
-import { envelope, runSimulationHost, type SimulationSnapshot } from "@living-diorama/simulation";
+import {
+  envelope,
+  runSimulationHost,
+  type CatchUpReport,
+  type SimulationSnapshot,
+} from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
 import {
@@ -21,8 +26,11 @@ function stillClock(minutes: { now: number }): WallClock {
   };
 }
 
-/** A worker that runs the real host in this thread; its timers fire only in `tick`. */
-function fakeWorker() {
+/**
+ * A worker that runs the real host in this thread; its timers fire only in `tick`. Its wall clock
+ * is `wallNow`, which by default stands still.
+ */
+function fakeWorker(wallNow = () => 0) {
   let time = 0;
   let timers: (() => void)[] = [];
   let toHost: ((data: unknown) => void) | undefined;
@@ -42,6 +50,7 @@ function fakeWorker() {
     {
       loadContent,
       now: () => time,
+      wallNow,
       schedule: (callback) => timers.push(callback),
     },
   );
@@ -70,11 +79,13 @@ const drawn = {
 };
 
 function start(countOverride?: number, time = { now: 12 * 60 }) {
-  const { worker, tick } = fakeWorker();
+  // The worker reads the same wall clock as the main thread.
+  const { worker, tick } = fakeWorker(() => time.now * 60_000);
   const callbacks = {
     onReady: vi.fn(),
     onSpeciesRegistered: vi.fn(),
     onRestored: vi.fn(),
+    onCaughtUp: vi.fn<(report: CatchUpReport) => void>(),
     onSnapshot: vi.fn<(snapshot: SimulationSnapshot) => void>(),
     onFailure: vi.fn(),
   };
@@ -214,6 +225,60 @@ describe("simulation client", () => {
     tick(100);
     tick(100);
     expect(shown()).toBe(21 * 60 + 1);
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("catches the world up after the OS slept with it running, at the time of day now", () => {
+    const time = { now: 21 * 60 };
+    const { callbacks, tick } = start(0, time);
+    tick(100);
+    tick(100);
+    // Three hours asleep; the worker's monotonic clock may not have moved at all.
+    time.now += 3 * 60;
+    tick(100);
+    expect(callbacks.onCaughtUp).not.toHaveBeenCalled();
+    tick(100);
+    // Lost: the wall-clock gap less the one tick simulated across it.
+    expect(callbacks.onCaughtUp.mock.calls).toEqual([
+      [{ applied: true, gapMs: 3 * 3_600_000 - 100, failures: [] }],
+    ]);
+    tick(100);
+    const shown = callbacks.onSnapshot.mock.calls.at(-1)?.[0];
+    expect(shown?.timeOfDay).toBe(0);
+    // On from tick 3 by the gap, with no tick at the wake-up that caught up, then one more.
+    expect(shown?.tick).toBe(3 + (3 * 3_600_000 - 100) / 100 + 1);
+    for (let k = 0; k < 10; k++) tick(100);
+    expect(callbacks.onCaughtUp).toHaveBeenCalledOnce();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("counts no lost time across a change from a very slow dev speed", () => {
+    const time = { now: 21 * 60 };
+    const { client, callbacks, tick } = start(0, time);
+    tick(100);
+    client.setSpeed(0.0005);
+    // At this speed a tick takes 200 s; the speed goes back to 1 after 150 s, mid-tick.
+    tick(0);
+    time.now += 150 / 60;
+    tick(150_000);
+    client.setSpeed(1);
+    for (let k = 0; k < 10; k++) tick(100);
+    expect(callbacks.onCaughtUp).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("catches up nothing for an OS sleep while paused, nor on resuming", () => {
+    const time = { now: 21 * 60 };
+    const { client, callbacks, tick } = start(0, time);
+    tick(100);
+    client.setPaused(true);
+    tick(100);
+    time.now += 3 * 60;
+    tick(100);
+    client.setPaused(false);
+    for (let k = 0; k < 10; k++) tick(100);
+    expect(callbacks.onCaughtUp).not.toHaveBeenCalled();
+    expect(callbacks.onSnapshot.mock.calls.at(-1)?.[0].timeOfDay).toBe(0);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 

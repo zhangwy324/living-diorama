@@ -1,8 +1,10 @@
 import { formatDiagnostic, type Result, type SizeClass } from "@living-diorama/content-schema";
 import {
   envelope,
+  isValidSpeed,
   openEnvelope,
   type AssetSummary,
+  type CatchUpReport,
   type CheckedLimits,
   type Limit,
   type RequestCommand,
@@ -14,6 +16,7 @@ import {
   type SpeciesSummary,
   type WorldContent,
 } from "@living-diorama/simulation";
+import { lostTimeWatch } from "./lost-time";
 import { STARTUP, type StartupConfig } from "./startup";
 import { systemWallClock, timeOfDayFeed, type WallClock } from "./time-of-day";
 
@@ -107,6 +110,12 @@ export interface SimulationCallbacks {
    * the last one or far ahead of it. Runs before that snapshot and before `restore` resolves.
    */
   onRestored?(report: RestoreReport): void;
+  /**
+   * The running world was caught up for wall-clock time it lost, e.g. while the OS slept with the
+   * app open (issue #113). The next snapshot shows it, its tick far ahead of the last one. Runs
+   * before that snapshot.
+   */
+  onCaughtUp?(report: CatchUpReport): void;
   /** A species was registered while the world runs; the renderer may now meet its creatures. */
   onSpeciesRegistered?(speciesId: string, species: SpeciesSummary, asset: AssetSummary): void;
   onSnapshot(snapshot: SimulationSnapshot, events: SimulationEvent[]): void;
@@ -140,10 +149,19 @@ type Pending = (result: Result<unknown>) => void;
  * Starts the simulation worker on the startup world, still empty, and hands every snapshot and its
  * events to `onSnapshot`. The seed changes every launch and is logged so a run can be reproduced;
  * a restored save brings its own (ADR 0019 §8). The worker gets the local time of day at init,
- * whenever the minute changes, as checked on its snapshots, and on resume (ADR 0018 §5).
+ * whenever the minute changes, as checked on its snapshots, and on resume (ADR 0018 §5). Wall-clock
+ * time the running world loses, e.g. while the OS sleeps, is caught up as after a relaunch
+ * (issue #113).
  */
 export function startSimulation(
-  { onReady, onSpeciesRegistered, onRestored, onSnapshot, onFailure }: SimulationCallbacks,
+  {
+    onReady,
+    onSpeciesRegistered,
+    onRestored,
+    onCaughtUp,
+    onSnapshot,
+    onFailure,
+  }: SimulationCallbacks,
   config: StartupConfig = STARTUP,
   worker: WorkerLike = createWorker(),
   countOverride = COUNT_OVERRIDE,
@@ -169,6 +187,7 @@ export function startSimulation(
     pending.delete(requestId);
   };
   const timeOfDay = timeOfDayFeed((minutes) => send({ type: "set_time_of_day", minutes }), clock);
+  const lostTime = lostTimeWatch();
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
   const spawnStartingCreatures = async () => {
@@ -206,11 +225,29 @@ export function startSimulation(
         timeOfDay.start();
         onReady(message);
         break;
-      case "snapshot":
+      case "snapshot": {
         // Snapshots keep coming while the strip is hidden, unlike timers (issue #127).
-        timeOfDay.snapshot();
+        timeOfDay.snapshot(message.snapshot.paused);
+        const gapMs = lostTime.snapshot(message.snapshot, message.wallMs);
+        if (gapMs > 0) {
+          void request<CatchUpReport>({
+            type: "catch_up",
+            gapMs,
+            minutes: timeOfDay.minutes,
+          }).then((result) => {
+            if (!result.ok) {
+              console.warn(
+                [
+                  "Could not catch up the time the world lost",
+                  ...result.diagnostics.map(formatDiagnostic),
+                ].join("\n  "),
+              );
+            }
+          });
+        }
         onSnapshot(message.snapshot, message.events);
         break;
+      }
       case "species_registered":
         onSpeciesRegistered?.(message.speciesId, message.species, message.asset);
         answer(message.requestId, {
@@ -232,9 +269,20 @@ export function startSimulation(
         answer(message.requestId, { ok: true, value: message.json });
         break;
       case "restored":
+        lostTime.reset();
         onRestored?.(message.report);
         answer(message.requestId, { ok: true, value: message.report });
         break;
+      case "caught_up": {
+        lostTime.reset();
+        const { report } = message;
+        if (report.applied) {
+          console.info(`Caught up ${Math.round(report.gapMs / 60_000)} min the world lost`);
+          onCaughtUp?.(report);
+        }
+        answer(message.requestId, { ok: true, value: report });
+        break;
+      }
       case "rejected":
         answer(message.requestId, { ok: false, diagnostics: message.diagnostics });
         break;
@@ -290,7 +338,15 @@ export function startSimulation(
       if (!paused) timeOfDay.resync();
       send({ type: paused ? "pause" : "resume" });
     },
-    setSpeed: (multiplier) => send({ type: "set_speed", multiplier }),
+    setSpeed: (multiplier) => {
+      // The worker rejects any other speed and keeps the one it had. A snapshot pair spanning the
+      // change would be measured at the wrong speed, so the next snapshot only sets the baseline.
+      if (isValidSpeed(multiplier)) {
+        lostTime.setSpeed(multiplier);
+        lostTime.reset();
+      }
+      send({ type: "set_speed", multiplier });
+    },
     fixTimeOfDay: (minutes) => timeOfDay.fix(minutes),
     shutdown: () => send({ type: "shutdown" }),
     stop: () => {
