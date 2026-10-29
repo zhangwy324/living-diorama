@@ -734,6 +734,8 @@ describe("core:sleep", () => {
     if (!walking.ok) throw new Error("start failed");
     sleepAction.step(walking.state, stuck.context);
     sleepAction.interrupted!(walking.state, stuck.context, "outranked");
+    // Catch-up drops the action with its own reason (#164): no back-off either.
+    sleepAction.interrupted!(walking.state, stuck.context, "catch_up");
     expect(stuck.reaches).toEqual([]);
     sleepAction.interrupted!(walking.state, stuck.context, "stuck");
     expect(stuck.reaches).toEqual([
