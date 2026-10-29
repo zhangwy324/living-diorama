@@ -112,18 +112,6 @@ export const SpeciesDefinitionSchema = z.strictObject({
 });
 export type SpeciesDefinition = z.output<typeof SpeciesDefinitionSchema>;
 
-/** Live creature state; also the future save format for an individual. */
-export const CreatureInstanceSchema = z.strictObject({
-  id: LocalIdSchema,
-  species: ContentIdSchema,
-  /** Exact species version this individual was created from (ADR 0003 §5). */
-  speciesVersion: SemverSchema,
-  position: RegionPositionSchema,
-  heading: z.number().gte(-Math.PI).lt(Math.PI, { error: "Heading must be normalised to [-π, π)" }),
-  currentAction: ContentIdSchema.optional(),
-});
-export type CreatureInstance = z.output<typeof CreatureInstanceSchema>;
-
 /** A structure instance and the regions/connections it contributes, in world space. */
 export const StructurePlacementSchema = z.strictObject({
   id: LocalIdSchema,
