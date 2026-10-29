@@ -98,6 +98,11 @@ export interface CreatureStats {
   bedtimes: number[];
   /** Times of day it woke rested in the morning: in the world's night or dawn, after midnight. */
   wakeTimes: number[];
+  /**
+   * Whether the sleep check, if on, holds it to it (its `creatures` filter); true until a tick
+   * says otherwise.
+   */
+  sleepChecked: boolean;
 }
 
 /** The world's time of day when an event was emitted. */
@@ -131,8 +136,6 @@ export class LongRunChecks {
   readonly #awakeSinceMeal = new Map<string, number>();
   /** Per creature, its `rejected` and `no_proposal` evaluations since the last `started`. */
   readonly #failedInARow = new Map<string, number>();
-  /** Creatures the sleep check skips. */
-  readonly #noSleepCheck = new Set<string>();
   /** Per creature, the tick of its last bedtime. */
   readonly #lastBedtimeTick = new Map<string, number>();
 
@@ -161,6 +164,7 @@ export class LongRunChecks {
         asleepAtNightTicks: 0,
         bedtimes: [],
         wakeTimes: [],
+        sleepChecked: true,
       };
       this.creatures.set(id, stats);
     }
@@ -211,7 +215,7 @@ export class LongRunChecks {
         this.#stats(creatureId).bedtimes.push(minutes);
         this.#lastBedtimeTick.set(creatureId, event.tick);
       }
-      const checked = this.options.sleep && !this.#noSleepCheck.has(creatureId);
+      const checked = this.options.sleep && this.creatures.get(creatureId)?.sleepChecked !== false;
       if (checked && dayPhase === "day" && tiredness < tirednessNeed.actAt) {
         this.violation(
           `${creatureId}: fell asleep by day at tiredness ${tiredness.toFixed(2)} (below ${tirednessNeed.actAt})`,
@@ -250,7 +254,7 @@ export class LongRunChecks {
       if (c.cues.includes("hungry") || (c.needs[HUNGER_NEED] ?? 0) >= HUNGRY_FROM) {
         stats.hungryTicks++;
       }
-      if (c.checkSleep === false) this.#noSleepCheck.add(c.id);
+      if (c.checkSleep === false) stats.sleepChecked = false;
       if (c.asleep) stats.asleepTicks++;
       if (dayPhase === "night") {
         stats.nightTicks++;
@@ -287,7 +291,7 @@ export class LongRunChecks {
   /** The sleep bounds over the whole run. */
   #checkSleep(id: string, stats: CreatureStats) {
     const { sleep } = this.options;
-    if (!sleep || this.#noSleepCheck.has(id)) return;
+    if (!sleep || !stats.sleepChecked) return;
     const { ticks, asleepTicks, nightTicks, asleepAtNightTicks } = stats;
     const dayTicks = 24 * 3600 * this.tickRateHz;
     const maxHours = sleep.maxHoursPerDay ?? MAX_SLEEP_HOURS_PER_DAY;

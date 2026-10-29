@@ -65,8 +65,6 @@ for (let seed = 1; seed <= seeds; seed++) {
   const jumpsBy = new Map<string, number>();
   /** Ticks in water and out of it, summed over all the seed's amphibians (one by default). */
   const amphibianTicks = { water: 0, land: 0 };
-  /** Per creature, whether the sleep check holds it, decided when first seen as the runner does. */
-  const sleepChecked = new Map<string, boolean>();
   const report = runWithInvariants({
     register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
@@ -87,9 +85,6 @@ for (let seed = 1; seed <= seeds; seed++) {
       }
       const { creatures, model } = simulation.state;
       for (const c of creatures.values()) {
-        if (!sleepChecked.has(c.id)) {
-          sleepChecked.set(c.id, LIVING_BEHAVIOR_CHECKS.sleep.creatures(c, simulation));
-        }
         if (c.speciesId !== otter.id) continue;
         const kind = model.regions.get(c.position.regionId)?.kind;
         amphibianTicks[kind === "water" ? "water" : "land"]++;
@@ -121,7 +116,7 @@ for (let seed = 1; seed <= seeds; seed++) {
   if (jumps > 0) seedsWithJumps++;
   if (amphibianTicks.water > 0 && amphibianTicks.land > 0) seedsInBothMedia++;
   // A restore after a long gap may skip a night's events, so a seed may have no times at all.
-  const sleepers = Object.entries(report.creatures).filter(([id]) => sleepChecked.get(id));
+  const sleepers = Object.entries(report.creatures).filter(([, c]) => c.sleepChecked);
   const bedtimes = sleepers.flatMap(([, c]) => c.bedtimes);
   const wakeTimes = sleepers.flatMap(([, c]) => c.wakeTimes);
   if (bedtimes.length > 0) bedSpreads.push(Math.max(...bedtimes) - Math.min(...bedtimes));
