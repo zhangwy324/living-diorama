@@ -152,24 +152,6 @@ export function buildDioramaScene(
   const sphere = boundingSphere(scene);
   const sun = createSun(scene, sphere);
   world.add(sun, sun.target);
-  let shownMinute: number | undefined;
-  const setTimeOfDay = (minutes: number) => {
-    if (!Number.isFinite(minutes)) return false;
-    const minute = Math.floor(minutes);
-    if (minute === shownMinute) return false;
-    shownMinute = minute;
-    const light = lightingAt(minute);
-    sun.color.copy(light.keyColor);
-    sun.intensity = light.keyIntensity;
-    sun.shadow.intensity = light.shadowIntensity;
-    aimSun(sun, sphere, light.keyDirection);
-    sky.color.copy(light.skyColor);
-    sky.groundColor.copy(light.groundColor);
-    sky.intensity = light.skyIntensity;
-    background.copy(light.background);
-    return true;
-  };
-
   const layers = createLayers(world);
   const water = createWaterMaterial();
   const base = baseMeshes(scene, water.material);
@@ -187,6 +169,25 @@ export function buildDioramaScene(
     // The terrain and structures hide the cues of creatures they hide; props never do (#93).
     visibility: new CueVisibility(scene, layers),
   });
+  let shownMinute: number | undefined;
+  const setTimeOfDay = (minutes: number) => {
+    if (!Number.isFinite(minutes)) return false;
+    const minute = Math.floor(minutes);
+    if (minute === shownMinute) return false;
+    shownMinute = minute;
+    const light = lightingAt(minute);
+    sun.color.copy(light.keyColor);
+    sun.intensity = light.keyIntensity;
+    sun.shadow.intensity = light.shadowIntensity;
+    aimSun(sun, sphere, light.keyDirection);
+    sky.color.copy(light.skyColor);
+    sky.groundColor.copy(light.groundColor);
+    sky.intensity = light.skyIntensity;
+    background.copy(light.background);
+    // Dark z's by day, light ones at night (#93); they switch halfway through dusk and dawn.
+    creatures.setNight(light.night >= 0.5);
+    return true;
+  };
   const overlays = createDebugOverlays(scene, options.navigation);
   world.add(overlays.group);
   const ready = loadProps(

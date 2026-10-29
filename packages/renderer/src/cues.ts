@@ -106,9 +106,13 @@ export function bodyMotion(
   return out;
 }
 
-/** How many z's rise from a sleeping creature at once, and how long each takes. */
+/** At most this many z's rise from a sleeping creature at once... */
 export const Z_COUNT = 3;
+/** ...and this many when they are small on screen, so they don't run together. */
+export const Z_COUNT_SMALL = 2;
 const Z_PERIOD = 3.6;
+/** Each z leans by this much, alternately left and right, like hand lettering (radians, ~9°). */
+export const Z_TILT = 0.16;
 
 /** One rising z, in units of its own full size. */
 export interface ZMotion {
@@ -117,21 +121,57 @@ export interface ZMotion {
   /** Sideways, to the right on screen. */
   drift: number;
   scale: number;
+  /** Counterclockwise lean in radians. */
+  tilt: number;
   /** Before the sleeping weight. */
   opacity: number;
+  /** Counts the z's rises, so a change of look can wait for the next one. */
+  cycle: number;
 }
 
-export const restingZ = (): ZMotion => ({ rise: 0, drift: 0, scale: 0, opacity: 0 });
+export const restingZ = (): ZMotion => ({
+  rise: 0,
+  drift: 0,
+  scale: 0,
+  tilt: 0,
+  opacity: 0,
+  cycle: 0,
+});
 
-/** Z number `index` of a creature with `phase` at `time` seconds. Writes into `out`. */
-export function zMotion(time: number, index: number, phase: number, out: ZMotion): ZMotion {
-  const p = (((time / Z_PERIOD + index / Z_COUNT + phase) % 1) + 1) % 1;
-  out.rise = p * 1.8;
-  out.drift = 0.35 + p * 0.6 + 0.15 * Math.sin(TAU * p);
-  out.scale = 0.55 + 0.45 * p;
+/**
+ * Z number `index` at `p`, 0–1 through its rise. It starts small and quickly, then slows as it
+ * grows and fades (an ease-out). Writes into `out`.
+ */
+export function zAt(p: number, index: number, out: ZMotion): ZMotion {
+  const eased = 1 - (1 - p) ** 2;
+  out.rise = eased * 1.8;
+  out.drift = 0.35 + eased * 0.6 + 0.12 * Math.sin(TAU * p);
+  out.scale = 0.45 + 0.55 * eased;
+  out.tilt = index % 2 === 0 ? Z_TILT : -Z_TILT;
   out.opacity = Math.min(1, p / 0.2, (1 - p) / 0.35);
   return out;
 }
+
+/**
+ * Z number `index` of `count` rising from a creature with `phase` at `time` seconds. Writes into
+ * `out`.
+ */
+export function zMotion(
+  time: number,
+  index: number,
+  count: number,
+  phase: number,
+  out: ZMotion,
+): ZMotion {
+  const t = time / Z_PERIOD + index / count + phase;
+  const cycle = Math.floor(t);
+  zAt(t - cycle, index, out);
+  out.cycle = cycle;
+  return out;
+}
+
+/** How many z's rise for a z this many CSS pixels tall. */
+export const zCount = (zPx: number) => (zPx < Z_SMALL_PX ? Z_COUNT_SMALL : Z_COUNT);
 
 const BUBBLE_PERIOD = 1.6;
 /** Up-and-down of the food bubble, in units of its size; within ±0.06. */
@@ -139,9 +179,11 @@ export const bubbleBob = (time: number, phase: number) =>
   0.06 * Math.sin(TAU * (time / BUBBLE_PERIOD + phase));
 
 /** Screen sizes in CSS pixels: a share of the creature's own height on screen, within limits. */
-export const BUBBLE_PX = { share: 0.7, min: 22, max: 44 };
-export const Z_PX = { share: 0.4, min: 13, max: 24 };
+export const BUBBLE_PX = { share: 0.7, min: 26, max: 44 };
+export const Z_PX = { share: 0.4, min: 15, max: 24 };
 export const RING_PX = { share: 0.5, min: 16, max: 30 };
+/** Z's smaller than this on screen rise two at a time instead of three. */
+const Z_SMALL_PX = 18;
 
 export const cuePixels = (limits: typeof BUBBLE_PX, creaturePx: number) =>
   Math.min(limits.max, Math.max(limits.min, limits.share * creaturePx));
@@ -203,13 +245,6 @@ const segment =
     const t = Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
     return Math.hypot(x - ax - dx * t, y - ay - dy * t) - r;
   };
-const box =
-  (cx: number, cy: number, hx: number, hy: number, r = 0) =>
-  (x: number, y: number) => {
-    const qx = Math.abs(x - cx) - hx + r;
-    const qy = Math.abs(y - cy) - hy + r;
-    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
-  };
 const union =
   (...parts: ((x: number, y: number) => number)[]) =>
   (x: number, y: number) =>
@@ -250,37 +285,103 @@ export function rasterize(size: number, shapes: readonly Shape[]): Uint8Array {
   return data;
 }
 
+/** Unions two distances with a rounded fillet of radius `k` where they meet. */
+const smoothUnion =
+  (a: (x: number, y: number) => number, b: (x: number, y: number) => number, k: number) =>
+  (x: number, y: number) => {
+    const da = a(x, y);
+    const db = b(x, y);
+    const h = Math.min(1, Math.max(0, 0.5 + (0.5 * (db - da)) / k));
+    return db + (da - db) * h - k * h * (1 - h);
+  };
+/** Signed distance to the triangle a, b, c. */
+const triangle = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+  const edges = union(
+    segment(ax, ay, bx, by, 0),
+    segment(bx, by, cx, cy, 0),
+    segment(cx, cy, ax, ay, 0),
+  );
+  return (x: number, y: number) => {
+    const edge = edges(x, y);
+    const side = (px: number, py: number, qx: number, qy: number) =>
+      (qx - px) * (y - py) - (qy - py) * (x - px);
+    const s1 = side(ax, ay, bx, by);
+    const s2 = side(bx, by, cx, cy);
+    const s3 = side(cx, cy, ax, ay);
+    const inside = (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+    return inside ? -edge : edge;
+  };
+};
+
 const OUTLINE = rgb("#3a3330");
 
-/** A speech bubble with a mushroom in it, its tail at the bottom centre. */
-export function bubblePixels(size: number): Uint8Array {
-  const bubble = union(circle(0.5, 0.58, 0.37), segment(0.46, 0.3, 0.42, 0.06, 0.035));
-  const dome = circle(0.5, 0.5, 0.24);
-  const cap = (x: number, y: number) => Math.max(dome(x, y), 0.5 - y);
-  const stem = box(0.5, 0.44, 0.075, 0.11, 0.04);
-  const mushroom = union(cap, stem);
+/**
+ * The picture inside a cue bubble: shapes drawn back to front, in their own square from −1 to 1
+ * (y up), with distances in those units. The bubble fits it into its round body.
+ */
+export type CueIcon = readonly Shape[];
+
+const fruit = union(circle(-0.2, -0.12, 0.56), circle(0.2, -0.12, 0.56));
+const stem = segment(0, 0.3, 0.12, 0.72, 0.08);
+// A leaf as two circles' overlap, leaning up to the right from the stem.
+const leaf = (x: number, y: number) =>
+  Math.max(circle(0.3, 0.42, 0.36)(x, y), circle(0.55, 0.85, 0.36)(x, y));
+
+/**
+ * Food in general: a round red fruit with a stem and a leaf. It stands for every food, so it
+ * says "hungry" whether the creature eats mushrooms or berries from a bush.
+ */
+export const FOOD_ICON: CueIcon = [
+  { distance: grow(union(fruit, stem, leaf), 0.13), color: OUTLINE },
+  { distance: stem, color: rgb("#6b4a2b") },
+  { distance: leaf, color: rgb("#5aa83c") },
+  { distance: fruit, color: rgb("#d8402f") },
+  { distance: circle(-0.3, 0.05, 0.13), color: rgb("#fff6e8") },
+];
+
+/** The bubble's round body, its outline's width and where its icon goes (texture units). */
+const BUBBLE = { x: 0.5, y: 0.6, radius: 0.31, outline: 0.08, icon: 0.23 };
+
+/**
+ * A round speech bubble with `icon` in it and a short tail at the bottom centre. The outline is
+ * about 2 CSS px at the bubble's smallest size.
+ */
+export function bubblePixels(size: number, icon: CueIcon = FOOD_ICON): Uint8Array {
+  const { x: cx, y: cy, radius, outline } = BUBBLE;
+  const tail = grow(
+    triangle(cx - 0.1, cy - radius + 0.06, cx + 0.1, cy - radius + 0.06, cx, 0.13),
+    0.01,
+  );
+  const bubble = smoothUnion(circle(cx, cy, radius), tail, 0.05);
+  const scale = BUBBLE.icon;
+  const placed = icon.map(({ distance, color }): Shape => ({
+    distance: (x, y) => distance((x - cx) / scale, (y - cy) / scale) * scale,
+    color,
+  }));
   return rasterize(size, [
-    { distance: grow(bubble, 0.045), color: OUTLINE },
+    { distance: grow(bubble, outline), color: OUTLINE },
     { distance: bubble, color: rgb("#fffaf0") },
-    { distance: grow(mushroom, 0.03), color: OUTLINE },
-    { distance: stem, color: rgb("#f0dfbf") },
-    { distance: cap, color: rgb("#d8402f") },
-    { distance: circle(0.41, 0.6, 0.04), color: rgb("#fff6e8") },
-    { distance: circle(0.56, 0.66, 0.035), color: rgb("#fff6e8") },
-    { distance: circle(0.6, 0.55, 0.028), color: rgb("#fff6e8") },
+    ...placed,
   ]);
 }
 
-/** A bold "z", light with a dark outline so it reads by day and by night. */
-export function zPixels(size: number): Uint8Array {
+/** A z's two colours: dark on light by day, light on dark at night, so it stands out from the scene. */
+export const Z_COLORS = {
+  day: { fill: "#262c45", outline: "#f4f6ff" },
+  night: { fill: "#eef3ff", outline: "#1d2236" },
+} as const;
+
+/** A bold "z" with a thick outline, in the day or night colours. */
+export function zPixels(size: number, night = false): Uint8Array {
+  const { fill, outline } = night ? Z_COLORS.night : Z_COLORS.day;
   const glyph = union(
-    segment(0.24, 0.78, 0.76, 0.78, 0.07),
-    segment(0.76, 0.78, 0.24, 0.22, 0.07),
-    segment(0.24, 0.22, 0.76, 0.22, 0.07),
+    segment(0.26, 0.76, 0.74, 0.76, 0.075),
+    segment(0.74, 0.76, 0.26, 0.24, 0.075),
+    segment(0.26, 0.24, 0.74, 0.24, 0.075),
   );
   return rasterize(size, [
-    { distance: grow(glyph, 0.07), color: rgb("#262c45") },
-    { distance: glyph, color: rgb("#eef3ff") },
+    { distance: grow(glyph, 0.1), color: rgb(outline) },
+    { distance: glyph, color: rgb(fill) },
   ]);
 }
 
@@ -323,10 +424,10 @@ const RING_FILL = rgb("#f2a531");
  * track, with a dark outline so it reads by day and by night. Clear inside and around it.
  */
 export function ringPixels(size: number, progress: number): Uint8Array {
-  const band = (x: number, y: number) => Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.3) - 0.12;
+  const band = (x: number, y: number) => Math.abs(Math.hypot(x - 0.5, y - 0.5) - 0.29) - 0.11;
   const sweep = wedge(0.5, 0.5, progress);
   return rasterize(size, [
-    { distance: grow(band, 0.05), color: OUTLINE },
+    { distance: grow(band, 0.09), color: OUTLINE },
     { distance: band, color: rgb("#fffaf0") },
     { distance: (x, y) => Math.max(band(x, y), sweep(x, y)), color: RING_FILL },
   ]);
@@ -341,6 +442,30 @@ const texture = (data: Uint8Array, size: number) => {
   map.needsUpdate = true;
   return map;
 };
+
+/** Where the sprite shader samples its texture, to bias it towards a sharper mipmap. */
+export const MAP_SAMPLE = "texture2D( map, vMapUv )";
+/**
+ * Cues are mostly seen at their smallest, a few times smaller than their textures, where the
+ * mipmaps blend in a level too blurry for their outlines. Sampling this many levels finer keeps
+ * them crisp; the textures are smooth shapes, so it doesn't shimmer.
+ */
+export const MIP_BIAS = -0.75;
+
+/** Makes a cue material sample its texture sharper (`MIP_BIAS`); all cues share one program. */
+export function sharpen(material: THREE.SpriteMaterial): THREE.SpriteMaterial {
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <map_fragment>",
+      THREE.ShaderChunk.map_fragment.replace(
+        MAP_SAMPLE,
+        `texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`,
+      ),
+    );
+  };
+  material.customProgramCacheKey = () => "cue-sharp";
+  return material;
+}
 
 /**
  * Cue sprites draw over the scene: a bubble behind a tree would say nothing. A creature hidden by
@@ -372,12 +497,14 @@ class SpritePool {
       return reused;
     }
     // Unlit, so a cue reads the same at night; its own material for its own opacity.
-    const material = new THREE.SpriteMaterial({
-      map: this.#map,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    });
+    const material = sharpen(
+      new THREE.SpriteMaterial({
+        map: this.#map,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
     const sprite = new THREE.Sprite(material);
     sprite.name = this.#name;
     sprite.center.copy(this.#center);
@@ -447,15 +574,25 @@ const GAP_PX = 3;
 /** The z's, food bubbles and progress rings of every creature, pooled and drawn over the scene. */
 export class CueSprites {
   readonly group = new THREE.Group();
+  /**
+   * Night look for the z's: light on dark instead of dark on light. A z takes the new look only
+   * as it starts its next rise, so a change at dusk or dawn rolls through without a pop.
+   */
+  night = false;
+  /**
+   * A hook for a future reduced-motion setting, not wired to one yet: z's stand still in a
+   * stack and the bubble doesn't bob.
+   */
+  reducedMotion = false;
   readonly #bubbleMap = texture(bubblePixels(128), 128);
-  readonly #zMap = texture(zPixels(64), 64);
+  readonly #zMaps = { day: texture(zPixels(64), 64), night: texture(zPixels(64, true), 64) };
   readonly #bubbles = new SpritePool(
     this.group,
     this.#bubbleMap,
     new THREE.Vector2(0.5, 0),
     "cue:bubble",
   );
-  readonly #zs = new SpritePool(this.group, this.#zMap, new THREE.Vector2(0.5, 0), "cue:z");
+  readonly #zs = new SpritePool(this.group, this.#zMaps.day, new THREE.Vector2(0.5, 0), "cue:z");
   /** Ring textures by step, drawn when first needed. */
   readonly #ringMaps: (THREE.DataTexture | undefined)[] = [];
   readonly #rings = new SpritePool(
@@ -487,16 +624,36 @@ export class CueSprites {
 
     const sleeping = ease(weights.sleeping);
     if (sleeping * visible > HIDDEN) {
-      while (sprites.zs.length < Z_COUNT) sprites.zs.push(this.#zs.acquire());
-      const size = cuePixels(Z_PX, anchor.creaturePx) * unitsPerPixel;
+      const zPx = cuePixels(Z_PX, anchor.creaturePx);
+      const count = zCount(zPx);
+      const map = this.night ? this.#zMaps.night : this.#zMaps.day;
+      if (sprites.zs.length > count) {
+        for (const sprite of sprites.zs.splice(count)) this.#zs.release(sprite);
+      }
+      while (sprites.zs.length < count) {
+        const sprite = this.#zs.acquire();
+        sprite.material.map = map;
+        sprites.zs.push(sprite);
+      }
+      const size = zPx * unitsPerPixel;
       let index = 0;
       for (const sprite of sprites.zs) {
-        const z = zMotion(time, index++, phase, this.#z);
+        const z = this.reducedMotion
+          ? zAt((index + 0.5) / count, index, this.#z)
+          : zMotion(time, index, count, phase, this.#z);
+        index++;
+        // A new look waits for the z's next rise, where it starts faint.
+        const { userData } = sprite;
+        if (sprite.material.map !== map && (this.reducedMotion || userData.zCycle !== z.cycle)) {
+          sprite.material.map = map;
+        }
+        userData.zCycle = z.cycle;
         sprite.position
           .copy(top)
           .addScaledVector(right, z.drift * size)
           .setY(top.y + gap + z.rise * size);
         sprite.scale.set(size * z.scale, size * z.scale, 1);
+        sprite.material.rotation = z.tilt;
         sprite.material.opacity = sleeping * z.opacity * visible;
       }
     } else {
@@ -513,7 +670,7 @@ export class CueSprites {
       sprites.bubble.position
         .copy(top)
         .addScaledVector(right, -0.45 * size * sleeping)
-        .setY(top.y + gap + bubbleBob(time, phase) * size);
+        .setY(top.y + gap + (this.reducedMotion ? 0 : bubbleBob(time, phase)) * size);
       sprites.bubble.scale.set(scale, scale, 1);
       sprites.bubble.material.opacity = hungry * visible;
     } else if (sprites.bubble) {
@@ -556,7 +713,8 @@ export class CueSprites {
     this.#zs.dispose();
     this.#rings.dispose();
     this.#bubbleMap.dispose();
-    this.#zMap.dispose();
+    this.#zMaps.day.dispose();
+    this.#zMaps.night.dispose();
     for (const map of this.#ringMaps) map?.dispose();
     this.#ringMaps.length = 0;
     this.group.removeFromParent();

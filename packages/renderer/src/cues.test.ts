@@ -4,10 +4,17 @@ import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
 import {
   BUBBLE_PX,
+  CueSprites,
+  FOOD_ICON,
+  MAP_SAMPLE,
+  MIP_BIAS,
   RING_STEPS,
   SNAP_SECONDS,
   ScreenScale,
   Z_COUNT,
+  Z_COUNT_SMALL,
+  Z_PX,
+  Z_TILT,
   bodyMotion,
   bubbleBob,
   bubblePixels,
@@ -17,9 +24,13 @@ import {
   restingZ,
   ringPixels,
   ringStep,
+  sharpen,
   stepCueWeights,
+  zAt,
+  zCount,
   zMotion,
   zPixels,
+  type CueAnchor,
   type CueWeights,
 } from "./cues";
 import { SceneLayer } from "./layers";
@@ -99,16 +110,50 @@ describe("sprite motion", () => {
   it("rises each z and fades it in and out, bounded", () => {
     for (const time of times) {
       for (let index = 0; index < Z_COUNT; index++) {
-        const z = zMotion(time, index, 0.9, restingZ());
+        const z = zMotion(time, index, Z_COUNT, 0.9, restingZ());
         expect(z.rise).toBeGreaterThanOrEqual(0);
         expect(z.rise).toBeLessThanOrEqual(1.8);
         expect(z.opacity).toBeGreaterThanOrEqual(0);
         expect(z.opacity).toBeLessThanOrEqual(1);
-        expect(z.scale).toBeGreaterThan(0.5);
+        expect(z.scale).toBeGreaterThanOrEqual(0.45);
         expect(z.scale).toBeLessThanOrEqual(1);
+        expect(Math.abs(z.tilt)).toBe(Z_TILT);
       }
       expect(Math.abs(bubbleBob(time, 0.5))).toBeLessThanOrEqual(0.06);
     }
+  });
+
+  it("eases each z out: small and quick at first, slowing as it grows", () => {
+    const at = (p: number) => zAt(p, 0, restingZ());
+    expect(at(0).scale).toBeLessThanOrEqual(0.5);
+    expect(at(1).scale).toBeCloseTo(1);
+    // More than half the rise in the first third of the time.
+    expect(at(1 / 3).rise).toBeGreaterThan(0.5 * at(1).rise);
+    const steps = [0, 0.25, 0.5, 0.75, 1].map((p) => at(p).rise);
+    for (let k = 1; k < steps.length - 1; k++) {
+      expect(steps[k + 1]! - steps[k]!).toBeLessThan(steps[k]! - steps[k - 1]!);
+    }
+  });
+
+  it("leans neighbouring z's opposite ways by about 9°", () => {
+    expect(THREE.MathUtils.radToDeg(Z_TILT)).toBeGreaterThanOrEqual(8);
+    expect(THREE.MathUtils.radToDeg(Z_TILT)).toBeLessThanOrEqual(10);
+    expect(zAt(0.5, 0, restingZ()).tilt).toBe(Z_TILT);
+    expect(zAt(0.5, 1, restingZ()).tilt).toBe(-Z_TILT);
+  });
+
+  it("counts each z's rises, starting a new one as it wraps round", () => {
+    const z = restingZ();
+    const before = zMotion(3.59, 0, 2, 0, z).cycle;
+    expect(zMotion(3.61, 0, 2, 0, z).cycle).toBe(before + 1);
+    expect(z.opacity).toBeLessThan(0.05);
+  });
+
+  it("rises two z's at a time when they are small on screen, three otherwise", () => {
+    expect(zCount(Z_PX.min)).toBe(Z_COUNT_SMALL);
+    expect(Z_COUNT_SMALL).toBe(2);
+    expect(zCount(Z_PX.max)).toBe(Z_COUNT);
+    expect(Z_PX.min).toBeGreaterThanOrEqual(15);
   });
 
   it("gives each creature a stable phase in 0–1", () => {
@@ -143,14 +188,99 @@ describe("cue textures", () => {
   const alpha = (data: Uint8Array, size: number, x: number, y: number) =>
     data[(Math.floor(y * size) * size + Math.floor(x * size)) * 4 + 3];
 
-  it("draws a bubble with an icon and a z, transparent around them", () => {
-    const bubble = bubblePixels(64);
-    expect(bubble).toHaveLength(64 * 64 * 4);
-    expect(alpha(bubble, 64, 0.02, 0.98)).toBe(0);
-    expect(alpha(bubble, 64, 0.5, 0.58)).toBe(255);
-    const z = zPixels(32);
-    expect(alpha(z, 32, 0.02, 0.5)).toBe(0);
-    expect(alpha(z, 32, 0.5, 0.5)).toBe(255);
+  const pixel = (data: Uint8Array, size: number, x: number, y: number) => {
+    const k = (Math.floor(y * size) * size + Math.floor(x * size)) * 4;
+    return [data[k]!, data[k + 1]!, data[k + 2]!, data[k + 3]!];
+  };
+  const brightness = (data: Uint8Array, size: number, x: number, y: number) => {
+    const [r, g, b] = pixel(data, size, x, y);
+    return (r! + g! + b!) / 3;
+  };
+
+  it("draws a round bubble with a short tail at the bottom centre, clear around it", () => {
+    const bubble = bubblePixels(128);
+    expect(bubble).toHaveLength(128 * 128 * 4);
+    for (const [x, y] of [
+      [0.02, 0.98],
+      [0.02, 0.02],
+      [0.98, 0.02],
+      [0.3, 0.12], // beside the tail
+      [0.5, 0.01], // below its tip
+    ] as const) {
+      expect(alpha(bubble, 128, x, y)).toBe(0);
+    }
+    expect(alpha(bubble, 128, 0.5, 0.6)).toBe(255);
+    expect(alpha(bubble, 128, 0.5, 0.2)).toBe(255); // the tail, centred
+    // As wide as it is tall: the body reaches as far left and right as up from its centre.
+    const reach = (dx: number, dy: number) => {
+      let r = 0;
+      while (alpha(bubble, 128, 0.5 + dx * r, 0.6 + dy * r)! > 127) r += 1 / 256;
+      return r;
+    };
+    expect(reach(1, 0)).toBeCloseTo(reach(-1, 0), 1);
+    expect(reach(1, 0)).toBeCloseTo(reach(0, 1), 1);
+  });
+
+  it("outlines the bubble about 2 CSS px thick at its smallest", () => {
+    const size = 128;
+    const bubble = bubblePixels(size);
+    // Walk in from the top edge along the centre, above the icon: count the outline's texels.
+    let dark = 0;
+    for (let row = size - 1; row > size * 0.86; row--) {
+      const y = (row + 0.5) / size;
+      if (alpha(bubble, size, 0.5, y)! > 200 && brightness(bubble, size, 0.5, y) < 100) dark++;
+    }
+    const px = (dark / size) * BUBBLE_PX.min;
+    expect(px).toBeGreaterThanOrEqual(1.5);
+    expect(px).toBeLessThanOrEqual(2.5);
+  });
+
+  it("draws the icon it is given, the food icon by default", () => {
+    const red = (data: Uint8Array) => pixel(data, 128, 0.5, 0.57);
+    expect(bubblePixels(128)).toEqual(bubblePixels(128, FOOD_ICON));
+    const [r, g, b] = red(bubblePixels(128));
+    expect(r).toBeGreaterThan(150);
+    expect(g).toBeLessThan(100);
+    expect(b).toBeLessThan(100);
+    const blue = [
+      { distance: (x: number, y: number) => Math.hypot(x, y) - 0.8, color: [0, 0, 1] as const },
+    ];
+    const [r2, , b2] = red(bubblePixels(128, blue));
+    expect(r2).toBe(0);
+    expect(b2).toBe(255);
+    // An empty icon leaves the bubble plain cream.
+    expect(brightness(bubblePixels(128, []), 128, 0.5, 0.57)).toBeGreaterThan(230);
+  });
+
+  it("draws a z dark on light by day and light on dark at night, clear around it", () => {
+    const day = zPixels(64);
+    const night = zPixels(64, true);
+    for (const z of [day, night]) {
+      expect(alpha(z, 64, 0.02, 0.5)).toBe(0);
+      expect(alpha(z, 64, 0.5, 0.5)).toBe(255);
+    }
+    // The stroke's middle, and just outside it: the outline.
+    const stroke = [0.5, 0.76] as const;
+    const edge = [0.5, 0.76 + 0.075 + 0.05] as const;
+    expect(brightness(day, 64, ...stroke)).toBeLessThan(80);
+    expect(brightness(day, 64, ...edge)).toBeGreaterThan(200);
+    expect(brightness(night, 64, ...stroke)).toBeGreaterThan(200);
+    expect(brightness(night, 64, ...edge)).toBeLessThan(80);
+  });
+
+  it("samples cue textures sharper, through the sprite shader's own map lookup", () => {
+    // A three.js upgrade that renames the lookup fails here instead of silently blurring.
+    expect(THREE.ShaderChunk.map_fragment).toContain(MAP_SAMPLE);
+    const material = sharpen(new THREE.SpriteMaterial());
+    const shader = {
+      fragmentShader: "void main() {\n#include <map_fragment>\n}",
+    } as THREE.WebGLProgramParametersWithUniforms;
+    material.onBeforeCompile(shader, undefined as unknown as THREE.WebGLRenderer);
+    expect(shader.fragmentShader).toContain(`texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`);
+    expect(shader.fragmentShader).not.toContain(MAP_SAMPLE);
+    expect(material.customProgramCacheKey()).toBe(
+      sharpen(new THREE.SpriteMaterial()).customProgramCacheKey(),
+    );
   });
 
   it("draws a ring clear inside and around, filled clockwise from the top", () => {
@@ -217,9 +347,9 @@ describe("cue sprites", () => {
     const { bodies, sprites } = make();
     bodies.update([creature("a", ["sleeping", "hungry"])], at(0));
     bodies.update([creature("a", ["sleeping", "hungry"])], at(2));
-    expect(bodies.cueSprites).toBe(Z_COUNT + 1);
+    expect(bodies.cueSprites).toBe(Z_COUNT_SMALL + 1);
     const shown = sprites();
-    expect(shown.filter((s) => s.name === "cue:z")).toHaveLength(Z_COUNT);
+    expect(shown.filter((s) => s.name === "cue:z")).toHaveLength(Z_COUNT_SMALL);
     expect(shown.filter((s) => s.name === "cue:bubble")).toHaveLength(1);
     // Above the lowered head of a 0.8 m creature, drawn over the scene and unlit.
     for (const sprite of shown) {
@@ -290,14 +420,14 @@ describe("cue sprites", () => {
       layer.group.traverse((o) => (count += o instanceof THREE.Sprite ? 1 : 0));
       return count;
     };
-    expect(all()).toBe(Z_COUNT);
+    expect(all()).toBe(Z_COUNT_SMALL);
     bodies.update([creature("a", [])], at(2.1));
-    expect(bodies.cueSprites).toBe(Z_COUNT); // still fading out
+    expect(bodies.cueSprites).toBe(Z_COUNT_SMALL); // still fading out
     for (let t = 2.2; t < 4; t += 0.1) bodies.update([creature("a", [])], at(t));
     expect(bodies.cueSprites).toBe(0);
     bodies.update([creature("a", []), creature("b", ["sleeping"])], at(4.1));
-    expect(bodies.cueSprites).toBe(Z_COUNT);
-    expect(all()).toBe(Z_COUNT); // reused, not made anew
+    expect(bodies.cueSprites).toBe(Z_COUNT_SMALL);
+    expect(all()).toBe(Z_COUNT_SMALL); // reused, not made anew
   });
 
   it("hands back a departed creature's sprites and disposes everything", () => {
@@ -325,7 +455,7 @@ describe("cue sprites", () => {
       bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: t });
     }
     expect(body().scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
-    expect(sprites()).toHaveLength(Z_COUNT);
+    expect(sprites()).toHaveLength(Z_COUNT_SMALL);
     const held = sprites().map((s) => s.position.y);
     bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: 1.6 });
     expect(sprites().map((s) => s.position.y)).toEqual(held);
@@ -370,5 +500,73 @@ describe("cue sprites", () => {
     });
     expect(Math.max(...heights)).toBeGreaterThan(0);
     expect(Math.min(...heights)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("shows two small z's in the strip and three once they are bigger", () => {
+    const cues = new CueSprites();
+    const sprites = { bubble: undefined, ring: undefined, zs: [] as THREE.Sprite[] };
+    const anchor = (creaturePx: number): CueAnchor => ({
+      top: new THREE.Vector3(0, 1, 0),
+      creaturePx,
+      unitsPerPixel: 0.01,
+      right: new THREE.Vector3(1, 0, 0),
+      visible: 1,
+    });
+    const sleeping = { eating: 0, sleeping: 1, hungry: 0 };
+    cues.place(sprites, sleeping, anchor(20), 1, 0);
+    expect(sprites.zs).toHaveLength(Z_COUNT_SMALL);
+    cues.place(sprites, sleeping, anchor(100), 1.1, 0);
+    expect(sprites.zs).toHaveLength(Z_COUNT);
+    expect(sprites.zs.map((z) => z.material.rotation)).toEqual([Z_TILT, -Z_TILT, Z_TILT]);
+    cues.place(sprites, sleeping, anchor(20), 1.2, 0);
+    expect(sprites.zs).toHaveLength(Z_COUNT_SMALL);
+    expect(cues.active).toBe(Z_COUNT_SMALL);
+    cues.dispose();
+  });
+
+  it("switches the z's to their night look as each starts its next rise", () => {
+    const { bodies, sprites } = make();
+    const zs = () => sprites().filter((s) => s.name === "cue:z");
+    bodies.update([creature("a", ["sleeping"])], at(0));
+    bodies.update([creature("a", ["sleeping"])], at(2));
+    const day = zs()[0]!.material.map;
+    expect(zs().every((z) => z.material.map === day)).toBe(true);
+    bodies.setNight(true);
+    bodies.update([creature("a", ["sleeping"])], at(2.05));
+    // Mid-rise, each z keeps its look...
+    expect(zs().every((z) => z.material.map === day)).toBe(true);
+    // ...and takes the night look once it starts again, within one rise.
+    for (let t = 2.1; t < 6; t += 0.05) bodies.update([creature("a", ["sleeping"])], at(t));
+    const night = zs()[0]!.material.map;
+    expect(night).not.toBe(day);
+    expect(zs().every((z) => z.material.map === night)).toBe(true);
+    // A z that appears later takes the current look at once.
+    bodies.update([creature("a", ["sleeping"]), creature("b", ["sleeping"])], at(6.05));
+    bodies.update([creature("a", ["sleeping"]), creature("b", ["sleeping"])], at(7));
+    expect(zs().every((z) => z.material.map === night)).toBe(true);
+  });
+
+  it("holds z's and the bubble still with reduced motion", () => {
+    const cues = new CueSprites();
+    cues.reducedMotion = true;
+    const sprites = { bubble: undefined, ring: undefined, zs: [] as THREE.Sprite[] };
+    const anchor: CueAnchor = {
+      top: new THREE.Vector3(0, 1, 0),
+      creaturePx: 20,
+      unitsPerPixel: 0.01,
+      right: new THREE.Vector3(1, 0, 0),
+      visible: 1,
+    };
+    const weights = { eating: 0, sleeping: 1, hungry: 1 };
+    const positions = () =>
+      [...sprites.zs, sprites.bubble!].map((s) => s.position.toArray().concat(s.material.opacity));
+    cues.place(sprites, weights, anchor, 1, 0.3);
+    const held = positions();
+    for (const time of [1.7, 2.9, 4.4]) {
+      cues.place(sprites, weights, anchor, time, 0.3);
+      expect(positions()).toEqual(held);
+    }
+    for (const z of sprites.zs) expect(z.material.opacity).toBeGreaterThan(0.5);
+    cues.dispose();
   });
 });
