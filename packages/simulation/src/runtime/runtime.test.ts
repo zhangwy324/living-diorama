@@ -37,6 +37,34 @@ describe("FixedClock", () => {
     expect(() => clock.setSpeed(0)).toThrow(RangeError);
     expect(() => new FixedClock({ tickRateHz: 0 })).toThrow(RangeError);
   });
+
+  it("raises the catch-up limit in proportion to a faster speed (issue #100)", () => {
+    const clock = new FixedClock({ tickRateHz: 10 });
+    clock.advance(0);
+    clock.setSpeed(60);
+    expect(clock.catchUpLimit).toBe(600);
+    // A host advancing every 100 ms now gets 60 ticks each time, not 10.
+    expect(clock.advance(100)).toBe(60);
+    expect(clock.advance(200)).toBe(60);
+    // Still at most one second of wall-clock time, e.g. after sleep at speed 60.
+    expect(clock.advance(3_600_200)).toBe(600);
+    expect(clock.advance(3_600_250)).toBe(30);
+    clock.setSpeed(2.5);
+    expect(clock.catchUpLimit).toBe(25);
+  });
+
+  it("keeps the catch-up limit at speed 1 or slower", () => {
+    const clock = new FixedClock({ tickRateHz: 10 });
+    clock.advance(0);
+    expect(clock.catchUpLimit).toBe(10);
+    expect(clock.advance(3_600_000)).toBe(10);
+    clock.setSpeed(0.5);
+    expect(clock.catchUpLimit).toBe(10);
+    expect(clock.advance(7_200_000)).toBe(10);
+    clock.setSpeed(60);
+    clock.setSpeed(1);
+    expect(clock.advance(10_800_000)).toBe(10);
+  });
 });
 
 describe("Rng", () => {

@@ -1,6 +1,9 @@
 export interface ClockOptions {
   tickRateHz: number;
-  /** Most ticks one `advance` may release; time beyond that is dropped, e.g. after sleep. */
+  /**
+   * Most ticks one `advance` may release at speed 1; time beyond that is dropped, e.g. after
+   * sleep. A faster speed raises the limit in proportion (see `FixedClock.catchUpLimit`).
+   */
   maxCatchUpTicks?: number;
 }
 
@@ -55,6 +58,16 @@ export class FixedClock {
     this.#speed = multiplier;
   }
 
+  /**
+   * Most ticks the next `advance` may release: `maxCatchUpTicks` at speed 1 or slower, raised in
+   * proportion to a faster speed. The limit so covers the same span of wall-clock time at any
+   * speed above 1 (one second at the defaults), so a dev speed of 60 isn't held to about 10×
+   * (issue #100), while speed 1 still drops a long sleep as before.
+   */
+  get catchUpLimit(): number {
+    return this.#speed > 1 ? Math.ceil(this.maxCatchUpTicks * this.#speed) : this.maxCatchUpTicks;
+  }
+
   /** Feeds the current monotonic wall-clock time in milliseconds; returns the ticks now due. */
   advance(wallMs: number): number {
     const last = this.#lastWallMs;
@@ -62,9 +75,10 @@ export class FixedClock {
     if (last === undefined || this.#paused) return 0;
     this.#accumulatorMs += Math.max(0, wallMs - last) * this.#speed;
     const due = Math.floor(this.#accumulatorMs / this.tickMs);
-    if (due > this.maxCatchUpTicks) {
+    const limit = this.catchUpLimit;
+    if (due > limit) {
       this.#accumulatorMs = 0;
-      return this.maxCatchUpTicks;
+      return limit;
     }
     this.#accumulatorMs -= due * this.tickMs;
     return due;

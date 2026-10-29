@@ -177,6 +177,16 @@ describe("simulation host", () => {
     expect(host.snapshots()).toHaveLength(20);
   });
 
+  it("runs a dev speed of 60 at 60 times real time, past the speed-1 catch-up limit", () => {
+    const host = startHost();
+    host.init();
+    host.send({ type: "set_speed", multiplier: 60 });
+    host.advance(100);
+    host.take();
+    host.advance(1000);
+    expect(host.snapshots()).toHaveLength(600);
+  });
+
   it("rejects commands it cannot apply and keeps running", () => {
     const host = startHost();
     host.send({ type: "pause" });
