@@ -5,7 +5,7 @@ import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState }
 import { gridCellAt } from "./knowledge";
 import { hungerNeed } from "./needs";
 import { VISION_SENSE } from "./perception";
-import { chooseNearestByRoute, isRecord } from "./shared";
+import { chooseNearestByRoute, isIntFrom, isPathState, isRecord } from "./shared";
 
 // `core:feed` and `core:eat` (ADR 0018 §11, §12 and amendments). A hungry creature goes to the
 // remembered food with the shortest route, stands at its own spot beside it and eats, which
@@ -129,6 +129,13 @@ export const feedBehavior: BehaviorProvider = {
       memory.avoid = Object.fromEntries(Object.entries(avoid).filter(([id]) => exists(id)));
     }
   },
+  // Back from a gap, the creature is taken to have eaten (ADR 0018 §19): integrating hunger over
+  // hours away would leave every creature starving.
+  catchUp({ needs }, _gap, rng) {
+    return Object.hasOwn(needs, HUNGER)
+      ? { needs: { [HUNGER]: rng.range(0, hungerNeed.actAt) } }
+      : null;
+  },
 };
 
 interface EatState {
@@ -194,5 +201,21 @@ export const eatAction: ActionProvider = {
     if (eat.ticksLeft > 0) return { status: "running", cue: "eating", cueProgress };
     context.emit({ type: "ate", placementId: eat.placementId, hunger: context.needs[HUNGER] ?? 0 });
     return { status: "done", cue: "eating" };
+  },
+  checkState(state, exists) {
+    if (!isRecord(state)) return false;
+    const { placementId, x, z, path, arrived, ticksLeft, perTick } = state;
+    return (
+      typeof placementId === "string" &&
+      exists(placementId) &&
+      Number.isFinite(x) &&
+      Number.isFinite(z) &&
+      isPathState(path) &&
+      typeof arrived === "boolean" &&
+      isIntFrom(ticksLeft, 1) &&
+      typeof perTick === "number" &&
+      perTick > 0 &&
+      Number.isFinite(perTick)
+    );
   },
 };

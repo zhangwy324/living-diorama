@@ -328,6 +328,7 @@ function eatContext(walks: ("moving" | "arrived")[], legs: { x: number; z: numbe
   const faced: { x: number; z: number }[] = [];
   const needs = { [HUNGER]: 0.9 };
   const context: ActionContext = {
+    catchingUp: false,
     tick: 0,
     tickSeconds: 0.1,
     position: { regionId: "r", x: 0, z: 0 },

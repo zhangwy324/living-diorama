@@ -7,7 +7,8 @@ import {
   type WorldSave,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
-import type { BehaviorProvider } from "../creatures/contracts";
+import type { ActionProvider, BehaviorProvider } from "../creatures/contracts";
+import type { CatchUpSkip } from "./catch-up";
 import type { WorldModel } from "../world/world-model";
 import { clonePlain } from "./plain";
 import type { RngState } from "./rng";
@@ -53,6 +54,47 @@ export interface PrunedPlacement {
   where: PrunedReference;
 }
 
+/**
+ * Why a saved running action was dropped: no action of its ID is registered (`unknown_action`), or
+ * its state fails the action's `checkState`, e.g. naming a placement no longer in the world
+ * (`invalid_state`).
+ */
+export type DroppedActionReason = "unknown_action" | "invalid_state";
+
+export interface DroppedAction {
+  creatureId: string;
+  actionId: string;
+  reason: DroppedActionReason;
+}
+
+/** A behavior's catch-up that had no effect on a creature. */
+export interface CatchUpFailure {
+  creatureId: string;
+  behavior: string;
+  /**
+   * `hook_failed`: its `catchUp` hook threw, so nothing it would have set was.
+   * `undeclared_need` or `invalid_need`: it set `need`, which it doesn't declare, or to a value
+   * that isn't a finite number; that need was left alone. `no_spot`: the creature has no spot it
+   * can reach at the placement the hook named. Otherwise why the action it asked for failed to
+   * start (`start_failed` if it threw); the creature was placed awake then.
+   */
+  reason: string;
+  /** The need, for `undeclared_need` and `invalid_need`. */
+  need?: string;
+}
+
+/** What catch-up did for the time the world was away (ADR 0018 §19, ADR 0019 §5, §6). */
+export interface CatchUpReport {
+  /** Whether it ran. If not, the world resumed exactly as saved and only the time of day moved. */
+  applied: boolean;
+  /** Why it didn't run; absent when it did. */
+  skipped?: CatchUpSkip;
+  /** The gap it covered, in milliseconds, capped at 12 hours; 0 when it didn't run. */
+  gapMs: number;
+  /** Behaviors whose catch-up had no effect, per creature. */
+  failures: CatchUpFailure[];
+}
+
 /** What restoring a save kept out of the world. */
 export interface RestoreReport {
   /**
@@ -66,6 +108,12 @@ export interface RestoreReport {
    * Behavior memory is pruned by its behavior's `forgetPlacements` and isn't listed.
    */
   prunedPlacements: PrunedPlacement[];
+  /**
+   * Running actions dropped because their action is missing or their saved state is unusable;
+   * those creatures decide afresh. Catch-up drops every running action besides, unreported.
+   */
+  droppedActions: DroppedAction[];
+  catchUp: CatchUpReport;
 }
 
 /** A save that passed `checkSave`: the creatures to restore and what was left out. */
@@ -73,6 +121,7 @@ export interface CheckedSave {
   creatures: CreatureState[];
   droppedCreatures: DroppedCreature[];
   prunedPlacements: PrunedPlacement[];
+  droppedActions: DroppedAction[];
 }
 
 const CREATURE_NUMBER = /^creature-(\d+)$/;
@@ -85,13 +134,16 @@ const major = (version: string) => version.split(".")[0];
  * fields disagree: a creature whose species isn't in `species` at its exact version, or a creature
  * number at or above `nextCreature`. Otherwise returns copies of the creatures that still fit,
  * each at its species' registered version, with placement references the world no longer has
- * pruned. A behavior whose `forgetPlacements` throws loses that memory. Doesn't change `save`.
+ * pruned. A behavior whose `forgetPlacements` throws loses that memory. A running action whose
+ * action isn't registered, or whose state fails the action's `checkState` (or it throws), is
+ * dropped, and the creature decides afresh on its next tick. Doesn't change `save`.
  */
 export function checkSave(
   save: WorldSave,
   model: WorldModel,
   registries: Registries,
   behaviors: ReadonlyMap<string, BehaviorProvider>,
+  actions: ReadonlyMap<string, ActionProvider>,
 ): Result<CheckedSave> {
   const { id, version } = model.definition;
   if (save.world.id !== id || save.world.version !== version) {
@@ -129,6 +181,7 @@ export function checkSave(
   const creatures: CreatureState[] = [];
   const droppedCreatures: DroppedCreature[] = [];
   const prunedPlacements: PrunedPlacement[] = [];
+  const droppedActions: DroppedAction[] = [];
   for (const saved of save.creatures) {
     const { id: creatureId, speciesId, speciesVersion } = saved;
     const species = registries.species.get(speciesId);
@@ -163,6 +216,15 @@ export function checkSave(
       if (!exists(placementId)) pruned(placementId, "used_structures");
       return exists(placementId);
     });
+    const action = creature.action;
+    const reason = action && checkAction(action, actions.get(action.id), exists);
+    if (action && reason) {
+      droppedActions.push({ creatureId, actionId: action.id, reason });
+      delete creature.action;
+      creature.lastResult = { action: action.id, outcome: "interrupted", reason };
+      creature.decideAtTick = save.tick;
+      creature.asleep = false;
+    }
     // A behavior that fails on a saved memory loses that memory rather than failing the restore.
     creature.memory = Object.fromEntries(
       Object.entries(creature.memory).filter(([behavior, memory]) => {
@@ -176,7 +238,23 @@ export function checkSave(
     );
     creatures.push(creature);
   }
-  return { ok: true, value: { creatures, droppedCreatures, prunedPlacements } };
+  return { ok: true, value: { creatures, droppedCreatures, prunedPlacements, droppedActions } };
+}
+
+/** Why a saved running action can't carry on, or undefined if it can. */
+function checkAction(
+  action: { state: unknown },
+  provider: ActionProvider | undefined,
+  exists: (placementId: string) => boolean,
+): DroppedActionReason | undefined {
+  if (!provider) return "unknown_action";
+  try {
+    return provider.checkState === undefined || provider.checkState(action.state, exists)
+      ? undefined
+      : "invalid_state";
+  } catch {
+    return "invalid_state";
+  }
 }
 
 const discard = (code: string, message: string, path: (string | number)[]): Result<never> => ({

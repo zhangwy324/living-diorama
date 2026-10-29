@@ -1,10 +1,32 @@
 import type { Rng } from "../runtime/rng";
-import type { CreatureObservation, ReachableRegion } from "./contracts";
+import type { CreatureObservation, PathState, ReachableRegion } from "./contracts";
 
 // Helpers that core behaviors and actions share.
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+/** A whole number from `min` up. */
+export const isIntFrom = (value: unknown, min: number): value is number =>
+  Number.isInteger(value) && (value as number) >= min;
+
+/** A path an action walks, e.g. from a save: waypoints with finite coordinates, `next` in range. */
+export function isPathState(value: unknown): value is PathState {
+  if (!isRecord(value) || !Array.isArray(value.points)) return false;
+  const { points, next } = value;
+  return (
+    isIntFrom(next, 0) &&
+    next <= points.length &&
+    points.every(
+      (p) =>
+        isRecord(p) &&
+        typeof p.regionId === "string" &&
+        Number.isFinite(p.x) &&
+        Number.isFinite(p.z) &&
+        (p.connectionId === undefined || typeof p.connectionId === "string"),
+    )
+  );
+}
 
 /** A region drawn with probability proportional to its walkable area. */
 export function pickWeighted(regions: readonly ReachableRegion[], rng: Rng): string | undefined {

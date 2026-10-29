@@ -40,6 +40,8 @@ At least:
 
 5. **A `catchUp` hook on behaviors.** `BehaviorProvider` gains an optional `catchUp(observation, gap)` hook, like the `interrupted` hook on actions (ADR 0018, PR 5a). `core:feed` resets hunger (to a random value below `actAt`, ADR 0018 §19). `core:rest` sets tiredness and can ask for the creature to start sleeping at home, already arrived and asleep. The engine owns the rest: the 12-hour cap, computing the gap, dropping the action in progress, placing awake creatures and suppressing per-creature events. The engine never branches on content IDs; it calls whichever behaviors declare the hook.
 
+   _Amended (owner, 2026-10-28, M15 PR 3):_ catch-up moves the tick on by the capped gap, so every tick-based timer (the release grace, cooldowns, when places were last seen) counts the time away.
+
 6. **Short gaps are no gap (amends ADR 0018 §19).** ADR 0018 §19 said a gap under 2 minutes "runs as ordinary ticks". The clock drops time beyond `maxCatchUpTicks` (ADR 0006 §1), so those ticks would never run. Instead, a gap under 2 minutes is treated as no gap: the world is restored exactly, and only the time of day jumps to the present. A clock that went backwards still counts as no gap, and custom day mode still has no catch-up.
 
 ### Compatibility

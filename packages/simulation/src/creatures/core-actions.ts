@@ -1,7 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Route } from "../navigation/pathfinder";
 import type { ActionProvider, PathPoint, PathState } from "./contracts";
-import { isRecord } from "./shared";
+import { isIntFrom, isPathState, isRecord } from "./shared";
 
 // `core:idle` and `core:follow_path` (roadmap M3 task 6). Preconditions are checked in `start`,
 // progress in `step`; completion is a `done` status. An interrupted action's state is dropped.
@@ -51,6 +51,7 @@ export const idleAction: ActionProvider = {
     idle.remainingTicks--;
     return idle.remainingTicks > 0 ? { status: "running" } : { status: "done" };
   },
+  checkState: (state) => isRecord(state) && isIntFrom(state.remainingTicks, 1),
 };
 
 /** Walks to `params.destination` along a route the engine plans. */
@@ -76,6 +77,7 @@ export const followPathAction: ActionProvider = {
       ? { status: "done" }
       : { status: "running" };
   },
+  checkState: isPathState,
 };
 
 export const coreActions: readonly ActionProvider[] = [idleAction, followPathAction];

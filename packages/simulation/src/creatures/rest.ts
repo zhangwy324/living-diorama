@@ -1,8 +1,23 @@
 import type { DayPhase } from "../runtime/time-of-day";
 import { pathFromRoute } from "./core-actions";
-import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState } from "./contracts";
+import type {
+  ActionContext,
+  ActionProvider,
+  ActionStart,
+  BehaviorProvider,
+  CatchUpGap,
+  CatchUpResult,
+  CreatureObservation,
+  PathState,
+} from "./contracts";
 import { tirednessNeed } from "./needs";
-import { isRecord, routeNearest, type PlaceChoice } from "./shared";
+import {
+  chooseNearestByRoute,
+  isPathState,
+  isRecord,
+  routeNearest,
+  type PlaceChoice,
+} from "./shared";
 
 // `core:rest` and `core:sleep` (ADR 0018 §13, §14 and amendments). A tired creature, or any
 // creature once its sleeping phase draws near, goes to a shelter it knows (its home, unless that
@@ -33,6 +48,8 @@ export const WAKE_TIREDNESS = 0.1;
 export const HOME_DETOUR_FACTOR = 2;
 /** A creature released from the Studio doesn't sleep for this long (ADR 0018 amendments, §13). */
 export const RELEASE_GRACE_SECONDS = 10 * 60;
+/** How close to its spot at a shelter a creature must stand to start there already asleep. */
+const AT_SPOT_METRES = 1e-3;
 
 /** Where a day phase falls in a creature's day (ADR 0018 §13 and amendments, §5). */
 export interface SleepCycle {
@@ -140,6 +157,27 @@ export const restBehavior: BehaviorProvider = {
         }
       : { action: SLEEP, params: {}, utility, reason: `${why} where it stands` };
   },
+  /**
+   * After a gap (ADR 0018 §19): tiredness as `tirednessAfter` has it, and, in the creature's
+   * sleeping phase, asleep already: at home if home still offers it shelter it can reach, else at
+   * the nearest shelter it knows, else where it stands. Not within the release grace.
+   */
+  catchUp(observation, gap) {
+    const { dayPhase, home, needs, traits, world } = observation;
+    const nocturnal = isNocturnal(traits);
+    const tiredness = tirednessAfter(needs[TIREDNESS] ?? 0, gap, nocturnal);
+    if (tiredness === undefined) return null;
+    const result: CatchUpResult = { needs: { [TIREDNESS]: tiredness } };
+    if (!sleepCycle(dayPhase, nocturnal).sleeping || inReleaseGrace(observation)) return result;
+    const homePlace = home === null ? undefined : world.place(home);
+    const atHome =
+      homePlace && Object.hasOwn(homePlace.affordances, SHELTER) && world.spotAt(homePlace.id);
+    const shelter = atHome ? home : chooseNearestByRoute(observation, SHELTER)?.placementId;
+    result.start = shelter
+      ? { action: SLEEP, params: { placementId: shelter, asleep: true }, at: shelter }
+      : { action: SLEEP, params: { asleep: true } };
+    return result;
+  },
 };
 
 interface SleepState {
@@ -165,7 +203,8 @@ interface SleepState {
  * without one, stays where it is; then sleeps there. Checked every tick: a night's sleep ends
  * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
  * reaches 0. Emits `fell_asleep` on arriving and `woke_up` on waking, also when interrupted. The
- * first shelter a creature sleeps at becomes its home.
+ * first shelter a creature sleeps at becomes its home. With `params.asleep` true it starts already
+ * there and asleep, for catch-up (`startAsleep`).
  */
 export const sleepAction: ActionProvider = {
   id: SLEEP,
@@ -177,6 +216,7 @@ export const sleepAction: ActionProvider = {
     }
     const { waking } = sleepCycle(context.dayPhase, isNocturnal(context.traits));
     const { placementId } = params;
+    if (params.asleep === true) return startAsleep(placementId, waking, context);
     if (placementId === undefined) {
       const { x, z } = context.position;
       const state: SleepState = {
@@ -246,4 +286,80 @@ export const sleepAction: ActionProvider = {
       });
     }
   },
+  checkState(state, exists) {
+    if (!isRecord(state)) return false;
+    const { placementId, x, z, path, arrived, asleep, nap } = state;
+    return (
+      (placementId === null || (typeof placementId === "string" && exists(placementId))) &&
+      Number.isFinite(x) &&
+      Number.isFinite(z) &&
+      isPathState(path) &&
+      typeof arrived === "boolean" &&
+      typeof asleep === "boolean" &&
+      typeof nap === "boolean"
+    );
+  },
 };
+
+/**
+ * Sleep already under way, for catch-up only (ADR 0018 §19; `not_catching_up` otherwise). At a
+ * shelter `placementId`, the creature must already stand at its spot there, where the engine
+ * placed it (`not_at_spot` otherwise); without one it sleeps where it stands. It is asleep from
+ * the start, so it emits no `fell_asleep`; a shelter becomes its home if it has none, as on
+ * falling asleep there.
+ */
+function startAsleep(placementId: unknown, waking: boolean, context: ActionContext): ActionStart {
+  if (!context.catchingUp) return { ok: false, reason: "not_catching_up" };
+  let { x, z } = context.position;
+  if (placementId !== undefined) {
+    const place = typeof placementId === "string" ? context.place(placementId) : undefined;
+    if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
+      return { ok: false, reason: "not_shelter", detail: { placementId } };
+    }
+    // Only where the creature already stands at its spot: catch-up puts it there first.
+    const spot = context.spotAt(place.id);
+    const here = context.position;
+    const there =
+      spot !== undefined &&
+      spot.regionId === here.regionId &&
+      Math.hypot(spot.x - here.x, spot.z - here.z) <= AT_SPOT_METRES;
+    if (!there) return { ok: false, reason: "not_at_spot", detail: { placementId } };
+    ({ x, z } = place);
+    context.face(place.x, place.z);
+    if (context.home === null) context.setHome(place.id);
+  }
+  const state: SleepState = {
+    placementId: typeof placementId === "string" ? placementId : null,
+    x,
+    z,
+    path: { points: [], next: 0 },
+    arrived: true,
+    asleep: true,
+    nap: waking,
+  };
+  return { ok: true, state, detail: { placementId: state.placementId, asleep: true } };
+}
+
+/**
+ * Tiredness after a gap (ADR 0018 §19): it falls at the asleep rate through the creature's
+ * sleeping phase and rises at the awake rate through the rest, and a creature whose sleeping
+ * phase ended during the gap starts its waking phase rested (0).
+ */
+export function tirednessAfter(
+  tiredness: number,
+  gap: CatchUpGap,
+  nocturnal: boolean,
+): number | undefined {
+  const awake = gap.needRate(TIREDNESS, false);
+  const asleep = gap.needRate(TIREDNESS, true);
+  if (awake === undefined || asleep === undefined) return undefined;
+  let value = tiredness;
+  let slept = false;
+  for (const { phase, hours } of gap.phases) {
+    const { waking, sleeping } = sleepCycle(phase, nocturnal);
+    if (waking && slept) value = 0;
+    slept = sleeping;
+    value = Math.min(1, Math.max(0, value + hours * (sleeping ? asleep : awake)));
+  }
+  return value;
+}

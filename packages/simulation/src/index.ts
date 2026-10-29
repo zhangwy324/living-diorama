@@ -20,6 +20,7 @@ export * from "./navigation/profile";
 export * from "./navigation/region-graph";
 export * from "./navigation/walkability";
 export * from "./protocol";
+export * from "./runtime/catch-up";
 export * from "./runtime/clock";
 export * from "./runtime/host";
 export * from "./runtime/rng";
