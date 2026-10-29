@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   FULL_MOTION_SPEED,
+  leapMotion,
   locomotionMotion,
   locomotionTransform,
   placePivots,
@@ -12,6 +13,7 @@ import {
   type LocomotionInput,
   type LocomotionMotion,
 } from "./locomotion";
+import { MAX_BANK_JUMP } from "./interpolation";
 
 const input = (overrides: Partial<LocomotionInput> = {}): LocomotionInput => ({
   profile: "walk",
@@ -185,6 +187,47 @@ describe("trackMovement", () => {
     trackMovement(movement, at(10.5), 5); // a break, e.g. the window was hidden
     expect(movement.speed).toBe(0);
     expect(movement.last).toEqual(at(10.5));
+  });
+});
+
+describe("trackMovement on a bank jump", () => {
+  const at = (x: number) => ({ x, y: 0, z: 0 });
+  it("holds the speed and distance in the air, so the gait goes on where it left off", () => {
+    const movement = restingMovement();
+    trackMovement(movement, at(0), 0);
+    for (let frame = 1; frame <= 60; frame++) trackMovement(movement, at(frame * 0.01), 1 / 60);
+    const { speed, travelled } = movement;
+    // A large creature's 3.4 m jump in a few frames: neither a dash nor a teleport.
+    for (let frame = 1; frame <= 20; frame++) {
+      trackMovement(movement, at(0.6 + frame * 0.17), 1 / 60, true);
+    }
+    expect(movement).toMatchObject({ speed, travelled });
+    trackMovement(movement, at(4.01), 1 / 60);
+    expect(movement.speed).toBeCloseTo(speed, 2);
+  });
+
+  it("is not a teleport even when a frame spans the whole of the longest jump", () => {
+    const movement = restingMovement();
+    trackMovement(movement, at(0), 0);
+    for (let frame = 1; frame <= 60; frame++) trackMovement(movement, at(frame * 0.01), 1 / 60);
+    trackMovement(movement, at(0.6 + MAX_BANK_JUMP), 1 / 60, true);
+    expect(movement.speed).toBeGreaterThan(0);
+  });
+});
+
+describe("leapMotion", () => {
+  it("stretches and tips nose up as it leaves, nose down as it comes down, and lands plain", () => {
+    const leap = (progress: number) => ({ ...leapMotion(progress, restingLocomotion()) });
+    expect(leap(0)).toMatchObject({ lift: 0, scaleY: 1, scaleXZ: 1 });
+    expect(leap(0).pitch).toBeCloseTo(0);
+    expect(leap(1).pitch).toBeCloseTo(0);
+    expect(leap(1).scaleY).toBeCloseTo(1);
+    expect(leap(0.25).pitch).toBeLessThan(0);
+    expect(leap(0.75).pitch).toBeGreaterThan(0);
+    expect(leap(0.25).scaleY).toBeGreaterThan(1);
+    expect(leap(0.5).pivot).toBe("centerOfGravity");
+    // The arc is in the drawn position, so the leap itself never lifts.
+    expect(leap(0.5).lift).toBe(0);
   });
 });
 
