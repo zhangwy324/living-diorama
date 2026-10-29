@@ -7,6 +7,7 @@ import {
 import { pointInPolygon, polygonEdges, projectOnSegment } from "../world/geometry";
 import type { ConnectionModel, RegionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
+import { footprintRows } from "./region-cells";
 import { buildRegionMask, CellState, type RegionMask } from "./walkability";
 
 export type PortalCheck =
@@ -262,8 +263,21 @@ export const JUMP_DECK_DEPTH = 0.15;
  * Known gaps, to revisit: "off the ground anywhere" also catches a flat land region set partly
  * into a slope, whose whole footprint then keeps jumps away; and any kind but water counts, so
  * a region of a kind nothing walks on (air, say) does too.
+ *
+ * Computed once per world model and shared by every profile.
  */
-export function raisedSurfaces(world: WorldModel): RegionModel[] {
+export function raisedSurfaces(world: WorldModel): readonly RegionModel[] {
+  let raised = raisedCache.get(world);
+  if (!raised) {
+    raised = findRaisedSurfaces(world);
+    raisedCache.set(world, raised);
+  }
+  return raised;
+}
+
+const raisedCache = new WeakMap<WorldModel, readonly RegionModel[]>();
+
+function findRaisedSurfaces(world: WorldModel): RegionModel[] {
   const eps = WORLD_TOLERANCES.surfaceEpsilon;
   const { terrain } = world;
   const cs = terrain.cellSize;
@@ -275,9 +289,10 @@ export function raisedSurfaces(world: WorldModel): RegionModel[] {
     if (region.kind === "water") return false;
     if (region.footprint.some((p) => offGround(region, p.x, p.z))) return true;
     const { box } = region;
+    const footprint = footprintRows(world, region);
     for (let z = (Math.floor(box.minZ / cs) + 0.5) * cs; z <= box.maxZ; z += cs) {
       for (let x = (Math.floor(box.minX / cs) + 0.5) * cs; x <= box.maxX; x += cs) {
-        if (pointInPolygon(x, z, region.footprint) && offGround(region, x, z)) return true;
+        if (footprint.contains(x, z) && offGround(region, x, z)) return true;
       }
     }
     return false;
@@ -329,14 +344,25 @@ export function isJumpClear(
       box.maxZ > Math.min(a.z, b.z) - keep &&
       box.minZ < Math.max(a.z, b.z) + keep,
   );
+  // `Math.hypot` is never below either leg, so a prop further than its reach along an axis from
+  // the line's box never blocks it. The slack covers sample points rounding past the ends.
+  const props = world.props.filter(({ blockRadius, transform: { position } }) => {
+    const range = blockRadius + profile.radius + 1e-6;
+    return (
+      blockRadius > 0 &&
+      position.x > Math.min(a.x, b.x) - range &&
+      position.x < Math.max(a.x, b.x) + range &&
+      position.z > Math.min(a.z, b.z) - range &&
+      position.z < Math.max(a.z, b.z) + range
+    );
+  });
   for (const end of [a, b]) {
     if (near.some((r) => nearestFootprintPoint(r, end.x, end.z).distance < keep)) return false;
   }
   for (let k = 0; k <= steps; k++) {
     const x = a.x + ((b.x - a.x) * k) / steps;
     const z = a.z + ((b.z - a.z) * k) / steps;
-    for (const prop of world.props) {
-      if (prop.blockRadius <= 0) continue;
+    for (const prop of props) {
       const { position } = prop.transform;
       if (Math.hypot(position.x - x, position.z - z) < prop.blockRadius + profile.radius) {
         return false;
@@ -372,6 +398,13 @@ function bankPairs(
   const cs = land.cellSize;
   const { box } = water.region;
   const span = Math.ceil(reach / cs);
+  const offsets: { di: number; dj: number; distance: number }[] = [];
+  for (let dj = -span; dj <= span; dj++) {
+    for (let di = -span; di <= span; di++) {
+      const distance = Math.hypot(di * cs, dj * cs);
+      if (distance <= reach + 1e-9) offsets.push({ di, dj, distance });
+    }
+  }
   const pairs: BankPair[] = [];
   for (let cell = 0; cell < land.states.length; cell++) {
     if (land.states[cell] !== CellState.walkable) continue;
@@ -386,14 +419,10 @@ function bankPairs(
     }
     // Candidates nearest first (then in cell order); the first with a clear line wins.
     const candidates: { cell: number; distance: number }[] = [];
-    for (let dj = -span; dj <= span; dj++) {
-      for (let di = -span; di <= span; di++) {
-        const distance = Math.hypot(di * cs, dj * cs);
-        if (distance > reach + 1e-9) continue;
-        const w = water.cellAt(c.x + di * cs, c.z + dj * cs);
-        if (w === -1 || !isBankPair(land, cell, water, w)) continue;
-        candidates.push({ cell: w, distance });
-      }
+    for (const { di, dj, distance } of offsets) {
+      const w = water.cellAt(c.x + di * cs, c.z + dj * cs);
+      if (w === -1 || !isBankPair(land, cell, water, w)) continue;
+      candidates.push({ cell: w, distance });
     }
     candidates.sort((p, q) => p.distance - q.distance || p.cell - q.cell);
     const from = { ...c, y: land.height(cell) };

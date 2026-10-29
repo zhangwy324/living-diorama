@@ -31,11 +31,36 @@ export function polylineSegments(line: readonly Vec2[]): [Vec2, Vec2][] {
 /** Even-odd test; points exactly on an edge may land either side. */
 export function pointInPolygon(x: number, z: number, polygon: readonly Vec2[]): boolean {
   let inside = false;
-  for (const [b, a] of polygonEdges(polygon)) {
-    if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) {
+  // Each edge from the previous point `b` to `a`, without allocating: it runs per grid cell.
+  let b = polygon[polygon.length - 1];
+  for (const a of polygon) {
+    if (b && a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) {
       inside = !inside;
     }
+    b = a;
   }
+  return inside;
+}
+
+/**
+ * Where the polygon's edges cross the line at `z`: the x values `pointInPolygon` compares
+ * against, computed the same way, so `insideAt` on them gives exactly its answer for every x on
+ * that line. A scanline: one row's crossings serve every cell in the row.
+ */
+export function polygonCrossings(polygon: readonly Vec2[], z: number): number[] {
+  const crossings: number[] = [];
+  let b = polygon[polygon.length - 1];
+  for (const a of polygon) {
+    if (b && a.z > z !== b.z > z) crossings.push(((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x);
+    b = a;
+  }
+  return crossings;
+}
+
+/** Whether x is inside the polygon, given its `polygonCrossings` on the line through the point. */
+export function insideAt(crossings: readonly number[], x: number): boolean {
+  let inside = false;
+  for (const c of crossings) if (x < c) inside = !inside;
   return inside;
 }
 

@@ -5,6 +5,9 @@ import {
   buildWorldModel,
   CellState,
   coreSurfaces,
+  insideAt,
+  pointInPolygon,
+  polygonCrossings,
   profileForSpecies,
   registerCoreEngine,
   Terrain,
@@ -35,6 +38,27 @@ describe("Terrain", () => {
   it("reports the slope of the containing triangle", () => {
     expect(terrain.slopeAt(0.75, 0.25)).toBeCloseTo(Math.atan(Math.hypot(1, 3)));
     expect(terrain.slopeAt(0.25, 0.75)).toBeCloseTo(Math.atan(Math.hypot(2, 2)));
+  });
+});
+
+describe("polygon scanline", () => {
+  it("answers exactly as pointInPolygon, on edges and vertices too", () => {
+    // A small deterministic generator: random polygons with vertices on a quarter grid, tested on
+    // that grid (so many points lie on edges and vertices) and at points between.
+    let seed = 7;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let n = 0; n < 50; n++) {
+      const polygon = Array.from({ length: 3 + Math.floor(next() * 8) }, () => ({
+        x: Math.round(next() * 16) / 4 - 2,
+        z: Math.round(next() * 16) / 4 - 2,
+      }));
+      for (let z = -2.5; z <= 2.5; z += 0.125) {
+        const crossings = polygonCrossings(polygon, z);
+        for (let x = -2.5; x <= 2.5; x += 0.0625) {
+          expect(insideAt(crossings, x)).toBe(pointInPolygon(x, z, polygon));
+        }
+      }
+    }
   });
 });
 

@@ -1,5 +1,4 @@
-import { WORLD_TOLERANCES } from "@living-diorama/content-schema";
-import { pointInPolygon } from "../world/geometry";
+import { CellBase, regionCells } from "./region-cells";
 import type { RegionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
 
@@ -136,106 +135,51 @@ export function buildRegionMask(
   region: RegionModel,
   profile: NavProfile,
 ): RegionMask {
-  const { terrain, bounds } = world;
-  const cs = terrain.cellSize;
-  const originX = bounds.min.x;
-  const originZ = bounds.min.z;
-  const worldColumns = terrain.columns - 1;
-  const worldRows = terrain.rows - 1;
-  const clampI = (v: number) => Math.max(0, Math.min(worldColumns - 1, v));
-  const clampJ = (v: number) => Math.max(0, Math.min(worldRows - 1, v));
-  const i0 = clampI(Math.floor((region.box.minX - originX) / cs));
-  const j0 = clampJ(Math.floor((region.box.minZ - originZ) / cs));
-  const columns = clampI(Math.floor((region.box.maxX - originX) / cs)) - i0 + 1;
-  const rows = clampJ(Math.floor((region.box.maxZ - originZ) / cs)) - j0 + 1;
-
+  const { bounds } = world;
+  const cells = regionCells(world, region);
+  const { i0, j0, columns, rows, cellSize: cs, originX, originZ } = cells.grid;
   const states = new Uint8Array(columns * rows);
   const heights = new Float64Array(columns * rows).fill(NaN);
   const mask = new RegionMask(region, i0, j0, columns, rows, cs, originX, originZ, states, heights);
   const maxSlope = profile.maxSlopeByKind.get(region.kind);
-  const eps = WORLD_TOLERANCES.surfaceEpsilon;
-
-  const others = [...world.regions.values()].filter((r) => r !== region);
-  const covers = (r: RegionModel, x: number, z: number) =>
-    x >= r.box.minX &&
-    x <= r.box.maxX &&
-    z >= r.box.minZ &&
-    z <= r.box.maxZ &&
-    pointInPolygon(x, z, r.footprint);
-
-  /** The cell centre and four points just inside its corners. */
-  const samples = (x: number, z: number) => {
-    const d = cs * 0.49;
-    return [
-      { x, z },
-      { x: x - d, z: z - d },
-      { x: x + d, z: z - d },
-      { x: x - d, z: z + d },
-      { x: x + d, z: z + d },
-    ];
-  };
-  const waters = others.filter((r) => r.kind === "water");
-  /** Whether water region `w` lies above this region's surface anywhere in the cell at (x, z). */
-  const isUnder = (w: RegionModel, x: number, z: number) =>
-    samples(x, z).some((p) => {
-      if (!covers(w, p.x, p.z)) return false;
-      const below = region.surface.heightAt(p.x, p.z);
-      const above = w.surface.heightAt(p.x, p.z);
-      return below !== undefined && above !== undefined && above > below + eps;
-    });
 
   // Pass 1: what the surface itself allows.
   for (let cell = 0; cell < states.length; cell++) {
-    const { x, z } = mask.center(cell);
-    if (!pointInPolygon(x, z, region.footprint)) continue;
+    const base = cells.base[cell];
+    if (base === CellBase.outside) continue;
     if (maxSlope === undefined) {
       states[cell] = CellState.noLocomotion;
       continue;
     }
-    const h = region.surface.heightAt(x, z);
-    if (h === undefined) {
+    if (base === CellBase.offSurface) {
       states[cell] = CellState.offSurface;
       continue;
     }
     // A water region is only where its surface lies above the ground (ADR 0020 §3), all over the
     // cell, since a creature may stand anywhere in it.
-    if (
-      region.kind === "water" &&
-      samples(x, z).some((p) => terrain.heightAt(p.x, p.z) >= h + eps)
-    ) {
+    if (base === CellBase.dry) {
       states[cell] = CellState.dry;
       continue;
     }
+    const h = cells.heights[cell] ?? NaN;
     heights[cell] = h;
-    // Centre plus one point inside each of the cell's two terrain triangles.
-    const q = cs / 4;
-    const slopes = [
-      region.surface.slopeAt(x, z),
-      region.surface.slopeAt(x + q, z - q),
-      region.surface.slopeAt(x - q, z + q),
-    ];
-    if (slopes.some((s) => s !== undefined && s > maxSlope)) {
+    if ((cells.slopes[cell] ?? -Infinity) > maxSlope) {
       states[cell] = CellState.steep;
       continue;
     }
     // Land is under water if any part of the cell is: a creature may stand anywhere in it.
-    if (waters.some((w) => isUnder(w, x, z))) {
+    if (cells.submerged[cell]) {
       states[cell] = CellState.submerged;
       continue;
     }
-    let state: CellState = CellState.walkable;
-    for (const other of others) {
-      if (other.kind === "water" || !covers(other, x, z)) continue;
-      const above = other.surface.heightAt(x, z);
-      if (above === undefined || above <= h + eps) continue;
-      if (above <= h + WORLD_TOLERANCES.maxStepHeight) {
-        state = CellState.covered;
-      } else if (above < h + profile.height) {
-        state = CellState.noHeadroom;
-        break;
-      }
-    }
-    states[cell] = state;
+    // Another region's surface within a step above: the creature stands on that one here. Any
+    // higher but lower than the creature's height leaves it no room.
+    states[cell] =
+      (cells.lowestAbove[cell] ?? Infinity) < h + profile.height
+        ? CellState.noHeadroom
+        : cells.covered[cell]
+          ? CellState.covered
+          : CellState.walkable;
   }
 
   // Pass 2: clearance for the creature's radius.
@@ -243,6 +187,17 @@ export function buildRegionMask(
   const reach = Math.ceil((radius + cs / 2) / cs);
   const canSwim = profile.maxSlopeByKind.has("water");
   const blocked = Uint8Array.from(states, (s) => (isBaseBlocked(s, canSwim) ? 1 : 0));
+  const nearProp = propCells(world, mask, radius);
+  // The neighbours, as offsets, whose square comes within the radius of a cell's centre.
+  const close: number[][] = [];
+  for (let dj = -reach; dj <= reach; dj++) {
+    for (let di = -reach; di <= reach; di++) {
+      // Distance from the centre to the nearest point of the neighbour's square.
+      const dx = Math.max(0, Math.abs(di) * cs - cs / 2);
+      const dz = Math.max(0, Math.abs(dj) * cs - cs / 2);
+      if (Math.hypot(dx, dz) < radius) close.push([di, dj]);
+    }
+  }
   for (let cell = 0; cell < states.length; cell++) {
     if (states[cell] !== CellState.walkable) continue;
     const { x, z } = mask.center(cell);
@@ -255,37 +210,52 @@ export function buildRegionMask(
       states[cell] = CellState.worldEdge;
       continue;
     }
-    if (
-      world.props.some(
-        (p) =>
-          Math.hypot(p.transform.position.x - x, p.transform.position.z - z) <
-          p.blockRadius + radius,
-      )
-    ) {
+    if (nearProp[cell]) {
       states[cell] = CellState.prop;
       continue;
     }
-    if (region.surface.edgeDistance(x, z) < radius) {
+    if (cells.edgeDistance(cell) < radius) {
       states[cell] = CellState.tooClose;
       continue;
     }
     const i = cell % columns;
     const j = Math.floor(cell / columns);
-    search: for (let dj = -reach; dj <= reach; dj++) {
-      for (let di = -reach; di <= reach; di++) {
-        const ni = i + di;
-        const nj = j + dj;
-        if (ni < 0 || nj < 0 || ni >= columns || nj >= rows || !blocked[nj * columns + ni])
-          continue;
-        // Distance from this centre to the nearest point of the blocked cell's square.
-        const dx = Math.max(0, Math.abs(di) * cs - cs / 2);
-        const dz = Math.max(0, Math.abs(dj) * cs - cs / 2);
-        if (Math.hypot(dx, dz) < radius) {
-          states[cell] = CellState.tooClose;
-          break search;
-        }
+    for (const [di = 0, dj = 0] of close) {
+      const ni = i + di;
+      const nj = j + dj;
+      if (ni >= 0 && nj >= 0 && ni < columns && nj < rows && blocked[nj * columns + ni]) {
+        states[cell] = CellState.tooClose;
+        break;
       }
     }
   }
   return mask;
+}
+
+/**
+ * 1 for each mask cell whose centre is closer to a prop than its block radius plus `radius`.
+ * Visits only the cells around each prop instead of every prop per cell.
+ */
+function propCells(world: WorldModel, mask: RegionMask, radius: number): Uint8Array {
+  const { i0, j0, columns, rows, cellSize: cs, originX, originZ } = mask;
+  const near = new Uint8Array(columns * rows);
+  for (const p of world.props) {
+    const { x: px, z: pz } = p.transform.position;
+    const range = p.blockRadius + radius;
+    // `Math.hypot` is never below either leg, so no cell further than `range` along an axis
+    // passes; a cell's margin on each side absorbs rounding.
+    const iLo = Math.max(0, Math.floor((px - range - originX) / cs) - i0 - 1);
+    const iHi = Math.min(columns - 1, Math.ceil((px + range - originX) / cs) - i0 + 1);
+    const jLo = Math.max(0, Math.floor((pz - range - originZ) / cs) - j0 - 1);
+    const jHi = Math.min(rows - 1, Math.ceil((pz + range - originZ) / cs) - j0 + 1);
+    for (let j = jLo; j <= jHi; j++) {
+      for (let i = iLo; i <= iHi; i++) {
+        const cell = j * columns + i;
+        if (near[cell]) continue;
+        const { x, z } = mask.center(cell);
+        if (Math.hypot(px - x, pz - z) < range) near[cell] = 1;
+      }
+    }
+  }
+  return near;
 }
