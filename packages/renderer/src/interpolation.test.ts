@@ -1,6 +1,11 @@
 import type { CreatureSnapshot, SimulationSnapshot } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { SIZE_CLASSES, WORLD_TOLERANCES } from "@living-diorama/content-schema";
+import {
+  MAX_SIZE_CLASS_RADIUS,
+  SIZE_CLASSES,
+  WORLD_TOLERANCES,
+  jumpClearance,
+} from "@living-diorama/content-schema";
 import {
   JUMP_MAX_INTERVALS,
   JUMP_MS,
@@ -10,7 +15,6 @@ import {
   SnapshotInterpolator,
   arcHeight,
   isBankJump,
-  jumpClearance,
 } from "./interpolation";
 
 const at = (x: number): CreatureSnapshot => ({
@@ -236,6 +240,21 @@ describe("SnapshotInterpolator bank jumps", () => {
     const apex = Math.max(...track(tiny, 100, 100 + JUMP_MS - 1).map((pose) => pose.world.y));
     expect(apex).toBeCloseTo(SIZE_CLASSES.tiny.radius, 2);
     expect(apex + SIZE_CLASSES.tiny.height).toBeLessThan(0.37);
+  });
+
+  it("caps the arc at the largest size class's radius when the size is unknown", () => {
+    expect(jumpClearance(10)).toBeCloseTo(MAX_SIZE_CLASS_RADIUS);
+    // Longer than any bank but still drawn as a jump: uncapped, it would rise about 0.86 m.
+    const horizontal = 3.8;
+    expect(horizontal).toBeLessThan(SNAP_DISTANCE);
+    for (const sizeOf of [undefined, () => undefined]) {
+      const interpolator = new SnapshotInterpolator(100, sizeOf);
+      interpolator.push(frame(1, on(0, 0, "land")), 0);
+      interpolator.push(frame(2, on(horizontal, 0, "water")), 100);
+      const flight = track(interpolator, 100, 100 + JUMP_MS - 1);
+      const apex = Math.max(...flight.map((pose) => pose.world.y));
+      expect(apex).toBeCloseTo(MAX_SIZE_CLASS_RADIUS, 2);
+    }
   });
 
   it("takes a second jump in the next tick off from where the first is drawn, without a pop", () => {

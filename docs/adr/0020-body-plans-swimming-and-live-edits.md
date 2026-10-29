@@ -253,6 +253,10 @@ PRs 5 and 6 landed as one PR, so a released creature never had a body plan the w
 - **Medium is the region kind.** `core:land` also covers `cave`, so a walker in a world with caves would, like an amphibian, keep mostly to caves or to open land. No world has caves yet; if that is wrong for them, wander should compare the capability in use rather than the kind.
 - **Not done here:** per-species preferences, such as a water-loving amphibian (the constants are module-level).
 
+### Follow-up: one jump arc for renderer and navigation (#162)
+
+- **The arc's values live in `content-schema`.** `JUMP_CLEARANCE`, `maxJumpClearance` and `jumpClearance` moved from the renderer's interpolation to `packages/content-schema/src/constants.ts`, so the renderer and navigation read one definition. The renderer draws the arc with `jumpClearance`; `isJumpClear` bounds the top of the arc with `maxJumpClearance`, the creature's radius as before, whatever the jump's length, so bank pairs are unchanged. With a species' size unknown, the renderer's arc is now capped at the largest size class's radius (`MAX_SIZE_CLASS_RADIUS`, 0.8 m) instead of uncapped, which replaces "with no size known the clearance is uncapped" in the arc's paragraph above. No bank jump is long enough for that cap to bind.
+
 ## Consequences
 
 - A new place to move (air, say) is a capability with a locomotion rule and a profile. A new style within a medium (a land gait now, water styles later) is a body-plan choice and a profile function in the renderer. Neither changes the engine.
