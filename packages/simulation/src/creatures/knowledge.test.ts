@@ -156,4 +156,18 @@ describe("perceive and reach failures", () => {
     expect(k.places["core:food"]![0]!.failures).toMatchObject({ noRoute: 1, cell: { x: 1, z: 0 } });
     expect(scan(k, 9, 1, 20, false)).toEqual([]);
   });
+
+  it("never clears getting stuck by seeing a place: only arriving does", () => {
+    const k = emptyKnowledge();
+    rememberPlace(k, "core:food", "a", 0, 8);
+    const attempt = { tick: 0, tickSeconds: 0.1, cell: { x: 0, z: 0 } };
+    recordReach(k, "core:food", "a", "stuck", attempt);
+    expect(scan(k, 9, 1, 10, true)).toEqual([]);
+    expect(k.places["core:food"]![0]!.failures).toMatchObject({ stuck: 1 });
+    // With both kinds, only the no-route side clears.
+    recordReach(k, "core:food", "a", "no_route", attempt);
+    expect(scan(k, 9, 1, 20, true)).toEqual(["a"]);
+    expect(k.places["core:food"]![0]!.failures).toMatchObject({ noRoute: 0, stuck: 1 });
+    expect(scan(k, 17, 1, 30, true)).toEqual([]);
+  });
 });

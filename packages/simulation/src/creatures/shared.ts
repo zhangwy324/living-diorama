@@ -51,8 +51,8 @@ export interface PlaceChoice {
 
 /**
  * The known place offering `affordanceId` with the shortest route to the creature's spot there
- * (ADR 0018 amendments, §10): only the `PATHED_CANDIDATES` nearest by straight line, leaving out
- * `skip`, get a route. Undefined if none can be reached.
+ * (ADR 0018 amendments, §10): only the `PATHED_CANDIDATES` nearest by straight line that have a
+ * spot the creature can reach, leaving out `skip`, get a route. Undefined if none can be reached.
  */
 export function chooseNearestByRoute(
   observation: CreatureObservation,
@@ -65,7 +65,9 @@ export function chooseNearestByRoute(
 /**
  * The `PATHED_CANDIDATES` known places offering `affordanceId` nearest by straight line, leaving
  * out `skip`, that the creature can reach, with their route lengths, shortest route first (the
- * first in straight-line order on a tie).
+ * first in straight-line order on a tie). A place without a spot the creature can reach (#95),
+ * e.g. across water from a walker, is passed over and doesn't count towards the few that get a
+ * route, so it can't hide reachable places further away.
  */
 export function routeNearest(
   { creature, knowledge, world }: CreatureObservation,
@@ -80,12 +82,15 @@ export function routeNearest(
         ? [{ placementId, distance: Math.hypot(place.x - here.x, place.z - here.z) }]
         : [];
     })
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, PATHED_CANDIDATES);
+    .sort((a, b) => a.distance - b.distance);
   const routed: PlaceChoice[] = [];
+  let pathed = 0;
   for (const { placementId } of nearest) {
+    if (pathed === PATHED_CANDIDATES) break;
     const spot = world.spotAt(placementId);
-    const length = spot && world.routeLength(spot);
+    if (!spot) continue;
+    pathed++;
+    const length = world.routeLength(spot);
     if (length !== undefined) routed.push({ placementId, length });
   }
   // Stable, so equal routes keep their straight-line order.

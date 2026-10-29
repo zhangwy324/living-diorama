@@ -37,8 +37,8 @@ export interface PerceptionInput {
   affordance(id: string): AffordanceType | undefined;
   /**
    * Whether the creature has a spot it can reach at the place from where it stands. Asked only
-   * for a noticed place it failed to reach, from a grid cell other than the one it failed from.
-   * Without it, failures are never cleared by seeing a place.
+   * for a noticed place it found no spot or route to, from a grid cell other than the one it
+   * failed from. Without it, seeing a place never clears its failures.
    */
   canReach?(placementId: string): boolean;
 }
@@ -49,9 +49,11 @@ export interface PerceptionInput {
  * and records the grid cell the creature is in. When more places of one affordance are in view
  * than the cap, only the nearest are noted, so a scan never forgets what it has just seen.
  *
- * A noticed place the creature failed to reach, seen from a grid cell other than the one of its
- * failures, has them cleared if the creature can reach it from here (ADR 0018 amendments, §11);
- * if it can't, that cell becomes the failures' cell, so each cell is asked about once.
+ * A noticed place the creature found no spot or route to, seen from a grid cell other than the
+ * one of its failures, has its no-route count cleared if the creature can reach it from here
+ * (ADR 0018 amendments, §11), and all its failures if it never got stuck there: stuck failures
+ * clear only on arriving, since a spot and route existed when it got stuck. If it can't reach
+ * it, that cell becomes the failures' cell, so each cell is asked about once.
  */
 export function perceive({
   knowledge,
@@ -82,10 +84,11 @@ export function perceive({
     if (!canReach) continue;
     for (const place of knowledge.places[id] ?? []) {
       const { failures } = place;
-      if (!failures || place.lastSeenTick !== tick) continue;
+      if (!failures || failures.noRoute === 0 || place.lastSeenTick !== tick) continue;
       if (failures.cell.x === here.x && failures.cell.z === here.z) continue;
-      if (canReach(place.placementId)) delete place.failures;
-      else failures.cell = { ...here };
+      if (!canReach(place.placementId)) failures.cell = { ...here };
+      else if (failures.stuck === 0) delete place.failures;
+      else failures.noRoute = 0;
     }
   }
   visitCell(knowledge, here, tick);
