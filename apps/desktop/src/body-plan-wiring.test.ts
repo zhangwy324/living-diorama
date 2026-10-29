@@ -63,13 +63,15 @@ describe("a released body plan", () => {
       );
       const id = value(await library.addCreature(speciesId));
       const creature = simulation.snapshot().creatures.find((c) => c.id === id);
-      return { species: simulation.state.registries.species.get(speciesId), creature };
+      const kind = simulation.state.model.regions.get(creature?.position.regionId ?? "")?.kind;
+      return { species: simulation.state.registries.species.get(speciesId), creature, kind };
     };
 
-    // Spawn points in Woodland Hollow are on land, so these start out of the water.
+    // Released walkers and hoppers appear at a spawn point on land.
     const hopper = await release("Hopper", templatePlan("hopper"));
     expect(hopper.species?.capabilities).toEqual({ "core:land": 1 });
     expect(hopper.species?.body.locomotion.land.gait).toBe("hop");
+    expect(hopper.kind).not.toBe("water");
     expect(hopper.creature).toMatchObject({ animation: "hop", submersion: 0 });
 
     const amphibian = await release("Newt", {
@@ -82,24 +84,29 @@ describe("a released body plan", () => {
       template: "walker",
       anchors: { feet: { x: 120, y: 200 } },
     });
-    expect(amphibian.creature).toMatchObject({ animation: "walk", submersion: 0 });
+    // It may appear on land or at the river's spawn point; either way it moves as it should there.
+    expect(amphibian.creature).toMatchObject(
+      amphibian.kind === "water"
+        ? { animation: "swim", submersion: 0.5 }
+        : { animation: "walk", submersion: 0 },
+    );
   });
 
-  it("keeps a water-only creature in the water, or says the world has nowhere for it", async () => {
+  it("puts a water-only creature in the water, at the river's spawn point", async () => {
     const { simulation, world } = headlessWorld();
     const library = await openSpeciesLibrary(createMemoryLibraryStore(), world);
     const saved = await library.save(DRAWING, PNG, "Minnow", "small", {
       plan: templatePlan("swimmer"),
     });
-    if (!saved.ok) {
-      // Until the world has a spawn point in the water (ADR 0020 §6), a swimmer can't appear.
-      expect(saved.diagnostics.map((d) => d.code)).toContain("no_spawn_point");
-      return;
-    }
-    const id = value(await library.addCreature(saved.value.speciesId));
-    const species = simulation.state.registries.species.get(saved.value.speciesId);
+    const { speciesId } = value(saved);
+    const id = value(await library.addCreature(speciesId));
+    const species = simulation.state.registries.species.get(speciesId);
     expect(species?.capabilities).toEqual({ "core:swim": 1 });
-    expect(simulation.snapshot().creatures.find((c) => c.id === id)).toMatchObject({
+    const creature = simulation.snapshot().creatures.find((c) => c.id === id);
+    expect(simulation.state.model.regions.get(creature?.position.regionId ?? "")?.kind).toBe(
+      "water",
+    );
+    expect(creature).toMatchObject({
       animation: "swim",
       submersion: 0.5,
     });
