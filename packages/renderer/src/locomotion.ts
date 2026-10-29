@@ -86,10 +86,11 @@ export interface LocomotionMotion {
 }
 
 /**
- * Where a body turns and scales: about its feet on land; in water about a point near its front,
- * so its tail sweeps from side to side like a fish's. Both come from the anchors (ADR 0020 §10).
+ * Where a body turns and scales: on land about the ground below its center of gravity; in water
+ * about a point near its front, so its tail sweeps from side to side like a fish's. Both come from
+ * the anchors (ADR 0020 §10).
  */
-export type LocomotionPivot = "feet" | "front";
+export type LocomotionPivot = "centerOfGravity" | "front";
 
 export const restingLocomotion = (): LocomotionMotion => ({
   lift: 0,
@@ -98,7 +99,7 @@ export const restingLocomotion = (): LocomotionMotion => ({
   yaw: 0,
   scaleY: 1,
   scaleXZ: 1,
-  pivot: "feet",
+  pivot: "centerOfGravity",
 });
 
 /** Moving at this many metres per second or faster shows a profile in full; slower, less. */
@@ -116,7 +117,7 @@ const cycle = (base: number, perHeight: number, height: number) => base + perHei
 type Profile = (input: LocomotionInput, weight: number, out: LocomotionMotion) => void;
 
 // The walk: a bob up each step, a waddle from side to side over two, a slight lean into the walk,
-// and a small squash as each foot lands. About the feet.
+// and a small squash as each foot lands. About the center of gravity.
 const WALK_STEP = { base: 0.15, perHeight: 0.4 };
 const WALK_BOB = 0.05;
 const WALK_ROLL = 0.07;
@@ -132,12 +133,12 @@ const walk: Profile = (input, w, out) => {
   out.pitch = w * WALK_LEAN;
   out.scaleY = 1 - w * WALK_SQUASH * landing;
   out.scaleXZ = 1 + w * WALK_SQUASH * 0.5 * landing;
-  out.pivot = "feet";
+  out.pivot = "centerOfGravity";
 };
 
 // The hop: on the ground the body squashes as it lands and stays low as it gathers for the next
 // jump; in the air it stretches as it leaves and as it comes down, rising and falling in an arc,
-// nose up then nose down. About the feet.
+// nose up then nose down. About the center of gravity.
 const HOP_LENGTH = { base: 0.3, perHeight: 0.6 };
 /** Share of each hop spent on the ground. */
 const HOP_GROUND = 0.3;
@@ -150,7 +151,7 @@ const hop: Profile = (input, w, out) => {
   const hops = input.travelled / cycle(HOP_LENGTH.base, HOP_LENGTH.perHeight, input.height);
   const u = hops - Math.floor(hops);
   out.roll = 0;
-  out.pivot = "feet";
+  out.pivot = "centerOfGravity";
   if (u < HOP_GROUND) {
     const squash = w * HOP_SQUASH * Math.sin((Math.PI * u) / HOP_GROUND);
     out.lift = 0;
@@ -206,7 +207,7 @@ export function locomotionMotion(input: LocomotionInput, out: LocomotionMotion):
   out.yaw = 0;
   out.scaleY = 1;
   out.scaleXZ = 1;
-  out.pivot = "feet";
+  out.pivot = "centerOfGravity";
   // Each profile scales its moving parts by the weight, so at rest they vanish.
   profile?.(input, weight, out);
   return out;
@@ -228,13 +229,18 @@ export interface LocomotionBody {
 const FRONT_PIVOT_INSET = 0.25;
 
 /**
- * Puts the pivots of `body` (its `minX` and `maxX` set) from its feet and tail anchors, in its
- * metres. The feet are where the body meets the ground, so wherever they are placed along it only
- * their x is taken. The front pivot lies on the line from the tail through the body, a little
- * behind the front: the tail mirrored onto the front, moved back by `FRONT_PIVOT_INSET`.
+ * Puts the pivots of `body` (its `minX` and `maxX` set) from its center of gravity and tail
+ * anchors, in its metres. The body rocks and squashes about the ground below its center of
+ * gravity, so wherever that is placed on the body only its x is taken. The front pivot lies on
+ * the line from the tail through the body, a little behind the front: the tail mirrored onto the
+ * front, moved back by `FRONT_PIVOT_INSET`.
  */
-export function placePivots(body: LocomotionBody, feet: THREE.Vector3, tail: THREE.Vector3): void {
-  body.pivots.feet.set(feet.x, 0, feet.z);
+export function placePivots(
+  body: LocomotionBody,
+  centerOfGravity: THREE.Vector3,
+  tail: THREE.Vector3,
+): void {
+  body.pivots.centerOfGravity.set(centerOfGravity.x, 0, centerOfGravity.z);
   const front = body.minX + body.maxX - tail.x;
   body.pivots.front.set(front + (tail.x - front) * FRONT_PIVOT_INSET, tail.y, tail.z);
 }
@@ -248,8 +254,8 @@ const unpivot = new THREE.Matrix4();
  * Writes into `out` the body's turn and scale for `motion` about its pivot, in the body's own
  * frame: the yaw about the vertical, the pitch about the depth axis, the roll about the drawing's
  * forward axis. Returns how far to lift the body, in metres: the motion's own lift plus, for a tilt
- * about the feet, enough that its front, rear or side doesn't dip into the ground. Turns about
- * another pivot happen in water, where nothing needs lifting.
+ * about the center of gravity, enough that its front, rear or side doesn't dip into the ground.
+ * Turns about another pivot happen in water, where nothing needs lifting.
  */
 export function locomotionTransform(
   motion: LocomotionMotion,
@@ -267,11 +273,11 @@ export function locomotionTransform(
   return motion.lift * body.height + groundClearance(motion, body, pivot);
 }
 
-/** How far a body tilted about its feet at `pivot` would dip below them. */
+/** How far a body tilted about the ground point `pivot` would dip below the ground. */
 function groundClearance(motion: LocomotionMotion, body: LocomotionBody, pivot: THREE.Vector3) {
-  if (motion.pivot !== "feet") return 0;
+  if (motion.pivot !== "centerOfGravity") return 0;
   const { pitch, roll, scaleXZ } = motion;
-  // Measured from the feet, which may be placed anywhere along the body.
+  // Measured from the pivot, since the center of gravity may be placed anywhere along the body.
   const front = Math.max(0, body.maxX - pivot.x);
   const back = Math.max(0, pivot.x - body.minX);
   const tilt = (pitch >= 0 ? front : back) * Math.sin(Math.abs(pitch));

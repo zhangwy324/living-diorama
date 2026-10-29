@@ -130,28 +130,22 @@ export function BodyPlanPanel({
       </fieldset>
       <div className="field anchors">
         <span>Points</span>
-        {anchors.length === 0 ? (
-          <p className="anchor-help">A hopper has no points to place.</p>
-        ) : (
-          anchors.map((name) => (
-            <p key={name} className="anchor-help">
-              <strong>{ANCHOR_LABELS[name].name}</strong>: {ANCHOR_LABELS[name].help}.{" "}
-              {plan.anchors[name]
-                ? "Placed."
-                : `Click the drawing to place ${ANCHOR_LABELS[name].them}.`}
-            </p>
-          ))
-        )}
-        {anchors.length > 0 && (
-          <button
-            type="button"
-            className="reset-anchors"
-            disabled={anchors.every((name) => !plan.anchors[name])}
-            onClick={props.onResetAnchors}
-          >
-            Reset to default
-          </button>
-        )}
+        {anchors.map((name) => (
+          <p key={name} className="anchor-help">
+            <strong>{ANCHOR_LABELS[name].name}</strong>: {ANCHOR_LABELS[name].help}.{" "}
+            {plan.anchors[name]
+              ? "Placed."
+              : `Click the drawing to place ${ANCHOR_LABELS[name].them}.`}
+          </p>
+        ))}
+        <button
+          type="button"
+          className="reset-anchors"
+          disabled={anchors.every((name) => !plan.anchors[name])}
+          onClick={props.onResetAnchors}
+        >
+          Reset to default
+        </button>
       </div>
       {props.modes.length > 1 && (
         <fieldset className="field preview-modes">

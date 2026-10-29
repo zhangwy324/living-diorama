@@ -43,11 +43,13 @@ describe("placing anchors", () => {
   });
 
   it("places only the template's anchors, and resets to the defaults", () => {
-    const walker = placeAnchor(templatePlan("walker"), "feet", { x: 90, y: 210 });
-    expect(walker.anchors).toEqual({ feet: { x: 90, y: 210 } });
+    const walker = placeAnchor(templatePlan("walker"), "centerOfGravity", { x: 90, y: 110 });
+    expect(walker.anchors).toEqual({ centerOfGravity: { x: 90, y: 110 } });
     expect(placeAnchor(walker, "tail", { x: 1, y: 1 })).toBe(walker);
-    const hopper = templatePlan("hopper");
-    expect(placeAnchor(hopper, "feet", { x: 1, y: 1 })).toBe(hopper);
+    const hopper = placeAnchor(templatePlan("hopper"), "centerOfGravity", { x: 90, y: 110 });
+    expect(hopper.anchors).toEqual({ centerOfGravity: { x: 90, y: 110 } });
+    const swimmer = templatePlan("swimmer");
+    expect(placeAnchor(swimmer, "centerOfGravity", { x: 1, y: 1 })).toBe(swimmer);
     expect(resetAnchors(walker).anchors).toEqual({});
     expect(resetAnchors(walker).locomotion).toEqual(walker.locomotion);
   });
@@ -63,7 +65,7 @@ describe("after the drawing changes", () => {
     const plan = {
       template: "walker" as const,
       locomotion: { land: true, gait: "hop" as const, swim: true },
-      anchors: { feet: { x: 90, y: 210 } },
+      anchors: { centerOfGravity: { x: 90, y: 110 } },
     };
     expect(afterDrawingEdit(plan)).toEqual({ ...plan, anchors: {} });
   });
@@ -77,11 +79,10 @@ describe("after the drawing changes", () => {
 describe("the anchor layer's note for screen readers", () => {
   it("says whether each point is placed or at its default", () => {
     expect(anchorNote(templatePlan("walker"))).toBe(
-      "Feet not placed, so the default position is used. Click the drawing to place them.",
+      "Center of gravity not placed, so the default position is used. Click the drawing to place it.",
     );
     expect(anchorNote(placeAnchor(templatePlan("swimmer"), "tail", { x: 1, y: 2 }))).toBe(
       "Tail placed. Click the drawing to move it.",
     );
-    expect(anchorNote(templatePlan("hopper"))).toBe("A hopper has no points to place.");
   });
 });

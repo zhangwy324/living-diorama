@@ -35,8 +35,10 @@ describe("the confirm panel", () => {
     expect(html).toContain('<h2 tabindex="-1">How does Mossy Pebble move?</h2>');
     expect(inputs(html, "radio", "template")).toEqual(["walker", "hopper*", "swimmer"]);
     expect(inputs(html, "radio", "gait")).toEqual(["walk", "hop*"]);
-    expect(html).toContain("A hopper has no points to place.");
-    expect(html).not.toContain("Reset to default");
+    // A hopper squashes and arcs about its center of gravity, so it has one to place too.
+    expect(html).toContain("<strong>Center of gravity</strong>: where the body balances.");
+    expect(html).toContain("Click the drawing to place it.");
+    expect(/<button[^>]*class="reset-anchors"[^>]*>/.exec(html)?.[0]).toContain("disabled");
     expect(html).toContain(
       "<li>Could get stuck in the water: some banks are too high to climb out.</li>",
     );
@@ -56,7 +58,7 @@ describe("the confirm panel", () => {
     const plan: BodyPlanChoice = {
       template: "walker",
       locomotion: { land: true, gait: "walk", swim: true },
-      anchors: { feet: { x: 100, y: 200 } },
+      anchors: { centerOfGravity: { x: 100, y: 100 } },
     };
     const html = panel(plan, "swim");
     expect(inputs(html, "radio", "preview-mode")).toEqual(["land", "swim*"]);
@@ -74,14 +76,14 @@ describe("the anchor layer", () => {
     const html = renderToStaticMarkup(
       <AnchorLayer plan={templatePlan("walker")} bounds={bounds} onPlace={() => {}} />,
     );
-    // The feet: centred on the bottom edge, at (128, 224) of 256.
-    expect(html).toContain('class="anchor-marker" style="left:50%;top:87.5%"');
-    expect(html).toContain("Feet (default)");
+    // The center of gravity: the middle of the bounds, at (128, 128) of 256.
+    expect(html).toContain('class="anchor-marker" style="left:50%;top:50%"');
+    expect(html).toContain("Center of gravity (default)");
     expect(html).toContain(
       'role="group" aria-label="Points on the drawing" aria-describedby="anchor-note"',
     );
     expect(html).toContain("the default position is used");
-    expect(html).toContain("Click to place the feet");
+    expect(html).toContain("Click to place the center of gravity");
     const placed = renderToStaticMarkup(
       <AnchorLayer
         plan={{ ...templatePlan("swimmer"), anchors: { tail: { x: 32, y: 128 } } }}
@@ -92,11 +94,11 @@ describe("the anchor layer", () => {
     expect(placed).toContain('class="anchor-marker placed" style="left:12.5%;top:50%"');
   });
 
-  it("has nothing to place for a hopper", () => {
+  it("lets a hopper place its center of gravity", () => {
     const html = renderToStaticMarkup(
       <AnchorLayer plan={templatePlan("hopper")} bounds={bounds} onPlace={() => {}} />,
     );
-    expect(html).not.toContain("anchor-marker");
-    expect(html).toContain('class="anchor-layer"');
+    expect(html).toContain("Center of gravity (default)");
+    expect(html).toContain('class="anchor-layer placing"');
   });
 });

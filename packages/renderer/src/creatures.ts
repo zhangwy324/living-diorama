@@ -116,7 +116,7 @@ function reachOf(body: Body): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
   };
 }
 
-const feetOnBody = new THREE.Vector3();
+const cogOnBody = new THREE.Vector3();
 const tailOnBody = new THREE.Vector3();
 
 /**
@@ -125,10 +125,10 @@ const tailOnBody = new THREE.Vector3();
  */
 function placeAnchors(look: SpeciesLook): void {
   const { drawing } = look.body;
-  const { feet, tail } = look.anchors;
-  drawing.toBody(feet ?? defaultAnchor("feet", drawing.bounds), feetOnBody);
+  const { centerOfGravity, tail } = look.anchors;
+  drawing.toBody(centerOfGravity ?? defaultAnchor("centerOfGravity", drawing.bounds), cogOnBody);
   drawing.toBody(tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
-  placePivots(look, feetOnBody, tailOnBody);
+  placePivots(look, cogOnBody, tailOnBody);
 }
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -404,7 +404,7 @@ export class CreatureBodies {
       height,
       ...reachOf(block),
       anchors: species.body.anchors,
-      pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+      pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
     };
     placeAnchors(look);
     this.#bodies.push(look.body);

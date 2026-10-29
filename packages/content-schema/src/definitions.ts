@@ -111,12 +111,12 @@ export const LOCOMOTION_MEDIA = Object.keys(
 ) as readonly LocomotionMedium[];
 
 /**
- * The anchors each body template has (ADR 0020 §10): a walker's feet, a swimmer's tail, and none
- * for a hopper. More templates come later.
+ * The anchors each body template has (ADR 0020 §10): a walker's and a hopper's center of gravity,
+ * a swimmer's tail. More templates come later.
  */
 export const BODY_TEMPLATE_ANCHORS = {
-  walker: ["feet"],
-  hopper: [],
+  walker: ["centerOfGravity"],
+  hopper: ["centerOfGravity"],
   swimmer: ["tail"],
 } as const satisfies Record<string, readonly string[]>;
 export type BodyTemplate = keyof typeof BODY_TEMPLATE_ANCHORS;
@@ -204,14 +204,15 @@ export interface DrawingBounds {
 }
 
 /**
- * Where an anchor the player didn't place sits (ADR 0020 §10): the feet on the bottom edge of the
- * drawn shape's bounds, centred across them, where the body meets the ground; the tail at the
- * middle of the bounds' left edge, the rear, since drawings face right.
+ * Where an anchor the player didn't place sits (ADR 0020 §10): the center of gravity in the middle
+ * of the drawn shape's bounds (only its x is used: the body rocks and squashes about the point on
+ * the ground below it); the tail at the middle of the bounds' left edge, the rear, since drawings
+ * face right.
  */
 export function defaultAnchor(name: AnchorName, bounds: DrawingBounds): Anchor {
   switch (name) {
-    case "feet":
-      return { x: (bounds.left + bounds.right) / 2, y: bounds.bottom };
+    case "centerOfGravity":
+      return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
     case "tail":
       return { x: bounds.left, y: (bounds.top + bounds.bottom) / 2 };
   }

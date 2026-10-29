@@ -77,12 +77,12 @@ describe("a released body plan", () => {
     const amphibian = await release("Newt", {
       ...templatePlan("walker"),
       locomotion: { land: true, gait: "walk", swim: true },
-      anchors: { feet: { x: 120, y: 200 } },
+      anchors: { centerOfGravity: { x: 120, y: 200 } },
     });
     expect(amphibian.species?.capabilities).toEqual({ "core:land": 1, "core:swim": 1 });
     expect(amphibian.species?.body).toMatchObject({
       template: "walker",
-      anchors: { feet: { x: 120, y: 200 } },
+      anchors: { centerOfGravity: { x: 120, y: 200 } },
     });
     // It may appear on land or at the river's spawn point; either way it moves as it should there.
     expect(amphibian.creature).toMatchObject(

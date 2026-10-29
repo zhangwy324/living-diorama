@@ -153,14 +153,17 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
 
   let anchors: Anchors = {};
   let motion: PreviewMotion | undefined;
-  const feetOnBody = new THREE.Vector3();
+  const cogOnBody = new THREE.Vector3();
   const tailOnBody = new THREE.Vector3();
   const placeAnchors = () => {
     if (!body) return;
     const { drawing } = body.body;
-    drawing.toBody(anchors.feet ?? defaultAnchor("feet", drawing.bounds), feetOnBody);
+    drawing.toBody(
+      anchors.centerOfGravity ?? defaultAnchor("centerOfGravity", drawing.bounds),
+      cogOnBody,
+    );
     drawing.toBody(anchors.tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
-    placePivots(body.look, feetOnBody, tailOnBody);
+    placePivots(body.look, cogOnBody, tailOnBody);
   };
 
   // The body is built 1 tall and the turntable scaled to its height, so the pose is worked out in
@@ -252,7 +255,7 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
         minX: box.min.x,
         maxX: box.max.x,
         halfDepth: extent.z * thickness,
-        pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+        pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
       };
       body = { body: built, mesh, look, ...(highlight ? { highlight } : {}) };
       placeAnchors();

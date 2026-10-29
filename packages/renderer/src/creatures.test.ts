@@ -332,11 +332,15 @@ describe("CreatureBodies", () => {
     });
 
     it("keeps a walker's and a hopper's feet on the ground as they tilt and squash", async () => {
-      // The default feet, and feet placed off-centre and above the bottom edge, which still sit
-      // on the ground: the body neither dips below it nor floats above it when it lands.
-      for (const anchors of [{}, { feet: { x: 4, y: 30 } }]) {
-        for (const animation of ["walk", "hop"]) {
-          const { layer, bodies } = make(undefined, { template: "walker", anchors });
+      // The default center of gravity, and one placed off-centre and high on the body: the body
+      // tilts about the ground below it, so it neither dips below the ground nor floats above it.
+      for (const anchors of [{}, { centerOfGravity: { x: 4, y: 30 } }]) {
+        for (const [template, animation] of [
+          ["walker", "walk"],
+          ["walker", "hop"],
+          ["hopper", "hop"],
+        ] as const) {
+          const { layer, bodies } = make(undefined, { template, anchors });
           await loaded(bodies);
           const lowest: number[] = [];
           moving(240, { animation }, bodies, () => lowest.push(box(layer).min.y));
