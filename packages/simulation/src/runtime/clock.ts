@@ -1,7 +1,21 @@
 export interface ClockOptions {
   tickRateHz: number;
-  /** Most ticks one `advance` may release; time beyond that is dropped, e.g. after sleep. */
+  /**
+   * Most ticks one `advance` may release at speed 1; time beyond that is dropped, e.g. after
+   * sleep. A faster speed raises the limit in proportion (see `FixedClock.catchUpLimit`).
+   */
   maxCatchUpTicks?: number;
+}
+
+/**
+ * The fastest speed multiplier. Speeds above 1 are a development aid (the dev console's time
+ * hook), and the catch-up limit grows with the speed, so this bounds a tick burst after a sleep.
+ */
+export const MAX_SPEED = 100;
+
+/** Whether `multiplier` is a speed the clock accepts: above 0 and at most `MAX_SPEED`. */
+export function isValidSpeed(multiplier: number): boolean {
+  return Number.isFinite(multiplier) && multiplier > 0 && multiplier <= MAX_SPEED;
 }
 
 /**
@@ -47,12 +61,26 @@ export class FixedClock {
     this.#lastWallMs = undefined;
   }
 
-  /** Scales how much simulation time passes per wall-clock millisecond. */
+  /** Scales how much simulation time passes per wall-clock millisecond, up to `MAX_SPEED`. */
   setSpeed(multiplier: number): void {
-    if (!(Number.isFinite(multiplier) && multiplier > 0)) {
-      throw new RangeError(`Speed multiplier must be a positive number, got ${multiplier}`);
+    if (!isValidSpeed(multiplier)) {
+      throw new RangeError(
+        `Speed multiplier must be above 0 and at most ${MAX_SPEED}, got ${multiplier}`,
+      );
     }
     this.#speed = multiplier;
+  }
+
+  /**
+   * Most ticks the next `advance` may release: `maxCatchUpTicks` at speed 1 or slower, raised in
+   * proportion to a faster speed. The limit so covers the same span of wall-clock time at any
+   * speed above 1 (one second at the defaults), so a dev speed of 60 isn't held to about 10×
+   * (issue #100), while speed 1 still drops a long sleep as before.
+   */
+  get catchUpLimit(): number {
+    if (this.#speed <= 1) return this.maxCatchUpTicks;
+    // Rounded first, so float error doesn't push e.g. 10 × 1.1 (11.000000000000002) up to 12.
+    return Math.ceil(Number((this.maxCatchUpTicks * this.#speed).toPrecision(12)));
   }
 
   /** Feeds the current monotonic wall-clock time in milliseconds; returns the ticks now due. */
@@ -62,9 +90,10 @@ export class FixedClock {
     if (last === undefined || this.#paused) return 0;
     this.#accumulatorMs += Math.max(0, wallMs - last) * this.#speed;
     const due = Math.floor(this.#accumulatorMs / this.tickMs);
-    if (due > this.maxCatchUpTicks) {
+    const limit = this.catchUpLimit;
+    if (due > limit) {
       this.#accumulatorMs = 0;
-      return this.maxCatchUpTicks;
+      return limit;
     }
     this.#accumulatorMs -= due * this.tickMs;
     return due;

@@ -17,7 +17,7 @@ import {
   type WorldContent,
 } from "../protocol";
 import { describeScene } from "../world/scene";
-import { FixedClock } from "./clock";
+import { FixedClock, isValidSpeed, MAX_SPEED } from "./clock";
 import { Simulation } from "./simulation";
 
 // Runs a simulation behind the worker protocol (ADR 0006 §11). Everything host-specific is
@@ -148,11 +148,14 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         sendSnapshot(sim, false);
         break;
       case "set_speed":
-        if (Number.isFinite(command.multiplier) && command.multiplier > 0) {
+        if (isValidSpeed(command.multiplier)) {
           ticks.setSpeed(command.multiplier);
         } else {
           reject([
-            error("invalid_speed", `Speed must be positive, got ${String(command.multiplier)}`),
+            error(
+              "invalid_speed",
+              `Speed must be above 0 and at most ${MAX_SPEED}, got ${String(command.multiplier)}`,
+            ),
           ]);
         }
         break;
