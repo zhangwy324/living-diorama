@@ -252,6 +252,21 @@ describe("simulation client", () => {
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 
+  it("counts no lost time across a change from a very slow dev speed", () => {
+    const time = { now: 21 * 60 };
+    const { client, callbacks, tick } = start(0, time);
+    tick(100);
+    client.setSpeed(0.0005);
+    // At this speed a tick takes 200 s; the speed goes back to 1 after 150 s, mid-tick.
+    tick(0);
+    time.now += 150 / 60;
+    tick(150_000);
+    client.setSpeed(1);
+    for (let k = 0; k < 10; k++) tick(100);
+    expect(callbacks.onCaughtUp).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
   it("catches up nothing for an OS sleep while paused, nor on resuming", () => {
     const time = { now: 21 * 60 };
     const { client, callbacks, tick } = start(0, time);

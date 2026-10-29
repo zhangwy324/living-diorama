@@ -230,7 +230,20 @@ export function startSimulation(
         timeOfDay.snapshot(message.snapshot.paused);
         const gapMs = lostTime.snapshot(message.snapshot, message.wallMs);
         if (gapMs > 0) {
-          void request<CatchUpReport>({ type: "catch_up", gapMs, minutes: timeOfDay.minutes });
+          void request<CatchUpReport>({
+            type: "catch_up",
+            gapMs,
+            minutes: timeOfDay.minutes,
+          }).then((result) => {
+            if (!result.ok) {
+              console.warn(
+                [
+                  "Could not catch up the time the world lost",
+                  ...result.diagnostics.map(formatDiagnostic),
+                ].join("\n  "),
+              );
+            }
+          });
         }
         onSnapshot(message.snapshot, message.events);
         break;
@@ -326,8 +339,12 @@ export function startSimulation(
       send({ type: paused ? "pause" : "resume" });
     },
     setSpeed: (multiplier) => {
-      // The worker rejects any other speed and keeps the one it had.
-      if (isValidSpeed(multiplier)) lostTime.setSpeed(multiplier);
+      // The worker rejects any other speed and keeps the one it had. A snapshot pair spanning the
+      // change would be measured at the wrong speed, so the next snapshot only sets the baseline.
+      if (isValidSpeed(multiplier)) {
+        lostTime.setSpeed(multiplier);
+        lostTime.reset();
+      }
       send({ type: "set_speed", multiplier });
     },
     fixTimeOfDay: (minutes) => timeOfDay.fix(minutes),
