@@ -508,7 +508,12 @@ export class Simulation {
       const profile = this.#profile(creature.speciesId);
       const to = plan.relocations.get(creature.id);
       const interrupt = (action: NonNullable<CreatureState["action"]>) => {
-        this.#interrupted(creature, profile, action, "world_edited");
+        // The world is already swapped in, so a hook that throws must not stop the reconcile.
+        try {
+          this.#interrupted(creature, profile, action, "world_edited");
+        } catch {
+          creature.asleep = false;
+        }
         this.#finish(creature, {
           action: action.id,
           outcome: "interrupted",
