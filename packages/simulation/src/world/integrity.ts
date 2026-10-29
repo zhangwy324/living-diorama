@@ -11,7 +11,7 @@ import { profileForSpecies, type NavProfile } from "../navigation/profile";
 import {
   buildNavigation,
   distanceToPortal,
-  isWaterEntryPair,
+  isBankPair,
   type Navigation,
 } from "../navigation/region-graph";
 import { CellState } from "../navigation/walkability";
@@ -204,7 +204,7 @@ function navigate(
   }
 
   checkSeams(model, nav, label, err, warn, regionPath);
-  checkWaterExits(nav, label, limit, regionPath);
+  checkWaterExits(world, nav, label, limit, regionPath);
 
   let standable = 0;
   world.spawnPoints.forEach((spawn, i) => {
@@ -233,25 +233,39 @@ function navigate(
 }
 
 /**
- * A water region the profile can get into, by a water entry, but not out of to land: an
- * amphibious creature that jumps in stays there (ADR 0020 §4). A limit, not an error, since the
- * species can still be released. Region-level, like `reachableRegions`.
+ * For a profile that moves on land and in water: a water region it can get into (from land, by a
+ * connection, or by appearing at a spawn point there) but not out of to land, because every bank
+ * is too high or too far and no connection leads out (ADR 0020 §4). A limit, not an error, since
+ * the species can still be released. Region-level, like `reachableRegions`.
  */
 function checkWaterExits(
+  world: WorldDefinition,
   nav: Navigation,
   label: string,
   limit: (code: string, message: string, path: DiagnosticPath) => void,
   regionPath: (id: string) => DiagnosticPath,
 ) {
-  const entered = [...new Set(nav.entries.map((e) => e.toRegionId))].sort();
-  for (const regionId of entered) {
-    const out = [...nav.reachableRegions(regionId)].some(
-      (id) => nav.masks.get(id)?.region.kind !== "water",
-    );
-    if (out) continue;
+  const kinds = nav.profile.maxSlopeByKind;
+  if (!kinds.has("water") || ![...kinds.keys()].some((k) => k !== "water")) return;
+  const isLand = (id: string) => {
+    const kind = nav.masks.get(id)?.region.kind;
+    return kind !== undefined && kind !== "water" && kinds.has(kind);
+  };
+  const entered = new Set<string>();
+  for (const [id, mask] of nav.masks) {
+    if (!isLand(id) || mask.walkableCount === 0) continue;
+    for (const reached of nav.reachableRegions(id)) entered.add(reached);
+  }
+  for (const spawn of world.spawnPoints) {
+    const { regionId, x, z } = spawn.position;
+    if (nav.masks.get(regionId)?.isWalkableAt(x, z)) entered.add(regionId);
+  }
+  for (const [regionId, mask] of [...nav.masks].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (mask.region.kind !== "water" || !entered.has(regionId)) continue;
+    if ([...nav.reachableRegions(regionId)].some(isLand)) continue;
     limit(
       "no_water_exit",
-      `Creatures of ${label} can get into water region "${regionId}" from the bank but no connection leads them out`,
+      `Creatures of ${label} can get into water region "${regionId}" but no bank is low and near enough to climb out and no connection leads out`,
       regionPath(regionId),
     );
   }
@@ -307,9 +321,8 @@ function checkSeams(
           const n = b.cellAt(nx, nz);
           if (n === -1 || b.states[n] !== CellState.walkable || a.isWalkableAt(nx, nz)) continue;
           if (Math.abs(b.height(n) - hA) > step) continue;
-          // A bank is joined by the derived water entry, land into water (ADR 0020 §4). Out of
-          // the water there is meant to be no way but a connection, so that side is no wall.
-          if (isWaterEntryPair(a, cell, b, n) || isWaterEntryPair(b, n, a, cell)) continue;
+          // A creature that swims jumps across a bank, both ways (ADR 0020 §4).
+          if (isBankPair(a, cell, b, n)) continue;
           const mx = c.x + dx / 2;
           const mz = c.z + dz / 2;
           if (joining.some((j) => distanceToPortal(j, mx, mz) <= cs)) continue;

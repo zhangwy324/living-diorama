@@ -1365,7 +1365,7 @@ export class Simulation {
    * Locomotion (roadmap M3 task 8): kinematic movement along the path at the species speed,
    * slowed by any need at 1 that declares an `atMax` speed factor (ADR 0018 §18).
    * Height is never stored, it always comes from the current region's surface. On a portal
-   * crossing or a water entry the region changes on the shared cell edge.
+   * crossing the region changes on the shared cell edge; a bank jump is made whole in one tick.
    *
    * The heading turns towards the next waypoint at `TURN_RATE`, once per tick, as `turnTo`
    * does; the creature only moves once it faces within `WALK_TURN_LIMIT` of it, and keeps turning
@@ -1390,6 +1390,15 @@ export class Simulation {
         const wanted = Math.atan2(dx, dz);
         this.#turn(creature, wanted, false);
         if (Math.abs(normalizeHeading(wanted - creature.heading)) > WALK_TURN_LIMIT) break;
+      }
+      if (target.regionId !== here.regionId && target.connectionId === undefined) {
+        // A bank jump (ADR 0020 §4) spans cells the creature can't stand on, so it is made whole,
+        // in one tick, and ends the tick: the creature is always on a walkable cell.
+        const from = here.regionId;
+        creature.position = { regionId: target.regionId, x: target.x, z: target.z };
+        this.#enteredRegion(creature, from, target.regionId, undefined);
+        path.next++;
+        break;
       }
       const travel = Math.min(budget, distance);
       budget -= travel;
@@ -1440,7 +1449,7 @@ export class Simulation {
     if (regionId !== from) this.#enteredRegion(creature, from, regionId, connectionId);
   }
 
-  /** `connectionId` is undefined for a derived water entry (ADR 0020 §4). */
+  /** `connectionId` is undefined for a bank jump (ADR 0020 §4). */
   #enteredRegion(
     creature: CreatureState,
     from: string,
@@ -1455,7 +1464,7 @@ export class Simulation {
       toRegionId: to,
       ...(connectionId === undefined ? {} : { connectionId }),
     });
-    // A water entry crosses no connection, so no structure (ADR 0020 §4).
+    // A bank jump crosses no connection, so no structure (ADR 0020 §4).
     if (connectionId === undefined) return;
     // Structures are found through ownership, never by name (ADR 0004 §4).
     const structureId =

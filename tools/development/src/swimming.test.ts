@@ -1,7 +1,12 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { formatDiagnostic, type RegionPosition } from "@living-diorama/content-schema";
+import {
+  formatDiagnostic,
+  WORLD_TOLERANCES,
+  type RegionPosition,
+} from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import {
+  bankReach,
   CellState,
   checkWorld,
   SWIM_SUBMERSION,
@@ -13,14 +18,21 @@ import {
   type SimulationEvent,
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { minnow, newt, pondWorld, registerPond, vole } from "./index";
+import { minnow, newt, pond as pondVariant, pondWorld, registerPond, vole } from "./index";
 import { createSimulation, loadContent, runWithInvariants } from "./simulation-run";
 
-// Swimming and locomotion styles (ADR 0020, M16 PR 2), on the pond fixture: water walkability,
-// the derived way into water, directed routes, the snapshot's profile and submersion, the
-// integrity checks, and the smooth turn when setting off (#121).
+// Swimming and locomotion styles (ADR 0020, M16 PR 2, with the owner's revision of §4), on the
+// pond fixture: water walkability, the derived banks between land and water, routes across them,
+// the snapshot's profile and submersion, the integrity checks, and the smooth turn when setting
+// off (#121).
 
 const pond = { register: registerPond, worldId: "fixture:pond" };
+
+/** The pond variant `world`, registered with the pond's species. */
+const variant = (world: ReturnType<typeof pondVariant>) => ({
+  register: (r: Registries) => registerPond(r, world),
+  worldId: world.id,
+});
 
 function registries(register: (r: Registries) => unknown = registerPond): Registries {
   const content = loadContent(register);
@@ -31,6 +43,9 @@ function registries(register: (r: Registries) => unknown = registerPond): Regist
 function navigationOf(simulation: Simulation, speciesId: string) {
   return simulation.state.pathfinderFor(speciesId)!;
 }
+
+/** Long runs take a few seconds locally and several times that on the CI runner. */
+const slow = { timeout: 60_000 };
 
 const north: RegionPosition = { regionId: "north-bank", x: -3, z: -3.2 };
 const south: RegionPosition = { regionId: "south-bank", x: 3, z: 3.2 };
@@ -46,8 +61,8 @@ describe("water walkability (ADR 0020 §3)", () => {
 
   it("is walkable on its surface for a swimmer, only where the surface is above the ground", () => {
     for (const id of [newt.id, minnow.id]) {
-      expect(water(id).isWalkableAt(0.25, 1.75)).toBe(true);
-      expect(water(id).height(water(id).cellAt(0.25, 1.75))).toBe(0);
+      expect(water(id).isWalkableAt(0.25, 1.25)).toBe(true);
+      expect(water(id).height(water(id).cellAt(0.25, 1.25))).toBe(0);
       // The footprint reaches over the bank, where the ground is above the water.
       expect(state(id, "pond", 0.25, 2.25)).toBe(CellState.dry);
       expect(state(id, "pond", 0.25, -2.25)).toBe(CellState.dry);
@@ -61,7 +76,22 @@ describe("water walkability (ADR 0020 §3)", () => {
     expect(state(minnow.id, "south-bank", 0.25, 1.75)).toBe(CellState.noLocomotion);
   });
 
-  it("lets a swimmer's land reach the waterline, but keeps a walker its radius away", () => {
+  it("counts a cell as under water, or dry, if any part of it is", () => {
+    // At y = 0.03 the waterline is at |z| = 2.15, inside the cells centred on ±2.25.
+    const wading = createSimulation({
+      ...variant(pondVariant({ id: "fixture:wade", water: 0.03 })),
+      seed: 1,
+    });
+    for (const id of [vole.id, newt.id]) {
+      const bank = navigationOf(wading, id).navigation.masks.get("south-bank")!;
+      expect(bank.state(bank.cellAt(0.25, 2.25))).toBe(CellState.submerged);
+    }
+    const lake = navigationOf(wading, minnow.id).navigation.masks.get("pond")!;
+    expect(lake.state(lake.cellAt(0.25, 1.75))).toBe(CellState.walkable);
+    expect(lake.state(lake.cellAt(0.25, 2.25))).toBe(CellState.dry);
+  });
+
+  it("keeps a swimmer's body out of the bank, and lets its land reach the waterline", () => {
     const medium = (caps: Record<string, number>) => {
       const checked = simulation.checkLimits("medium", caps);
       if (!checked.ok) throw new Error(checked.diagnostics.map(formatDiagnostic).join("\n"));
@@ -72,76 +102,113 @@ describe("water walkability (ADR 0020 §3)", () => {
           Object.keys(caps).every((c) => n.profile.capabilities.has(c)),
       )!;
     };
-    const bank = (caps: Record<string, number>) =>
-      medium(caps).masks.get("south-bank")!.isWalkableAt(0.25, 2.25);
-    expect(bank({ "core:land": 1, "core:swim": 1 })).toBe(true);
-    expect(bank({ "core:land": 1 })).toBe(false);
+    const both = medium({ "core:land": 1, "core:swim": 1 });
+    // Water next to the dry cell at z = 2.25 is within its radius (0.4 m) of the bank.
+    expect(both.masks.get("pond")!.isWalkableAt(0.25, 1.75)).toBe(false);
+    expect(both.masks.get("pond")!.isWalkableAt(0.25, 1.25)).toBe(true);
+    // Its land reaches the waterline; a walker's keeps its radius from the water.
+    expect(both.masks.get("south-bank")!.isWalkableAt(0.25, 2.25)).toBe(true);
+    expect(medium({ "core:land": 1 }).masks.get("south-bank")!.isWalkableAt(0.25, 2.25)).toBe(
+      false,
+    );
   });
 });
 
-describe("the derived way into water (ADR 0020 §4)", () => {
+describe("banks between land and water (ADR 0020 §4)", () => {
   const simulation = createSimulation({ ...pond, seed: 1 });
 
-  it("joins every walkable bank cell next to walkable water, land into water only", () => {
+  it("pairs walkable land with the nearest walkable water in reach, low enough to jump", () => {
     const { navigation } = navigationOf(simulation, newt.id);
-    expect(navigation.entries.map((e) => [e.fromRegionId, e.toRegionId])).toEqual([
+    expect(navigation.banks.map((b) => [b.landRegionId, b.waterRegionId])).toEqual([
       ["north-bank", "pond"],
       ["south-bank", "pond"],
     ]);
-    for (const entry of navigation.entries) {
-      for (const pair of entry.pairs) {
-        expect(Math.hypot(pair.to.x - pair.from.x, pair.to.z - pair.from.z)).toBeCloseTo(0.5);
-        expect(Math.abs(pair.to.z)).toBeLessThan(Math.abs(pair.from.z));
+    const reach = bankReach(navigation.profile);
+    for (const bank of navigation.banks) {
+      const land = navigation.masks.get(bank.landRegionId)!;
+      const water = navigation.masks.get(bank.waterRegionId)!;
+      for (const pair of bank.pairs) {
+        expect(
+          Math.hypot(pair.water.x - pair.land.x, pair.water.z - pair.land.z),
+        ).toBeLessThanOrEqual(reach + 1e-9);
+        expect(
+          Math.abs(land.height(pair.landCell) - water.height(pair.waterCell)),
+        ).toBeLessThanOrEqual(WORLD_TOLERANCES.maxBankJumpHeight);
       }
     }
   });
 
   it("exists only for a profile that moves on land and in water", () => {
-    expect(navigationOf(simulation, minnow.id).navigation.entries).toEqual([]);
-    expect(navigationOf(simulation, vole.id).navigation.entries).toEqual([]);
+    expect(navigationOf(simulation, minnow.id).navigation.banks).toEqual([]);
+    expect(navigationOf(simulation, vole.id).navigation.banks).toEqual([]);
   });
 
-  it("makes the region graph directed: out of the water only by the shore exit", () => {
+  it("joins land and water both ways", () => {
     const { navigation } = navigationOf(simulation, newt.id);
-    expect([...navigation.reachableRegions("north-bank")].sort()).toEqual([
-      "north-bank",
-      "pond",
-      "south-bank",
-    ]);
-    expect([...navigation.reachableRegions("pond")].sort()).toEqual(["pond", "south-bank"]);
-    expect([...navigation.reachableRegions("south-bank")].sort()).toEqual(["pond", "south-bank"]);
+    for (const from of ["north-bank", "pond", "south-bank"]) {
+      expect([...navigation.reachableRegions(from)].sort()).toEqual([
+        "north-bank",
+        "pond",
+        "south-bank",
+      ]);
+    }
   });
 
-  it("plans routes into the water from the bank and out only through the exit", () => {
+  it("plans routes in and out of the water anywhere along a bank", () => {
     const pathfinder = navigationOf(simulation, newt.id);
     const across = pathfinder.findRoute(north, south);
     if (!across.ok) throw new Error(across.detail);
-    expect(across.route.legs.map((l) => [l.regionId, l.exit?.connectionId])).toEqual([
+    expect(across.route.legs.map((l) => l.regionId)).toEqual(["north-bank", "pond", "south-bank"]);
+    expect(across.route.legs[0]!.exit?.connectionId).toBeUndefined();
+    const back = pathfinder.findRoute(middle, north);
+    if (!back.ok) throw new Error(back.detail);
+    expect(back.route.legs.map((l) => [l.regionId, l.exit?.connectionId])).toEqual([
+      ["pond", undefined],
       ["north-bank", undefined],
-      ["pond", "south-shore"],
-      ["south-bank", undefined],
     ]);
-    expect(across.route.legs[0]!.exit).toMatchObject({ fromRegionId: "north-bank" });
-    expect(pathfinder.findRoute(south, north)).toMatchObject({ ok: false, reason: "unreachable" });
-    expect(pathfinder.findRoute(middle, north)).toMatchObject({ ok: false, reason: "unreachable" });
-    // What a creature can reach is exactly what it can route to.
-    expect([...pathfinder.reachableCells(south).keys()].sort()).toEqual(["pond", "south-bank"]);
-    expect([...pathfinder.reachableCells(north).keys()].sort()).toEqual([
+    expect([...pathfinder.reachableCells(south).keys()].sort()).toEqual([
       "north-bank",
       "pond",
       "south-bank",
     ]);
   });
 
-  it("keeps its crossings at least 2 m apart along a bank", () => {
-    const crossings = navigationOf(simulation, newt.id).entryCrossings("north-bank");
-    expect(crossings.length).toBeGreaterThan(1);
-    for (const [k, a] of crossings.entries()) {
+  it("still lets an authored shore exit be used, though banks make it optional", () => {
+    const pathfinder = navigationOf(simulation, newt.id);
+    expect(pathfinder.navigation.portals.get("south-shore")).toEqual({ usable: true });
+    const exit = pondWorld.connections[0]!;
+    const along = pathfinder.findRoute(
+      { regionId: "pond", x: 2.5, z: 1.25 },
+      { regionId: "south-bank", x: 2.5, z: 2.75 },
+    );
+    if (!along.ok) throw new Error(along.detail);
+    expect(along.route.legs[0]!.exit?.connectionId).toBe(exit.id);
+  });
+
+  it("keeps its crossings at least 2 m apart along a bank, one each way per pair", () => {
+    const pathfinder = navigationOf(simulation, newt.id);
+    const out = pathfinder.bankCrossings("north-bank");
+    expect(out.length).toBeGreaterThan(1);
+    for (const [k, a] of out.entries()) {
       expect(a.connectionId).toBeUndefined();
-      for (const b of crossings.slice(k + 1)) {
+      for (const b of out.slice(k + 1)) {
         expect(Math.hypot(a.from.x - b.from.x, a.from.z - b.from.z)).toBeGreaterThanOrEqual(2);
       }
     }
+    const back = pathfinder.bankCrossings("pond").filter((x) => x.toRegionId === "north-bank");
+    expect(back.map((x) => x.to).sort((p, q) => p.x - q.x)).toEqual(
+      out.map((x) => x.from).sort((p, q) => p.x - q.x),
+    );
+  });
+
+  it("is not made over a bank too high to jump", () => {
+    const cliff = createSimulation({
+      ...variant(pondVariant({ id: "fixture:cliff", cliffs: ["north"] })),
+      seed: 1,
+    });
+    const { navigation } = navigationOf(cliff, newt.id);
+    expect(navigation.banks.map((b) => b.landRegionId)).toEqual(["south-bank"]);
+    expect([...navigation.reachableRegions("north-bank")]).toEqual(["north-bank"]);
   });
 });
 
@@ -180,10 +247,7 @@ describe("world checks for swimmers (ADR 0020 §4–§5)", () => {
       ],
     });
     sky.spawnPoints.push({ id: "aloft", position: { regionId: "cloud", x: -4.5, z: -3.25 } });
-    const found = diagnostics((r) => {
-      registerPond(r);
-      r.worlds.register(sky);
-    }, sky.id);
+    const found = diagnostics((r) => registerPond(r, sky), sky.id);
     expect(found.filter((d) => d.includes("spawn_unusable"))).toEqual([
       expect.stringContaining(`air region of spawn point "aloft"`),
     ]);
@@ -199,31 +263,42 @@ describe("world checks for swimmers (ADR 0020 §4–§5)", () => {
     expect(simulation.checkLimits("small", { "core:swim": 1 })).toEqual({ ok: true, value: [] });
   });
 
-  it("limits a profile that can get into water but not out", () => {
-    const closed = { ...structuredClone(pondWorld), id: "fixture:closed-pond", connections: [] };
-    const simulation = createSimulation({
-      register: (r) => {
-        registerPond(r);
-        r.worlds.register(closed);
-      },
-      worldId: closed.id,
-      seed: 1,
-    });
+  it("limits a profile that can get into water but not out: every bank too high", () => {
+    const closed = pondVariant({ id: "fixture:closed-pond", cliffs: ["north", "south"] });
+    const simulation = createSimulation({ ...variant(closed), seed: 1 });
+    // An amphibian appearing at the spawn point in the water can never climb out.
     const limits = simulation.checkLimits("small", { "core:land": 1, "core:swim": 1 });
     expect(limits.ok && limits.value.map((d) => [d.severity, d.code, d.path])).toEqual([
       ["warning", "no_water_exit", ["regions", 1]],
     ]);
-    // Walkers and water-only swimmers can't get in from the bank, so it is no limit for them.
+    // Walkers and water-only swimmers don't move between the two, so it is no limit for them.
     expect(simulation.checkLimits("small", { "core:land": 1 })).toEqual({ ok: true, value: [] });
     expect(simulation.checkLimits("small", { "core:swim": 1 })).toEqual({ ok: true, value: [] });
+    // With one bank low enough there is a way out.
+    const open = createSimulation({
+      ...variant(pondVariant({ id: "fixture:half-pond", cliffs: ["north"] })),
+      seed: 1,
+    });
+    expect(open.checkLimits("small", { "core:land": 1, "core:swim": 1 })).toEqual({
+      ok: true,
+      value: [],
+    });
   });
 
-  it("starts the Hollow cleanly; a water-only species has nowhere to appear there yet", () => {
+  it("lets amphibians of every size into and out of the Hollow's river as it is", () => {
     const simulation = createSimulation({
       register: registerBuiltInContent,
       worldId: "hollow:woodland-hollow",
       seed: 1,
     });
+    for (const size of ["tiny", "small", "medium", "large"] as const) {
+      const checked = simulation.checkLimits(size, { "core:land": 1, "core:swim": 1 });
+      expect(checked.ok && checked.value.map((d) => d.code)).not.toContain("no_water_exit");
+      const nav = simulation.state.navigations.find(
+        (n) => n.profile.sizeClass === size && n.profile.capabilities.has("core:swim"),
+      )!;
+      expect(nav.banks.map((b) => b.landRegionId).sort()).toEqual(["east-meadow", "west-woods"]);
+    }
     const swimOnly = simulation.checkLimits("medium", { "core:swim": 1 });
     expect(swimOnly.ok && swimOnly.value.map((d) => d.code)).toEqual(["no_spawn_point"]);
   });
@@ -250,17 +325,16 @@ const walkTo = ({ regionId, x, z }: RegionPosition): Proposal => ({
   utility: 1,
 });
 
+/** Registers the pond with a puppet species like `base` that plays `script`. */
+const puppetContent = (script: Proposal[], base: object) => (r: Registries) => {
+  registerPond(r);
+  r.behaviors.register(scripted(script));
+  r.species.register({ ...base, id: "fixture:puppet", behaviors: ["test:scripted"] });
+};
+
 /** A newt (or `base`) that plays `script`, spawned at `spawnPointId`. */
 function puppet(script: Proposal[], spawnPointId: string, base: object = newt) {
-  const simulation = createSimulation({
-    ...pond,
-    seed: 1,
-    register: (r: Registries) => {
-      registerPond(r);
-      r.behaviors.register(scripted(script));
-      r.species.register({ ...base, id: "fixture:puppet", behaviors: ["test:scripted"] });
-    },
-  });
+  const simulation = createSimulation({ ...pond, seed: 1, register: puppetContent(script, base) });
   const spawned = simulation.spawn("fixture:puppet", spawnPointId);
   if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
   const creature = () => simulation.state.creatures.get(spawned.value.id)!;
@@ -268,46 +342,53 @@ function puppet(script: Proposal[], spawnPointId: string, base: object = newt) {
   return { simulation, creature, snap };
 }
 
-/** Long runs take a few seconds locally and several times that on the CI runner. */
-const slow = { timeout: 30_000 };
-
 describe("swimming in the simulation", () => {
-  it("jumps in from the bank, swims at its water speed, and leaves by the exit", () => {
+  it("jumps in from the bank, swims at its water speed, and climbs out on the far bank", () => {
     const { simulation, creature, snap } = puppet([walkTo(south)], "north");
     expect(snap()).toMatchObject({ animation: "hop", submersion: 0 });
     const events: SimulationEvent[] = [];
     const seen = new Set<string>();
     let previous = { ...creature().position };
     for (let t = 0; t < 2_000 && !creature().lastResult; t++) {
-      events.push(...simulation.step());
+      const tick = simulation.step();
+      events.push(...tick);
       const here = creature().position;
       const step = Math.hypot(here.x - previous.x, here.z - previous.z);
-      // 0.6 m/s on land, half that in water, at 10 Hz.
-      if (here.regionId === "pond" && previous.regionId === "pond") {
+      const jumped = tick.some((e) => e.type === "entered_region");
+      // 0.6 m/s on land, half that in water, at 10 Hz; a jump is made whole in one tick.
+      if (jumped) {
+        expect(step).toBeLessThanOrEqual(
+          bankReach(navigationOf(simulation, "fixture:puppet").navigation.profile) + 1e-9,
+        );
+      } else if (here.regionId === "pond") {
         expect(step).toBeLessThanOrEqual(0.03 + 1e-9);
         expect(snap()).toMatchObject({ animation: "swim", submersion: SWIM_SUBMERSION });
         expect(snap().world.y).toBe(0);
       } else {
         expect(step).toBeLessThanOrEqual(0.06 + 1e-9);
       }
+      // Always on a walkable cell, jumps included.
+      const mask = navigationOf(simulation, "fixture:puppet").navigation.masks.get(here.regionId)!;
+      expect(mask.isWalkableAt(here.x, here.z)).toBe(true);
       seen.add(`${here.regionId}:${snap().animation}`);
       previous = { ...here };
     }
     expect(creature().position).toEqual(south);
     expect(seen).toEqual(new Set(["north-bank:hop", "pond:swim", "south-bank:hop"]));
     const moves = events.filter((e) => e.type === "entered_region");
-    expect(moves.map((e) => [e.fromRegionId, e.toRegionId, e.connectionId])).toEqual([
-      ["north-bank", "pond", undefined],
-      ["pond", "south-bank", "south-shore"],
+    expect(moves.map((e) => [e.fromRegionId, e.toRegionId])).toEqual([
+      ["north-bank", "pond"],
+      ["pond", "south-bank"],
     ]);
     expect(moves[0]).not.toHaveProperty("connectionId");
     expect(events.filter((e) => e.type === "first_use_of_structure")).toEqual([]);
   });
 
-  it("can't plan a way back out of the water to the bank it came from", () => {
+  it("climbs back out onto the bank it came from", () => {
     const { simulation, creature } = puppet([walkTo(north)], "middle");
-    simulation.step();
-    expect(creature().lastResult).toMatchObject({ outcome: "failed", reason: "unreachable" });
+    for (let t = 0; t < 1_000 && !creature().lastResult; t++) simulation.step();
+    expect(creature().lastResult).toEqual({ action: "core:follow_path", outcome: "done" });
+    expect(creature().position).toEqual(north);
   });
 
   it("shows a water-only creature swimming and a walker walking", () => {
@@ -348,14 +429,17 @@ describe("swimming in the simulation", () => {
   });
 
   it("keeps every per-capability invariant over long runs", slow, () => {
-    for (const [speciesId, regions] of [
-      [newt.id, ["north-bank", "pond", "south-bank"]],
-      [minnow.id, ["pond"]],
-      [vole.id, ["north-bank", "south-bank"]],
+    const wade = pondVariant({ id: "fixture:wade", water: 0.03 });
+    for (const [world, speciesId, regions] of [
+      [pondWorld, newt.id, ["north-bank", "pond", "south-bank"]],
+      [pondWorld, minnow.id, ["pond"]],
+      [pondWorld, vole.id, ["north-bank", "south-bank"]],
+      [wade, newt.id, ["north-bank", "pond", "south-bank"]],
+      [wade, vole.id, ["north-bank", "south-bank"]],
     ] as const) {
       for (const seed of [1, 2]) {
         const report = runWithInvariants({
-          ...pond,
+          ...variant(world),
           speciesId,
           seed,
           ticks: 20_000,
@@ -376,26 +460,21 @@ describe("swimming in the simulation", () => {
 });
 
 describe("turning when setting off (#121, ADR 0020 §7)", () => {
+  // The vole faces +Z (heading 0); the destination lies due west, a quarter turn to its right.
+  const west = { regionId: "north-bank", x: -5, z: -3.2 };
+
   it("turns towards its way at the turn rate before walking off, and never snaps", () => {
-    // The vole faces +Z (heading 0); the destination lies due west, a quarter turn to its right.
-    const west = { regionId: "north-bank", x: -5, z: -3.2 };
     const { simulation, creature } = puppet([walkTo(west)], "north", vole);
     const maxTurn = TURN_RATE * simulation.tickSeconds + 1e-9;
+    const angle = (d: number) => Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
     let heading = creature().heading;
     let { x } = creature().position;
     let turningTicks = 0;
     for (let t = 0; t < 400 && !creature().lastResult; t++) {
       simulation.step();
       const now = creature();
-      const turn = Math.abs(
-        Math.atan2(Math.sin(now.heading - heading), Math.cos(now.heading - heading)),
-      );
-      expect(turn).toBeLessThanOrEqual(maxTurn);
-      const wanted = -Math.PI / 2;
-      const off = Math.abs(
-        Math.atan2(Math.sin(wanted - now.heading), Math.cos(wanted - now.heading)),
-      );
-      if (off > WALK_TURN_LIMIT + 1e-9) {
+      expect(angle(now.heading - heading)).toBeLessThanOrEqual(maxTurn);
+      if (angle(-Math.PI / 2 - now.heading) > WALK_TURN_LIMIT + 1e-9) {
         // Still turning in place.
         expect(now.position.x).toBe(x);
         turningTicks++;
@@ -408,6 +487,30 @@ describe("turning when setting off (#121, ADR 0020 §7)", () => {
     // A quarter turn less the limit at half a turn a second: 0.25 s, the first 3 ticks or so.
     expect(turningTicks).toBeGreaterThan(0);
     expect(turningTicks).toBeLessThanOrEqual(4);
+  });
+
+  it("resumes the same turn from a save taken mid-turn", () => {
+    const { simulation } = puppet([walkTo(west)], "north", vole);
+    simulation.step(); // decides, starts walking and turns a first step
+    simulation.step();
+    const saved = simulation.save(0);
+    const restored = createSimulation({
+      ...pond,
+      seed: 99,
+      register: puppetContent([walkTo(west)], vole),
+    });
+    const result = restored.restore(JSON.parse(JSON.stringify(saved)), {
+      nowMs: 0,
+      minutes: simulation.state.minutes,
+    });
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    for (let t = 0; t < 60; t++) {
+      simulation.step();
+      restored.step();
+      expect(restored.state.creatures.get("creature-1")).toEqual(
+        simulation.state.creatures.get("creature-1"),
+      );
+    }
   });
 
   it("never turns faster than the turn rate over a living day in the Hollow", slow, () => {

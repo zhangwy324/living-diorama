@@ -24,7 +24,7 @@ export function pathFromRoute({ legs }: Route): PathState {
     leg.points.forEach((p, n) => {
       // The first leg starts where the creature stands; later legs start at the crossing.
       if (n === 0 && !entry) return;
-      // A derived water entry has no connection (ADR 0020 §4).
+      // A bank jump has no connection (ADR 0020 §4).
       const via = n === 0 ? entry?.connectionId : undefined;
       points.push(
         via === undefined

@@ -92,6 +92,8 @@ A **connection** links two regions through a **portal**: a segment `a`–`b` in 
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maxWalkableSlopeDeg` | 35°     | A surface steeper than this is unwalkable (a cliff) for `core:land`. The engine reads it from the `core:land` capability's locomotion rule.                         |
 | `maxStepHeight`       | 0.25 m  | The largest height discontinuity a walker crosses at a portal, e.g. from bank to deck. Across a portal, the two surfaces' heights must differ by no more than this. |
+| `maxBankJumpHeight`   | 0.75 m  | The largest height between a land surface and a water surface that a creature that swims and moves on land jumps down or climbs up across a bank, either way.       |
+| `maxBankJumpGap`      | 1.75 m  | The widest horizontal gap across a bank, between such a creature's body on land and in the water, edge to edge: centres at most twice its radius plus this apart.   |
 | `surfaceEpsilon`      | 0.001 m | Tolerance when checking that a creature's height matches its surface.                                                                                               |
 | `positionEpsilon`     | 0.01 m  | Tolerance for "on the portal", "inside the footprint" and "inside the bounds" checks.                                                                               |
 

@@ -13,7 +13,7 @@ export const CellState = {
   /** No surface here, e.g. beside a deck. */
   offSurface: 2,
   steep: 3,
-  /** Below the surface of an overlapping water region. */
+  /** Below the surface of an overlapping water region, anywhere in the cell. */
   submerged: 4,
   /** Another region's surface is lower than the creature's height above this one. */
   noHeadroom: 5,
@@ -29,8 +29,9 @@ export const CellState = {
    */
   covered: 10,
   /**
-   * A water region's surface is not above the ground here, e.g. where its footprint reaches over
-   * the bank (ADR 0020 §3). Like `outside`, this is not an obstacle for clearance.
+   * A water region's surface is not above the ground somewhere in this cell, e.g. where its
+   * footprint reaches over the bank (ADR 0020 §3). An obstacle for clearance, so a swimmer's
+   * body keeps out of the bank.
    */
   dry: 11,
 } as const;
@@ -39,11 +40,12 @@ export type CellState = (typeof CellState)[keyof typeof CellState];
 /**
  * Whether a cell in this state keeps the creature's radius away. For a creature that can swim,
  * water over the ground is somewhere it can go, not an obstacle, so its walkable land reaches
- * the waterline and meets the water's walkable cells there (the derived entry, ADR 0020 §4).
+ * the waterline (ADR 0020 §4).
  */
 const isBaseBlocked = (s: number, canSwim: boolean) =>
   s === CellState.offSurface ||
   s === CellState.steep ||
+  s === CellState.dry ||
   (s === CellState.submerged && !canSwim) ||
   s === CellState.noHeadroom;
 
@@ -161,6 +163,27 @@ export function buildRegionMask(
     z <= r.box.maxZ &&
     pointInPolygon(x, z, r.footprint);
 
+  /** The cell centre and four points just inside its corners. */
+  const samples = (x: number, z: number) => {
+    const d = cs * 0.49;
+    return [
+      { x, z },
+      { x: x - d, z: z - d },
+      { x: x + d, z: z - d },
+      { x: x - d, z: z + d },
+      { x: x + d, z: z + d },
+    ];
+  };
+  const waters = others.filter((r) => r.kind === "water");
+  /** Whether water region `w` lies above this region's surface anywhere in the cell at (x, z). */
+  const isUnder = (w: RegionModel, x: number, z: number) =>
+    samples(x, z).some((p) => {
+      if (!covers(w, p.x, p.z)) return false;
+      const below = region.surface.heightAt(p.x, p.z);
+      const above = w.surface.heightAt(p.x, p.z);
+      return below !== undefined && above !== undefined && above > below + eps;
+    });
+
   // Pass 1: what the surface itself allows.
   for (let cell = 0; cell < states.length; cell++) {
     const { x, z } = mask.center(cell);
@@ -174,8 +197,12 @@ export function buildRegionMask(
       states[cell] = CellState.offSurface;
       continue;
     }
-    // A water region is only where its surface lies above the ground (ADR 0020 §3).
-    if (region.kind === "water" && h <= terrain.heightAt(x, z) + eps) {
+    // A water region is only where its surface lies above the ground (ADR 0020 §3), all over the
+    // cell, since a creature may stand anywhere in it.
+    if (
+      region.kind === "water" &&
+      samples(x, z).some((p) => terrain.heightAt(p.x, p.z) >= h + eps)
+    ) {
       states[cell] = CellState.dry;
       continue;
     }
@@ -191,15 +218,16 @@ export function buildRegionMask(
       states[cell] = CellState.steep;
       continue;
     }
+    // Land is under water if any part of the cell is: a creature may stand anywhere in it.
+    if (waters.some((w) => isUnder(w, x, z))) {
+      states[cell] = CellState.submerged;
+      continue;
+    }
     let state: CellState = CellState.walkable;
     for (const other of others) {
-      if (!covers(other, x, z)) continue;
+      if (other.kind === "water" || !covers(other, x, z)) continue;
       const above = other.surface.heightAt(x, z);
       if (above === undefined || above <= h + eps) continue;
-      if (other.kind === "water") {
-        state = CellState.submerged;
-        break;
-      }
       if (above <= h + WORLD_TOLERANCES.maxStepHeight) {
         state = CellState.covered;
       } else if (above < h + profile.height) {

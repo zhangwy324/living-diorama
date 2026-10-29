@@ -217,7 +217,7 @@ export type CreatureEvent =
       type: "entered_region";
       fromRegionId: string;
       toRegionId: string;
-      /** The connection crossed; absent for a derived water entry (ADR 0020 §4). */
+      /** The connection crossed; absent for a jump across a bank between land and water (ADR 0020 §4). */
       connectionId?: string;
     })
   | (CreatureEventBase & {

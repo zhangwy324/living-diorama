@@ -16,23 +16,25 @@ export type PortalCheck =
       detail: string;
     };
 
-/** Two edge-adjacent walkable cells, one in each of two regions, with their centres. */
-export interface CellPair {
-  fromCell: number;
-  toCell: number;
-  from: Vec2;
-  to: Vec2;
+/** A walkable land cell and a walkable water cell a creature can jump between, with centres. */
+export interface BankPair {
+  landCell: number;
+  waterCell: number;
+  land: Vec2;
+  water: Vec2;
 }
 
 /**
- * The derived way from a land region into a water region for a profile that can move in both
- * (ADR 0020 §4): every walkable cell of the land region edge-adjacent to a walkable cell of the
- * water region, within a step of its surface. One-way: out of the water is only by a connection.
+ * The derived bank between a land region and a water region for a profile that can move in both
+ * (ADR 0020 §4, as revised by the owner): the creature jumps in or climbs out between each walkable
+ * land cell and the nearest walkable water cell within `bankReach` of it whose surface is within
+ * `maxBankJumpHeight`. Two-way, and needs no connection.
  */
-export interface WaterEntry {
-  fromRegionId: string;
-  toRegionId: string;
-  pairs: readonly CellPair[];
+export interface Bank {
+  landRegionId: string;
+  waterRegionId: string;
+  /** One per land cell that has a water cell in reach, in land cell order. */
+  pairs: readonly BankPair[];
 }
 
 /** Region masks and the capability-filtered region graph for one navigation profile. */
@@ -40,11 +42,11 @@ export interface Navigation {
   profile: NavProfile;
   masks: ReadonlyMap<string, RegionMask>;
   portals: ReadonlyMap<string, PortalCheck>;
-  /** The derived water entries, one per land and water region pair that has any. */
-  entries: readonly WaterEntry[];
+  /** The derived banks, one per land and water region pair that has any. */
+  banks: readonly Bank[];
   /**
-   * Regions linked to `regionId` through usable connections and water entries, including itself,
-   * following their directions. Region-level only: a region may split into areas a creature
+   * Regions linked to `regionId` through usable connections, in the directions they allow, and
+   * banks, both ways, including itself. Region-level only: a region may split into areas a creature
    * can't cross (`Pathfinder.reachableCells`).
    */
   reachableRegions(regionId: string): Set<string>;
@@ -143,13 +145,16 @@ export function buildNavigation(world: WorldModel, profile: NavProfile): Navigat
     link(connection.from, connection.to);
     if (connection.bidirectional) link(connection.to, connection.from);
   }
-  const entries = waterEntries(masks, profile);
-  for (const entry of entries) link(entry.fromRegionId, entry.toRegionId);
+  const banks = findBanks(masks, profile);
+  for (const bank of banks) {
+    link(bank.landRegionId, bank.waterRegionId);
+    link(bank.waterRegionId, bank.landRegionId);
+  }
   return {
     profile,
     masks,
     portals,
-    entries,
+    banks,
     reachableRegions(regionId) {
       const seen = new Set([regionId]);
       const queue = [regionId];
@@ -166,72 +171,91 @@ export function buildNavigation(world: WorldModel, profile: NavProfile): Navigat
   };
 }
 
-/** Whether moving from a region of kind `from` into one of kind `to` is a derived water entry. */
-export function isWaterEntry(from: RegionKind, to: RegionKind): boolean {
-  return from !== "water" && to === "water";
+/** Whether one of two region kinds is water and the other not, so a bank can join them. */
+export function isBankKinds(a: RegionKind, b: RegionKind): boolean {
+  return (a === "water") !== (b === "water");
 }
 
 /**
- * Whether two edge-adjacent walkable cells, one in a region of each mask, are a derived water
- * entry from `from` into `to`: land into water, within a step (ADR 0020 §4).
+ * Whether two walkable cells, one in a region of each mask, one on land and one in water, have
+ * surfaces close enough in height to jump between (ADR 0020 §4). Horizontal reach is the
+ * caller's to check (`bankReach`).
  */
-export function isWaterEntryPair(
-  from: RegionMask,
-  fromCell: number,
-  to: RegionMask,
-  toCell: number,
-) {
+export function isBankPair(a: RegionMask, aCell: number, b: RegionMask, bCell: number): boolean {
   return (
-    isWaterEntry(from.region.kind, to.region.kind) &&
-    from.state(fromCell) === CellState.walkable &&
-    to.state(toCell) === CellState.walkable &&
-    Math.abs(from.height(fromCell) - to.height(toCell)) <= WORLD_TOLERANCES.maxStepHeight
+    isBankKinds(a.region.kind, b.region.kind) &&
+    a.state(aCell) === CellState.walkable &&
+    b.state(bCell) === CellState.walkable &&
+    Math.abs(a.height(aCell) - b.height(bCell)) <= WORLD_TOLERANCES.maxBankJumpHeight
   );
 }
 
-/** Every derived water entry of a profile; none unless it can move on land and in water. */
-function waterEntries(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile): WaterEntry[] {
+/**
+ * How far apart, horizontally, the centres of a land cell and a water cell may be for a creature
+ * of this profile to jump between them: `maxBankJumpGap` between its body's edges on either side,
+ * so its radius twice over, since clearance keeps its walkable cells that far from a steep bank
+ * on land and from the bank in the water.
+ */
+export function bankReach(profile: NavProfile): number {
+  return 2 * profile.radius + WORLD_TOLERANCES.maxBankJumpGap;
+}
+
+/** Every derived bank of a profile; none unless it can move on land and in water. */
+function findBanks(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile): Bank[] {
   if (!profile.maxSlopeByKind.has("water")) return [];
   const all = [...masks.values()];
-  const entries: WaterEntry[] = [];
+  const banks: Bank[] = [];
   for (const land of all) {
     if (land.region.kind === "water" || !profile.maxSlopeByKind.has(land.region.kind)) continue;
     for (const water of all) {
-      if (!isWaterEntry(land.region.kind, water.region.kind)) continue;
-      const pairs = adjacentPairs(land, water);
+      if (water.region.kind !== "water" || water.walkableCount === 0) continue;
+      const pairs = bankPairs(land, water, bankReach(profile));
       if (pairs.length > 0) {
-        entries.push({ fromRegionId: land.region.id, toRegionId: water.region.id, pairs });
+        banks.push({ landRegionId: land.region.id, waterRegionId: water.region.id, pairs });
       }
     }
   }
-  return entries;
+  return banks;
 }
 
-/** Edge-adjacent pairs of cells from `a` into `b` that are a water entry, in cell order. */
-function adjacentPairs(a: RegionMask, b: RegionMask): CellPair[] {
-  const cs = a.cellSize;
-  const { box } = b.region;
-  const pairs: CellPair[] = [];
-  for (let cell = 0; cell < a.states.length; cell++) {
-    if (a.states[cell] !== CellState.walkable) continue;
-    const c = a.center(cell);
-    if (c.x < box.minX - cs || c.x > box.maxX + cs || c.z < box.minZ - cs || c.z > box.maxZ + cs)
+/**
+ * For each walkable cell of `land`, the nearest walkable cell of `water` within `reach` that it
+ * can jump to (the first in cell order on a tie), in land cell order.
+ */
+function bankPairs(land: RegionMask, water: RegionMask, reach: number): BankPair[] {
+  const cs = land.cellSize;
+  const { box } = water.region;
+  const span = Math.ceil(reach / cs);
+  const pairs: BankPair[] = [];
+  for (let cell = 0; cell < land.states.length; cell++) {
+    if (land.states[cell] !== CellState.walkable) continue;
+    const c = land.center(cell);
+    if (
+      c.x < box.minX - reach ||
+      c.x > box.maxX + reach ||
+      c.z < box.minZ - reach ||
+      c.z > box.maxZ + reach
+    ) {
       continue;
-    for (const [dx, dz] of EDGE_NEIGHBOURS) {
-      const toCell = b.cellAt(c.x + dx * cs, c.z + dz * cs);
-      if (toCell === -1 || !isWaterEntryPair(a, cell, b, toCell)) continue;
-      pairs.push({ fromCell: cell, toCell, from: c, to: b.center(toCell) });
+    }
+    let best: { cell: number; distance: number } | undefined;
+    for (let dj = -span; dj <= span; dj++) {
+      for (let di = -span; di <= span; di++) {
+        const distance = Math.hypot(di * cs, dj * cs);
+        if (distance > reach + 1e-9) continue;
+        const w = water.cellAt(c.x + di * cs, c.z + dj * cs);
+        if (w === -1 || !isBankPair(land, cell, water, w)) continue;
+        if (!best || distance < best.distance || (distance === best.distance && w < best.cell)) {
+          best = { cell: w, distance };
+        }
+      }
+    }
+    if (best) {
+      pairs.push({ landCell: cell, waterCell: best.cell, land: c, water: water.center(best.cell) });
     }
   }
   return pairs;
 }
-
-const EDGE_NEIGHBOURS = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-] as const;
 
 /** Distance from (x, z) to the portal segment of `connection`. */
 export function distanceToPortal(connection: ConnectionModel, x: number, z: number): number {

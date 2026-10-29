@@ -168,7 +168,7 @@ Creature positions are region-relative (`regionId`, `x`, `z`); the snapshot also
 
 Each creature's `cues` say what it visibly shows, so the renderer needs no action or need IDs: its action's cue (`eating`, `sleeping`) while that action isn't walking, then each need's cue from the value the need declares (`hungry`) ([ADR 0018](adr/0018-living-behavior.md) §15).
 
-Each creature's `animation` names the animation profile of the capability it moves by where it is (`walk` or `hop` on land, the species' gait; `swim` in water), and `submersion` how far its body sits below the surface (0 on land), so the renderer never reads capability IDs or region kinds ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §8–§9). An `entered_region` after a swimmer jumps in from the bank has no `connectionId`.
+Each creature's `animation` names the animation profile of the capability it moves by where it is (`walk` or `hop` on land, the species' gait; `swim` in water), and `submersion` how far its body sits below the surface (0 on land), so the renderer never reads capability IDs or region kinds ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §8–§9). An `entered_region` after a jump across a bank, between land and water, has no `connectionId`.
 
 Creature events are `creature_spawned`, `species_introduced`, `creature_despawned`, `entered_region`, `first_use_of_structure`, `path_failed`, `creature_stuck`, `ate` (a finished meal, with the placement and the hunger after it), `fell_asleep` (beside a shelter, or where it stood), `woke_up` (`rested` or `interrupted`) and `new_home_selected`; each carries a `creatureId`. Actions emit theirs through `ActionContext.emit`; the engine emits `new_home_selected` when an action calls `ActionContext.setHome`. `species_introduced` follows the first creature of a species in the world; registering alone doesn't introduce one.
 
@@ -231,7 +231,7 @@ The `user:` namespace for drawn species is the app's convention (`user-species.t
 
 A creature only goes where it fits ([ADR 0013](adr/0013-size-limits.md)). For each profile, a region's walkable cells split into connected areas, and wander only picks cells reachable from where the creature stands.
 
-- **Limits are warnings**: a region split into areas (`disconnected_region`), a portal with no room (`portal_unusable`, naming the structure), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`), water a swimmer can jump into but not leave (`no_water_exit`). Cut-off slivers up to 1 m² don't count.
+- **Limits are warnings**: a region split into areas (`disconnected_region`), a portal with no room (`portal_unusable`, naming the structure), a spawn point with no room (`spawn_not_walkable`), a region with nowhere to stand (`no_walkable_area`), water an amphibious creature can get into but not climb out of (`no_water_exit`). Cut-off slivers up to 1 m² don't count.
 - **Broken geometry stays an error**: a portal whose surfaces don't meet, two regions walkable at the same place and height (`ambiguous_overlap`), or no usable spawn point at all (`no_spawn_point`).
 
 This holds for pack species at startup too. Each profile's limits come back with `species_registered` and `limits` as `Limit`s, diagnostics that name the structure they are about, and the Studio turns them into the player's words. In the Woodland Hollow, large creatures can't cross the wooden bridge; the other sizes go everywhere.

@@ -214,7 +214,6 @@ export function runWithInvariants(options: RunOptions): RunReport {
   const { model } = simulation.state;
   // Per species, since `onTick` may add species with other navigation profiles.
   const navigationOf = (speciesId: string) => simulation.state.pathfinderFor(speciesId)?.navigation;
-  const speciesOf = (creatureId: string) => simulation.state.creatures.get(creatureId)?.speciesId;
   const water = [...model.regions.values()].filter((r) => r.kind === "water");
   const { min, max } = model.bounds;
   const report: RunReport = {
@@ -300,18 +299,23 @@ export function runWithInvariants(options: RunOptions): RunReport {
       if (event.type === "first_use_of_structure") report.firstStructureUse ??= event.tick;
       if (event.type === "entered_region") {
         // Regions change only through a connection that joins them, in a direction it allows,
-        // or, from land into water only, by a water entry of the creature's own profile
-        // (ADR 0020 §4, "Contradictions resolved"). Water to land is only by a connection.
+        // or by a jump across a bank, either way between land and water, landing where one of
+        // the creature's own profile's bank crossings does (ADR 0020 §4, "Contradictions
+        // resolved"). A jump ends the tick, so the creature is still where it landed.
         const { fromRegionId: from, toRegionId: to, connectionId } = event;
         const c = model.connections.find((c) => c.id === connectionId);
         const forward = c?.from === from && c.to === to;
         const backward = c?.bidirectional && c.to === from && c.from === to;
-        const entry =
+        const creature = simulation.state.creatures.get(event.creatureId);
+        const landed = creature?.position;
+        const jump =
           connectionId === undefined &&
-          navigationOf(speciesOf(event.creatureId) ?? "")?.entries.some(
-            (e) => e.fromRegionId === from && e.toRegionId === to,
-          );
-        if (!forward && !backward && !entry) {
+          landed !== undefined &&
+          simulation.state
+            .pathfinderFor(creature?.speciesId ?? "")
+            ?.bankCrossings(from)
+            .some((x) => x.toRegionId === to && x.to.x === landed.x && x.to.z === landed.z);
+        if (!forward && !backward && !jump) {
           violation(
             `${event.creatureId} went ${from} → ${to} via ${connectionId === undefined ? "no connection" : `"${connectionId}"`}`,
           );

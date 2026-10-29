@@ -1,7 +1,7 @@
 import { WORLD_TOLERANCES, type RegionPosition, type Vec2 } from "@living-diorama/content-schema";
 import type { ConnectionModel, WorldModel } from "../world/world-model";
 import { distanceField, findGridPath, pathLength } from "./grid-path";
-import { distanceToPortal, type Navigation } from "./region-graph";
+import { distanceToPortal, type BankPair, type Navigation } from "./region-graph";
 import { CellState, type RegionMask } from "./walkability";
 
 // Hierarchical route planning (roadmap M3 task 5, ADR 0006). Each usable portal gets a few
@@ -14,22 +14,25 @@ import { CellState, type RegionMask } from "./walkability";
 // creature can't pass (ADR 0013). Areas are linked by the same crossings routes use, so what
 // `reachableCells` returns is exactly what `findRoute` can reach.
 //
-// For a profile that can swim, derived water entries (ADR 0020 §4) add one-way crossings from
-// land into water, picked from the entry's cell pairs like a portal's, so the graph is directed:
-// out of the water is only through connections.
+// For a profile that moves on land and in water, derived banks (ADR 0020 §4) add crossings both
+// ways between land and water, picked from the bank's cell pairs and spaced like a portal's. The
+// graph stays directed for one-way connections.
 
 /** Crossings on one portal are at least this far apart, in metres. */
 const CROSSING_SPACING = 1;
 /**
- * Crossings of one water entry between the same two areas are at least this far apart, in
- * metres. A bank is long and has no portal to spread along, so they are sparser than a portal's;
- * every crossing is a door with a distance field of its own.
+ * Crossings of one bank between the same two areas are at least this far apart, in metres. A
+ * bank is long and has no portal to spread along, so they are sparser than a portal's; every
+ * crossing is a door with a distance field of its own.
  */
-const ENTRY_SPACING = 2;
+const BANK_SPACING = 2;
 
-/** One way across a portal: from a walkable cell in one region into an adjacent one in the next. */
+/**
+ * One way across a portal, from a walkable cell in one region into an adjacent one in the next,
+ * or a jump across a bank between a land cell and a water cell up to `bankReach` apart.
+ */
 export interface Crossing {
-  /** The connection crossed; absent for a derived water entry. */
+  /** The connection crossed; absent for a bank. */
   connectionId?: string;
   fromRegionId: string;
   toRegionId: string;
@@ -77,8 +80,10 @@ export class Pathfinder {
   readonly #areas = new Map<string, { ofCell: Int32Array; cells: number[][] }>();
   /** Per area key, the cells reachable from it. */
   readonly #reachable = new Map<string, ReachableCells>();
-  /** Per region, the crossings of the water entries leaving it; built on first use. */
-  #entryCrossings: Map<string, Crossing[]> | undefined;
+  /** Per region, every crossing leaving it (`#exits`). */
+  readonly #exitsByRegion = new Map<string, readonly Crossing[]>();
+  /** Per region, the crossings of the banks leaving it; built on first use. */
+  #bankCrossings: Map<string, Crossing[]> | undefined;
 
   constructor(
     readonly world: WorldModel,
@@ -171,7 +176,8 @@ export class Pathfinder {
     }
     for (const id of ids) this.#areas.delete(id);
     this.#reachable.clear();
-    this.#entryCrossings = undefined;
+    this.#bankCrossings = undefined;
+    this.#exitsByRegion.clear();
   }
 
   findRoute(from: RegionPosition, to: RegionPosition): RouteResult {
@@ -245,14 +251,17 @@ export class Pathfinder {
       via.set(key, link);
     };
 
-    // From the start to every door of its region.
+    // From the start to every door of its region. Each door's field is kept, so later routes
+    // reuse them.
     for (const exit of this.#exits(startRegion)) {
       const d = this.#field(startRegion, exit.fromCell)[startCell] ?? Infinity;
       if (Number.isFinite(d)) relax(doorKey(startRegion, exit.fromCell), d, {});
     }
 
     for (;;) {
-      // The door graph has a few dozen nodes at most, so a linear scan beats a heap here.
+      // A linear scan for the cheapest door: the door graph has a few dozen nodes, or a couple
+      // of hundred where banks line a river (ADR 0020 §4), and a scan of that is still cheap
+      // beside the distance fields each popped door needs.
       let key: string | undefined;
       let best = Infinity;
       for (const [k, c] of cost) {
@@ -291,51 +300,75 @@ export class Pathfinder {
     return sequence.reverse();
   }
 
-  #exits(regionId: string): Crossing[] {
-    return [
-      ...this.world.connections
-        .filter((c) => c.from === regionId || c.to === regionId)
-        .flatMap((c) => this.crossings(c).filter((x) => x.fromRegionId === regionId)),
-      ...this.entryCrossings(regionId),
-    ];
+  /** Every crossing leaving `regionId`, over connections and banks; built once per region. */
+  #exits(regionId: string): readonly Crossing[] {
+    let exits = this.#exitsByRegion.get(regionId);
+    if (!exits) {
+      exits = [
+        ...this.world.connections
+          .filter((c) => c.from === regionId || c.to === regionId)
+          .flatMap((c) => this.crossings(c).filter((x) => x.fromRegionId === regionId)),
+        ...this.bankCrossings(regionId),
+      ];
+      this.#exitsByRegion.set(regionId, exits);
+    }
+    return exits;
   }
 
-  /** The crossings of the derived water entries leaving `regionId` (ADR 0020 §4), in cell order. */
-  entryCrossings(regionId: string): readonly Crossing[] {
-    this.#entryCrossings ??= this.#buildEntryCrossings();
-    return this.#entryCrossings.get(regionId) ?? [];
+  /** The crossings of the derived banks leaving `regionId` (ADR 0020 §4), in cell order. */
+  bankCrossings(regionId: string): readonly Crossing[] {
+    this.#bankCrossings ??= this.#buildBankCrossings();
+    return this.#bankCrossings.get(regionId) ?? [];
   }
 
   /**
-   * Per water entry and pair of areas it joins, cell pairs at least `ENTRY_SPACING` apart, taken
-   * in cell order, so every area that touches the water gets a way in.
+   * Per bank and pair of areas it joins, cell pairs whose land cells are at least `BANK_SPACING`
+   * apart, taken in land cell order, so every area that reaches the water gets a way in and out.
+   * Each pair is a crossing each way.
    */
-  #buildEntryCrossings(): Map<string, Crossing[]> {
+  #buildBankCrossings(): Map<string, Crossing[]> {
     const byRegion = new Map<string, Crossing[]>();
-    for (const entry of this.navigation.entries) {
-      const fromAreas = this.#regionAreas(entry.fromRegionId).ofCell;
-      const toAreas = this.#regionAreas(entry.toRegionId).ofCell;
-      const chosen = new Map<string, Crossing[]>();
-      for (const pair of entry.pairs) {
-        const key = `${fromAreas[pair.fromCell] ?? -1}>${toAreas[pair.toCell] ?? -1}`;
+    const add = (crossing: Crossing) => {
+      let list = byRegion.get(crossing.fromRegionId);
+      if (!list) byRegion.set(crossing.fromRegionId, (list = []));
+      list.push(crossing);
+    };
+    for (const bank of this.navigation.banks) {
+      const landAreas = this.#regionAreas(bank.landRegionId).ofCell;
+      const waterAreas = this.#regionAreas(bank.waterRegionId).ofCell;
+      const chosen = new Map<string, BankPair[]>();
+      for (const pair of bank.pairs) {
+        const key = `${landAreas[pair.landCell] ?? -1}|${waterAreas[pair.waterCell] ?? -1}`;
         let list = chosen.get(key);
         if (!list) chosen.set(key, (list = []));
-        const near = (c: Crossing) =>
-          Math.hypot(c.from.x - pair.from.x, c.from.z - pair.from.z) < ENTRY_SPACING - 1e-9;
-        if (list.some(near)) continue;
-        list.push({
-          fromRegionId: entry.fromRegionId,
-          toRegionId: entry.toRegionId,
-          fromCell: pair.fromCell,
-          toCell: pair.toCell,
-          from: pair.from,
-          to: pair.to,
-          cost: Math.hypot(pair.to.x - pair.from.x, pair.to.z - pair.from.z),
+        const near = (p: BankPair) =>
+          Math.hypot(p.land.x - pair.land.x, p.land.z - pair.land.z) < BANK_SPACING - 1e-9;
+        if (!list.some(near)) list.push(pair);
+      }
+      const pairs = [...chosen.values()].flat().sort((p, q) => p.landCell - q.landCell);
+      for (const pair of pairs) {
+        const cost = Math.hypot(pair.water.x - pair.land.x, pair.water.z - pair.land.z);
+        add({
+          fromRegionId: bank.landRegionId,
+          toRegionId: bank.waterRegionId,
+          fromCell: pair.landCell,
+          toCell: pair.waterCell,
+          from: pair.land,
+          to: pair.water,
+          cost,
+        });
+        add({
+          fromRegionId: bank.waterRegionId,
+          toRegionId: bank.landRegionId,
+          fromCell: pair.waterCell,
+          toCell: pair.landCell,
+          from: pair.water,
+          to: pair.land,
+          cost,
         });
       }
-      const crossings = [...chosen.values()].flat().sort((p, q) => p.fromCell - q.fromCell);
-      byRegion.set(entry.fromRegionId, [...(byRegion.get(entry.fromRegionId) ?? []), ...crossings]);
     }
+    for (const list of byRegion.values()) list.sort((p, q) => p.fromCell - q.fromCell);
     return byRegion;
   }
 

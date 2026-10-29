@@ -28,7 +28,8 @@ export interface PathState {
 
 /**
  * A waypoint. `connectionId` is set on the first waypoint after a portal crossing; the first
- * waypoint after a derived water entry, which crosses no connection, has none (ADR 0020 §4).
+ * waypoint after a bank jump, which crosses no connection, has none (ADR 0020 §4); the creature
+ * jumps to it in one tick.
  */
 export interface PathPoint extends RegionPosition {
   connectionId?: string;
