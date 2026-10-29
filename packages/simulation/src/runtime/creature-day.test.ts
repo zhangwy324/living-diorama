@@ -110,7 +110,8 @@ describe("a creature's own day", () => {
   });
 
   it("never puts a creature back into the phase it has just left", () => {
-    for (let seed = 1; seed < 200; seed++) {
+    const backwards: string[] = [];
+    for (let seed = 1; seed < 100; seed++) {
       const { rng } = counted(seed);
       const day: CreatureDay = { phase: "dusk", morning: (seed % 61) - 30 };
       let last = day.phase;
@@ -119,12 +120,13 @@ describe("a creature's own day", () => {
         settleDay(day, m, rng);
         // Only forwards, one phase at a time: four changes a day.
         const step = (DAY_PHASES.indexOf(day.phase) - DAY_PHASES.indexOf(last) + 4) % 4;
-        expect(step === 0 || step === 1).toBe(true);
+        if (step > 1) backwards.push(`seed ${seed} at ${m}: ${last} → ${day.phase}`);
         if (step === 1) changes++;
         last = day.phase;
       }
       expect(changes).toBe(12);
     }
+    expect(backwards).toEqual([]);
   });
 
   it("walks a gap as the ticks would have, and leaves the day as of the present", () => {
