@@ -8,6 +8,7 @@
     { "path": "packages/renderer" },
     { "path": "packages/desktop-integration" },
     { "path": "tools/development" },
+    { "path": "tools/development/tsconfig.node.json" },
     { "path": "apps/desktop" },
     { "path": "apps/desktop/tsconfig.node.json" }
   ]
