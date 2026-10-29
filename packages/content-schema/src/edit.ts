@@ -14,7 +14,9 @@ import {
 // union as `terrain.*` and `region.*`.
 //
 // Positions are horizontal only: the engine puts a prop on the ground where it stands, so a
-// placement's height is never edited directly.
+// placement's height is never edited directly. For the same reason an inverse edit is exact only
+// up to that ground snap: undoing restores a placement's position, rotation and scale, but a
+// placement whose authored height was off the ground comes back on the ground.
 
 const scale = z.number().positive({ error: "A prop's scale must be greater than 0" });
 
@@ -69,10 +71,14 @@ export const EDIT_OP_KINDS: readonly (typeof OPS)[number]["shape"]["op"]["value"
 
 /** One change to a world, told apart by `op`. */
 export const WorldEditOpSchema = z.discriminatedUnion("op", OPS, {
-  error: (issue) =>
-    issue.code === "invalid_union"
-      ? `Unknown edit op (expected one of ${EDIT_OP_KINDS.join(", ")})`
-      : undefined,
+  error: (issue) => {
+    if (issue.code !== "invalid_union") return undefined;
+    const kinds = EDIT_OP_KINDS.join(", ");
+    const { input } = issue;
+    return typeof input === "object" && input !== null && !("op" in input)
+      ? `An edit op needs an "op" (one of ${kinds})`
+      : `Unknown edit op (expected one of ${kinds})`;
+  },
 });
 export type WorldEditOp = z.output<typeof WorldEditOpSchema>;
 /** An op as written, before defaults are filled in. */
@@ -87,6 +93,15 @@ export const WorldEditSchema = z.strictObject({
   ops: z.array(WorldEditOpSchema).min(1, { error: "An edit needs at least one op" }),
 });
 export type WorldEdit = z.output<typeof WorldEditSchema>;
+
+/** A `prop.add` as applied: the new placement's ID is always known. */
+export type AppliedPropAddOp = PropAddOp & { id: string };
+/** An op as applied, with every new placement's ID. */
+export type AppliedWorldEditOp = Exclude<WorldEditOp, PropAddOp> | AppliedPropAddOp;
+/** An edit as applied, with every new placement's ID: an applied edit and its inverse. */
+export interface AppliedWorldEdit {
+  ops: AppliedWorldEditOp[];
+}
 /** An edit as written, before defaults are filled in. */
 export type WorldEditInput = z.input<typeof WorldEditSchema>;
 
@@ -152,8 +167,11 @@ export type WorldEditResult =
   | ({
       ok: true;
       /** The edit as applied, with every default filled in and every new placement's ID. */
-      edit: WorldEdit;
-      /** The edit that undoes it: each op's inverse, in reverse order. */
-      inverse: WorldEdit;
+      edit: AppliedWorldEdit;
+      /**
+       * The edit that undoes it: each op's inverse, in reverse order. Exact up to the ground snap:
+       * a placement it adds or moves back stands on the ground, whatever its authored height.
+       */
+      inverse: AppliedWorldEdit;
     } & WorldEditOutcome)
   | WorldEditRejected;

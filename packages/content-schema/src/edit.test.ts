@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EDIT_OP_KINDS, parseWorldEdit, type Result, type WorldEditInput } from "./index";
+import {
+  EDIT_OP_KINDS,
+  parseWorldEdit,
+  type AppliedPropAddOp,
+  type AppliedWorldEdit,
+  type Result,
+  type WorldEditInput,
+} from "./index";
 
 function codesAndPaths<T>(result: Result<T>) {
   return result.ok ? [] : result.diagnostics.map((d) => ({ code: d.code, path: d.path }));
@@ -78,6 +85,28 @@ describe("WorldEdit", () => {
     expect(messages(parsed)).toEqual([
       "Unknown edit op (expected one of prop.add, prop.remove, prop.move, prop.scale)",
     ]);
+  });
+
+  it("rejects an op without an op kind, saying so", () => {
+    const parsed = parseWorldEdit({ ops: [{ id: "pine-1" }] });
+    expect(codesAndPaths(parsed)).toEqual([{ code: "invalid_union", path: ["ops", 0, "op"] }]);
+    expect(messages(parsed)).toEqual([
+      'An edit op needs an "op" (one of prop.add, prop.remove, prop.move, prop.scale)',
+    ]);
+  });
+
+  it("types an applied edit's adds with their IDs", () => {
+    const unnamed = {
+      op: "prop.add",
+      prop: "hollow:pine",
+      position: { x: 0, z: 0 },
+      rotationY: 0,
+      scale: 1,
+    } as const;
+    const named: AppliedPropAddOp = { ...unnamed, id: "pine-7" };
+    // @ts-expect-error: an applied add must name its placement.
+    const missing: AppliedWorldEdit = { ops: [unnamed] };
+    expect({ ops: [named] } satisfies AppliedWorldEdit).not.toEqual(missing);
   });
 
   it("rejects a move that changes nothing", () => {
