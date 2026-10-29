@@ -142,6 +142,8 @@ export interface RunReport {
 }
 
 const MAX_VIOLATIONS = 20;
+/** Added to the run's seed for the fresh worlds that saves are restored into mid-run. */
+const RESTORED_SEED_OFFSET = 1_000_003;
 
 /** The engine plus `register`, with references resolved. */
 export function loadContent(register: RunOptions["register"]): Result<Registries> {
@@ -176,9 +178,13 @@ interface Traced {
 export function runWithInvariants(options: RunOptions): RunReport {
   const started = performance.now();
   let decisions = 0;
-  const traced = (): Traced => {
+  const traced = (seed = options.seed): Traced => {
     const traces: DecisionTrace[] = [];
-    const simulation = createSimulation({ ...options, onTrace: (trace) => traces.push(trace) });
+    const simulation = createSimulation({
+      ...options,
+      seed,
+      onTrace: (trace) => traces.push(trace),
+    });
     return { simulation, traces };
   };
   let main = traced();
@@ -364,8 +370,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
         report.saveRestore.largestSaveBytes,
         saved.bytes,
       );
-      // A fresh world of another seed, as the app's at startup, then the save.
-      const next = traced();
+      // A fresh world of another seed, as the app's at startup, then the save, which must bring
+      // back the saved seed and the streams forked from it.
+      const next = traced(options.seed + RESTORED_SEED_OFFSET);
       // Without a gap the next step's time of day; after one, that plus the gap.
       const present = minutesAfter(minutesAt(simulation.tick), gapMs);
       wallMs += gapMs;

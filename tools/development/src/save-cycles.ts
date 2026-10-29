@@ -156,7 +156,7 @@ export function catchUpProblems(
     if (sleeping && creature.home !== null) {
       const spot = simulation.spotFor(who, creature.home);
       if (!isDeepStrictEqual(spot, creature.position)) {
-        problems.push(`${who}: asleep away from its home ${creature.home}`);
+        problems.push(`${who}: away from its home ${creature.home} in its sleeping phase`);
       }
     }
     // Rested: tiredness was 0 when the night ended in the gap, and rose awake since.

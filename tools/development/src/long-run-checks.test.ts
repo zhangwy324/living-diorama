@@ -177,6 +177,20 @@ describe("long-run checks", () => {
     };
     expect(sleepy(14)).toEqual([]);
     expect(sleepy(24)).toEqual(["c1: asleep 24.0 h a day (at most 14)"]);
+    // A run whose ticks are mostly night, as after a catch-up that skipped a day: asleep every
+    // night tick is 10 hours a day, however many night ticks were stepped.
+    const skewed = (asleepOtherHours: number) => {
+      const c = checker({ sleep: {} });
+      c.live(0, 16 * HOUR, "night", { asleep: true });
+      c.live(16 * HOUR, asleepOtherHours * HOUR, "day", { asleep: true });
+      c.live((16 + asleepOtherHours) * HOUR, (8 - asleepOtherHours) * HOUR, "day");
+      c.checks.finish();
+      return c.violations;
+    };
+    expect(skewed(0)).toEqual([]);
+    expect(skewed(2)).toEqual([]);
+    // Oversleeping still shows: asleep half of the other ticks too is 10 + 7 hours a day.
+    expect(skewed(4)).toEqual(["c1: asleep 17.0 h a day (at most 14)"]);
     const short = checker({ sleep: {} });
     short.live(0, 4 * HOUR, "night", { asleep: true });
     short.checks.finish();

@@ -124,6 +124,8 @@ describe("catchUpProblems", () => {
     const creature = [...simulation.state.creatures.values()][0]!;
     creature.asleep = false;
     creature.needs["core:hunger"] = 0.95;
+    expect(creature.home).not.toBeNull();
+    creature.position = { ...creature.position, x: creature.position.x + 1 };
     const events = [{ type: "woke_up" as const, tick: simulation.tick, creatureId: creature.id }];
     const problems = catchUpProblems(
       simulation,
@@ -136,6 +138,7 @@ describe("catchUpProblems", () => {
       expect.stringContaining("first step after catch-up emitted"),
       expect.stringContaining(`${creature.id}: hunger 0.95`),
       expect.stringContaining(`${creature.id}: awake at night`),
+      expect.stringContaining(`${creature.id}: away from its home`),
     ]);
   });
 });

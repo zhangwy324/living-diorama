@@ -1,9 +1,10 @@
-import type {
-  CreatureState,
-  DayPhase,
-  DecisionTrace,
-  Simulation,
-  SimulationEvent,
+import {
+  phaseSpans,
+  type CreatureState,
+  type DayPhase,
+  type DecisionTrace,
+  type Simulation,
+  type SimulationEvent,
 } from "@living-diorama/simulation";
 
 // The living-behavior checks of the long runs (ADR 0018 §20 and its amendments), kept apart from
@@ -23,6 +24,10 @@ export const MEAL_EVENT = "ate";
 /** A creature counts as hungry with the `hungry` cue or with this much hunger. */
 export const HUNGRY_FROM = 0.8;
 const HUNGER_NEED = "core:hunger";
+/** Hours of night in a day (ADR 0018 §5): 20:00 to 06:00. */
+const NIGHT_HOURS = phaseSpans(0, 24 * 3_600_000)
+  .filter((span) => span.phase === "night")
+  .reduce((hours, span) => hours + span.hours, 0);
 
 /**
  * Which creatures a check applies to; all by default. The runner calls it once per creature, when
@@ -54,7 +59,10 @@ export interface LongRunCheckOptions {
    * Each creature is asleep for at least `minShare` (default 0.5) of the night ticks it lived
    * through, once it has lived through `minNightHours` (default 1), and, once it has lived a
    * whole simulated day, for at most `maxHoursPerDay` (default 14) a day on average, so one that
-   * never wakes fails too. Off unless given; `creatures` chooses those held to it, e.g. those
+   * never wakes fails too. The day is weighed by phase: its share of night ticks asleep counts for
+   * the night's 10 hours and its share of other ticks asleep for the other 14, so a run whose
+   * ticks are not a fair sample of the day (one that skipped hours in a catch-up) is judged as an
+   * unbroken one. Off unless given; `creatures` chooses those held to it, e.g. those
    * that sleep at night (a nocturnal creature sleeps by day, so it is left out).
    */
   sleep?: {
@@ -84,11 +92,6 @@ export interface CreatureStats {
   asleepAtNightTicks: number;
 }
 
-type SleepCounts = Pick<
-  CreatureStats,
-  "ticks" | "asleepTicks" | "nightTicks" | "asleepAtNightTicks"
->;
-
 /** A creature as one tick leaves it. */
 export interface CreatureTick {
   id: string;
@@ -112,12 +115,6 @@ export class LongRunChecks {
   readonly #failedInARow = new Map<string, number>();
   /** Creatures the sleep check skips. */
   readonly #noSleepCheck = new Set<string>();
-  /**
-   * Per creature, its sleep counts at the last catch-up. The sleep check holds over the time
-   * stepped since: a gap skips hours of the day but not of the night, or the other way round, so
-   * across one the stepped ticks are no fair sample of a day.
-   */
-  readonly #sleepFrom = new Map<string, SleepCounts>();
 
   constructor(
     private readonly tickRateHz: number,
@@ -185,16 +182,10 @@ export class LongRunChecks {
 
   /**
    * After a restore with catch-up, which feeds every creature (ADR 0018 §19): the time awake
-   * before the gap no longer counts towards a gap between meals, and the sleep check is applied
-   * to the ticks before the gap and starts afresh after it.
+   * before the gap no longer counts towards a gap between meals.
    */
   caughtUp() {
     this.#awakeSinceMeal.clear();
-    for (const [id, stats] of this.creatures) {
-      this.#checkSleep(id, stats);
-      const { ticks, asleepTicks, nightTicks, asleepAtNightTicks } = stats;
-      this.#sleepFrom.set(id, { ticks, asleepTicks, nightTicks, asleepAtNightTicks });
-    }
   }
 
   /** After each tick, with every creature alive. */
@@ -245,18 +236,20 @@ export class LongRunChecks {
     }
   }
 
-  /** The sleep bounds over the ticks since the last catch-up, or since the start. */
+  /** The sleep bounds over the whole run. */
   #checkSleep(id: string, stats: CreatureStats) {
     const { sleep } = this.options;
     if (!sleep || this.#noSleepCheck.has(id)) return;
-    const from = this.#sleepFrom.get(id);
-    const ticks = stats.ticks - (from?.ticks ?? 0);
-    const asleepTicks = stats.asleepTicks - (from?.asleepTicks ?? 0);
-    const nightTicks = stats.nightTicks - (from?.nightTicks ?? 0);
-    const asleepAtNightTicks = stats.asleepAtNightTicks - (from?.asleepAtNightTicks ?? 0);
+    const { ticks, asleepTicks, nightTicks, asleepAtNightTicks } = stats;
     const dayTicks = 24 * 3600 * this.tickRateHz;
     const maxHours = sleep.maxHoursPerDay ?? MAX_SLEEP_HOURS_PER_DAY;
-    const hoursPerDay = (24 * asleepTicks) / Math.max(1, ticks);
+    // Hours asleep in a day, weighed by phase; a phase it never lived through counts at its
+    // overall share.
+    const overall = asleepTicks / Math.max(1, ticks);
+    const otherTicks = ticks - nightTicks;
+    const atNight = nightTicks > 0 ? asleepAtNightTicks / nightTicks : overall;
+    const otherwise = otherTicks > 0 ? (asleepTicks - asleepAtNightTicks) / otherTicks : overall;
+    const hoursPerDay = NIGHT_HOURS * atNight + (24 - NIGHT_HOURS) * otherwise;
     if (ticks >= dayTicks && hoursPerDay > maxHours) {
       this.violation(`${id}: asleep ${hoursPerDay.toFixed(1)} h a day (at most ${maxHours})`);
     }
