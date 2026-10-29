@@ -1,6 +1,6 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Rng } from "../runtime/rng";
-import type { BehaviorProvider, CreatureObservation } from "./contracts";
+import type { BehaviorProvider, CreatureObservation, ReachableRegion } from "./contracts";
 import { pickWeighted } from "./shared";
 
 // `core:wander` (roadmap M3 task 7, ADR 0006 §9): alternate idling with walking to a random
@@ -19,16 +19,44 @@ interface WanderMemory {
   walkNext?: boolean;
 }
 
+/**
+ * Chance that a walk heads for a region of another kind than the one the creature is in, e.g.
+ * into the water from a bank, when it can reach one (#140). Wander otherwise keeps to its medium,
+ * so a creature that walks and swims switches only now and then instead of splashing back and
+ * forth. Tuned on `pnpm soak:quick`: an amphibian makes a few dozen bank jumps a day, not
+ * hundreds, and still spends part of the day in the water.
+ */
+export const OTHER_MEDIUM_CHANCE = 0.015;
+
+/**
+ * The region a walk heads for: now and then one of another kind, else the creature's own or,
+ * with `OTHER_REGION_CHANCE`, another of its kind; regions drawn by walkable area. A creature
+ * that can reach only one kind, such as a walker or a water-only swimmer, draws exactly as it
+ * did before medium mattered.
+ */
+export function pickWanderRegion(
+  hereRegionId: string,
+  regions: readonly ReachableRegion[],
+  rng: Rng,
+): string {
+  const kind = regions.find((r) => r.regionId === hereRegionId)?.kind;
+  const others = regions.filter((r) => r.regionId !== hereRegionId);
+  const otherMedium = others.filter((r) => kind !== undefined && r.kind !== kind);
+  if (otherMedium.length > 0 && rng.chance(OTHER_MEDIUM_CHANCE)) {
+    return pickWeighted(otherMedium, rng) ?? hereRegionId;
+  }
+  const sameMedium = others.filter((r) => kind === undefined || r.kind === kind);
+  return sameMedium.length > 0 && rng.chance(OTHER_REGION_CHANCE)
+    ? (pickWeighted(sameMedium, rng) ?? hereRegionId)
+    : hereRegionId;
+}
+
 function pickDestination(
   { creature, world }: CreatureObservation,
   rng: Rng,
 ): RegionPosition | undefined {
   const here = creature.position;
-  const others = world.reachableRegions().filter((r) => r.regionId !== here.regionId);
-  const regionId =
-    others.length > 0 && rng.chance(OTHER_REGION_CHANCE)
-      ? (pickWeighted(others, rng) ?? here.regionId)
-      : here.regionId;
+  const regionId = pickWanderRegion(here.regionId, world.reachableRegions(), rng);
   for (let attempt = 0; attempt < DESTINATION_ATTEMPTS; attempt++) {
     const point = world.randomWalkablePoint(regionId, rng);
     if (!point) return undefined;

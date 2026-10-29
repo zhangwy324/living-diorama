@@ -29,6 +29,14 @@ const CROSSING_SPACING = 1;
  * crossing is a door with a distance field of its own.
  */
 const BANK_SPACING = 2;
+/**
+ * Extra cost of a jump across a bank, in metres of walking (#140), so a route between two places
+ * on land crosses the water only when that is clearly shorter than a bridge: a trip there and out
+ * again pays it twice, 24 m, more than swimming saves over the Hollow's bridge for nearly any trip.
+ * It is the same on every jump, so it never changes which way a route into or out of the water
+ * goes. Search cost only; a route's length stays the distance walked. Tuned on `pnpm soak:quick`.
+ */
+export const BANK_CROSSING_COST = 12;
 
 /**
  * One way across a portal, from a walkable cell in one region into an adjacent one in the next,
@@ -44,7 +52,7 @@ export interface Crossing {
   /** Cell centres. The region changes halfway, on the shared cell edge. */
   from: Vec2;
   to: Vec2;
-  /** Distance between the centres plus the connection's extra cost. */
+  /** Distance between the centres plus the connection's extra cost, or `BANK_CROSSING_COST`. */
   cost: number;
 }
 
@@ -359,7 +367,8 @@ export class Pathfinder {
       }
       const pairs = [...chosen.values()].flat().sort((p, q) => p.landCell - q.landCell);
       for (const pair of pairs) {
-        const cost = Math.hypot(pair.water.x - pair.land.x, pair.water.z - pair.land.z);
+        const cost =
+          Math.hypot(pair.water.x - pair.land.x, pair.water.z - pair.land.z) + BANK_CROSSING_COST;
         add({
           fromRegionId: bank.landRegionId,
           toRegionId: bank.waterRegionId,

@@ -1,4 +1,4 @@
-import type { RegionPosition } from "@living-diorama/content-schema";
+import type { RegionKind, RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
 import type { ActionEvent } from "./action-event";
@@ -212,6 +212,8 @@ export function isActionProvider(entry: ActionType): entry is ActionProvider {
 /** A region the creature can get to from where it stands. */
 export interface ReachableRegion {
   regionId: string;
+  /** The region's kind, e.g. land or water: the medium the creature moves in there. */
+  kind: RegionKind;
   /** Walkable area the creature can reach in this region, in square metres. */
   walkableArea: number;
 }

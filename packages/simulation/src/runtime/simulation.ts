@@ -1330,7 +1330,13 @@ export class Simulation {
         [...reachable].flatMap(([regionId, cells]) => {
           const mask = masks.get(regionId);
           return cells.length > 0 && mask
-            ? [{ regionId, walkableArea: cells.length * mask.cellSize * mask.cellSize }]
+            ? [
+                {
+                  regionId,
+                  kind: mask.region.kind,
+                  walkableArea: cells.length * mask.cellSize * mask.cellSize,
+                },
+              ]
             : [];
         }),
       randomWalkablePoint: (regionId, rng) => {
