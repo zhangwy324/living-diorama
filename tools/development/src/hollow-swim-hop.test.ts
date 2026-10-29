@@ -40,8 +40,8 @@ describe("a water-only swimmer in Woodland Hollow", () => {
   });
 });
 
-/** A behavior that walks to `destination` once, then idles. */
-const goTo = (destination: RegionPosition): BehaviorProvider => ({
+/** A behavior that walks to each of `destinations` in turn, then idles. */
+const goTo = (...destinations: RegionPosition[]): BehaviorProvider => ({
   id: "test:go_to",
   version: "1.0.0",
   dependencies: ["core:idle", "core:follow_path"].map((id) => ({
@@ -49,14 +49,18 @@ const goTo = (destination: RegionPosition): BehaviorProvider => ({
     id,
   })),
   evaluate(_observation, memory) {
-    if (memory.sent) return null;
-    memory.sent = true;
+    const n = typeof memory.n === "number" ? memory.n : 0;
+    const destination = destinations[n];
+    if (!destination) return null;
+    memory.n = n + 1;
     return { action: "core:follow_path", params: { destination }, utility: 1 } satisfies Proposal;
   },
 });
 
 describe("crossing the river", () => {
-  // From the woods' glade to the meadow by the river's south stretch, far from the bridge.
+  // From the woods' glade down to the west bank's south stretch, far from the bridge, then over
+  // to the meadow, where swimming saves about 24 m: more than the two bank jumps cost (#140).
+  const southBank: RegionPosition = { regionId: "west-woods", x: -3, z: 14 };
   const meadow: RegionPosition = { regionId: "east-meadow", x: 9, z: 14 };
 
   it("by the banks for an amphibian, while a walker takes the bridge", () => {
@@ -65,7 +69,7 @@ describe("crossing the river", () => {
       seed: 1,
       register: (r: Registries) => {
         registerHollowCreatures(r);
-        r.behaviors.register(goTo(meadow));
+        r.behaviors.register(goTo(southBank, meadow));
         for (const [id, base] of [
           ["test:amphibian", otter],
           ["test:walker", mossling],
@@ -84,8 +88,11 @@ describe("crossing the river", () => {
     const events: SimulationEvent[] = [];
     const visited = { [amphibian]: new Set<string>(), [walker]: new Set<string>() };
     const done = () =>
-      [amphibian, walker].every((id) => simulation.state.creatures.get(id)!.lastResult);
-    for (let t = 0; t < 3_000 && !done(); t++) {
+      [amphibian, walker].every((id) => {
+        const { position, action } = simulation.state.creatures.get(id)!;
+        return !action && position.x === meadow.x && position.z === meadow.z;
+      });
+    for (let t = 0; t < 6_000 && !done(); t++) {
       events.push(...simulation.step());
       for (const c of simulation.snapshot().creatures) {
         visited[c.id]!.add(`${c.position.regionId}:${c.animation}`);

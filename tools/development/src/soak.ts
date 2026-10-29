@@ -42,14 +42,20 @@ let failed = 0;
 let restores = 0;
 let comparedTicks = 0;
 let largestSave = 0;
-/** Bank jumps by the amphibians, and the seeds in which they made any. */
+/**
+ * Bank jumps by the amphibians, the seeds in which they made any, and those in which they spent
+ * time both on land and in the water (#140).
+ */
 let bankJumps = 0;
 let seedsWithJumps = 0;
+let seedsInBothMedia = 0;
 const started = performance.now();
 for (let seed = 1; seed <= seeds; seed++) {
   /** Creatures that used a structure, and each creature's jumps across a bank, by ID. */
   const structureUsers = new Set<string>();
   const jumpsBy = new Map<string, number>();
+  /** Ticks in water and out of it, summed over all the seed's amphibians (one by default). */
+  const amphibianTicks = { water: 0, land: 0 };
   const report = runWithInvariants({
     register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
@@ -61,12 +67,18 @@ for (let seed = 1; seed <= seeds; seed++) {
     alsoSpawn,
     ...LIVING_BEHAVIOR_CHECKS,
     saveRestore,
-    onTick: (_simulation, events) => {
+    onTick: (simulation, events) => {
       for (const e of events) {
         if (e.type === "first_use_of_structure") structureUsers.add(e.creatureId);
         if (e.type === "entered_region" && e.connectionId === undefined) {
           jumpsBy.set(e.creatureId, (jumpsBy.get(e.creatureId) ?? 0) + 1);
         }
+      }
+      const { creatures, model } = simulation.state;
+      for (const c of creatures.values()) {
+        if (c.speciesId !== otter.id) continue;
+        const kind = model.regions.get(c.position.regionId)?.kind;
+        amphibianTicks[kind === "water" ? "water" : "land"]++;
       }
     },
   });
@@ -93,7 +105,11 @@ for (let seed = 1; seed <= seeds; seed++) {
   const jumps = of(otter.id).reduce((n, id) => n + (jumpsBy.get(id) ?? 0), 0);
   bankJumps += jumps;
   if (jumps > 0) seedsWithJumps++;
-  const swam = values["mosslings-only"] ? "" : `, ${jumps} amphibian bank jumps`;
+  if (amphibianTicks.water > 0 && amphibianTicks.land > 0) seedsInBothMedia++;
+  const inWater = amphibianTicks.water / Math.max(1, amphibianTicks.water + amphibianTicks.land);
+  const swam = values["mosslings-only"]
+    ? ""
+    : `, ${jumps} amphibian bank jumps, ${(inWater * 100).toFixed(0)}% of amphibian time in water`;
   console.log(
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
       `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
@@ -107,7 +123,10 @@ console.log(
     `largest save ${(largestSave / 1024).toFixed(0)} KiB of JSON`,
 );
 if (!values["mosslings-only"]) {
-  console.log(`${bankJumps} amphibian bank jumps, in ${seedsWithJumps}/${seeds} seeds`);
+  console.log(
+    `${bankJumps} amphibian bank jumps, in ${seedsWithJumps}/${seeds} seeds; ` +
+      `on land and in water in ${seedsInBothMedia}/${seeds} seeds`,
+  );
 }
 console.log(
   `${seeds - failed}/${seeds} seeds clean in ${((performance.now() - started) / 1000).toFixed(0)} s`,

@@ -6,6 +6,7 @@ import {
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import {
+  BANK_CROSSING_COST,
   bankReach,
   distanceToPolygonEdge,
   isJumpClear,
@@ -23,7 +24,17 @@ import {
   type SimulationEvent,
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { minnow, newt, pond as pondVariant, pondWorld, registerPond, vole } from "./index";
+import {
+  carp,
+  minnow,
+  newt,
+  otter,
+  pond as pondVariant,
+  pondWorld,
+  registerHollowCreatures,
+  registerPond,
+  vole,
+} from "./index";
 import { createSimulation, loadContent, runWithInvariants } from "./simulation-run";
 
 // Swimming and locomotion styles (ADR 0020, M16 PR 2, with the owner's revision of §4), on the
@@ -821,4 +832,132 @@ describe("turning when setting off (#121, ADR 0020 §7)", () => {
     expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
     expect(worst).toBeLessThanOrEqual(TURN_RATE / 2 + 1e-9);
   });
+});
+
+describe("keeping to one medium (#140)", () => {
+  const simulation = createSimulation({
+    register: registerHollowCreatures,
+    worldId: "hollow:woodland-hollow",
+    seed: 1,
+  });
+  const amphibian = navigationOf(simulation, otter.id);
+  const walker = navigationOf(simulation, "hollow:mossling");
+
+  it("costs a bank jump its length plus BANK_CROSSING_COST", () => {
+    const out = amphibian.bankCrossings("west-woods");
+    expect(out.length).toBeGreaterThan(0);
+    for (const c of [...out, ...amphibian.bankCrossings("river")]) {
+      const length = Math.hypot(c.to.x - c.from.x, c.to.z - c.from.z);
+      expect(c.cost).toBeCloseTo(length + BANK_CROSSING_COST, 9);
+    }
+  });
+
+  it("takes the bridge between the banks unless the river is clearly shorter", () => {
+    const cells = (regionId: string) => {
+      const mask = walker.navigation.masks.get(regionId)!;
+      const walkable: RegionPosition[] = [];
+      for (let cell = 0; cell < mask.states.length; cell++) {
+        const { x, z } = mask.center(cell);
+        if (mask.isWalkableAt(x, z)) walkable.push({ regionId, x, z });
+      }
+      return walkable;
+    };
+    const west = cells("west-woods");
+    const east = cells("east-meadow");
+    let bridged = 0;
+    for (let k = 0; k < 60; k++) {
+      // Spread over both banks, the same pairs on every run.
+      const from = west[(k * 7919) % west.length]!;
+      const to = east[(k * 104_729) % east.length]!;
+      const swum = amphibian.findRoute(from, to);
+      const walked = walker.findRoute(from, to);
+      if (!swum.ok || !walked.ok) throw new Error("no route between the banks");
+      const jumps = swum.route.legs.filter((l) => l.exit && !l.exit.connectionId).length;
+      if (jumps === 0) {
+        bridged++;
+        // The cost only steers the search: a route's length is still the distance walked.
+        expect(swum.route.length).toBeCloseTo(walked.route.length, 6);
+      } else {
+        // Crossing doors are spaced, so the search is within a metre or two of the best.
+        expect(walked.route.length - swum.route.length).toBeGreaterThan(
+          jumps * BANK_CROSSING_COST - 2,
+        );
+      }
+    }
+    expect(bridged).toBeGreaterThan(30);
+  });
+
+  it("reaches in one medium what a walker or a swimmer reaches at all", () => {
+    for (const [speciesId, from] of [
+      ["hollow:mossling", { regionId: "west-woods", x: -15, z: 7 }],
+      [carp.id, { regionId: "river", x: 4.25, z: 14.25 }],
+    ] as const) {
+      const pathfinder = navigationOf(simulation, speciesId);
+      expect(pathfinder.reachableCells(from, { sameMedium: true })).toEqual(
+        pathfinder.reachableCells(from),
+      );
+    }
+    // An amphibian reaches the river and the far bank only by changing medium.
+    const fromWoods = amphibian.reachableCells({ regionId: "west-woods", x: -15, z: 7 });
+    const inMedium = amphibian.reachableCells(
+      { regionId: "west-woods", x: -15, z: 7 },
+      { sameMedium: true },
+    );
+    expect([...fromWoods.keys()]).toContain("river");
+    expect(inMedium.has("river")).toBe(false);
+    expect(inMedium.get("west-woods")).toEqual(fromWoods.get("west-woods"));
+    // A large one doesn't fit the bridge, so the far bank is across the water only.
+    const large = createSimulation({
+      register: (r: Registries) => {
+        registerHollowCreatures(r);
+        r.species.register({ ...otter, id: "test:large-otter", sizeClass: "large" });
+      },
+      worldId: "hollow:woodland-hollow",
+      seed: 1,
+    });
+    const big = navigationOf(large, "test:large-otter");
+    const west = { regionId: "west-woods", x: -15, z: 7 };
+    expect(big.reachableCells(west).has("east-meadow")).toBe(true);
+    expect(big.reachableCells(west, { sameMedium: true }).has("east-meadow")).toBe(false);
+  });
+
+  // Per amphibian and day: a few dozen jumps, not hundreds (#140 measured 509–717 for medium and
+  // 365–778 for large before), and time in the water too.
+  it.each([
+    ["medium", 50, 0.02],
+    ["large", 75, 0],
+  ] as const)(
+    "keeps a %s amphibian mostly to one medium over a living day, still in both",
+    slow,
+    (sizeClass, maxJumps, minWaterShare) => {
+      const ticks = { water: 0, land: 0 };
+      let jumps = 0;
+      const speciesId = `test:otter-${sizeClass}`;
+      const report = runWithInvariants({
+        register: (r: Registries) => {
+          registerHollowCreatures(r);
+          r.species.register({ ...otter, id: speciesId, sizeClass });
+        },
+        worldId: "hollow:woodland-hollow",
+        speciesId,
+        seed: 1,
+        ticks: 24 * 3600 * 2,
+        tickRateHz: 2,
+        creatures: 2,
+        onTick: (sim, events) => {
+          jumps += events.filter((e) => e.type === "entered_region" && !e.connectionId).length;
+          for (const c of sim.state.creatures.values()) {
+            const kind = sim.state.model.regions.get(c.position.regionId)?.kind;
+            ticks[kind === "water" ? "water" : "land"]++;
+          }
+        },
+      });
+      expect(report.violations).toEqual([]);
+      expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
+      expect(jumps / 2).toBeLessThan(maxJumps);
+      expect(ticks.water).toBeGreaterThan(0);
+      expect(ticks.water / (ticks.water + ticks.land)).toBeGreaterThanOrEqual(minWaterShare);
+      expect(ticks.land / (ticks.water + ticks.land)).toBeGreaterThan(0.5);
+    },
+  );
 });

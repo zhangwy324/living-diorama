@@ -1303,6 +1303,7 @@ export class Simulation {
   #queries(creature: CreatureState): WorldQueries {
     const pathfinder = this.#pathfinder(creature);
     const reachable = pathfinder.reachableCells(creature.position);
+    const sameMedium = () => pathfinder.reachableCells(creature.position, { sameMedium: true });
     const { masks } = pathfinder.navigation;
     const here = creature.position;
     /** Per distance asked for, the reachable cells whose centres lie within it. */
@@ -1330,11 +1331,20 @@ export class Simulation {
         [...reachable].flatMap(([regionId, cells]) => {
           const mask = masks.get(regionId);
           return cells.length > 0 && mask
-            ? [{ regionId, walkableArea: cells.length * mask.cellSize * mask.cellSize }]
+            ? [
+                {
+                  regionId,
+                  kind: mask.region.kind,
+                  walkableArea: cells.length * mask.cellSize * mask.cellSize,
+                  sameMediumArea:
+                    (sameMedium().get(regionId)?.length ?? 0) * mask.cellSize * mask.cellSize,
+                },
+              ]
             : [];
         }),
-      randomWalkablePoint: (regionId, rng) => {
-        const cell = rng.pick(reachable.get(regionId) ?? []);
+      randomWalkablePoint: (regionId, rng, options) => {
+        const cells = options?.sameMedium ? sameMedium() : reachable;
+        const cell = rng.pick(cells.get(regionId) ?? []);
         return cell === undefined ? undefined : point(regionId, cell, rng);
       },
       randomWalkablePointWithin: (maxDistance, rng) => {

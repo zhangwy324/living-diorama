@@ -196,7 +196,9 @@ function observe(
       pathed.push(destination.regionId);
       return stub.routes?.[destination.regionId];
     },
-    reachableRegions: () => [{ regionId: "r", walkableArea: 100 }],
+    reachableRegions: () => [
+      { regionId: "r", kind: "land", walkableArea: 100, sameMediumArea: 100 },
+    ],
     randomWalkablePoint: () => undefined,
     randomWalkablePointWithin: (maxDistance) => {
       stub.ranges?.push(maxDistance);

@@ -1,4 +1,4 @@
-import type { RegionPosition } from "@living-diorama/content-schema";
+import type { RegionKind, RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
 import type { ActionEvent } from "./action-event";
@@ -212,8 +212,16 @@ export function isActionProvider(entry: ActionType): entry is ActionProvider {
 /** A region the creature can get to from where it stands. */
 export interface ReachableRegion {
   regionId: string;
+  /** The region's kind, e.g. land or water: the medium the creature moves in there. */
+  kind: RegionKind;
   /** Walkable area the creature can reach in this region, in square metres. */
   walkableArea: number;
+  /**
+   * The part of `walkableArea` it can reach without changing medium: through no bank jump and
+   * no connection into a region of another kind (#140). 0 for a region of another kind, or one
+   * of its own kind that it can reach only by way of another medium.
+   */
+  sameMediumArea: number;
 }
 
 /**
@@ -228,9 +236,14 @@ export interface WorldQueries extends PlaceQueries, OpenGroundQueries {
   reachableRegions(): readonly ReachableRegion[];
   /**
    * A uniformly random point on a cell of the region the creature can reach, or undefined if it
-   * can reach none.
+   * can reach none. With `sameMedium`, only on cells it can reach without changing medium, as
+   * `ReachableRegion.sameMediumArea` counts them.
    */
-  randomWalkablePoint(regionId: string, rng: Rng): RegionPosition | undefined;
+  randomWalkablePoint(
+    regionId: string,
+    rng: Rng,
+    options?: { sameMedium?: boolean },
+  ): RegionPosition | undefined;
   /**
    * The length in metres of the route the creature would walk to `destination`, or undefined if
    * it has none. Plans a route, so a behavior should ask for a few candidates only. Emits nothing.
