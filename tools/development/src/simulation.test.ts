@@ -81,7 +81,7 @@ describe("long randomized runs keep every invariant", () => {
   });
 
   // Nothing may assume a single creature (roadmap M6 task 4, ADR 0009 §4).
-  it("Woodland Hollow with 20 creatures, 20k ticks", () => {
+  it("Woodland Hollow with 20 creatures, 20k ticks", slow, () => {
     const report = runWithInvariants({
       ...hollow,
       seed: 5,
