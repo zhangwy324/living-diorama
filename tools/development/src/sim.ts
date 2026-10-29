@@ -1,4 +1,3 @@
-import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import {
   formatDiagnostic,
   parseWorldSave,
@@ -18,6 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { carp, otter, registerHollowCreatures, toad } from "./fixtures/hollow-creatures";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
 import { saveThroughText } from "./save-cycles";
@@ -35,21 +35,31 @@ import { renderDebugMap } from "./worldgen/debug-map";
 // as in the app. Both run at the app's tick rate only: a save doesn't record the rate, and its
 // tick-based timers (cooldowns, the release grace) mean simulated time only at the rate they
 // were counted at.
+//
+// `--species` picks who lives in the world, a comma-separated list of names from its species
+// table, `--creatures` of each. Woodland Hollow has `mossling` (the default), `amphibian`,
+// `swimmer` and `hopper`, the last three the test species of `fixtures/hollow-creatures.ts`
+// (ADR 0020).
 
 /** The app's tick rate, the only one saves are made and loaded at. */
 const APP_TICK_RATE_HZ = 10;
 
 const WORLDS = {
   hollow: {
-    register: registerBuiltInContent,
+    register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
-    speciesId: "hollow:mossling",
+    species: {
+      mossling: "hollow:mossling",
+      amphibian: otter.id,
+      swimmer: carp.id,
+      hopper: toad.id,
+    } as Record<string, string>,
     ...LIVING_BEHAVIOR_CHECKS,
   },
   river: {
     register: registerRiverCrossing,
     worldId: "fixture:river-crossing",
-    speciesId: "fixture:pebble",
+    species: { pebble: "fixture:pebble" } as Record<string, string>,
     // Short walks in a small world (see LongRunCheckOptions).
     maxDecisionsPer10Seconds: 2,
   },
@@ -72,6 +82,8 @@ const { values } = parseArgs({
     load: { type: "string" },
     // Wall-clock minutes between the save and the load.
     gap: { type: "string", default: "0" },
+    // Comma-separated names from the world's species table; default its first.
+    species: { type: "string" },
     "no-map": { type: "boolean", default: false },
   },
 });
@@ -89,6 +101,18 @@ const worldName =
   "hollow";
 const preset = WORLDS[worldName as keyof typeof WORLDS] as (typeof WORLDS)["hollow"] | undefined;
 if (!preset) throw new Error(`--world must be one of: ${Object.keys(WORLDS).join(", ")}`);
+// Each named once, however often it is given.
+const names = new Set(
+  (values.species ?? Object.keys(preset.species)[0] ?? "").split(",").map((n) => n.trim()),
+);
+const speciesIds = [...names].map((name) => {
+  const id = preset.species[name];
+  if (!id) {
+    throw new Error(`--species must be names from: ${Object.keys(preset.species).join(", ")}`);
+  }
+  return id;
+});
+const [speciesId = "", ...others] = speciesIds;
 const seed = loaded?.seed ?? Number(values.seed);
 const ticks = Number(values.ticks);
 const creatures = Number(values.creatures ?? (loaded ? 0 : 1));
@@ -141,6 +165,8 @@ function describe(e: SimulationEvent): string {
 
 const report = runWithInvariants({
   ...preset,
+  speciesId,
+  alsoSpawn: Object.fromEntries(others.map((id) => [id, creatures])),
   seed,
   ticks,
   creatures,
@@ -170,7 +196,7 @@ const report = runWithInvariants({
     if (!mapInputs) {
       const { model, registries } = simulation.state;
       const world = registries.worlds.get(preset.worldId) as WorldDefinition | undefined;
-      const navigation = simulation.state.pathfinderFor(preset.speciesId)?.navigation;
+      const navigation = simulation.state.pathfinderFor(speciesId)?.navigation;
       if (world && navigation) mapInputs = [world, model, navigation];
     }
   },
@@ -185,8 +211,8 @@ if (!values["no-map"] && mapInputs) {
 const total = Object.values(report.regionTicks).reduce((a, b) => a + b, 0);
 console.log("");
 const from = restore
-  ? `resumed from ${values.load} at ${formatClockTime(restore.minutes)}, ${creatures} creature(s) added`
-  : `${creatures} creature(s) from ${formatClockTime(startMinutes)}`;
+  ? `resumed from ${values.load} at ${formatClockTime(restore.minutes)}, ${creatures} creature(s) of each species added`
+  : `${creatures} creature(s) of each species from ${formatClockTime(startMinutes)}`;
 console.log(
   `${preset.worldId}, seed ${seed}: ${ticks} ticks (${time(ticks).trim()}), ${from}, ` +
     `${Math.round(report.elapsedMs)} ms`,

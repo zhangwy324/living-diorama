@@ -49,6 +49,11 @@ export interface RunOptions extends LongRunCheckOptions {
   seed: number;
   ticks: number;
   creatures: number;
+  /**
+   * More species to spawn after the `creatures` of `speciesId`, as species ID to count, e.g. an
+   * amphibian and a water-only swimmer beside the mosslings in `pnpm soak`.
+   */
+  alsoSpawn?: Readonly<Record<string, number>>;
   /** Default 10, the app's rate. */
   tickRateHz?: number;
   /** Most creatures the world holds. No limit if omitted. */
@@ -154,7 +159,9 @@ export function loadContent(register: RunOptions["register"]): Result<Registries
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, value: registries };
 }
 
-export function createSimulation(options: Omit<RunOptions, "ticks" | "creatures" | "speciesId">) {
+export function createSimulation(
+  options: Omit<RunOptions, "ticks" | "creatures" | "speciesId" | "alsoSpawn">,
+) {
   const content = loadContent(options.register);
   if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
   const created = Simulation.create(content.value, {
@@ -206,9 +213,15 @@ export function runWithInvariants(options: RunOptions): RunReport {
   }
   /** The headless wall clock: simulated time and gaps since a fixed epoch, or since the restore. */
   let wallMs = options.restore?.nowMs ?? RUN_EPOCH_MS;
-  for (let n = 0; n < options.creatures; n++) {
-    const spawned = simulation.spawn(options.speciesId);
-    if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
+  const spawns: [string, number][] = [
+    [options.speciesId, options.creatures],
+    ...Object.entries(options.alsoSpawn ?? {}),
+  ];
+  for (const [speciesId, count] of spawns) {
+    for (let n = 0; n < count; n++) {
+      const spawned = simulation.spawn(speciesId);
+      if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
+    }
   }
 
   const { model } = simulation.state;

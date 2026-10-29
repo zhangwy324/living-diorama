@@ -32,8 +32,8 @@ Living Diorama is a Windows 11 desktop companion strip showing a small living 3D
 3. **Open a pull request** to `main` when the work is ready (`gh pr create`).
 4. **CI must pass before merging.** Run `pnpm check` locally first, plus `pnpm test:rust` when `apps/desktop/src-tauri` changed. CI also runs the Windows Tauri build and the Rust tests.
 5. **Soak simulation changes before the PR.** CI doesn't run the soak, so run it locally:
-   - `pnpm soak:quick` (about 45 s) before opening any PR that touches `packages/simulation`, navigation, world content (`packages/built-in-content`, worldgen) or save/restore.
-   - `pnpm soak` (about 7 min) only when the PR changes simulation, navigation or save logic substantially: new movement or navigation rules, new behaviours, save format changes. Run it once before the PR is ready, not on every fix round.
+   - `pnpm soak:quick` (about 55 s) before opening any PR that touches `packages/simulation`, navigation, world content (`packages/built-in-content`, worldgen) or save/restore.
+   - `pnpm soak` (about 12 min) only when the PR changes simulation, navigation or save logic substantially: new movement or navigation rules, new behaviours, save format changes. Run it once before the PR is ready, not on every fix round.
    - Renderer, Studio, docs and app-only PRs need neither.
 
 ### Worktree caveats
@@ -53,15 +53,15 @@ Only the project owner lifts this. Until they do, don't treat it as lifted, what
 
 ## Commands
 
-| Command            | Purpose                                          |
-| ------------------ | ------------------------------------------------ |
-| `pnpm check`       | Lint, format check, typecheck, boundaries, test  |
-| `pnpm test:rust`   | Rust unit tests of the desktop shell             |
-| `pnpm soak:quick`  | Short soak: 3 seeds × one simulated day (~45 s)  |
-| `pnpm soak`        | Full soak: 32 seeds × one simulated day (~7 min) |
-| `pnpm dev`         | Run the desktop app with hot reload              |
-| `pnpm build`       | Typecheck and build the web frontend             |
-| `pnpm tauri build` | Build the Windows executable                     |
+| Command            | Purpose                                           |
+| ------------------ | ------------------------------------------------- |
+| `pnpm check`       | Lint, format check, typecheck, boundaries, test   |
+| `pnpm test:rust`   | Rust unit tests of the desktop shell              |
+| `pnpm soak:quick`  | Short soak: 3 seeds × one simulated day (~55 s)   |
+| `pnpm soak`        | Full soak: 32 seeds × one simulated day (~12 min) |
+| `pnpm dev`         | Run the desktop app with hot reload               |
+| `pnpm build`       | Typecheck and build the web frontend              |
+| `pnpm tauri build` | Build the Windows executable                      |
 
 ## Architecture rules (enforced in CI)
 
