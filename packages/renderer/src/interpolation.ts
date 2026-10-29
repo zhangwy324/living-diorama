@@ -1,6 +1,8 @@
 import {
+  MAX_SIZE_CLASS_RADIUS,
   SIZE_CLASSES,
   WORLD_TOLERANCES,
+  jumpClearance,
   type SizeClass,
   type Vec3,
 } from "@living-diorama/content-schema";
@@ -17,8 +19,7 @@ import type { CreatureSnapshot, Cue, SimulationSnapshot } from "@living-diorama/
  * navigation's `bankReach` has it) with `maxBankJumpHeight` of rise or fall. About 3.43 m.
  */
 export const MAX_BANK_JUMP = Math.hypot(
-  2 * Math.max(...Object.values(SIZE_CLASSES).map((size) => size.radius)) +
-    WORLD_TOLERANCES.maxBankJumpGap,
+  2 * MAX_SIZE_CLASS_RADIUS + WORLD_TOLERANCES.maxBankJumpGap,
   WORLD_TOLERANCES.maxBankJumpHeight,
 );
 
@@ -46,14 +47,6 @@ export const JUMP_MS = 350;
  * creature doesn't trail far behind its own position.
  */
 export const JUMP_MAX_INTERVALS = 4;
-
-/**
- * How far the arc's highest point rises above the higher end of the jump, in metres: a base plus a
- * share of the jump's horizontal length, so long jumps leap higher, but never more than the
- * creature's radius (half its height), so a small creature leaps like one and stays under a deck
- * it may pass beneath: a tiny one 0.1 m, a large one up to 0.77 m on its longest jump.
- */
-export const JUMP_CLEARANCE = { base: 0.1, perMetre: 0.2 } as const;
 
 /** A species' size class, or undefined when unknown. `SpeciesResolver` fits. */
 export type JumpSizeResolver = (speciesId: string) => { sizeClass: SizeClass } | undefined;
@@ -114,13 +107,6 @@ export function isBankJump(from: MediumOf, to: MediumOf): boolean {
   const length = distance(from.world, to.world);
   return length >= MIN_BANK_JUMP && length <= SNAP_DISTANCE;
 }
-
-/**
- * How far above the higher end the arc of a jump `horizontal` metres long rises, for a creature
- * of `radius` (uncapped when its size is unknown).
- */
-export const jumpClearance = (horizontal: number, radius = Infinity): number =>
-  Math.min(JUMP_CLEARANCE.base + JUMP_CLEARANCE.perMetre * horizontal, radius);
 
 /**
  * The height `h` of the arc `y(s) = y0 + (y1 − y0)·s + 4h·s(1 − s)` from `y0` to `y1` whose

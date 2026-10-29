@@ -1,4 +1,9 @@
-import { WORLD_TOLERANCES, type RegionKind, type Vec2 } from "@living-diorama/content-schema";
+import {
+  WORLD_TOLERANCES,
+  maxJumpClearance,
+  type RegionKind,
+  type Vec2,
+} from "@living-diorama/content-schema";
 import { pointInPolygon, polygonEdges, projectOnSegment } from "../world/geometry";
 import type { ConnectionModel, RegionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
@@ -300,7 +305,8 @@ function nearestFootprintPoint(region: RegionModel, x: number, z: number) {
  * end at any height, so it never takes off or lands on a deck, under one or against its side;
  * and from the line where the surface lies above the lower end and its underside
  * (`JUMP_DECK_DEPTH` below it) below the top of the creature's arc: its height above the higher
- * end plus its radius, the most the renderer's arc rises. A deck higher than that may span a jump.
+ * end plus `maxJumpClearance`, the most the renderer's arc rises for it whatever the jump's
+ * length. A deck higher than that may span a jump.
  */
 export function isJumpClear(
   world: WorldModel,
@@ -312,7 +318,7 @@ export function isJumpClear(
   const eps = WORLD_TOLERANCES.surfaceEpsilon;
   const low = Math.min(a.y, b.y);
   const high = Math.max(a.y, b.y);
-  const top = high + profile.radius + profile.height;
+  const top = high + maxJumpClearance(profile.radius) + profile.height;
   const length = Math.hypot(b.x - a.x, b.z - a.z);
   const steps = Math.max(1, Math.ceil(length / JUMP_SAMPLE_SPACING));
   const keep = profile.radius + JUMP_STRUCTURE_MARGIN;
