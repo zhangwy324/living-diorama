@@ -28,6 +28,13 @@ export interface CreaturePose {
   cues: readonly Cue[];
   /** How far through the action showing its cue the creature is, 0–1, if the action says. */
   cueProgress?: number | undefined;
+  /**
+   * How it moves now (ADR 0020 §8), e.g. "walk", "hop", "swim": the profile of the snapshot the
+   * pose blends from, like its cues. None or an unknown name draws no motion.
+   */
+  animation: string | undefined;
+  /** How far it sits in water, as a share of its body's height (0–1, ADR 0020 §9). Blended. */
+  submersion: number;
 }
 
 /** Blends two headings (radians) the short way round. */
@@ -86,10 +93,11 @@ export class SnapshotInterpolator {
     if (!this.#latest) return [];
     const t = Math.min(1, Math.max(0, (now - this.#receivedAt) / this.#intervalMs));
     const before = new Map(this.#previous?.creatures.map((c) => [c.id, c]));
-    return this.#latest.creatures.map(({ id, speciesId, world, heading, cues, cueProgress }) => {
+    return this.#latest.creatures.map((creature) => {
+      const { id, speciesId, world, heading, cues, cueProgress, animation, submersion } = creature;
       const from = before.get(id);
       if (!from || distance(from.world, world) > SNAP_DISTANCE) {
-        return { id, speciesId, world, heading, cues, cueProgress };
+        return { id, speciesId, world, heading, cues, cueProgress, animation, submersion };
       }
       return {
         id,
@@ -112,6 +120,9 @@ export class SnapshotInterpolator {
             : t < 1
               ? from.cueProgress
               : cueProgress,
+        animation: t < 1 ? from.animation : animation,
+        // Blended, so a creature sinks smoothly as it goes into the water and rises as it leaves.
+        submersion: from.submersion + (submersion - from.submersion) * t,
       };
     });
   }

@@ -37,6 +37,14 @@ import {
 } from "./cues";
 import { SceneLayer } from "./layers";
 
+/** A creature body's placement, read from its matrix (it composes more than position, rotation, scale). */
+const placed = (mesh: THREE.Object3D) => {
+  const position = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  mesh.matrix.decompose(position, new THREE.Quaternion(), scale);
+  return { position, scale };
+};
+
 const none = (): CueWeights => ({ eating: 0, sleeping: 0, hungry: 0 });
 /** A frame whose animation and real clocks agree. */
 const at = (t: number) => ({ time: t, realTime: t });
@@ -483,7 +491,7 @@ describe("cue sprites", () => {
     for (let t = 0.1; t < 1.5; t += 0.1) {
       bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: t });
     }
-    expect(body().scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
+    expect(placed(body()).scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
     expect(sprites()).toHaveLength(Z_COUNT_SMALL);
     const held = sprites().map((s) => s.position.y);
     bodies.update([creature("a", ["sleeping"])], { time: 5, realTime: 1.6 });
@@ -520,16 +528,16 @@ describe("cue sprites", () => {
     const body = () => layer.group.getObjectByName("a") as THREE.Mesh;
     bodies.update([creature("a", ["sleeping"])], at(0));
     bodies.update([creature("a", ["sleeping"])], at(0.2));
-    const fading = body().scale.y;
+    const fading = placed(body()).scale.y;
     expect(fading).toBeLessThan(1);
     expect(fading).toBeGreaterThan(0.9); // still easing in
     for (let t = 0.4; t < 3; t += 0.2) bodies.update([creature("a", ["sleeping"])], at(t));
-    expect(body().scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
+    expect(placed(body()).scale.y).toBeLessThanOrEqual(0.9 + 1e-9);
     for (let t = 3; t < 6; t += 0.2) bodies.update([creature("a", ["eating"])], at(t));
-    expect(body().scale.y).toBe(1);
+    expect(placed(body()).scale.y).toBeCloseTo(1, 9);
     const heights = [6, 6.2, 6.4, 6.6, 6.8].map((t) => {
       bodies.update([creature("a", ["eating"])], at(t));
-      return body().position.y;
+      return placed(body()).position.y;
     });
     expect(Math.max(...heights)).toBeGreaterThan(0);
     expect(Math.min(...heights)).toBeGreaterThanOrEqual(0);

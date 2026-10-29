@@ -130,6 +130,36 @@ describe("buildBody", () => {
     body.dispose();
   });
 
+  it("places points of the drawing on the body, for its anchors", () => {
+    // The same off-centre 40 × 80 px rectangle: feet at the origin, 0.01 m per pixel.
+    const pixels = art(
+      ...Array.from({ length: 100 }, (_, y) =>
+        Array.from({ length: 100 }, (_, x) =>
+          x >= 5 && x < 45 && y >= 10 && y < 90 ? "g" : ".",
+        ).join(""),
+      ),
+    );
+    const { drawing, dispose } = buildBody(pixels, 0.8)!;
+    expect(drawing.bounds).toEqual({ left: 5, top: 10, right: 45, bottom: 90 });
+    const at = (x: number, y: number) => drawing.toBody({ x, y }, new THREE.Vector3()).toArray();
+    expect(at(25, 90)).toEqual([0, 0, 0]); // the default feet
+    const [x, y, z] = at(5, 50); // the default tail
+    expect([x, y, z]).toEqual([expect.closeTo(-0.2), expect.closeTo(0.4), 0]);
+    dispose();
+    // The block stands in for a drawing filling its height, feet at the bottom middle.
+    const block = fallbackBody(0.8).drawing;
+    const feet = block.toBody(
+      { x: (block.bounds.left + block.bounds.right) / 2, y: block.bounds.bottom },
+      new THREE.Vector3(),
+    );
+    expect(feet.toArray()).toEqual([0, 0, 0]);
+    expect(block.toBody({ x: block.bounds.left, y: 0 }, new THREE.Vector3()).toArray()).toEqual([
+      expect.closeTo(-0.3),
+      expect.closeTo(0.8),
+      0,
+    ]);
+  });
+
   it("makes the body as deep as the thickness asks, the same shape otherwise", () => {
     const pixels = art("......", ".gggg.", ".gggg.", ".gg...", ".gg...", "......");
     const depth = (body: { geometry: THREE.BufferGeometry }) => {

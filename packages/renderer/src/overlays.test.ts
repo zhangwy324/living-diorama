@@ -125,7 +125,15 @@ describe("debug overlays", () => {
       ...(route ? { route } : {}),
     });
     const poses: CreaturePose[] = [
-      { id: "a", speciesId: "s", world: { x: 0.5, y: 0, z: 0 }, heading: 0, cues: [] },
+      {
+        id: "a",
+        speciesId: "s",
+        world: { x: 0.5, y: 0, z: 0 },
+        heading: 0,
+        cues: [],
+        animation: undefined,
+        submersion: 0,
+      },
     ];
     const legs = [
       { regionId: "west", points: [{ x: 1, y: 0, z: 0 }] },

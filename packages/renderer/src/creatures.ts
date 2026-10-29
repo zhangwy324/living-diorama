@@ -1,4 +1,10 @@
-import { SIZE_CLASSES, type BodyShape, type SizeClass } from "@living-diorama/content-schema";
+import {
+  SIZE_CLASSES,
+  defaultAnchor,
+  type Anchors,
+  type BodyShape,
+  type SizeClass,
+} from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { buildBody, fallbackBody, type Body } from "./body/body";
 import { readImage, type ImageReader } from "./body/pixels";
@@ -11,6 +17,7 @@ import {
   noCueSprites,
   restingMotion,
   stepCueWeights,
+  type BodyMotion,
   type CreatureCueSprites,
   type CueAnchor,
   type CueView,
@@ -20,6 +27,19 @@ import { describeCues, emptyCueBox, layoutCues, type CueBox } from "./cue-layout
 import { visibleState, type CueVisibility, type VisibilityState } from "./cue-visibility";
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
+import {
+  locomotionMotion,
+  locomotionTransform,
+  placePivots,
+  restingLocomotion,
+  restingMovement,
+  trackMovement,
+  type LocomotionBody,
+  type LocomotionInput,
+  type LocomotionMotion,
+  type LocomotionPivot,
+  type Movement,
+} from "./locomotion";
 import type { AssetResolver } from "./props";
 
 // Creatures as solid bodies extruded from their drawings, casting shadows from the sun (ADR 0011),
@@ -44,13 +64,13 @@ export interface CreatureBodiesOptions {
   visibility?: CueVisibility;
 }
 
-interface SpeciesLook {
+/** A species as drawn: its body, its size and reach in metres, and its anchors as pivots. */
+interface SpeciesLook extends LocomotionBody {
   /** The fallback block until the drawing's body is built. */
   body: Body;
-  /** Metres from the feet to the top of the head. */
-  height: number;
-  /** Metres from the feet forward to the front of the body, for lifting it as it pecks. */
-  front: number;
+  /** The species' placed anchors; the others sit where `defaultAnchor` puts them. */
+  anchors: Anchors;
+  pivots: Record<LocomotionPivot, THREE.Vector3>;
 }
 
 /** A frame's clocks, in seconds. */
@@ -67,6 +87,8 @@ interface Creature {
   id: string;
   mesh: THREE.Mesh;
   weights: CueWeights;
+  /** How it has been moving, for its walk, hop or swim. */
+  movement: Movement;
   phase: number;
   sprites: CreatureCueSprites;
   /** The meal's progress while eating, kept as the ring fades out after it. */
@@ -83,11 +105,35 @@ const DEFAULT_UNITS_PER_PIXEL = 0.02;
 
 const byId = (a: Creature, b: Creature) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-/** How far a body reaches forward (+X) of its feet. */
-function frontOf(body: Body): number {
+/** How far a body reaches back and forward along X, and to each side of its middle plane. */
+function reachOf(body: Body): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
   body.geometry.computeBoundingBox();
-  return Math.max(0, body.geometry.boundingBox?.max.x ?? 0);
+  const box = body.geometry.boundingBox;
+  return {
+    minX: box?.min.x ?? 0,
+    maxX: box?.max.x ?? 0,
+    halfDepth: Math.max(0, box?.max.z ?? 0, -(box?.min.z ?? 0)),
+  };
 }
+
+const feetOnBody = new THREE.Vector3();
+const tailOnBody = new THREE.Vector3();
+
+/**
+ * Puts the pivots of `look` on its current body (ADR 0020 §10), from its anchors: placed, or
+ * where `defaultAnchor` puts them.
+ */
+function placeAnchors(look: SpeciesLook): void {
+  const { drawing } = look.body;
+  const { feet, tail } = look.anchors;
+  drawing.toBody(feet ?? defaultAnchor("feet", drawing.bounds), feetOnBody);
+  drawing.toBody(tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
+  placePivots(look, feetOnBody, tailOnBody);
+}
+
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const ONE = new THREE.Vector3(1, 1, 1);
 
 export class CreatureBodies {
   readonly #creatures = new Map<string, Creature>();
@@ -104,6 +150,24 @@ export class CreatureBodies {
   readonly #screen = new ScreenScale();
   // Reused every frame, so placing creatures allocates nothing.
   readonly #motion = restingMotion();
+  readonly #locomotion = restingLocomotion();
+  readonly #input: LocomotionInput = {
+    profile: undefined,
+    speed: 0,
+    travelled: 0,
+    time: 0,
+    phase: 0,
+    height: 0,
+  };
+  readonly #scratch = {
+    base: new THREE.Matrix4(),
+    cue: new THREE.Matrix4(),
+    move: new THREE.Matrix4(),
+    position: new THREE.Vector3(),
+    scale: new THREE.Vector3(),
+    turn: new THREE.Quaternion(),
+    point: new THREE.Vector3(),
+  };
   /** Where the visibility check looks from: the head's top, then the middle of the body. */
   readonly #samples = [new THREE.Vector3(), new THREE.Vector3()] as const;
   readonly #seen = new Set<string>();
@@ -114,6 +178,7 @@ export class CreatureBodies {
   readonly #onScreen = new THREE.Vector3();
   #frame: CreatureFrame = { time: 0, realTime: 0 };
   #realTime: number | undefined;
+  #time: number | undefined;
 
   constructor(layer: SceneLayer, options: CreatureBodiesOptions) {
     this.#layer = layer;
@@ -138,6 +203,10 @@ export class CreatureBodies {
     const { time, realTime, view } = frame;
     const dt = realTime - (this.#realTime ?? realTime);
     this.#realTime = realTime;
+    // Movement is measured on animation time, which stops while the simulation is paused (the
+    // view sets its timer's timescale to 0), so a paused creature holds its pose mid-stride.
+    const animationDt = time - (this.#time ?? time);
+    this.#time = time;
     if (view) this.#screen.set(view);
     const seen = this.#seen;
     seen.clear();
@@ -149,23 +218,26 @@ export class CreatureBodies {
       const { mesh, weights, phase } = creature;
       stepCueWeights(weights, pose.cues, dt);
       if (pose.cues.includes("eating")) creature.progress = pose.cueProgress;
+      const { speed, travelled } = trackMovement(creature.movement, pose.world, animationDt);
       const motion = bodyMotion(weights, time, phase, this.#motion);
-      // The pitch turns about the feet, so the body rises as its front dips, to keep it above ground.
-      const lift = motion.lift * look.height + frontLift(look.front * motion.scaleXZ, motion.pitch);
-      mesh.position.set(pose.world.x, pose.world.y + lift, pose.world.z);
-      // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h). The pitch turns
-      // about the drawing's own depth axis, so its front dips.
-      mesh.rotation.set(0, pose.heading - Math.PI / 2, -motion.pitch);
-      mesh.scale.set(motion.scaleXZ, motion.scaleY, motion.scaleXZ);
+      const height = look.height;
+      const input = this.#input;
+      input.profile = pose.animation;
+      input.speed = speed;
+      input.travelled = travelled;
+      input.time = time;
+      input.phase = phase;
+      input.height = height;
+      const locomotion = locomotionMotion(input, this.#locomotion);
+      this.#place(mesh, pose, look, motion, locomotion);
       mesh.geometry = look.body.geometry;
       mesh.material = look.body.material;
 
+      // Cues go above the head as it rises and falls, but don't swing aside as it sways.
+      const top = this.#scratch.point.set(0, height, 0).applyMatrix4(mesh.matrix).y;
+      const middle = this.#scratch.point.set(0, height / 2, 0).applyMatrix4(mesh.matrix).y;
       const anchor = creature.anchor;
-      anchor.top.set(
-        mesh.position.x,
-        mesh.position.y + look.height * motion.scaleY,
-        mesh.position.z,
-      );
+      anchor.top.set(pose.world.x, top, pose.world.z);
       anchor.unitsPerPixel = view
         ? this.#screen.unitsPerPixel(anchor.top.x, anchor.top.y, anchor.top.z)
         : DEFAULT_UNITS_PER_PIXEL;
@@ -177,9 +249,7 @@ export class CreatureBodies {
         creature.visibility.due = undefined;
       } else if (view && this.#visibility) {
         this.#samples[0].copy(anchor.top);
-        this.#samples[1]
-          .copy(mesh.position)
-          .setY(mesh.position.y + 0.5 * look.height * motion.scaleY);
+        this.#samples[1].set(pose.world.x, middle, pose.world.z);
         const visibility = creature.visibility;
         this.#visibility.update(visibility, this.#samples, this.#screen.position, realTime, dt);
         anchor.visible = visibility.weight;
@@ -237,16 +307,56 @@ export class CreatureBodies {
     this.#cues.dispose();
   }
 
+  /**
+   * Sets the body's transform from its pose, cue motion and locomotion. Outermost first: the
+   * position, lowered by its submersion (ADR 0020 §9), and the heading; then the cue motion about
+   * the bottom middle of the body (ADR 0018 §15); then the locomotion about its pivot (ADR 0020
+   * §8, §10, `locomotionTransform`). So the two add up: their lifts sum, their tilts and scales
+   * compose. A sleeping or eating creature stands still, so the two rarely overlap, and when they
+   * do, as one fades, each turns about its own point.
+   */
+  #place(
+    mesh: THREE.Mesh,
+    pose: CreaturePose,
+    look: SpeciesLook,
+    cue: BodyMotion,
+    move: LocomotionMotion,
+  ): void {
+    const { base, cue: cueMatrix, move: moveMatrix, position, scale, turn } = this.#scratch;
+    const height = look.height;
+    // The cue pitch turns about the bottom middle, so the body rises as its front dips, to keep it
+    // above ground; `locomotionTransform` lifts its own tilts the same way.
+    const lift =
+      cue.lift * height +
+      frontLift(Math.max(0, look.maxX) * cue.scaleXZ, cue.pitch) +
+      locomotionTransform(move, look, moveMatrix) -
+      pose.submersion * height;
+    // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h).
+    position.set(pose.world.x, pose.world.y + lift, pose.world.z);
+    base.compose(position, turn.setFromAxisAngle(Y_AXIS, pose.heading - Math.PI / 2), ONE);
+    // The pitch turns about the drawing's own depth axis, so its front dips.
+    cueMatrix.compose(
+      position.set(0, 0, 0),
+      turn.setFromAxisAngle(Z_AXIS, -cue.pitch),
+      scale.set(cue.scaleXZ, cue.scaleY, cue.scaleXZ),
+    );
+    mesh.matrix.copy(base).multiply(cueMatrix).multiply(moveMatrix);
+    mesh.matrixWorldNeedsUpdate = true;
+  }
+
   #add(id: string, look: SpeciesLook): Creature {
     const mesh = new THREE.Mesh(look.body.geometry, look.body.material);
     mesh.name = id;
     mesh.castShadow = true;
+    // Placed by `#place`, which composes more than a position, a rotation and a scale can say.
+    mesh.matrixAutoUpdate = false;
     this.#layer.add(mesh);
     const phase = cuePhase(id);
     const creature: Creature = {
       id,
       mesh,
       weights: { eating: 0, sleeping: 0, hungry: 0 },
+      movement: restingMovement(),
       phase,
       sprites: noCueSprites(),
       progress: undefined,
@@ -289,7 +399,14 @@ export class CreatureBodies {
     const { height } = SIZE_CLASSES[species.sizeClass];
     const { thickness } = species.body;
     const block = fallbackBody(height, thickness);
-    const look: SpeciesLook = { body: block, height, front: frontOf(block) };
+    const look: SpeciesLook = {
+      body: block,
+      height,
+      ...reachOf(block),
+      anchors: species.body.anchors,
+      pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+    };
+    placeAnchors(look);
     this.#bodies.push(look.body);
     this.#looks.set(speciesId, look);
 
@@ -308,7 +425,8 @@ export class CreatureBodies {
           }
           this.#bodies.push(body);
           look.body = body;
-          look.front = frontOf(body);
+          Object.assign(look, reachOf(body));
+          placeAnchors(look);
         },
         (error: unknown) => console.warn(`Could not load ${species.appearance}`, error),
       ),
