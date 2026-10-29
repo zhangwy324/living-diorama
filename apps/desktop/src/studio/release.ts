@@ -6,16 +6,19 @@ import { RequestTimeoutError } from "@living-diorama/desktop-integration";
 /**
  * Release needs a name and a body to build, and one release at a time. `empty` is true while the
  * image has nothing a body is built from: nothing drawn, all of it erased, or only faint pixels.
+ * `moves` is false while the body plan has no way of moving (ADR 0020 §1).
  */
 export const canRelease = ({
   name,
   empty,
   releasing,
+  moves,
 }: {
   name: string;
   empty: boolean;
   releasing: boolean;
-}): boolean => name.trim() !== "" && !empty && !releasing;
+  moves: boolean;
+}): boolean => name.trim() !== "" && !empty && !releasing && moves;
 
 /** The line shown when a creature goes into the world. */
 export const releasedMessage = (name: string) => `${name} is off into the world!`;

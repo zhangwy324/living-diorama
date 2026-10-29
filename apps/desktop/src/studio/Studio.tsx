@@ -1,4 +1,9 @@
-import { BODY_THICKNESS, SIZE_CLASSES, type SizeClass } from "@living-diorama/content-schema";
+import {
+  BODY_THICKNESS,
+  SIZE_CLASSES,
+  type DrawingBounds,
+  type SizeClass,
+} from "@living-diorama/content-schema";
 import {
   connectLibraryStore,
   connectStudioWindow,
@@ -6,7 +11,21 @@ import {
 } from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
+import { canMove, changeTemplate, templatePlan, type BodyPlanChoice } from "../body-plan";
+import {
+  NO_LOCOMOTION,
+  type LibrarySnapshot,
+  type StudioRequests,
+  type StudioSpecies,
+} from "../studio-protocol";
+import { AnchorLayer, BodyPlanPanel } from "./BodyPlanPanel";
+import {
+  chosenMode,
+  placeAnchor,
+  previewModes,
+  resetAnchors,
+  type PreviewMode,
+} from "./body-plan-view";
 import { CloseDialog } from "./CloseDialog";
 import { CreatureDetails, DEFAULT_SIZE_CLASS } from "./CreatureDetails";
 import { DeleteDialog } from "./DeleteDialog";
@@ -78,7 +97,14 @@ export function Studio() {
   const [library, setLibrary] = useState<LibrarySnapshot>();
   const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
   const [sizeHints, setSizeHints] = useState<string[]>([]);
-  const sizeHintCache = useRef(new Map<SizeClass, string[]>());
+  // By size and ways of moving: the navigation profile the limits are for.
+  const sizeHintCache = useRef(new Map<string, string[]>());
+  // Drawing, then the confirm step: the body plan and Release (ADR 0020 §12).
+  const [step, setStep] = useState<"draw" | "plan">("draw");
+  const [plan, setPlan] = useState<BodyPlanChoice>(templatePlan);
+  const [previewMode, setPreviewMode] = useState<PreviewMode["key"]>();
+  // The drawn shape's bounds, from the latest check, for the anchors' defaults.
+  const [bounds, setBounds] = useState<DrawingBounds>();
   // Made once per drawing and kept while it is unchanged, so retrying a release whose answer was
   // lost can't save it twice (ADR 0015 §5).
   const releaseId = useRef<string>(undefined);
@@ -125,6 +151,7 @@ export function Studio() {
       preview.current?.setDrawing(check.empty ? undefined : pixels, check);
       setShapeHints(drawingHints(check));
       setHasBody(!check.empty);
+      setBounds(check.bounds);
     };
     const created = new DrawingEditor(
       element,
@@ -152,27 +179,41 @@ export function Studio() {
   useEffect(() => preview.current?.setHeight(SIZE_CLASSES[sizeClass].height), [sizeClass]);
   useEffect(() => preview.current?.setThickness(thickness), [thickness]);
 
-  // The size's limits in the world follow the size picker (ADR 0015 §8). The world doesn't change
-  // while the app runs, so each size is asked about once.
+  // The preview plays the chosen way of moving in the confirm step, and stands still while drawing.
+  const modes = previewModes(plan.locomotion);
+  const mode = chosenMode(modes, previewMode);
+  const profile = step === "plan" ? mode?.motion.profile : undefined;
+  const submersion = mode?.motion.submersion ?? 0;
+  useEffect(
+    () => preview.current?.setMotion(profile === undefined ? undefined : { profile, submersion }),
+    [profile, submersion],
+  );
+  useEffect(() => preview.current?.setAnchors(plan.anchors), [plan.anchors]);
+
+  // The limits in the world follow the size picker and the ways of moving (ADR 0015 §8, ADR 0020
+  // §12); the gait doesn't change them. The world doesn't change while the app runs, so each
+  // pairing is asked about once.
+  const { land, swim } = plan.locomotion;
   useEffect(() => {
-    const cached = sizeHintCache.current.get(sizeClass);
+    // Nothing to ask with no way of moving; the panel shows no limits then.
+    if (!land && !swim) return;
+    const key = `${sizeClass}:${land ? "land" : ""}:${swim ? "swim" : ""}`;
+    const cached = sizeHintCache.current.get(key);
     setSizeHints(cached ?? []);
     if (cached) return;
     let current = true;
     channel
-      .request("limits", { sizeClass })
+      .request("limits", { sizeClass, locomotion: { land, swim } })
       .then((limits) => {
         const hints = limitHints(limits);
-        sizeHintCache.current.set(sizeClass, hints);
+        sizeHintCache.current.set(key, hints);
         if (current) setSizeHints(hints);
       })
-      .catch((error: unknown) =>
-        console.warn(`Could not check the limits for ${sizeClass}`, error),
-      );
+      .catch((error: unknown) => console.warn(`Could not check the limits for ${key}`, error));
     return () => {
       current = false;
     };
-  }, [sizeClass]);
+  }, [sizeClass, land, swim]);
 
   useEffect(() => {
     if (editor.current) {
@@ -200,7 +241,7 @@ export function Studio() {
 
   // The Studio is focusable, unlike the strip, so it has keyboard shortcuts. Not while asking.
   useEffect(() => {
-    if (closing) return;
+    if (closing || step !== "draw") return;
     const onKey = (event: KeyboardEvent) => {
       const current = editor.current;
       if (!current || !(event.ctrlKey || event.metaKey)) return;
@@ -212,7 +253,7 @@ export function Studio() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closing]);
+  }, [closing, step]);
 
   // The library lives in the strip's window: ask for it now, then hear about every change.
   useEffect(() => {
@@ -254,7 +295,14 @@ export function Studio() {
 
   const shownName = name ?? suggestion ?? "";
   const libraryNames = () => library?.species.map((species) => species.name) ?? [];
-  const releasable = canRelease({ name: shownName, empty: !hasBody, releasing });
+  const moves = canMove(plan.locomotion);
+  const releasable = canRelease({ name: shownName, empty: !hasBody, releasing, moves });
+  /** A change to the body plan: a different release from any tried before. */
+  const changePlan = (next: BodyPlanChoice) => {
+    releaseId.current = undefined;
+    setReleaseError(undefined);
+    setPlan(next);
+  };
 
   const release = async () => {
     const current = editor.current;
@@ -272,6 +320,7 @@ export function Studio() {
         name: shownName,
         sizeClass,
         thickness,
+        plan,
       });
       // A fresh start for the next one.
       current.reset();
@@ -280,6 +329,9 @@ export function Studio() {
       setSuggestion(suggestName(randomNameSeed(), [...libraryNames(), released.name]));
       setSizeClass(DEFAULT_SIZE_CLASS);
       setThickness(BODY_THICKNESS.default);
+      setPlan(templatePlan());
+      setPreviewMode(undefined);
+      setStep("draw");
       setCelebration(
         released.notAdded === undefined
           ? { text: releasedMessage(released.name), happy: true }
@@ -304,7 +356,12 @@ export function Studio() {
 
   return (
     <div className="studio">
-      <div className="toolbar" role="toolbar" aria-label="Drawing tools">
+      <div
+        className={step === "draw" ? "toolbar" : "toolbar locked"}
+        role="toolbar"
+        aria-label="Drawing tools"
+        inert={step !== "draw"}
+      >
         <div className="tool-group">
           <ToolButton label="Pen" pressed={tool === "pen"} onClick={() => setTool("pen")}>
             <path className="stroke" d="M3 13l1-3.5 7-7 2.5 2.5-7 7zM9.5 4l2.5 2.5" />
@@ -373,54 +430,112 @@ export function Studio() {
           <div className="sheet">
             <canvas ref={canvas} className={tool === "fill" ? "drawing filling" : "drawing"} />
             {/* Not part of the drawing: the body's feet are the bottom of what is drawn. */}
-            <div className="guide" aria-hidden="true">
-              <span>facing right →, feet on this line</span>
-            </div>
+            {step === "draw" ? (
+              <div className="guide" aria-hidden="true">
+                <span>facing right →, feet on this line</span>
+              </div>
+            ) : (
+              <AnchorLayer
+                plan={plan}
+                bounds={bounds}
+                onPlace={(anchor, point) => changePlan(placeAnchor(plan, anchor, point))}
+              />
+            )}
           </div>
         </div>
-        <aside className="side-panel">
+        <aside className={step === "draw" ? "side-panel" : "side-panel planning"}>
           <div ref={previewBox} className="preview" aria-label="3D preview" role="img" />
-          <CreatureDetails
-            name={shownName}
-            placeholder="Creature"
-            onName={(next) => {
-              releaseId.current = undefined;
-              setName(next);
-            }}
-            onSuggestName={() => {
-              releaseId.current = undefined;
-              setName(undefined);
-              setSuggestion(anotherName(shownName, libraryNames()));
-            }}
-            sizeClass={sizeClass}
-            onSizeClass={(next) => {
-              releaseId.current = undefined;
-              setSizeClass(next);
-            }}
-            thickness={thickness}
-            onThickness={(next) => {
-              releaseId.current = undefined;
-              setThickness(next);
-            }}
-            hints={[...shapeHints, ...sizeHints]}
-          />
-          <div className="release-slot">
-            {releaseError && (
-              <p className="release-error" role="alert">
-                {releaseError}
-              </p>
-            )}
-            <button
-              type="button"
-              className="release"
-              disabled={!releasable}
-              aria-busy={releasing}
-              title={shownName.trim() === "" ? "Give your creature a name first" : undefined}
-              onClick={() => void release()}
-            >
-              {releasing ? "Releasing…" : "Release"}
-            </button>
-          </div>
+          {step === "plan" ? (
+            <>
+              <BodyPlanPanel
+                name={shownName}
+                plan={plan}
+                onTemplate={(template) => changePlan(changeTemplate(plan, template))}
+                onLocomotion={(locomotion) => changePlan({ ...plan, locomotion })}
+                onResetAnchors={() => changePlan(resetAnchors(plan))}
+                modes={modes}
+                mode={mode?.key}
+                onMode={setPreviewMode}
+                hints={moves ? sizeHints : []}
+              />
+              <div className="release-slot">
+                {!moves && (
+                  <p className="release-hint" role="status">
+                    {NO_LOCOMOTION}
+                  </p>
+                )}
+                {releaseError && (
+                  <p className="release-error" role="alert">
+                    {releaseError}
+                  </p>
+                )}
+                <div className="step-buttons">
+                  <button
+                    type="button"
+                    className="back"
+                    disabled={releasing}
+                    onClick={() => {
+                      setReleaseError(undefined);
+                      setStep("draw");
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    className="release"
+                    disabled={!releasable}
+                    aria-busy={releasing}
+                    title={shownName.trim() === "" ? "Give your creature a name first" : undefined}
+                    onClick={() => void release()}
+                  >
+                    {releasing ? "Releasing…" : "Release"}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <CreatureDetails
+                name={shownName}
+                placeholder="Creature"
+                onName={(next) => {
+                  releaseId.current = undefined;
+                  setName(next);
+                }}
+                onSuggestName={() => {
+                  releaseId.current = undefined;
+                  setName(undefined);
+                  setSuggestion(anotherName(shownName, libraryNames()));
+                }}
+                sizeClass={sizeClass}
+                onSizeClass={(next) => {
+                  releaseId.current = undefined;
+                  setSizeClass(next);
+                }}
+                thickness={thickness}
+                onThickness={(next) => {
+                  releaseId.current = undefined;
+                  setThickness(next);
+                }}
+                hints={[...shapeHints, ...(moves ? sizeHints : [])]}
+              />
+              <div className="release-slot">
+                <button
+                  type="button"
+                  className="release"
+                  disabled={!hasBody}
+                  title={hasBody ? undefined : "Draw your creature first"}
+                  onClick={() => {
+                    setReleaseError(undefined);
+                    setStep("plan");
+                  }}
+                >
+                  Next: how it moves →
+                </button>
+              </div>
+            </>
+          )}
         </aside>
         <MyCreatures
           library={library}

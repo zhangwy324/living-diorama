@@ -15,12 +15,13 @@ import {
 import type { Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
-import { DRAWN_SPECIES_DEFAULTS } from "./startup";
+import { templatePlan } from "./body-plan";
 import {
   countBySpecies,
   librarySnapshot,
   studioHandlers,
   worldFullMessage,
+  NO_LOCOMOTION,
   type LibrarySnapshot,
   type ReleaseParams,
   type StudioRequests,
@@ -43,6 +44,8 @@ const DRAWING: Drawing = {
     { kind: "stroke", tool: "pen", color: "#336633", width: 12, points: [10, 10, 1, 20, 20, 0.5] },
   ],
 };
+const LAND = { land: true, swim: false };
+const BOTH = { land: true, swim: true };
 const RELEASE_ID = "00000000-0000-4000-8000-00000000000a";
 const PNG = [137, 80, 78, 71];
 
@@ -53,6 +56,7 @@ const releaseParams = (overrides: Partial<ReleaseParams> = {}): ReleaseParams =>
   name: "Puddle",
   sizeClass: "small",
   thickness: 0.25,
+  plan: templatePlan(),
   ...overrides,
 });
 
@@ -62,10 +66,12 @@ function fakeWorld() {
   let next = 1;
   return {
     creatures,
-    registerSpecies: vi.fn((input: unknown) => {
-      const species = input as SpeciesDefinition;
-      return Promise.resolve({ ok: true as const, value: { speciesId: species.id, limits: [] } });
-    }),
+    registerSpecies: vi.fn(
+      (input: unknown): Promise<Result<{ speciesId: string; limits: Limit[] }>> => {
+        const species = input as SpeciesDefinition;
+        return Promise.resolve({ ok: true, value: { speciesId: species.id, limits: [] } });
+      },
+    ),
     spawn: vi.fn((speciesId: string): Promise<Result<string>> => {
       const id = `c${next++}`;
       creatures.push({ id, speciesId });
@@ -117,14 +123,23 @@ async function setUp({
 }
 
 describe("the Studio's requests", () => {
-  it("checks a size's limits with the capabilities every drawn species has", async () => {
+  it("checks a size's limits with the capabilities of the chosen ways of moving", async () => {
     const checkLimits = vi.fn((sizeClass: SizeClass) =>
       Promise.resolve({ ok: true as const, value: sizeClass === "large" ? [bridge] : [] }),
     );
     const { studio } = await setUp({ checkLimits });
-    await expect(studio.request("limits", { sizeClass: "large" })).resolves.toEqual([bridge]);
-    await expect(studio.request("limits", { sizeClass: "small" })).resolves.toEqual([]);
-    expect(checkLimits).toHaveBeenCalledWith("large", DRAWN_SPECIES_DEFAULTS.capabilities);
+    await expect(
+      studio.request("limits", { sizeClass: "large", locomotion: LAND }),
+    ).resolves.toEqual([bridge]);
+    await expect(
+      studio.request("limits", { sizeClass: "small", locomotion: BOTH }),
+    ).resolves.toEqual([]);
+    expect(checkLimits).toHaveBeenCalledWith("large", { "core:land": 1 });
+    expect(checkLimits).toHaveBeenCalledWith("small", { "core:land": 1, "core:swim": 1 });
+    await expect(
+      studio.request("limits", { sizeClass: "small", locomotion: { land: false, swim: false } }),
+    ).rejects.toThrow(NO_LOCOMOTION);
+    expect(checkLimits).toHaveBeenCalledTimes(2);
   });
 
   it("passes a rejected query on as an error", async () => {
@@ -135,9 +150,9 @@ describe("the Studio's requests", () => {
           diagnostics: [error("unknown_size_class", "No size huge", [])],
         }),
     });
-    await expect(studio.request("limits", { sizeClass: "huge" as SizeClass })).rejects.toThrow(
-      "No size huge",
-    );
+    await expect(
+      studio.request("limits", { sizeClass: "huge" as SizeClass, locomotion: LAND }),
+    ).rejects.toThrow("No size huge");
   });
 
   it("answers with the library and the world's creatures", async () => {
@@ -215,6 +230,58 @@ describe("releasing", () => {
     await expect(studio.request("release", releaseParams())).resolves.toMatchObject({
       name: "Puddle",
     });
+  });
+
+  it("gives the species the body plan and capabilities chosen in the confirm panel", async () => {
+    const { studio, world, store } = await setUp();
+    const plan = {
+      template: "swimmer" as const,
+      locomotion: { land: true, gait: "hop" as const, swim: true },
+      anchors: { tail: { x: 30, y: 120 } },
+    };
+    await studio.request("release", releaseParams({ plan }));
+    const registered = world.registerSpecies.mock.calls[0]?.[0] as SpeciesDefinition;
+    expect(registered.capabilities).toEqual({ "core:land": 1, "core:swim": 1 });
+    expect(registered.body).toEqual({
+      thickness: 0.25,
+      template: "swimmer",
+      locomotion: { land: { gait: "hop" } },
+      anchors: { tail: { x: 30, y: 120 } },
+    });
+    // The library entry (version 3) keeps the plan.
+    expect((await store.list())[0]?.entry).toMatchObject({
+      schemaVersion: 3,
+      species: { body: { template: "swimmer" }, capabilities: { "core:swim": 1 } },
+    });
+  });
+
+  it("refuses a body plan with no way of moving before saving anything", async () => {
+    const { studio, store } = await setUp();
+    const plan = {
+      ...templatePlan(),
+      locomotion: { land: false, gait: "walk" as const, swim: false },
+    };
+    await expect(studio.request("release", releaseParams({ plan }))).rejects.toThrow(NO_LOCOMOTION);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("says in the player's words when the world has nowhere for it to appear", async () => {
+    const { studio, world, store } = await setUp();
+    const noSpawn = {
+      ok: false as const,
+      diagnostics: [error("no_spawn_point", "No spawn point is walkable for user:x", [])],
+    };
+    world.registerSpecies.mockResolvedValueOnce(noSpawn);
+    await expect(
+      studio.request("release", releaseParams({ plan: templatePlan("swimmer") })),
+    ).rejects.toThrow(
+      "Puddle has nowhere to appear in this world: no starting spot in the water suits it.",
+    );
+    world.registerSpecies.mockResolvedValueOnce(noSpawn);
+    await expect(studio.request("release", releaseParams())).rejects.toThrow(
+      "Puddle has nowhere to appear in this world at this size. Try another size.",
+    );
+    expect(await store.list()).toEqual([]);
   });
 
   it("says when the species was kept but its creature couldn't join", async () => {

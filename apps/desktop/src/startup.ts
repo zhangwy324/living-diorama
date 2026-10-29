@@ -23,9 +23,12 @@ export const STARTUP: StartupConfig = {
   creatures: [{ speciesId: "hollow:mossling", count: 3 }],
 };
 
-/** What a drawn species is given besides its name, size and image (ADR 0014 §11): the mossling's. */
+/**
+ * What a drawn species is given besides its name, size, image and body plan (ADR 0014 §11): the
+ * mossling's. Its capabilities come from the body plan the player chose (ADR 0020 §14,
+ * `body-plan.ts`).
+ */
 export const DRAWN_SPECIES_DEFAULTS = {
-  capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
   behaviors: ["core:wander", "core:feed", "core:rest"],
   senses: { "core:vision": 8 },

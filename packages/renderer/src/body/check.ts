@@ -1,3 +1,4 @@
+import type { DrawingBounds } from "@living-diorama/content-schema";
 import { solidShapes } from "./outline";
 import { neighbours, type Pixels } from "./pixels";
 
@@ -38,6 +39,11 @@ export interface BodyCheck {
   thinParts: number;
   /** 1 for each pixel of a thin part, rows top first. */
   thin: Uint8Array;
+  /**
+   * The solid shapes' bounds in drawing pixels, as the body is built from them, or undefined when
+   * empty. Anchors default from these (`defaultAnchor`, ADR 0020 §10).
+   */
+  bounds: DrawingBounds | undefined;
   /** 1 for each pixel of every shape but the largest, rows top first. */
   loose: Uint8Array;
 }
@@ -53,6 +59,8 @@ export function checkBody(pixels: Pixels): BodyCheck {
   const loose = new Uint8Array(width * height);
   let top = height;
   let bottom = -1;
+  let left = width;
+  let right = -1;
   for (let i = 0; i < shape.length; i++) {
     const label = labels[i] ?? 0;
     if (!keptSet.has(label)) continue;
@@ -61,6 +69,8 @@ export function checkBody(pixels: Pixels): BodyCheck {
     const y = Math.floor(i / width);
     top = Math.min(top, y);
     bottom = Math.max(bottom, y);
+    left = Math.min(left, i % width);
+    right = Math.max(right, i % width);
   }
 
   const radius = thinRadius(bottom - top + 1);
@@ -74,7 +84,10 @@ export function checkBody(pixels: Pixels): BodyCheck {
   }
   for (const area of parts.areas) if (area >= minArea) thinParts++;
 
-  return { width, height, empty: kept.length === 0, shapes: kept.length, thinParts, thin, loose };
+  const empty = kept.length === 0;
+  // Right and bottom exclusive, like the traced outline's.
+  const bounds = empty ? undefined : { left, top, right: right + 1, bottom: bottom + 1 };
+  return { width, height, empty, shapes: kept.length, thinParts, thin, loose, bounds };
 }
 
 /** Labels the set pixels' connected areas from 1; `areas[label - 1]` is each one's size. */
