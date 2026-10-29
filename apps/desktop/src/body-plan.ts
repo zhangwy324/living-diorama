@@ -1,4 +1,4 @@
-import type { AnchorName, Anchors, LandGait } from "@living-diorama/content-schema";
+import type { AnchorName, Anchors, BodyShape, LandGait } from "@living-diorama/content-schema";
 
 // A drawn species' body plan as the player chooses it in the Studio (ADR 0020 §11, §12, §14):
 // where it can move, its land gait and its anchors. Shared by the Studio and the species library,
@@ -83,7 +83,7 @@ export function locomotionCapabilities({
 }
 
 /** The species' `body` for this plan and thickness (`BodyShape`'s input). */
-export function planBody(plan: BodyPlanChoice, thickness: number) {
+export function planBody(plan: BodyPlanChoice, thickness: number): BodyShape {
   return {
     thickness,
     locomotion: { land: { gait: plan.locomotion.gait } },

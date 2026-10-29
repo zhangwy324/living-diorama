@@ -3,6 +3,7 @@ import {
   envelope,
   openEnvelope,
   type AssetSummary,
+  type CheckedLimits,
   type Limit,
   type RequestCommand,
   type RestoreReport,
@@ -47,9 +48,13 @@ export interface SimulationClient {
   /**
    * Where creatures of this size and these capabilities wouldn't fit, without registering anything
    * (ADR 0015 §8). Errors among the limits mean such a species can't be added; the result fails
-   * only for a size class or capability that doesn't exist.
+   * only for a size class or capability that doesn't exist. The capabilities' locomotion rules
+   * come with them, so the Studio's preview moves as the world would (issue #136).
    */
-  checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Promise<Result<Limit[]>>;
+  checkLimits(
+    sizeClass: SizeClass,
+    capabilities: Record<string, number>,
+  ): Promise<Result<CheckedLimits>>;
   /**
    * Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added.
    * `released`: it comes from the Studio, so it gets the release grace (ADR 0018 amendments, §13).
@@ -214,7 +219,10 @@ export function startSimulation(
         });
         break;
       case "limits":
-        answer(message.requestId, { ok: true, value: message.limits });
+        answer(message.requestId, {
+          ok: true,
+          value: { limits: message.limits, locomotion: message.locomotion },
+        });
         break;
       case "spawned":
       case "despawned":

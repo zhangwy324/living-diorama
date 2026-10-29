@@ -10,6 +10,7 @@ import {
   connectStudioWindow,
   openStudioChannel,
 } from "@living-diorama/desktop-integration";
+import type { LocomotionRule } from "@living-diorama/extension-api";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -17,6 +18,7 @@ import {
   canMove,
   defaultPlan,
   planAnchors,
+  planBody,
   type BodyPlanChoice,
 } from "../body-plan";
 import {
@@ -43,6 +45,7 @@ import { drawingHints, limitHints } from "./hints";
 import { MyCreatures } from "./MyCreatures";
 import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
 import { useReducedMotion } from "./reduced-motion";
+import { keepTrying } from "./retry";
 import { NO_NAME, canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 import { hasWarningTint, WarningToggle } from "./WarningToggle";
@@ -114,6 +117,11 @@ export function Studio() {
   const [sizeHints, setSizeHints] = useState<string[]>([]);
   // By size and ways of moving: the navigation profile the limits are for.
   const sizeHintCache = useRef(new Map<string, string[]>());
+  // How each capability asked about moves, from the limits answers (issue #136). The world doesn't
+  // change while the app runs, so the rules only gather.
+  const [locomotionRules, setLocomotionRules] = useState<Readonly<Record<string, LocomotionRule>>>(
+    {},
+  );
   // Drawing, then the confirm step: the body plan and Release (ADR 0020 §12).
   const [step, setStep] = useState<"draw" | "plan">("draw");
   const [plan, setPlan] = useState<BodyPlanChoice>(defaultPlan);
@@ -211,20 +219,21 @@ export function Studio() {
   useEffect(() => preview.current?.setHighlightsShown(warningsShown), [warningsShown]);
 
   // The preview plays the chosen way of moving in the confirm step, and stands still while drawing.
-  const modes = previewModes(plan.locomotion);
+  // A way of moving stands still until the world has said how it moves.
+  const body = useMemo(() => planBody(plan, thickness), [plan, thickness]);
+  const modes = previewModes(plan.locomotion, body, locomotionRules);
   const mode = chosenMode(modes, previewMode);
   // With reduced motion asked for, it holds the pose it has at rest: a swimmer still sits in the
   // water, with only its slow bob.
   const reducedMotion = useReducedMotion();
-  const profile = step === "plan" ? mode?.motion.profile : undefined;
-  const submersion = mode?.motion.submersion ?? 0;
-  const speed = reducedMotion ? 0 : (mode?.motion.speed ?? 0);
+  const motion = step === "plan" ? mode?.motion : undefined;
+  const moving = motion !== undefined;
+  const profile = motion?.profile;
+  const submersion = motion?.submersion ?? 0;
+  const speed = reducedMotion ? 0 : (motion?.speed ?? 0);
   useEffect(
-    () =>
-      preview.current?.setMotion(
-        profile === undefined ? undefined : { profile, submersion, speed },
-      ),
-    [profile, submersion, speed],
+    () => preview.current?.setMotion(moving ? { profile, submersion, speed } : undefined),
+    [moving, profile, submersion, speed],
   );
   // The preview turns about the points the release will carry: the shown ones.
   const releasedAnchors = useMemo(() => activeAnchors(plan), [plan]);
@@ -232,7 +241,8 @@ export function Studio() {
 
   // The limits in the world follow the size picker and the ways of moving (ADR 0015 §8, ADR 0020
   // §12); the gait doesn't change them. The world doesn't change while the app runs, so each
-  // pairing is asked about once.
+  // pairing is asked about once. An unanswered question (the strip still starting, say) is asked
+  // again, since the preview's motion waits on the rules that come with the answer.
   const { land, swim } = plan.locomotion;
   useEffect(() => {
     // Nothing to ask with no way of moving; the panel shows no limits then.
@@ -242,16 +252,21 @@ export function Studio() {
     setSizeHints(cached ?? []);
     if (cached) return;
     let current = true;
-    channel
-      .request("limits", { sizeClass, locomotion: { land, swim } })
-      .then((limits) => {
-        const hints = limitHints(limits);
-        sizeHintCache.current.set(key, hints);
-        if (current) setSizeHints(hints);
-      })
-      .catch((error: unknown) => console.warn(`Could not check the limits for ${key}`, error));
+    const stop = keepTrying(
+      () =>
+        channel
+          .request("limits", { sizeClass, locomotion: { land, swim } })
+          .then(({ limits, locomotion }) => {
+            setLocomotionRules((known) => ({ ...known, ...locomotion }));
+            const hints = limitHints(limits);
+            sizeHintCache.current.set(key, hints);
+            if (current) setSizeHints(hints);
+          }),
+      (error: unknown) => console.warn(`Could not check the limits for ${key}`, error),
+    );
     return () => {
       current = false;
+      stop();
     };
   }, [sizeClass, land, swim]);
 

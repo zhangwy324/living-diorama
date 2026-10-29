@@ -246,14 +246,25 @@ describe("simulation client", () => {
   it("checks the limits of a size without registering a species", async () => {
     const { client, callbacks, tick } = start();
     const checking = client.checkLimits("large", { "core:land": 1 });
+    const amphibian = client.checkLimits("small", { "core:land": 1, "core:swim": 1 });
     const unknown = client.checkLimits("large", { "core:fly": 1 });
     tick();
     const checked = await checking;
-    const bridge = checked.ok ? checked.value.filter((d) => d.code === "portal_unusable") : [];
+    const bridge = checked.ok
+      ? checked.value.limits.filter((d) => d.code === "portal_unusable")
+      : [];
     expect(bridge.map((d) => d.structure)).toEqual([
       { id: "bridge", name: "Wooden bridge" },
       { id: "bridge", name: "Wooden bridge" },
     ]);
+    // With the rules of the capabilities asked about, as the engine registered them.
+    expect(checked.ok && Object.keys(checked.value.locomotion)).toEqual(["core:land"]);
+    const both = await amphibian;
+    expect(both.ok && Object.keys(both.value.locomotion)).toEqual(["core:land", "core:swim"]);
+    expect(both.ok && both.value.locomotion["core:swim"]).toMatchObject({
+      animation: "swim",
+      submersion: 0.5,
+    });
     const rejected = await unknown;
     expect(rejected.ok ? [] : rejected.diagnostics.map((d) => d.code)).toEqual([
       "unknown_capability",

@@ -19,8 +19,11 @@ import type { Pixels } from "./pixels";
 
 /** A way of moving for the preview to play in place (ADR 0020 §8, §9). */
 export interface PreviewMotion {
-  /** The animation profile, e.g. "walk", "hop" or "swim". An unknown one plays no motion. */
-  profile: string;
+  /**
+   * The animation profile, e.g. "walk", "hop" or "swim". Unknown or none plays no motion, as in
+   * the diorama; the body still sits at its submersion.
+   */
+  profile: string | undefined;
   /**
    * How far the body sits below a water surface, as a share of its height. Above 0 the ground
    * grid gives way to a water surface.

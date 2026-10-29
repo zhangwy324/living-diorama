@@ -1,6 +1,6 @@
 import type { Diagnostic, Drawing, Result, SizeClass } from "@living-diorama/content-schema";
 import type { RequestHandlers } from "@living-diorama/desktop-integration";
-import type { Limit } from "@living-diorama/simulation";
+import type { CheckedLimits } from "@living-diorama/simulation";
 import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
 import {
   canMove,
@@ -58,11 +58,12 @@ export type StudioRequests = {
   snapshot: { params: undefined; result: LibrarySnapshot };
   /**
    * Where a drawn species of this size, moving this way, wouldn't fit in the world, registering
-   * nothing (ADR 0015 §8, ADR 0020 §12). Errors among them mean it can't be released so.
+   * nothing (ADR 0015 §8, ADR 0020 §12). Errors among them mean it can't be released so. With
+   * them, the locomotion rules of its ways of moving, which the preview plays (issue #136).
    */
   limits: {
     params: { sizeClass: SizeClass; locomotion: Pick<LocomotionChoice, "land" | "swim"> };
-    result: Limit[];
+    result: CheckedLimits;
   };
   /** Saves the drawing as a species in the library and adds one of it to the world. */
   release: { params: ReleaseParams; result: Released };
@@ -85,7 +86,10 @@ export interface StudioServices {
   /** The world's creature cap (ADR 0012 §6). */
   maxCreatures: number;
   /** The worker's limits query, once the world is running. */
-  checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Promise<Result<Limit[]>>;
+  checkLimits(
+    sizeClass: SizeClass,
+    capabilities: Record<string, number>,
+  ): Promise<Result<CheckedLimits>>;
 }
 
 /** The worker says the same when a spawn would pass the cap (ADR 0012 §6). */

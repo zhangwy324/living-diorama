@@ -12,7 +12,7 @@ import {
   serveStudio,
   type LibraryStore,
 } from "@living-diorama/desktop-integration";
-import type { Limit } from "@living-diorama/simulation";
+import type { CheckedLimits, Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { defaultPlan } from "./body-plan";
@@ -124,16 +124,24 @@ async function setUp({
 
 describe("the Studio's requests", () => {
   it("checks a size's limits with the capabilities of the chosen ways of moving", async () => {
+    const swim = { regionKinds: ["water" as const], animation: "swim", submersion: 0.5 };
     const checkLimits = vi.fn((sizeClass: SizeClass) =>
-      Promise.resolve({ ok: true as const, value: sizeClass === "large" ? [bridge] : [] }),
+      Promise.resolve<Result<CheckedLimits>>({
+        ok: true,
+        value:
+          sizeClass === "large"
+            ? { limits: [bridge], locomotion: {} }
+            : { limits: [], locomotion: { "core:swim": swim } },
+      }),
     );
     const { studio } = await setUp({ checkLimits });
     await expect(
       studio.request("limits", { sizeClass: "large", locomotion: LAND }),
-    ).resolves.toEqual([bridge]);
+    ).resolves.toEqual({ limits: [bridge], locomotion: {} });
+    // The capabilities' locomotion rules pass through for the preview (issue #136).
     await expect(
       studio.request("limits", { sizeClass: "small", locomotion: BOTH }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ limits: [], locomotion: { "core:swim": swim } });
     expect(checkLimits).toHaveBeenCalledWith("large", { "core:land": 1 });
     expect(checkLimits).toHaveBeenCalledWith("small", { "core:land": 1, "core:swim": 1 });
     await expect(

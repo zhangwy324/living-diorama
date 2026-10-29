@@ -2,13 +2,20 @@ import {
   DRAWING_SIZE,
   type Anchor,
   type AnchorName,
+  type BodyShape,
   type LandGait,
 } from "@living-diorama/content-schema";
+import {
+  animationProfile,
+  locomotionSubmersion,
+  type LocomotionRule,
+} from "@living-diorama/extension-api";
 import type { PreviewMotion } from "@living-diorama/renderer";
-import { SWIM_SUBMERSION } from "@living-diorama/simulation";
 import {
   DRAWN_SPEED_FACTOR,
+  LAND_CAPABILITY,
   planAnchors,
+  SWIM_CAPABILITY,
   type BodyPlanChoice,
   type LocomotionChoice,
 } from "../body-plan";
@@ -44,34 +51,41 @@ export const planHeading = (name: string) =>
 export interface PreviewMode {
   key: "land" | "swim";
   label: string;
-  motion: PreviewMotion;
+  /** Undefined until the world has said how its capability moves: the preview stands still. */
+  motion: PreviewMotion | undefined;
 }
 
 /**
- * The ways of moving the preview plays, land first. The land gait names its profile (ADR 0020 §8:
- * each gait is a profile of the same name); swimming is `core:swim`'s `swim`, lowered by its
- * submersion.
+ * The ways of moving the preview plays, land first, each as its capability's locomotion rule in
+ * `rules` says for a species with `body` (issue #136): the rule's animation profile and
+ * submersion, as in the diorama. A way of moving whose rule hasn't come yet has no motion.
  */
-export function previewModes({ land, gait, swim }: LocomotionChoice): PreviewMode[] {
+export function previewModes(
+  { land, gait, swim }: LocomotionChoice,
+  body: BodyShape,
+  rules: Readonly<Record<string, LocomotionRule>>,
+): PreviewMode[] {
+  const motion = (capability: string): PreviewMotion | undefined => {
+    const rule = rules[capability];
+    return (
+      rule && {
+        profile: animationProfile(rule, body),
+        submersion: locomotionSubmersion(rule),
+        speed: PREVIEW_SPEED,
+      }
+    );
+  };
   return [
     ...(land
       ? [
           {
             key: "land" as const,
             label: GAIT_PREVIEW_LABELS[gait],
-            motion: { profile: gait, submersion: 0, speed: PREVIEW_SPEED },
+            motion: motion(LAND_CAPABILITY),
           },
         ]
       : []),
-    ...(swim
-      ? [
-          {
-            key: "swim" as const,
-            label: "Swimming",
-            motion: { profile: "swim", submersion: SWIM_SUBMERSION, speed: PREVIEW_SPEED },
-          },
-        ]
-      : []),
+    ...(swim ? [{ key: "swim" as const, label: "Swimming", motion: motion(SWIM_CAPABILITY) }] : []),
   ];
 }
 
