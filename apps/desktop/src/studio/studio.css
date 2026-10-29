@@ -237,6 +237,36 @@ body,
   background: rgb(255 255 255 / 8%);
 }
 
+/* A `.field > span`, so it undoes the caption's small grey text, as the thickness row does. */
+.field .name-row {
+  display: flex;
+  gap: 6px;
+  font-size: 14px;
+  color: inherit;
+}
+
+.name-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.suggest-name {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #f4f7ee;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+
+.suggest-name:hover {
+  background: rgb(255 255 255 / 16%);
+}
+
 .sizes {
   flex-direction: row;
   flex-wrap: wrap;

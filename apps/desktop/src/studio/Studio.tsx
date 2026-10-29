@@ -8,11 +8,12 @@ import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
-import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
+import { CreatureDetails, DEFAULT_SIZE_CLASS } from "./CreatureDetails";
 import { DeleteDialog } from "./DeleteDialog";
 import { DrawingEditor, type EditorState, type Tool } from "./editor";
 import { drawingHints, limitHints } from "./hints";
 import { MyCreatures } from "./MyCreatures";
+import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
 import { canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 
@@ -69,10 +70,12 @@ export function Studio() {
   const preview = useRef<BodyPreview>(undefined);
   const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
   const [thickness, setThickness] = useState<number>(BODY_THICKNESS.default);
-  // Undefined until the player types one, so the default follows the library.
+  // Undefined until the player types one, so the suggestion shows.
   const [name, setName] = useState<string>();
+  // Chosen once the library arrives, then kept until a reroll or a release, so it doesn't jump
+  // when the library changes.
+  const [suggestion, setSuggestion] = useState<string>();
   const [library, setLibrary] = useState<LibrarySnapshot>();
-  const speciesInLibrary = library?.species.length;
   const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
   const [sizeHints, setSizeHints] = useState<string[]>([]);
   const sizeHintCache = useRef(new Map<SizeClass, string[]>());
@@ -221,6 +224,15 @@ export function Studio() {
     const keep = (snapshot: LibrarySnapshot) => {
       created.sync(snapshot.species);
       setLibrary(snapshot);
+      const seed = randomNameSeed();
+      setSuggestion(
+        (kept) =>
+          kept ??
+          suggestName(
+            seed,
+            snapshot.species.map((s) => s.name),
+          ),
+      );
     };
     const stop = channel.onLibraryChanged(keep);
     channel
@@ -240,7 +252,8 @@ export function Studio() {
     return () => clearTimeout(timer);
   }, [celebration]);
 
-  const shownName = name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary));
+  const shownName = name ?? suggestion ?? "";
+  const libraryNames = () => library?.species.map((species) => species.name) ?? [];
   const releasable = canRelease({ name: shownName, empty: !hasBody, releasing });
 
   const release = async () => {
@@ -264,6 +277,7 @@ export function Studio() {
       current.reset();
       releaseId.current = undefined;
       setName(undefined);
+      setSuggestion(suggestName(randomNameSeed(), [...libraryNames(), released.name]));
       setSizeClass(DEFAULT_SIZE_CLASS);
       setThickness(BODY_THICKNESS.default);
       setCelebration(
@@ -372,6 +386,11 @@ export function Studio() {
             onName={(next) => {
               releaseId.current = undefined;
               setName(next);
+            }}
+            onSuggestName={() => {
+              releaseId.current = undefined;
+              setName(undefined);
+              setSuggestion(anotherName(shownName, libraryNames()));
             }}
             sizeClass={sizeClass}
             onSizeClass={(next) => {

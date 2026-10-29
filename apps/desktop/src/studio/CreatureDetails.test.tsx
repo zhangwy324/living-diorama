@@ -1,20 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { BODY_THICKNESS } from "@living-diorama/content-schema";
-import {
-  CreatureDetails,
-  DEFAULT_SIZE_CLASS,
-  defaultName,
-  thicknessLabel,
-} from "./CreatureDetails";
+import { CreatureDetails, DEFAULT_SIZE_CLASS, thicknessLabel } from "./CreatureDetails";
 
 it("starts a new creature at medium, the mossling's size", () => {
   expect(DEFAULT_SIZE_CLASS).toBe("medium");
-});
-
-it("names a new creature after the species already in the library", () => {
-  expect(defaultName(0)).toBe("Creature 1");
-  expect(defaultName(3)).toBe("Creature 4");
 });
 
 it("shows the name, the four sizes with one chosen, the thickness and the hints", () => {
@@ -23,6 +13,7 @@ it("shows the name, the four sizes with one chosen, the thickness and the hints"
       name="Creature 2"
       placeholder="Creature"
       onName={() => {}}
+      onSuggestName={() => {}}
       sizeClass={DEFAULT_SIZE_CLASS}
       onSizeClass={() => {}}
       thickness={BODY_THICKNESS.default}
@@ -31,6 +22,11 @@ it("shows the name, the four sizes with one chosen, the thickness and the hints"
     />,
   );
   expect(html).toContain('value="Creature 2"');
+  // The reroll button beside the name says what it does, aloud and as a tooltip.
+  const reroll = /<button[^>]*class="suggest-name"[^>]*>/.exec(html)?.[0] ?? "";
+  expect(reroll).toContain('type="button"');
+  expect(reroll).toContain('aria-label="Suggest another name"');
+  expect(reroll).toContain('title="Suggest another name"');
   const sizes = [...html.matchAll(/<input type="radio"[^>]*>/g)].map(([input]) => {
     const size = /value="(\w+)"/.exec(input)?.[1];
     return input.includes("checked") ? `${size}*` : size;
