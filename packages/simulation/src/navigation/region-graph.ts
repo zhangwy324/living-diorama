@@ -243,9 +243,20 @@ const JUMP_SAMPLE_SPACING = 0.1;
 export const JUMP_STRUCTURE_MARGIN = 0.25;
 
 /**
+ * How deep, in metres, a raised surface's underside may lie below the surface itself, for the
+ * jump line check (#132): the renderer draws a deck as a slab this thick below its walkable
+ * surface (`DECK_THICKNESS` in `packages/renderer/src/world-meshes.ts`). Change both together.
+ */
+export const JUMP_DECK_DEPTH = 0.15;
+
+/**
  * The regions with a raised surface, such as a bridge deck: not water, and with a surface off the
  * ground somewhere in the footprint, sampled at its corners and on a grid a terrain cell apart. A
  * region whose surface is the ground everywhere is the jump's ground check's.
+ *
+ * Known gaps, to revisit: "off the ground anywhere" also catches a flat land region set partly
+ * into a slope, whose whole footprint then keeps jumps away; and any kind but water counts, so
+ * a region of a kind nothing walks on (air, say) does too.
  */
 export function raisedSurfaces(world: WorldModel): RegionModel[] {
   const eps = WORLD_TOLERANCES.surfaceEpsilon;
@@ -287,9 +298,9 @@ function nearestFootprintPoint(region: RegionModel, x: number, z: number) {
  * ground rises no more than a step above the higher end. Raised surfaces (`raisedSurfaces`, a
  * bridge deck, say) are kept the creature's radius plus `JUMP_STRUCTURE_MARGIN` away: from either
  * end at any height, so it never takes off or lands on a deck, under one or against its side;
- * and from the line where the surface lies between the lower end and the top of the creature's
- * arc, its height above the higher end plus its radius, the most the renderer's arc rises. A deck
- * higher than that may span a jump.
+ * and from the line where the surface lies above the lower end and its underside
+ * (`JUMP_DECK_DEPTH` below it) below the top of the creature's arc: its height above the higher
+ * end plus its radius, the most the renderer's arc rises. A deck higher than that may span a jump.
  */
 export function isJumpClear(
   world: WorldModel,
@@ -334,7 +345,8 @@ export function isJumpClear(
       // No surface known there, as beside a curved deck: it may be in the way.
       if (y === undefined) return false;
       if (Math.abs(y - world.terrain.heightAt(point.x, point.z)) <= eps) continue;
-      if (y > low - eps && y < top) return false;
+      // Its underside, the deck's slab, as well as its surface may be in the arc's way.
+      if (y > low - eps && y - JUMP_DECK_DEPTH < top) return false;
     }
   }
   return true;

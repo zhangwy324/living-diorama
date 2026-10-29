@@ -9,6 +9,7 @@ import {
   bankReach,
   distanceToPolygonEdge,
   isJumpClear,
+  JUMP_DECK_DEPTH,
   JUMP_STRUCTURE_MARGIN,
   pointInPolygon,
   CellState,
@@ -346,6 +347,13 @@ describe("banks between land and water (ADR 0020 §4)", () => {
       expect(high(bank)).toBe(true);
     });
 
+    it("counts the deck's slab: rejects one whose underside, not its surface, is in the way", () => {
+      // The arc tops out at 0.75 m; a slab JUMP_DECK_DEPTH (0.15 m) thick hangs below the surface.
+      expect(footbridge(0.8)(bank)).toBe(false);
+      expect(footbridge(0.75 + JUMP_DECK_DEPTH - 0.01)(bank)).toBe(false);
+      expect(footbridge(0.75 + JUMP_DECK_DEPTH + 0.01)(bank)).toBe(true);
+    });
+
     it("rejects a take-off or landing under a deck or beside it, however high it is", () => {
       for (const jump of [high, low]) {
         expect(jump({ x: 0, z: 2.1 })).toBe(false);
@@ -407,7 +415,9 @@ describe("banks between land and water (ADR 0020 §4)", () => {
               const x = pair.land.x + ((pair.water.x - pair.land.x) * k) / 50;
               const z = pair.land.z + ((pair.water.z - pair.land.z) * k) / 50;
               if (near({ x, z }) >= keep) continue;
-              expect(deck.surface.heightAt(x, z) ?? Infinity).toBeGreaterThanOrEqual(top);
+              expect(
+                (deck.surface.heightAt(x, z) ?? Infinity) - JUMP_DECK_DEPTH,
+              ).toBeGreaterThanOrEqual(top);
             }
           }
         }
