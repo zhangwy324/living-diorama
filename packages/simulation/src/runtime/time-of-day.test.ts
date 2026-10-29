@@ -38,6 +38,7 @@ describe("time of day", () => {
     // -1e-14 + 1440 rounds to 1440, which is midnight of the next day.
     expect(wrapMinutes(-1e-14)).toBe(0);
     expect(wrapMinutes(at(24) - 1e-12)).toBeLessThan(at(24));
+    expect(wrapMinutes(NaN)).toBeNaN();
     expect(dayPhaseAt(at(24 + 7))).toBe("dawn");
     expect(dayPhaseAt(-at(3))).toBe("night");
   });

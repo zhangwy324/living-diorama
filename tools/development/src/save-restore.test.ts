@@ -1,6 +1,13 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import { parseWorldSave, type WorldSave } from "@living-diorama/content-schema";
-import { minutesAfter, type Simulation, type SimulationEvent } from "@living-diorama/simulation";
+import {
+  checkSave,
+  feedBehavior,
+  minutesAfter,
+  type BehaviorProvider,
+  type Simulation,
+  type SimulationEvent,
+} from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { createSimulation } from "./simulation-run";
 
@@ -266,5 +273,44 @@ describe("a save that doesn't fit the world", () => {
     // `core:feed` forgets the placement in its own memory.
     expect(after.memory["core:feed"]).toEqual({ avoid: {} });
     run(simulation, 50);
+  });
+
+  it("takes a creature of another version of the same major to the registered version", () => {
+    const save = base();
+    const registered = save.species[MOSSLING]!;
+    const older = `${registered}-old`;
+    for (const c of save.creatures) c.speciesVersion = older;
+    const first = restored(throughDisk({ ...save, species: { [MOSSLING]: older } }));
+    expect(first.report.droppedCreatures).toEqual([]);
+    expect(first.simulation.spawn(MOSSLING).ok).toBe(true);
+    // The next save lists one version of the species, which every creature is of.
+    const next = throughDisk(first.simulation.save(SAVED_AT));
+    expect(next.species).toEqual({ [MOSSLING]: registered });
+    expect(new Set(next.creatures.map((c) => c.speciesVersion))).toEqual(new Set([registered]));
+    const second = restored(next);
+    expect(second.report.droppedCreatures).toEqual([]);
+    expect(second.simulation.snapshot().creatures).toHaveLength(save.creatures.length + 1);
+  });
+
+  it("loses a behavior's memory when the behavior fails to prune it", () => {
+    const simulation = create(1);
+    const save = base();
+    const creature = save.creatures[0]!;
+    creature.memory = { "core:feed": { target: "x" }, "core:wander": { kept: true } };
+    const failing: BehaviorProvider = {
+      ...feedBehavior,
+      forgetPlacements: () => {
+        throw new Error("unexpected memory");
+      },
+    };
+    const checked = checkSave(
+      save,
+      simulation.state.model,
+      simulation.state.registries,
+      new Map([[failing.id, failing]]),
+    );
+    expect(checked.ok && checked.value.creatures[0]!.memory).toEqual({
+      "core:wander": { kept: true },
+    });
   });
 });

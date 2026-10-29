@@ -84,7 +84,8 @@ const major = (version: string) => version.split(".")[0];
  * caller starts a fresh world, when the save is of another world or world version, or when its
  * fields disagree: a creature whose species isn't in `species` at its exact version, or a creature
  * number at or above `nextCreature`. Otherwise returns copies of the creatures that still fit,
- * with placement references the world no longer has pruned. Doesn't change `save`.
+ * each at its species' registered version, with placement references the world no longer has
+ * pruned. A behavior whose `forgetPlacements` throws loses that memory. Doesn't change `save`.
  */
 export function checkSave(
   save: WorldSave,
@@ -143,6 +144,9 @@ export function checkSave(
       continue;
     }
     const creature: CreatureState = clonePlain(saved);
+    // The same major version is the same species (ADR 0003 §5), so the creature now is of the
+    // registered version; otherwise its next save would list two versions of one species.
+    creature.speciesVersion = species.version;
     const pruned = (placementId: string, where: PrunedReference) =>
       prunedPlacements.push({ creatureId, placementId, where });
     if (creature.home !== null && !exists(creature.home)) {
@@ -159,9 +163,17 @@ export function checkSave(
       if (!exists(placementId)) pruned(placementId, "used_structures");
       return exists(placementId);
     });
-    for (const [behavior, memory] of Object.entries(creature.memory)) {
-      behaviors.get(behavior)?.forgetPlacements?.(memory, exists);
-    }
+    // A behavior that fails on a saved memory loses that memory rather than failing the restore.
+    creature.memory = Object.fromEntries(
+      Object.entries(creature.memory).filter(([behavior, memory]) => {
+        try {
+          behaviors.get(behavior)?.forgetPlacements?.(memory, exists);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    );
     creatures.push(creature);
   }
   return { ok: true, value: { creatures, droppedCreatures, prunedPlacements } };
