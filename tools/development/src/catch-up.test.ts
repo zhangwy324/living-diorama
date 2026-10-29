@@ -990,7 +990,16 @@ describe("saved running actions", () => {
     [
       "core:sleep",
       "core:rest",
-      { placementId: null, heading: 0, path, arrived: true, asleep: true, moves: 0, nap: false },
+      {
+        placementId: null,
+        heading: 0,
+        path,
+        arrived: true,
+        asleep: true,
+        moves: 0,
+        nap: false,
+        newHome: false,
+      },
     ],
   ])("keeps %s with a sound state", (id, behavior, state) => {
     const { after, report } = withAction({ id, behavior, state, startTick: 0 });

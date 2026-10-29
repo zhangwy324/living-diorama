@@ -8,6 +8,7 @@ import {
   rememberPlace,
   restBehavior,
   Rng,
+  SEARCH_AFTER_SHELTER_FAILURES,
   SEARCH_FORGET_SECONDS,
   SHELTER_SEARCH_RADII,
   SLEEP_CONTINUE_UTILITY,
@@ -29,6 +30,7 @@ import {
 } from "@living-diorama/simulation";
 import type { Registries } from "@living-diorama/extension-api";
 import { beforeAll, describe, expect, it } from "vitest";
+import { registerFarShelter } from "./fixtures/far-shelter";
 import { createSimulation } from "./simulation-run";
 
 // Shelter, sleep and home (ADR 0018 §13, §14 and amendments, PR 5a): `core:rest` and `core:sleep`.
@@ -47,6 +49,8 @@ interface Stub {
   routes?: Record<string, number | undefined>;
   /** `randomWalkablePointWithin`: undefined, the default, means no point. */
   within?: (maxDistance: number) => { x: number; z: number } | undefined;
+  /** Places that no longer offer shelter. */
+  bare?: string[];
 }
 
 function observe(
@@ -62,7 +66,8 @@ function observe(
   const world: WorldQueries = {
     place: (id) => {
       const p = stub.places[id];
-      return p && { id, ...p, y: 0, blockRadius: 0, affordances: { [SHELTER]: {} } };
+      const affordances = stub.bare?.includes(id) ? {} : { [SHELTER]: {} };
+      return p && { id, ...p, y: 0, blockRadius: 0, affordances };
     },
     spotAt: (id) => stub.places[id] && { regionId: id, ...stub.places[id]! },
     routeLength: (destination) => stub.routes?.[destination.regionId],
@@ -370,8 +375,10 @@ describe("core:rest", () => {
 
     it("tries the shelter again once its back-off ends, longer after each failure", () => {
       const knowledge = knowing("near");
+      // Nowhere to search, so failing twice (issue #171) still sleeps in the open.
       const at = (tick: number) =>
-        evaluate(observe(stub(), { dayPhase: "night", knowledge, tick }))?.params;
+        evaluate(observe({ ...stub(), within: undefined }, { dayPhase: "night", knowledge, tick }))
+          ?.params;
       // Stuck once: 30 s, 300 ticks.
       fail(knowledge, "near");
       expect(at(TICK + 299)).toEqual({});
@@ -394,6 +401,119 @@ describe("core:rest", () => {
       fail(knowledge, "near");
       const observation = observe(stub(), { dayPhase: "night", knowledge, home: "home" });
       expect(chooseShelter(observation)?.placementId).toBe("home");
+    });
+  });
+
+  describe("after failing again and again (issue #171)", () => {
+    const TICK = 100_000;
+    /** Fails `id` `times` times, long enough ago that it is no longer backed off. */
+    const failOften = (
+      knowledge: ReturnType<typeof emptyKnowledge>,
+      id: string,
+      times = SEARCH_AFTER_SHELTER_FAILURES,
+      tick = TICK - 50_000,
+    ) => {
+      for (let k = 0; k < times; k++) {
+        recordReach(knowledge, SHELTER, id, k % 2 ? "no_route" : "stuck", {
+          tick,
+          tickSeconds: 0.1,
+          cell: { x: 0, z: 0 },
+        });
+      }
+    };
+    const stub = (): Stub => ({
+      places: { home: { x: 0, z: 4 }, near: { x: 2, z: 0 }, far: { x: 6, z: 0 } },
+      routes: { home: 5, near: 3, far: 8 },
+      within: (d) => ({ x: d, z: 0 }),
+    });
+    const stuck = { action: "core:sleep", outcome: "interrupted", reason: "stuck" } as const;
+
+    it("after a failed trip, searches if every shelter it knows has failed twice", () => {
+      const knowledge = knowing("home");
+      failOften(knowledge, "home", 1);
+      const night = { dayPhase: "night" as const, knowledge, home: "home", lastResult: stuck };
+      // Failed once: in the open, without searching (issue #161).
+      expect(evaluate(observe(stub(), night))).toMatchObject({ params: {} });
+      failOften(knowledge, "home", 1);
+      expect(evaluate(observe(stub(), night))).toMatchObject({
+        action: "core:follow_path",
+        reason: "night: looking for shelter (1/3)",
+      });
+      // One it knows hasn't failed: in the open, without searching.
+      rememberPlace(knowledge, SHELTER, "near", 0, 4);
+      expect(evaluate(observe(stub(), night))).toMatchObject({ params: {} });
+    });
+
+    it("with every shelter backed off and failing, searches instead of sleeping in the open", () => {
+      const knowledge = knowing("near", "home");
+      failOften(knowledge, "near", 2, TICK);
+      failOften(knowledge, "home", 2, TICK);
+      const memory = {};
+      expect(
+        restBehavior.evaluate(
+          observe(stub(), { dayPhase: "night", knowledge, home: "home" }),
+          memory,
+          Rng.fromSeed(1),
+        ),
+      ).toMatchObject({ action: "core:follow_path", params: { destination: { x: 6 } } });
+      expect(memory).toMatchObject({ searches: 1, searchedAtTick: TICK });
+    });
+
+    it("a forgotten home hasn't failed, so it doesn't search", () => {
+      const knowledge = knowing("near");
+      failOften(knowledge, "near");
+      const observation = observe(stub(), {
+        dayPhase: "night",
+        knowledge,
+        home: "home",
+        lastResult: stuck,
+      });
+      expect(evaluate(observation)).toMatchObject({ params: {} });
+    });
+
+    it("a backed-off place that no longer offers shelter doesn't stop the search", () => {
+      const knowledge = knowing("near");
+      failOften(knowledge, "near", 1, TICK);
+      const proposal = (bare: string[]) =>
+        evaluate(observe({ ...stub(), bare }, { dayPhase: "night", knowledge }));
+      expect(proposal([])).toMatchObject({ params: {}, reason: "night in the open" });
+      expect(proposal(["near"])).toMatchObject({ action: "core:follow_path" });
+    });
+
+    it("passes a failing shelter over for one that isn't, home included, and moves house", () => {
+      const knowledge = knowing("near", "far", "home");
+      failOften(knowledge, "near");
+      failOften(knowledge, "home");
+      const options = { dayPhase: "night" as const, knowledge, home: "home" };
+      expect(evaluate(observe(stub(), options))).toMatchObject({
+        action: "core:sleep",
+        params: { placementId: "far", newHome: true },
+      });
+      // Only failing ones left: the nearest by route, home no more than any other.
+      const failing = knowing("near", "home");
+      failOften(failing, "near");
+      failOften(failing, "home");
+      expect(evaluate(observe(stub(), { ...options, knowledge: failing }))).toMatchObject({
+        params: { placementId: "near", newHome: true },
+      });
+      // Home failing once only: home as before, no move.
+      const once = knowing("near", "home");
+      failOften(once, "home", 1);
+      expect(evaluate(observe(stub(), { ...options, knowledge: once }))?.params).toEqual({
+        placementId: "home",
+      });
+    });
+
+    it("trying a failing shelter again doesn't end the search", () => {
+      const knowledge = knowing("home");
+      failOften(knowledge, "home");
+      const memory = { searches: 1, searchedAtTick: TICK - 100 };
+      restBehavior.evaluate(
+        observe(stub(), { dayPhase: "night", knowledge, home: "home" }),
+        memory,
+        Rng.fromSeed(1),
+      );
+      expect(memory).toEqual({ searches: 1, searchedAtTick: TICK - 100 });
     });
   });
 
@@ -583,6 +703,23 @@ describe("core:sleep", () => {
     sleepAction.step(start.state, context);
     sleepAction.step(start.state, context);
     expect(homes).toEqual([]);
+  });
+
+  it("with newHome, takes the shelter as home on falling asleep there (issue #171)", () => {
+    const { context, homes } = sleepContext();
+    context.home = "elsewhere";
+    expect(sleepAction.start({ placementId: "tree", newHome: 1 }, context)).toMatchObject({
+      ok: false,
+      reason: "invalid_params",
+    });
+    const start = sleepAction.start({ placementId: "tree", newHome: true }, context);
+    if (!start.ok) throw new Error("start failed");
+    // Walking there, it doesn't move house yet.
+    sleepAction.step(start.state, context);
+    expect(homes).toEqual([]);
+    sleepAction.step(start.state, context);
+    sleepAction.step(start.state, context);
+    expect(homes).toEqual(["tree"]);
   });
 
   it("sleeps through the night and wakes once rested and its waking phase has begun", () => {
@@ -1376,5 +1513,136 @@ describe("sleeping in Woodland Hollow", () => {
     expect(first.sleep.length).toBeGreaterThan(2);
     expect(night(7)).toEqual(first);
     expect(night(8).sleep).not.toEqual(first.sleep);
+  });
+});
+
+describe("a home it can't get to (issue #171)", () => {
+  const START = 21 * 60;
+  /** A day in ticks at 10 Hz. */
+  const DAY = 864_000;
+
+  /**
+   * A wader in the far-shelter world, at home at the tree in the pond, which it has failed to
+   * reach `failures` times: a day before, or just now, so it is still backed off at bedtime. It
+   * doesn't know the tree in the meadow.
+   */
+  function wading(seed: number, failures: number, failedAt = -DAY) {
+    const traces: DecisionTrace[] = [];
+    const simulation = createSimulation({
+      register: registerFarShelter,
+      worldId: "fixture:far-shelter",
+      seed,
+      startMinutes: START,
+      onTrace: (t) => traces.push(t),
+    });
+    const spawned = simulation.spawn("fixture:wader", "start");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    creature.home = "pond-tree";
+    rememberPlace(creature.knowledge, SHELTER, "pond-tree", 0, 4);
+    for (let k = 0; k < failures; k++) {
+      recordReach(creature.knowledge, SHELTER, "pond-tree", "stuck", {
+        tick: failedAt,
+        tickSeconds: 0.1,
+        cell: { x: 0, z: 0 },
+      });
+    }
+    const events: SimulationEvent[] = [];
+    /** Runs `ticks`, or until `done`: by default, until it is asleep. */
+    const run = (ticks: number, done = () => creature.asleep) => {
+      for (let t = 0; t < ticks && !done(); t++) {
+        simulation.setTimeOfDay(
+          minutesAfter(START, (simulation.tick * 1000) / simulation.tickRateHz),
+        );
+        events.push(...simulation.step());
+      }
+    };
+    const of = (type: SimulationEvent["type"]) => events.filter((e) => e.type === type);
+    /** What `core:rest` started: sleeps by place (null in the open), and searches. */
+    const started = () =>
+      traces.flatMap((t) =>
+        t.result !== "started" || t.chosen?.behavior !== "core:rest"
+          ? []
+          : t.chosen.action === "core:sleep"
+            ? [(t.chosen.params as { placementId?: string }).placementId ?? null]
+            : ["search"],
+      );
+    return { simulation, creature, events, run, of, started };
+  }
+  const failuresOf = (creature: CreatureState) =>
+    creature.knowledge.places[SHELTER]!.find((p) => p.placementId === "pond-tree")!.failures;
+
+  it("having failed twice, gets stuck again, searches, and moves to the tree it finds", () => {
+    const { creature, run, of, started } = wading(1, SEARCH_AFTER_SHELTER_FAILURES);
+    run(DAY);
+    expect(creature.asleep).toBe(true);
+    const tries = started();
+    // Home first, stuck on the way in the pond; then searches, and the tree seen on one.
+    expect(tries[0]).toBe("pond-tree");
+    expect(tries.length).toBeGreaterThan(2);
+    expect(tries.slice(1, -1).every((t) => t === "search")).toBe(true);
+    expect(tries.at(-1)).toBe("meadow-tree");
+    expect(failuresOf(creature)).toMatchObject({ stuck: 3 });
+    expect(of("creature_stuck").length).toBeGreaterThan(0);
+    expect(of("fell_asleep")).toEqual([expect.objectContaining({ placementId: "meadow-tree" })]);
+    expect(of("new_home_selected")).toEqual([
+      expect.objectContaining({ placementId: "meadow-tree", previous: "pond-tree" }),
+    ]);
+    expect(creature.home).toBe("meadow-tree");
+    // Within the first night's first hour.
+    expect(of("fell_asleep")[0]!.tick).toBeLessThan(36_000);
+  });
+
+  it("failing for the first time, sleeps in the open without searching", () => {
+    const { creature, run, of, started } = wading(1, 0);
+    run(DAY);
+    expect(started()).toEqual(["pond-tree", null]);
+    expect(failuresOf(creature)).toMatchObject({ stuck: 1 });
+    expect(of("fell_asleep")).toEqual([expect.objectContaining({ placementId: null })]);
+    expect(creature.home).toBe("pond-tree");
+  });
+
+  it("moves to the tree within four nights, whatever the seed", { timeout: 120_000 }, () => {
+    const SEEDS = Array.from({ length: 32 }, (_, k) => k + 1);
+    for (const failedAt of [-DAY, 0]) {
+      for (const seed of SEEDS) {
+        const { creature, run, started } = wading(seed, SEARCH_AFTER_SHELTER_FAILURES, failedAt);
+        run(4 * DAY, () => creature.asleep && creature.home === "meadow-tree");
+        expect([failedAt, seed, creature.home, creature.asleep]).toEqual([
+          failedAt,
+          seed,
+          "meadow-tree",
+          true,
+        ]);
+        // With home backed off at bedtime, it searches at once instead of sleeping in the open.
+        if (failedAt === 0) expect([seed, started()[0]]).toEqual([seed, "search"]);
+      }
+    }
+  });
+
+  it("does the same for the same seed", { timeout: 30_000 }, () => {
+    const outcome = (seed: number) => {
+      const { creature, events, run } = wading(seed, SEARCH_AFTER_SHELTER_FAILURES);
+      run(2 * DAY, () => false);
+      return { events, creature: JSON.stringify(creature) };
+    };
+    const first = outcome(5);
+    expect(first.events.some((e) => e.type === "new_home_selected")).toBe(true);
+    expect(outcome(5)).toEqual(first);
+    expect(outcome(6).events).not.toEqual(first.events);
+  });
+
+  it("catch-up records no failure and doesn't search", () => {
+    const { simulation, creature, run, started } = wading(1, SEARCH_AFTER_SHELTER_FAILURES);
+    // On its way home, before it reaches the pond.
+    run(20);
+    expect(started()).toEqual(["pond-tree"]);
+    const before = structuredClone(failuresOf(creature));
+    simulation.catchUp({ gapMs: 3 * 3_600_000, minutes: 0 });
+    run(600, () => false);
+    expect(failuresOf(creature)).toEqual(before);
+    expect(started()).toEqual(["pond-tree"]);
+    expect(creature.asleep).toBe(true);
+    expect(creature.home).toBe("pond-tree");
   });
 });
