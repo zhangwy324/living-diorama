@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
 import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
+import { spread } from "./time-spread";
 
 // `pnpm soak`: the long-run invariant and living-behavior checks over many more seeds and a
 // higher tick rate than `pnpm check` runs (ADR 0006 §12, ADR 0018 §20), with the meal and sleep
@@ -11,6 +12,11 @@ import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 // JSON text and the schema (ADR 0019): a restore without a gap must carry on exactly as the
 // unbroken run, compared tick by tick for 10 simulated minutes, and one restore after a long gap
 // per run is checked against the catch-up rules (ADR 0018 §19).
+//
+// Each seed's line also gives the spread of bedtimes and wake times across the creatures the sleep
+// check holds to (issue #159), and the summary the narrowest and widest of those spreads. A run is
+// one day from noon, so that is about one bedtime and one wake time per creature: a spread across
+// creatures, unlike `pnpm sim`'s per creature across nights.
 
 const { values } = parseArgs({
   options: {
@@ -49,6 +55,9 @@ let largestSave = 0;
 let bankJumps = 0;
 let seedsWithJumps = 0;
 let seedsInBothMedia = 0;
+/** Per seed with any, how many minutes apart its earliest and latest bedtimes, and wake times. */
+const bedSpreads: number[] = [];
+const wakeSpreads: number[] = [];
 const started = performance.now();
 for (let seed = 1; seed <= seeds; seed++) {
   /** Creatures that used a structure, and each creature's jumps across a bank, by ID. */
@@ -56,6 +65,8 @@ for (let seed = 1; seed <= seeds; seed++) {
   const jumpsBy = new Map<string, number>();
   /** Ticks in water and out of it, summed over all the seed's amphibians (one by default). */
   const amphibianTicks = { water: 0, land: 0 };
+  /** Per creature, whether the sleep check holds it, decided when first seen as the runner does. */
+  const sleepChecked = new Map<string, boolean>();
   const report = runWithInvariants({
     register: registerHollowCreatures,
     worldId: "hollow:woodland-hollow",
@@ -76,6 +87,9 @@ for (let seed = 1; seed <= seeds; seed++) {
       }
       const { creatures, model } = simulation.state;
       for (const c of creatures.values()) {
+        if (!sleepChecked.has(c.id)) {
+          sleepChecked.set(c.id, LIVING_BEHAVIOR_CHECKS.sleep.creatures(c, simulation));
+        }
         if (c.speciesId !== otter.id) continue;
         const kind = model.regions.get(c.position.regionId)?.kind;
         amphibianTicks[kind === "water" ? "water" : "land"]++;
@@ -106,6 +120,12 @@ for (let seed = 1; seed <= seeds; seed++) {
   bankJumps += jumps;
   if (jumps > 0) seedsWithJumps++;
   if (amphibianTicks.water > 0 && amphibianTicks.land > 0) seedsInBothMedia++;
+  // A restore after a long gap may skip a night's events, so a seed may have no times at all.
+  const sleepers = Object.entries(report.creatures).filter(([id]) => sleepChecked.get(id));
+  const bedtimes = sleepers.flatMap(([, c]) => c.bedtimes);
+  const wakeTimes = sleepers.flatMap(([, c]) => c.wakeTimes);
+  if (bedtimes.length > 0) bedSpreads.push(Math.max(...bedtimes) - Math.min(...bedtimes));
+  if (wakeTimes.length > 0) wakeSpreads.push(Math.max(...wakeTimes) - Math.min(...wakeTimes));
   const inWater = amphibianTicks.water / Math.max(1, amphibianTicks.water + amphibianTicks.land);
   const swam = values["mosslings-only"]
     ? ""
@@ -113,7 +133,8 @@ for (let seed = 1; seed <= seeds; seed++) {
   console.log(
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
       `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
-      `${report.saveRestore.restores} restores${describeLongGap(report.saveRestore.longGap)}, ` +
+      `bed ${spread(bedtimes, "n/a")}, woke ${spread(wakeTimes, "n/a")} across ${sleepers.length} ` +
+      `sleepers, ${report.saveRestore.restores} restores${describeLongGap(report.saveRestore.longGap)}, ` +
       `${Math.round(report.elapsedMs)} ms`,
   );
   for (const problem of problems) console.log(`  ${problem}`);
@@ -129,6 +150,10 @@ if (!values["mosslings-only"]) {
   );
 }
 console.log(
+  `spread across each seed's sleepers: bedtimes ${spreadRange(bedSpreads)}, ` +
+    `wake times ${spreadRange(wakeSpreads)}`,
+);
+console.log(
   `${seeds - failed}/${seeds} seeds clean in ${((performance.now() - started) / 1000).toFixed(0)} s`,
 );
 process.exitCode = failed > 0 ? 1 : 0;
@@ -137,4 +162,12 @@ function describeLongGap(longGap: { gapMs: number; at: string } | undefined): st
   return longGap
     ? ` (one after ${(longGap.gapMs / 3_600_000).toFixed(1)} h away, back at ${longGap.at})`
     : "";
+}
+
+/** The narrowest and widest of the seeds' spreads, and in how many seeds there was one. */
+function spreadRange(spreads: readonly number[]): string {
+  if (spreads.length === 0) return "n/a";
+  const min = Math.round(Math.min(...spreads));
+  const max = Math.round(Math.max(...spreads));
+  return `${min}–${max} min apart (in ${spreads.length}/${seeds} seeds)`;
 }
