@@ -210,6 +210,121 @@ describe("banks between land and water (ADR 0020 §4)", () => {
     expect(navigation.banks.map((b) => b.landRegionId)).toEqual(["south-bank"]);
     expect([...navigation.reachableRegions("north-bank")]).toEqual(["north-bank"]);
   });
+
+  /** Every jump line of the newt's banks in `world`, as points 1/50 of the way apart. */
+  const jumpLines = (
+    world: { id: string },
+    register: (r: Registries) => unknown = variant(world as ReturnType<typeof pondVariant>)
+      .register,
+  ) => {
+    const sim = createSimulation({ register, worldId: world.id, seed: 1 });
+    const { navigation } = navigationOf(sim, newt.id);
+    return navigation.banks.flatMap((b) =>
+      b.pairs.map((p) =>
+        Array.from({ length: 51 }, (_, k) => ({
+          x: p.land.x + ((p.water.x - p.land.x) * k) / 50,
+          z: p.land.z + ((p.water.z - p.land.z) * k) / 50,
+        })),
+      ),
+    );
+  };
+
+  it("is not made through a prop in the way", () => {
+    // A boulder on the south slope, where the gentle bank meets the water.
+    const rock = { x: 0, z: 2.6, blockRadius: 0.3 };
+    const near = (p: { x: number; z: number }) =>
+      Math.hypot(p.x - rock.x, p.z - rock.z) < rock.blockRadius + 0.2; // the newt's radius
+    const plain = pondVariant({ id: "fixture:no-boulder" });
+    expect(jumpLines(plain).some((line) => line.some(near))).toBe(true);
+    const world = {
+      ...pondVariant({ id: "fixture:boulder" }),
+      props: [
+        {
+          id: "boulder",
+          prop: "fixture:boulder",
+          transform: { position: { x: rock.x, y: 0.1, z: rock.z } },
+        },
+      ],
+    };
+    const register = (r: Registries) => {
+      r.assets.register({ id: "fixture:boulder.glb", version: "1.0.0", kind: "model", url: "-" });
+      r.props.register({
+        schemaVersion: 1,
+        id: "fixture:boulder",
+        version: "1.0.0",
+        name: "Boulder",
+        model: "fixture:boulder.glb",
+        blockRadius: rock.blockRadius,
+      });
+      registerPond(r, world);
+    };
+    const lines = jumpLines(world, register);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.some((line) => line.some(near))).toBe(false);
+  });
+
+  it("is not made under or through a deck in the way", () => {
+    // A low jetty along the south waterline, 0.2 m above the water: less than the newt's height.
+    const footprint = [
+      { x: -1.5, z: 1.6 },
+      { x: 1.5, z: 1.6 },
+      { x: 1.5, z: 2 },
+      { x: -1.5, z: 2 },
+    ];
+    const inside = (p: { x: number; z: number }) => p.x > -1.5 && p.x < 1.5 && p.z > 1.6 && p.z < 2;
+    const plain = pondVariant({ id: "fixture:no-jetty" });
+    expect(jumpLines(plain).some((line) => line.some(inside))).toBe(true);
+    const world = pondVariant({ id: "fixture:jetty" });
+    (world.regions as unknown[]).push({
+      id: "jetty",
+      kind: "land",
+      surface: {
+        type: "core:deck",
+        params: {
+          centerline: [
+            { x: -1.5, y: 0.2, z: 1.8 },
+            { x: 1.5, y: 0.2, z: 1.8 },
+          ],
+          width: 0.4,
+        },
+      },
+      footprint,
+    });
+    const lines = jumpLines(world);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.some((line) => line.some(inside))).toBe(false);
+  });
+
+  it("leaves a walker's navigation in the Hollow as it was at medium and large size", () => {
+    const hollow = createSimulation({
+      register: registerBuiltInContent,
+      worldId: "hollow:woodland-hollow",
+      seed: 1,
+    });
+    const counts = (size: "medium" | "large") => {
+      const checked = hollow.checkLimits(size, { "core:land": 1 });
+      expect(checked.ok).toBe(true);
+      const nav = hollow.state.navigations.find(
+        (n) => n.profile.sizeClass === size && !n.profile.capabilities.has("core:swim"),
+      )!;
+      return Object.fromEntries([...nav.masks].map(([id, m]) => [id, m.walkableCount]));
+    };
+    // The counts before M16, unchanged by the whole-cell water rules.
+    expect(counts("medium")).toEqual({
+      "west-woods": 3712,
+      "east-meadow": 2742,
+      summit: 1024,
+      river: 0,
+      "bridge-deck": 32,
+    });
+    expect(counts("large")).toEqual({
+      "west-woods": 2878,
+      "east-meadow": 2247,
+      summit: 736,
+      river: 0,
+      "bridge-deck": 0,
+    });
+  });
 });
 
 describe("world checks for swimmers (ADR 0020 §4–§5)", () => {
@@ -389,6 +504,33 @@ describe("swimming in the simulation", () => {
     for (let t = 0; t < 1_000 && !creature().lastResult; t++) simulation.step();
     expect(creature().lastResult).toEqual({ action: "core:follow_path", outcome: "done" });
     expect(creature().position).toEqual(north);
+  });
+
+  it("makes the same jump from a save taken just before it", () => {
+    const first = puppet([walkTo(south)], "north");
+    let jumpTick = -1;
+    for (let t = 0; t < 2_000 && jumpTick < 0; t++) {
+      if (first.simulation.step().some((e) => e.type === "entered_region")) jumpTick = t;
+    }
+    expect(jumpTick).toBeGreaterThan(0);
+    const { simulation } = puppet([walkTo(south)], "north");
+    for (let t = 0; t < jumpTick; t++) simulation.step();
+    const restored = createSimulation({
+      ...pond,
+      seed: 99,
+      register: puppetContent([walkTo(south)], newt),
+    });
+    const result = restored.restore(JSON.parse(JSON.stringify(simulation.save(0))), {
+      nowMs: 0,
+      minutes: simulation.state.minutes,
+    });
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    for (let t = 0; t < 40; t++) {
+      expect(restored.step()).toEqual(simulation.step());
+      expect(restored.state.creatures.get("creature-1")).toEqual(
+        simulation.state.creatures.get("creature-1"),
+      );
+    }
   });
 
   it("shows a water-only creature swimming and a walker walking", () => {

@@ -1,5 +1,5 @@
 import { WORLD_TOLERANCES, type RegionKind, type Vec2 } from "@living-diorama/content-schema";
-import { projectOnSegment } from "../world/geometry";
+import { pointInPolygon, projectOnSegment } from "../world/geometry";
 import type { ConnectionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
 import { buildRegionMask, CellState, type RegionMask } from "./walkability";
@@ -145,7 +145,7 @@ export function buildNavigation(world: WorldModel, profile: NavProfile): Navigat
     link(connection.from, connection.to);
     if (connection.bidirectional) link(connection.to, connection.from);
   }
-  const banks = findBanks(masks, profile);
+  const banks = findBanks(world, masks, profile);
   for (const bank of banks) {
     link(bank.landRegionId, bank.waterRegionId);
     link(bank.waterRegionId, bank.landRegionId);
@@ -201,7 +201,11 @@ export function bankReach(profile: NavProfile): number {
 }
 
 /** Every derived bank of a profile; none unless it can move on land and in water. */
-function findBanks(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile): Bank[] {
+function findBanks(
+  world: WorldModel,
+  masks: ReadonlyMap<string, RegionMask>,
+  profile: NavProfile,
+): Bank[] {
   if (!profile.maxSlopeByKind.has("water")) return [];
   const all = [...masks.values()];
   const banks: Bank[] = [];
@@ -209,7 +213,9 @@ function findBanks(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile):
     if (land.region.kind === "water" || !profile.maxSlopeByKind.has(land.region.kind)) continue;
     for (const water of all) {
       if (water.region.kind !== "water" || water.walkableCount === 0) continue;
-      const pairs = bankPairs(land, water, bankReach(profile));
+      const pairs = bankPairs(land, water, bankReach(profile), (a, b) =>
+        isJumpClear(world, profile, a, b),
+      );
       if (pairs.length > 0) {
         banks.push({ landRegionId: land.region.id, waterRegionId: water.region.id, pairs });
       }
@@ -218,11 +224,65 @@ function findBanks(masks: ReadonlyMap<string, RegionMask>, profile: NavProfile):
   return banks;
 }
 
+/** One end of a jump: a point and the surface height there. */
+interface JumpEnd {
+  x: number;
+  z: number;
+  y: number;
+}
+
+/** Jumps are checked at points this far apart, in metres, along the straight line. */
+const JUMP_SAMPLE_SPACING = 0.1;
+
+/**
+ * Whether the straight line between two ends of a jump is clear for a creature of this profile
+ * (ADR 0020 §4): along it, no prop's block radius comes within the creature's radius, the ground
+ * rises no more than a step above the higher end, and no other surface (a bridge deck, say) lies
+ * between the lower end and the creature's height above the higher one. Water surfaces don't
+ * count, nor do regions whose surface is the ground itself, which the ground check covers.
+ */
+export function isJumpClear(world: WorldModel, profile: NavProfile, a: JumpEnd, b: JumpEnd) {
+  const eps = WORLD_TOLERANCES.surfaceEpsilon;
+  const low = Math.min(a.y, b.y);
+  const high = Math.max(a.y, b.y);
+  const length = Math.hypot(b.x - a.x, b.z - a.z);
+  const steps = Math.max(1, Math.ceil(length / JUMP_SAMPLE_SPACING));
+  const others = [...world.regions.values()].filter((r) => r.kind !== "water");
+  for (let k = 0; k <= steps; k++) {
+    const x = a.x + ((b.x - a.x) * k) / steps;
+    const z = a.z + ((b.z - a.z) * k) / steps;
+    for (const prop of world.props) {
+      if (prop.blockRadius <= 0) continue;
+      const { position } = prop.transform;
+      if (Math.hypot(position.x - x, position.z - z) < prop.blockRadius + profile.radius) {
+        return false;
+      }
+    }
+    const ground = world.terrain.heightAt(x, z);
+    if (ground > high + WORLD_TOLERANCES.maxStepHeight) return false;
+    for (const region of others) {
+      const { box } = region;
+      if (x < box.minX || x > box.maxX || z < box.minZ || z > box.maxZ) continue;
+      if (!pointInPolygon(x, z, region.footprint)) continue;
+      const y = region.surface.heightAt(x, z);
+      if (y === undefined || Math.abs(y - ground) <= eps) continue;
+      if (y > low - eps && y < high + profile.height) return false;
+    }
+  }
+  return true;
+}
+
 /**
  * For each walkable cell of `land`, the nearest walkable cell of `water` within `reach` that it
- * can jump to (the first in cell order on a tie), in land cell order.
+ * can jump to with the line between them `clear` (the first in cell order on a tie), in land
+ * cell order.
  */
-function bankPairs(land: RegionMask, water: RegionMask, reach: number): BankPair[] {
+function bankPairs(
+  land: RegionMask,
+  water: RegionMask,
+  reach: number,
+  clear: (a: JumpEnd, b: JumpEnd) => boolean,
+): BankPair[] {
   const cs = land.cellSize;
   const { box } = water.region;
   const span = Math.ceil(reach / cs);
@@ -238,18 +298,22 @@ function bankPairs(land: RegionMask, water: RegionMask, reach: number): BankPair
     ) {
       continue;
     }
-    let best: { cell: number; distance: number } | undefined;
+    // Candidates nearest first (then in cell order); the first with a clear line wins.
+    const candidates: { cell: number; distance: number }[] = [];
     for (let dj = -span; dj <= span; dj++) {
       for (let di = -span; di <= span; di++) {
         const distance = Math.hypot(di * cs, dj * cs);
         if (distance > reach + 1e-9) continue;
         const w = water.cellAt(c.x + di * cs, c.z + dj * cs);
         if (w === -1 || !isBankPair(land, cell, water, w)) continue;
-        if (!best || distance < best.distance || (distance === best.distance && w < best.cell)) {
-          best = { cell: w, distance };
-        }
+        candidates.push({ cell: w, distance });
       }
     }
+    candidates.sort((p, q) => p.distance - q.distance || p.cell - q.cell);
+    const from = { ...c, y: land.height(cell) };
+    const best = candidates.find((w) =>
+      clear(from, { ...water.center(w.cell), y: water.height(w.cell) }),
+    );
     if (best) {
       pairs.push({ landCell: cell, waterCell: best.cell, land: c, water: water.center(best.cell) });
     }

@@ -260,6 +260,11 @@ export function runWithInvariants(options: RunOptions): RunReport {
   for (let t = 0; t < options.ticks; t++) {
     const minutes = minutesAt(simulation.tick);
     simulation.setTimeOfDay(minutes);
+    // Where each creature stood before the tick, to check that a bank jump starts where one of
+    // its crossings does.
+    const before = new Map(
+      [...simulation.state.creatures.values()].map((c) => [c.id, { ...c.position }]),
+    );
     const events = simulation.step();
     wallMs += tickMs;
     const traces = main.traces.splice(0);
@@ -299,22 +304,32 @@ export function runWithInvariants(options: RunOptions): RunReport {
       if (event.type === "first_use_of_structure") report.firstStructureUse ??= event.tick;
       if (event.type === "entered_region") {
         // Regions change only through a connection that joins them, in a direction it allows,
-        // or by a jump across a bank, either way between land and water, landing where one of
-        // the creature's own profile's bank crossings does (ADR 0020 §4, "Contradictions
-        // resolved"). A jump ends the tick, so the creature is still where it landed.
+        // or by a jump across a bank, either way between land and water, from where one of the
+        // creature's own profile's bank crossings starts to where it lands (ADR 0020 §4,
+        // "Contradictions resolved"). A jump starts the creature's move on its tick and ends it,
+        // so it stood at the start before the tick and still stands where it landed.
         const { fromRegionId: from, toRegionId: to, connectionId } = event;
         const c = model.connections.find((c) => c.id === connectionId);
         const forward = c?.from === from && c.to === to;
         const backward = c?.bidirectional && c.to === from && c.from === to;
         const creature = simulation.state.creatures.get(event.creatureId);
         const landed = creature?.position;
+        const left = before.get(event.creatureId);
         const jump =
           connectionId === undefined &&
           landed !== undefined &&
+          left !== undefined &&
           simulation.state
             .pathfinderFor(creature?.speciesId ?? "")
             ?.bankCrossings(from)
-            .some((x) => x.toRegionId === to && x.to.x === landed.x && x.to.z === landed.z);
+            .some(
+              (x) =>
+                x.toRegionId === to &&
+                x.from.x === left.x &&
+                x.from.z === left.z &&
+                x.to.x === landed.x &&
+                x.to.z === landed.z,
+            );
         if (!forward && !backward && !jump) {
           violation(
             `${event.creatureId} went ${from} → ${to} via ${connectionId === undefined ? "no connection" : `"${connectionId}"`}`,

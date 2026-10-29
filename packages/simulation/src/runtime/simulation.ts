@@ -1378,6 +1378,7 @@ export class Simulation {
     const speed = kind ? this.#locomotion(creature.speciesId, kind).speed : 0;
     let budget = speed * atMaxSpeedFactor(creature, profile) * this.tickSeconds;
     let turned = false;
+    let moved = false;
     while (budget > 0) {
       const target = path.points[path.next];
       if (!target) break;
@@ -1392,8 +1393,10 @@ export class Simulation {
         if (Math.abs(normalizeHeading(wanted - creature.heading)) > WALK_TURN_LIMIT) break;
       }
       if (target.regionId !== here.regionId && target.connectionId === undefined) {
-        // A bank jump (ADR 0020 §4) spans cells the creature can't stand on, so it is made whole,
-        // in one tick, and ends the tick: the creature is always on a walkable cell.
+        // A bank jump (ADR 0020 §4) may span cells the creature can't stand on, so it is made
+        // whole, in one tick of its own: it starts the tick, from where the walk ended the last
+        // one, and ends it, so the creature is always on a walkable cell.
+        if (moved) break;
         const from = here.regionId;
         creature.position = { regionId: target.regionId, x: target.x, z: target.z };
         this.#enteredRegion(creature, from, target.regionId, undefined);
@@ -1402,6 +1405,7 @@ export class Simulation {
       }
       const travel = Math.min(budget, distance);
       budget -= travel;
+      if (travel > 0) moved = true;
       const arrived = travel >= distance;
       const x = arrived ? target.x : here.x + (dx * travel) / distance;
       const z = arrived ? target.z : here.z + (dz * travel) / distance;
