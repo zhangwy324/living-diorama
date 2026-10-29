@@ -1,5 +1,6 @@
 import {
   error,
+  parseWorldEdit,
   parseWorldSave,
   type Diagnostic,
   type Result,
@@ -213,6 +214,8 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "save":
       case "restore":
       case "catch_up":
+      case "edit":
+      case "validate_edit":
         request(sim, ticks, command);
         break;
       case "shutdown":
@@ -327,6 +330,26 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         if (report.applied) ticks.restart();
         send({ type: "caught_up", ...requestId, report });
         if (ticks.paused) sendSnapshot(sim, true);
+        return;
+      }
+      case "edit": {
+        const parsed = parseWorldEdit(command.edit, "world edit");
+        const result = parsed.ok ? sim.applyEdit(parsed.value) : parsed;
+        if (!result.ok) {
+          diagnostics = [...result.diagnostics];
+          break;
+        }
+        send({ type: "edited", ...requestId, result });
+        const { scene, navigations } = describeContent(sim);
+        send({ type: "world_changed", scene, navigations });
+        // No tick runs while paused, so the paused world shows the edit this way.
+        if (ticks.paused) sendSnapshot(sim, true);
+        return;
+      }
+      case "validate_edit": {
+        const parsed = parseWorldEdit(command.edit, "world edit");
+        const check = parsed.ok ? sim.validateEdit(parsed.value) : parsed;
+        send({ type: "edit_checked", ...requestId, check });
         return;
       }
     }

@@ -791,8 +791,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 13, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(13);
+  it("is protocol version 14, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(14);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,
@@ -802,5 +802,69 @@ describe("saving and restoring in the host", () => {
     const messages = host.take();
     expect(messages.map((m) => m.type)).toEqual(["error", "snapshot"]);
     expect(messages[0]).toMatchObject({ diagnostics: [{ code: "protocol_mismatch" }] });
+  });
+});
+
+describe("world edits in the host", () => {
+  it("validates and applies an edit between ticks, while paused too, and sends what to draw", () => {
+    const host = startHost();
+    host.init();
+    host.advance(300);
+    host.send({ type: "pause" });
+    host.advance(100);
+    host.take();
+    const ops = [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }];
+    host.send({ type: "validate_edit", requestId: "v", edit: { ops } });
+    host.send({ type: "edit", requestId: "e", edit: { ops } });
+    // Nothing applies before the next tick boundary.
+    expect(host.take()).toEqual([]);
+    host.advance(100);
+    const [checked, edited, changed, snapshot, ...rest] = host.take();
+    expect(rest).toEqual([]);
+    expect(checked).toMatchObject({
+      type: "edit_checked",
+      requestId: "v",
+      check: { ok: true, footprints: [{ placementId: "prop-1", center: { x: 5, z: -5 } }] },
+    });
+    expect(edited).toMatchObject({
+      type: "edited",
+      requestId: "e",
+      result: {
+        ok: true,
+        edit: { ops: [{ op: "prop.add", id: "prop-1" }] },
+        inverse: { ops: [{ op: "prop.remove", id: "prop-1" }] },
+      },
+    });
+    if (changed?.type !== "world_changed") throw new Error("Expected world_changed");
+    expect(structuredClone(changed)).toEqual(changed);
+    expect(changed.scene.props.some((p) => p.id === "prop-1")).toBe(true);
+    expect(changed.navigations).toHaveLength(1);
+    expect(snapshot).toMatchObject({ type: "snapshot", snapshot: { tick: 3, paused: true } });
+    // The edit's event comes with the first tick after it.
+    host.send({ type: "resume" });
+    host.advance(300);
+    const events = host.snapshots().flatMap((m) => m.events);
+    expect(events).toContainEqual({ type: "world_edited", tick: 3, edit: expect.any(Object) });
+  });
+
+  it("rejects an edit that is malformed or doesn't fit, and answers a validation either way", () => {
+    const host = startHost();
+    host.init();
+    host.take();
+    host.send({ type: "edit", requestId: "a", edit: { ops: [] } });
+    host.send({ type: "edit", requestId: "b", edit: { ops: [{ op: "prop.remove", id: "nope" }] } });
+    host.send({ type: "validate_edit", requestId: "c", edit: "nonsense" });
+    host.advance(100);
+    const answers = host.take().filter((m) => m.type !== "snapshot");
+    expect(answers).toMatchObject([
+      { type: "rejected", requestId: "a", command: "edit" },
+      {
+        type: "rejected",
+        requestId: "b",
+        command: "edit",
+        diagnostics: [{ code: "unknown_placement", path: ["ops", 0, "id"] }],
+      },
+      { type: "edit_checked", requestId: "c", check: { ok: false } },
+    ]);
   });
 });

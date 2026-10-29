@@ -8,6 +8,9 @@ import {
   type Result,
   type SizeClass,
   type SpeciesDefinition,
+  type WorldEdit,
+  type WorldEditCheck,
+  type WorldEditResult,
   type WorldSave,
 } from "@living-diorama/content-schema";
 import {
@@ -53,8 +56,16 @@ import { Rng, type RngState } from "./rng";
 import { clonePlain } from "./plain";
 import { creaturePhaseSpans, planCatchUp, planGap, type CatchUpPlan } from "./catch-up";
 import { settleDay } from "./creature-day";
-import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport } from "./save";
+import {
+  checkSave,
+  forgetMissingPlacements,
+  placementExists,
+  type CatchUpFailure,
+  type CatchUpReport,
+  type RestoreReport,
+} from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
+import { planWorldEdit, type PlannedEdit } from "./world-edit";
 import {
   normalizeHeading,
   turnHeading,
@@ -196,12 +207,12 @@ export interface CatchUpOptions {
   minutes: number;
 }
 
-export interface SimulationOptions extends WorldStateOptions {
+export type SimulationOptions = WorldStateOptions & {
   /** Default 10. */
   tickRateHz?: number;
   /** Receives every decision, for dev tools. */
   onTrace?: (trace: DecisionTrace) => void;
-}
+};
 
 /** Load-time check that every registered action and behavior has code behind it. */
 function implementationDiagnostics(registries: Registries): Diagnostic[] {
@@ -239,7 +250,9 @@ export class Simulation {
   readonly #onTrace: ((trace: DecisionTrace) => void) | undefined;
   readonly #actions = new Map<string, ActionProvider>();
   readonly #behaviors = new Map<string, BehaviorProvider>();
-  readonly #connections: ReadonlyMap<string, ConnectionModel>;
+  /** The world model's connections by ID; replaced with the world. */
+  #connections: ReadonlyMap<string, ConnectionModel>;
+  /** Per species, its pathfinder in the world now; cleared when the world is replaced. */
   readonly #pathfinders = new Map<string, Pathfinder>();
   /** Per species and region kind. */
   readonly #locomotions = new Map<string, Locomotion>();
@@ -253,6 +266,8 @@ export class Simulation {
   /** Ticks between two perception scans of one creature. */
   readonly #perceptionTicks: number;
   #events: SimulationEvent[] = [];
+  /** Set while `step` runs, so an edit can't land in the middle of one (ADR 0021 §3). */
+  #stepping = false;
 
   private constructor(
     readonly state: WorldState,
@@ -426,6 +441,122 @@ export class Simulation {
       throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
     }
     this.state.minutes = wrapMinutes(minutes);
+  }
+
+  /**
+   * What `edit` would do, without doing it (ADR 0021 §10): whether it would be applied, the
+   * footprints of the placements it adds, moves or scales, the ways out of the water it would
+   * block, other warnings, and the creatures it would move. `edit` must have passed
+   * `parseWorldEdit`. Builds the edited world to find out, so it costs about as much as applying.
+   */
+  validateEdit(edit: WorldEdit): WorldEditCheck {
+    const planned = planWorldEdit(this.state, edit);
+    return planned.ok ? { ok: true, ...planned.value.outcome } : planned;
+  }
+
+  /**
+   * Applies a world edit (ADR 0021): all of its ops or, if any fails, none. `edit` must have
+   * passed `parseWorldEdit`. The world is rebuilt from the edited definition, as if it had just
+   * loaded, and swapped in; then every creature is reconciled with it (`#reconcile`) and
+   * `world_edited` is emitted, followed by an event for each creature moved. Returns the edit as
+   * applied, with every new placement's ID, its inverse and what it did. Must be called between
+   * steps: one called while a step runs, e.g. from a trace callback, is rejected
+   * (`edit_during_step`). Rejected edits change nothing.
+   */
+  applyEdit(edit: WorldEdit): WorldEditResult {
+    if (this.#stepping) {
+      return {
+        ok: false,
+        diagnostics: [
+          error(
+            "edit_during_step",
+            "A world edit can only be applied between ticks",
+            [],
+            "world edit",
+          ),
+        ],
+      };
+    }
+    const planned = planWorldEdit(this.state, edit);
+    if (!planned.ok) return planned;
+    const plan = planned.value;
+    this.state.replaceWorld(plan.derived);
+    this.state.nextPropId = plan.nextPropId;
+    this.#connections = new Map(this.state.model.connections.map((c) => [c.id, c]));
+    this.#pathfinders.clear();
+    this.#emit({ type: "world_edited", tick: this.tick, edit: plan.edit });
+    this.#reconcile(plan);
+    return { ok: true, edit: plan.edit, inverse: plan.inverse, ...plan.outcome };
+  }
+
+  /**
+   * Fits every creature, in creature order, to the world an edit just swapped in (ADR 0021
+   * §6–§8). A running action that targets a placement the edit moved, scaled or removed, whose
+   * state no longer checks against the world, or whose creature is moved, is interrupted
+   * (`world_edited`) through the usual `interrupted` path, so the creature decides afresh on its
+   * next step. A creature the edit covered is moved to where the plan found room, with
+   * `creature_relocated`. References to removed placements are pruned as a restore prunes them,
+   * and failed attempts to reach a placement the edit moved or scaled are forgotten, since they
+   * were about where it stood before; other back-offs are kept. Every action that carries on
+   * plans its route again (`ActionProvider.replan`) and is interrupted if it has none.
+   */
+  #reconcile(plan: PlannedEdit) {
+    const exists = placementExists(this.state.model);
+    const touched = (id: string | undefined) =>
+      id !== undefined && (plan.changed.has(id) || plan.removed.has(id));
+    for (const creature of this.state.creatures.values()) {
+      const profile = this.#profile(creature.speciesId);
+      const to = plan.relocations.get(creature.id);
+      const interrupt = (action: NonNullable<CreatureState["action"]>) => {
+        this.#interrupted(creature, profile, action, "world_edited");
+        this.#finish(creature, {
+          action: action.id,
+          outcome: "interrupted",
+          reason: "world_edited",
+        });
+      };
+      const running = creature.action;
+      if (running) {
+        const provider = this.#actions.get(running.id);
+        let hit = to !== undefined || touched(provider?.target?.(running.state));
+        if (!hit && provider?.checkState) {
+          try {
+            hit = !provider.checkState(running.state, exists);
+          } catch {
+            hit = true;
+          }
+        }
+        if (hit) interrupt(running);
+      }
+      if (to) {
+        const from = creature.position;
+        creature.position = { ...to };
+        this.#emit({
+          type: "creature_relocated",
+          tick: this.tick,
+          creatureId: creature.id,
+          from: { ...from },
+          to: { ...to },
+        });
+      }
+      if (plan.removed.size > 0) forgetMissingPlacements(creature, exists, this.#behaviors);
+      for (const known of Object.values(creature.knowledge.places)) {
+        for (const place of known) if (plan.changed.has(place.placementId)) delete place.failures;
+      }
+      const action = creature.action;
+      const replan = action && this.#actions.get(action.id)?.replan;
+      if (action && replan) {
+        let replanned: boolean;
+        try {
+          replanned = replan(action.state, this.#actionContext(creature, profile, action.id));
+        } catch {
+          replanned = false;
+        }
+        if (!replanned) interrupt(action);
+      }
+      this.#paths.delete(creature.id);
+      creature.progress = { x: creature.position.x, z: creature.position.z, stalledTicks: 0 };
+    }
   }
 
   /**
@@ -720,11 +851,16 @@ export class Simulation {
 
   /** Advances one tick. Returns the events emitted since the previous step, spawns included. */
   step(): SimulationEvent[] {
-    const phase = dayPhaseAt(this.state.minutes);
-    if (phase !== this.state.dayPhase) this.#dayPhaseChanged(this.state.dayPhase, phase);
-    for (const creature of this.state.creatures.values()) {
-      this.#settleDay(creature);
-      this.#stepCreature(creature);
+    this.#stepping = true;
+    try {
+      const phase = dayPhaseAt(this.state.minutes);
+      if (phase !== this.state.dayPhase) this.#dayPhaseChanged(this.state.dayPhase, phase);
+      for (const creature of this.state.creatures.values()) {
+        this.#settleDay(creature);
+        this.#stepCreature(creature);
+      }
+    } finally {
+      this.#stepping = false;
     }
     this.state.tick++;
     const events = this.#events;

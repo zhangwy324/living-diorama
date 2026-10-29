@@ -288,6 +288,15 @@ export function startSimulation(
         answer(message.requestId, { ok: true, value: report });
         break;
       }
+      case "edited":
+        answer(message.requestId, { ok: true, value: message.result });
+        break;
+      case "edit_checked":
+        answer(message.requestId, { ok: true, value: message.check });
+        break;
+      case "world_changed":
+        // Nothing sends edits yet; the in-strip editor (ADR 0021, PR 6) redraws props from it.
+        break;
       case "rejected":
         if (message.command === "restore") restoring = Math.max(0, restoring - 1);
         answer(message.requestId, { ok: false, diagnostics: message.diagnostics });

@@ -1,6 +1,6 @@
 import type { FoodAffordanceParams, RegionPosition } from "@living-diorama/content-schema";
 import type { Rng } from "../runtime/rng";
-import { pathFromRoute } from "./core-actions";
+import { pathFromRoute, replanPath } from "./core-actions";
 import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState } from "./contracts";
 import { gridCellAt, isBackedOff } from "./knowledge";
 import { hungerNeed } from "./needs";
@@ -187,6 +187,10 @@ export const eatAction: ActionProvider = {
   },
   target(state) {
     return (state as EatState).placementId;
+  },
+  replan(state, context) {
+    const eat = state as EatState;
+    return eat.arrived || replanPath(eat.path, context);
   },
   interrupted(state, context, reason) {
     const eat = state as EatState;

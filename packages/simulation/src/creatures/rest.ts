@@ -1,7 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
-import { pathFromRoute } from "./core-actions";
+import { pathFromRoute, replanPath } from "./core-actions";
 import type {
   ActionContext,
   ActionProvider,
@@ -553,6 +553,13 @@ export const sleepAction: ActionProvider = {
       }
     }
     return { status: "running", asleep: true, cue: "sleeping" };
+  },
+  target(state) {
+    return (state as SleepState).placementId ?? undefined;
+  },
+  replan(state, context) {
+    const sleep = state as SleepState;
+    return sleep.arrived || replanPath(sleep.path, context);
   },
   interrupted(state, context, reason) {
     const sleep = state as SleepState;

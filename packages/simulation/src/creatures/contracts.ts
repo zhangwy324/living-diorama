@@ -199,8 +199,9 @@ export interface ActionProvider extends ActionType {
   step(state: unknown, context: ActionContext): ActionStatus;
   /**
    * Called when the engine ends the action before `step` reported it finished: a challenger
-   * outranked it (`outranked`), the watchdog stopped it (`stuck`), or catch-up after a gap
-   * dropped it (`catch_up`, ADR 0019). For what an action must do when cut short, e.g. a sleeper
+   * outranked it (`outranked`), the watchdog stopped it (`stuck`), catch-up after a gap
+   * dropped it (`catch_up`, ADR 0019), or a world edit changed its target, moved its creature or
+   * left it no route (`world_edited`, ADR 0021 §8). For what an action must do when cut short, e.g. a sleeper
    * emitting `woke_up`, or an action releasing what it holds. On `catch_up` the tick is already
    * the present one, events emitted are discarded, as catch-up announces nothing, and a throw is
    * reported as an `interrupted_failed` catch-up failure. Not called
@@ -210,9 +211,19 @@ export interface ActionProvider extends ActionType {
   /**
    * The placement the action goes to or uses, read from its state, e.g. the food it eats. The
    * snapshot shows it with the cue of a need that the action's behavior acts on (`cueTarget`,
-   * issue #110). Must not change `state`.
+   * issue #110), and a world edit that moves, scales or removes it interrupts the action
+   * (`world_edited`, ADR 0021 §8). Must not change `state`.
    */
   target?(state: unknown): string | undefined;
+  /**
+   * For an action that walks a route kept in its state: the world was edited (ADR 0021 §6), so
+   * plan the route still to walk again, from where the creature stands, on the rebuilt
+   * navigation, and keep the new one in `state`. Return false if there is none; the engine then
+   * interrupts the action (`world_edited`). Not called for an action the edit already
+   * interrupted: one whose `target` the edit changed or whose creature it moved. An action
+   * without the hook carries on with its state as it is, so one that keeps a route must have it.
+   */
+  replan?(state: unknown, context: ActionContext): boolean;
   /**
    * For an action with state: whether `state`, from a save, is one `step` can carry on from
    * (ADR 0019 §7). False if it hasn't the shape `start` gives it, or names a placement for which
