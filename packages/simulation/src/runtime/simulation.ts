@@ -35,6 +35,7 @@ import {
   type CreatureObservation,
   type PathState,
   type PlaceQueries,
+  type SpotOptions,
   type PlaceView,
   type Proposal,
   type RunningAction,
@@ -705,12 +706,16 @@ export class Simulation {
 
   /**
    * A creature's spot at a placement, as its behaviors and actions would find it from where it
-   * stands (ADR 0018 §11); undefined for an unknown creature or placement, or a spot it can't
-   * reach. Read-only, for tools and tests.
+   * stands (ADR 0018 §11), with `options` as `spotAt` takes them (issue #158); undefined for an
+   * unknown creature or placement, or a spot it can't reach. Read-only, for tools and tests.
    */
-  spotFor(creatureId: string, placementId: string): RegionPosition | undefined {
+  spotFor(
+    creatureId: string,
+    placementId: string,
+    options?: SpotOptions,
+  ): RegionPosition | undefined {
     const creature = this.state.creatures.get(creatureId);
-    return creature && this.#placeQueries(creature).spotAt(placementId);
+    return creature && this.#placeQueries(creature).spotAt(placementId, options);
   }
 
   /** Advances one tick. Returns the events emitted since the previous step, spawns included. */

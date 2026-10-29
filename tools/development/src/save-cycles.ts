@@ -4,6 +4,7 @@ import {
   hungerNeed,
   phaseSpans,
   Rng,
+  SLEEPER_GAP,
   sleepCycle,
   tirednessNeed,
   type CreatureState,
@@ -113,8 +114,8 @@ const PER_CREATURE_EVENTS = new Set([
 /**
  * The world one step after a restore with catch-up (ADR 0018 §19, ADR 0019 §5), and that step's
  * `events`: the tick moved on by the capped gap, nothing announced (no phase change, no
- * per-creature events), every creature fed, asleep in its sleeping phase (at home if it has one),
- * awake otherwise, and rested if its sleeping phase ended during the gap. A creature resumed
+ * per-creature events), every creature fed, asleep in its sleeping phase (at home if it has one,
+ * at its spot there clear of the other sleepers, unless home is full: issue #158), awake otherwise, and rested if its sleeping phase ended during the gap. A creature resumed
  * asleep counts as asleep from that first step. `checkSleep` says which creatures sleep at night
  * (the sleep check's filter).
  */
@@ -159,8 +160,11 @@ export function catchUpProblems(
       problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at its ${phase}`);
     }
     if (sleeping && creature.home !== null) {
-      const spot = simulation.spotFor(who, creature.home);
-      if (!isDeepStrictEqual(spot, creature.position)) {
+      // Its spot clear of the others asleep, as catch-up chose it; none clear while home has a
+      // spot at all means home is full, and it sleeps elsewhere (issue #158).
+      const spot = simulation.spotFor(who, creature.home, { clearOfSleepers: SLEEPER_GAP });
+      const full = !spot && simulation.spotFor(who, creature.home) !== undefined;
+      if (!full && !isDeepStrictEqual(spot, creature.position)) {
         problems.push(`${who}: away from its home ${creature.home} in its sleeping phase`);
       }
     }

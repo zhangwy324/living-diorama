@@ -1,5 +1,5 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { minutesAfter, type Simulation } from "@living-diorama/simulation";
+import { minutesAfter, SLEEPER_GAP, type Simulation } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { catchUpProblems, firstDifference, planRestores, saveThroughText } from "./save-cycles";
 import { createSimulation, LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
@@ -117,6 +117,26 @@ describe("catchUpProblems", () => {
   it("passes a world caught up by the rules", { timeout: 30_000 }, () => {
     const { simulation, save, report, events } = caughtUp();
     expect(catchUpProblems(simulation, save, report, events, () => true)).toEqual([]);
+  });
+
+  it("expects a sleeper at its home's spot clear of the others asleep (issue #158)", () => {
+    const { simulation, save, report, events } = caughtUp();
+    const [creature, other] = simulation.state.creatures.values();
+    const home = creature!.home!;
+    const plain = simulation.spotFor(creature!.id, home)!;
+    // Another sleeper lies at its plain spot, so its spot there is the next clear one.
+    other!.asleep = true;
+    other!.position = { ...plain };
+    const clear = simulation.spotFor(creature!.id, home, { clearOfSleepers: SLEEPER_GAP })!;
+    expect(clear).not.toEqual(plain);
+    const problems = (at: typeof plain) => {
+      creature!.position = { ...at };
+      return catchUpProblems(simulation, save, report, events, (c) => c.id === creature!.id);
+    };
+    expect(problems(clear)).toEqual([]);
+    expect(problems(plain)).toEqual([
+      expect.stringContaining(`${creature!.id}: away from its home`),
+    ]);
   });
 
   it("finds a creature awake at night, away from home, unfed, and announced events", () => {
