@@ -123,23 +123,34 @@ describe("worldSaving startup", () => {
     expect(warn.mock.calls[0]?.[0]).toContain("save_world_mismatch");
   });
 
-  it("spawns the starting creatures when nothing is saved or the save can't be read", async () => {
+  it("spawns the starting creatures when nothing is saved", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
+    const fake = fakeWorld();
+    const saving = worldSaving(fake.world, {
+      store: recordingStore(null).store,
+      creatures: () => [],
+      every: manualTimer().every,
+    });
+    await open(saving, fake);
+    expect(fake.calls).toEqual(["spawn starting", "save"]);
+  });
+
+  it("starts fresh but never saves this session when the save can't be read", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const store of [
-      recordingStore(null).store,
-      { load: () => Promise.reject(new Error("disk gone")), save: () => Promise.resolve() },
-    ]) {
-      const fake = fakeWorld();
-      const saving = worldSaving(fake.world, {
-        store,
-        creatures: () => [],
-        every: manualTimer().every,
-      });
-      await open(saving, fake);
-      expect(fake.calls).toEqual(["spawn starting", "save"]);
-    }
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("disk gone"));
+    const fake = fakeWorld();
+    const timer = manualTimer();
+    const store: WorldStore = {
+      load: () => Promise.reject(new Error("world.json is locked")),
+      save: vi.fn(() => Promise.resolve()),
+    };
+    const saving = worldSaving(fake.world, { store, creatures: () => [], every: timer.every });
+    await saving.open();
+    await saving.save(); // as on quit
+    expect(fake.calls).toEqual(["spawn starting"]);
+    expect(store.save).not.toHaveBeenCalled();
+    expect(timer.running()).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("without saving"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("world.json is locked"));
   });
 
   it("neither loads nor saves without a store, as under a count override", async () => {
@@ -265,6 +276,31 @@ describe("worldSaving saves", () => {
     await fake.answerSave();
     await next;
     expect(written).toEqual(["save-3"]);
+  });
+
+  it("keeps saving after a save that throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fake, saving, written } = await opened();
+    vi.mocked(fake.world.save).mockRejectedValueOnce(new Error("worker gone"));
+    await saving.save();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("worker gone"));
+    const next = saving.save();
+    await fake.answerSave();
+    await next;
+    expect(written).toEqual(["save-2"]);
+  });
+
+  it("logs a creature the reset couldn't take out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fake, saving } = await opened();
+    vi.mocked(fake.world.despawn).mockResolvedValueOnce({
+      ok: false,
+      diagnostics: [{ severity: "error", code: "unknown_creature", message: "gone", path: [] }],
+    });
+    const resetting = saving.reset();
+    await fake.answerSave();
+    await resetting;
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("unknown_creature"));
   });
 
   it("resets the world from the dev hook: creatures out, starting ones in, then saved", async () => {

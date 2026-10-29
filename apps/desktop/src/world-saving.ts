@@ -32,13 +32,15 @@ export interface WorldSaving {
    * Restores the saved world, or spawns the starting creatures when there is no usable save
    * (ADR 0019 §3, §7), then saves it and starts saving every minute. Call once, after the library
    * has registered its species. Never rejects: whatever goes wrong is logged and the world starts
-   * fresh.
+   * fresh. If the store fails to load, nothing is saved this session, so a save that is there but
+   * unreadable for now is never overwritten.
    */
   open(): Promise<void>;
   /**
    * Saves the world after any save in flight, so an older save never lands after a newer one. A
    * save asked for while another waits to start shares it. Does nothing before `open` has
-   * finished, once stopped, or without a store. Never rejects: a failure is logged.
+   * finished, once stopped, without a store, or after the save could not be read at startup.
+   * Never rejects: a failure is logged.
    */
   save(): Promise<void>;
   /**
@@ -99,13 +101,18 @@ export function worldSaving(
 ): WorldSaving {
   let opened = false;
   let stopped = false;
+  /**
+   * Where saves go: the store, until a load fails. A save that can't be read may still be good
+   * (e.g. a file another program holds), so this session then never saves over it.
+   */
+  let target = store;
   let stopAutosave = () => {};
   /** The last save asked for; the next one starts after it. */
   let tail = Promise.resolve();
   /** A save asked for that hasn't started yet, which later requests share. */
   let waiting: Promise<void> | undefined;
 
-  const writeSave = async (target: WorldStore) => {
+  const writeSave = async (into: WorldStore) => {
     const saved = await world.save();
     if (!saved.ok) {
       console.warn(
@@ -114,31 +121,38 @@ export function worldSaving(
       return;
     }
     try {
-      await target.save(saved.value);
+      await into.save(saved.value);
     } catch (cause) {
       console.warn(`Could not save the world: ${describeError(cause)}`);
     }
   };
 
   const save = () => {
-    if (!opened || stopped || !store) return Promise.resolve();
+    const into = target;
+    if (!opened || stopped || !into) return Promise.resolve();
     if (waiting) return waiting;
-    const next = tail.then(() => {
-      waiting = undefined;
-      return writeSave(store);
-    });
+    // Never rejects, so one failed save can't stop the ones after it.
+    const next = tail
+      .then(() => {
+        waiting = undefined;
+        return writeSave(into);
+      })
+      .catch((cause: unknown) => console.warn(`Could not save the world: ${describeError(cause)}`));
     waiting = next;
     tail = next;
     return next;
   };
 
-  /** Restores the save in `target`; true if the world is now the saved one. */
-  const restore = async (target: WorldStore) => {
+  /** Restores the save in `from`; true if the world is now the saved one. */
+  const restore = async (from: WorldStore) => {
     let json;
     try {
-      json = await target.load();
+      json = await from.load();
     } catch (cause) {
-      console.warn(`Could not read the saved world, starting fresh: ${describeError(cause)}`);
+      target = undefined;
+      console.warn(
+        `Could not read the saved world, starting fresh without saving until the next launch: ${describeError(cause)}`,
+      );
       return false;
     }
     if (json === null) {
@@ -169,12 +183,24 @@ export function worldSaving(
       if (stopped) return;
       opened = true;
       await save();
-      if (!stopped && store) stopAutosave = every(AUTOSAVE_MS, () => void save());
+      if (!stopped && target) stopAutosave = every(AUTOSAVE_MS, () => void save());
     },
     save,
     async reset() {
       if (!opened) throw new Error("The world is still starting");
-      await Promise.all(creatures().map((creature) => world.despawn(creature.id)));
+      const despawned = await Promise.all(
+        creatures().map((creature) => world.despawn(creature.id)),
+      );
+      for (const result of despawned) {
+        if (!result.ok) {
+          console.warn(
+            [
+              "Reset could not take a creature out",
+              ...result.diagnostics.map(formatDiagnostic),
+            ].join("\n  "),
+          );
+        }
+      }
       await world.spawnStartingCreatures();
       await save();
     },

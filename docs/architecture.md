@@ -119,8 +119,8 @@ Rust stores, TypeScript checks ([ADR 0014](adr/0014-species-library.md)).
 
 Rust stores, TypeScript checks, as for the library ([ADR 0019](adr/0019-world-saving.md)).
 
-- **Rust** (`src-tauri/src/world.rs`) keeps the save as text in `world.json` in the data directory, with the save before it as `world.prev.json`. It writes atomically, checks only that the file is JSON, and falls back to the backup when `world.json` is missing or unreadable. `WorldStore` in `desktop-integration` reaches it, with an in-memory version for tests and the browser.
-- **TypeScript** (`world-saving.ts`) restores the save once the library has registered its species, and saves every minute, after a creature is added or taken out, and on quit. Saves run one after another, so an older one never lands after a newer one. The worker parses and validates the text; a save it rejects starts the world fresh, without trying the backup. With a creature-count override the world is neither loaded nor saved.
+- **Rust** (`src-tauri/src/world.rs`) keeps the save as text in `world.json` in the data directory, with the save before it as `world.prev.json`. It writes atomically, checks only that the file is JSON, and falls back to the backup when `world.json` is missing, too large, not UTF-8 or not JSON. A file that is there but can't be read (another program holds it, say) is an error instead. `WorldStore` in `desktop-integration` reaches it, with an in-memory version for tests and the browser.
+- **TypeScript** (`world-saving.ts`) restores the save once the library has registered its species, and saves every minute, after a creature is added or taken out, and on quit. Saves run one after another, so an older one never lands after a newer one. The worker parses and validates the text; a save it rejects starts the world fresh, without trying the backup. When loading fails, the world starts fresh and nothing is saved until the next launch, so a save that can't be read for now is never overwritten. With a creature-count override the world is neither loaded nor saved.
 
 ### Startup
 

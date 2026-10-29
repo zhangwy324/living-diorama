@@ -8,7 +8,9 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 export interface WorldStore {
   /**
    * The saved world's JSON text, or `null` when nothing is saved. The app's store falls back to
-   * the save before the last one when the last is missing or unreadable.
+   * the save before the last one when the last is missing or its contents are unusable (too
+   * large, not UTF-8, not JSON). It rejects when a save is there but can't be read, e.g. while
+   * another program holds it, so the caller can avoid saving over it.
    */
   load(): Promise<string | null>;
   /** Replaces the saved world, keeping the previous save as a backup. */
