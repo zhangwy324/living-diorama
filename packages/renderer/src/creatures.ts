@@ -1,8 +1,6 @@
 import {
-  ANCHOR_NAMES,
   SIZE_CLASSES,
   defaultAnchor,
-  type AnchorName,
   type Anchors,
   type BodyShape,
   type SizeClass,
@@ -32,12 +30,14 @@ import type { SceneLayer } from "./layers";
 import {
   locomotionMotion,
   locomotionTransform,
+  placePivots,
   restingLocomotion,
   restingMovement,
   trackMovement,
   type LocomotionBody,
   type LocomotionInput,
   type LocomotionMotion,
+  type LocomotionPivot,
   type Movement,
 } from "./locomotion";
 import type { AssetResolver } from "./props";
@@ -70,8 +70,7 @@ interface SpeciesLook extends LocomotionBody {
   body: Body;
   /** The species' placed anchors; the others sit where `defaultAnchor` puts them. */
   anchors: Anchors;
-  /** Each anchor on the body, in its metres: the pivots of its motion (ADR 0020 §10). */
-  pivots: Record<AnchorName, THREE.Vector3>;
+  pivots: Record<LocomotionPivot, THREE.Vector3>;
 }
 
 /** A frame's clocks, in seconds. */
@@ -117,18 +116,19 @@ function reachOf(body: Body): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
   };
 }
 
+const feetOnBody = new THREE.Vector3();
+const tailOnBody = new THREE.Vector3();
+
 /**
- * Puts each anchor of `look` on its current body: placed, or where `defaultAnchor` puts it. The
- * feet are where the body meets the ground, so they sit on it wherever along the body they are
- * placed.
+ * Puts the pivots of `look` on its current body (ADR 0020 §10), from its anchors: placed, or
+ * where `defaultAnchor` puts them.
  */
 function placeAnchors(look: SpeciesLook): void {
   const { drawing } = look.body;
-  for (const name of ANCHOR_NAMES) {
-    const anchor = look.anchors[name] ?? defaultAnchor(name, drawing.bounds);
-    drawing.toBody(anchor, look.pivots[name]);
-  }
-  look.pivots.feet.y = 0;
+  const { feet, tail } = look.anchors;
+  drawing.toBody(feet ?? defaultAnchor("feet", drawing.bounds), feetOnBody);
+  drawing.toBody(tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
+  placePivots(look, feetOnBody, tailOnBody);
 }
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -404,10 +404,7 @@ export class CreatureBodies {
       height,
       ...reachOf(block),
       anchors: species.body.anchors,
-      pivots: Object.fromEntries(ANCHOR_NAMES.map((name) => [name, new THREE.Vector3()])) as Record<
-        AnchorName,
-        THREE.Vector3
-      >,
+      pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
     };
     placeAnchors(look);
     this.#bodies.push(look.body);

@@ -353,26 +353,48 @@ describe("CreatureBodies", () => {
       expect(box(layer).max.y).toBeCloseTo(2 + 0.75 * 0.8);
     });
 
-    it("sways a swimmer about its tail anchor", async () => {
-      // The tail placed at the drawing's top-left corner, so it's easy to find on the body.
+    it("sways a swimmer about a point near its front, so its tail sweeps", async () => {
+      // The tail placed at the drawing's top-left corner: the line through the body runs along
+      // its top, and the pivot sits on it a quarter of the way back from the front.
       const swimmer = { template: "swimmer" as const, anchors: { tail: { x: 0, y: 0 } } };
       const { layer, bodies } = make(undefined, swimmer);
       await loaded(bodies);
-      const yaws: number[] = [];
+      const tails: number[] = [];
+      const heads: number[] = [];
       moving(120, { animation: "swim" }, bodies, (frame) => {
         const mesh = bodyOf(layer, "a");
-        // The rear top corner of the body: x = -0.2 m (half of 20 px at 0.02 m/px), y = 0.8 m.
-        const tail = new THREE.Vector3(-0.2, 0.8, 0).applyMatrix4(mesh.matrix);
         const x = (0.6 * frame) / 60;
-        // Facing +X, the tail stays 0.2 m behind the feet whichever way the body sways...
-        expect(tail.x).toBeCloseTo(x - 0.2, 6);
-        expect(tail.z).toBeCloseTo(0, 6);
-        // ...while the front swings from side to side.
-        const forward = new THREE.Vector3(1, 0, 0).transformDirection(mesh.matrix);
-        yaws.push(Math.atan2(-forward.z, forward.x));
+        // The body is 0.4 m long (20 px at 0.02 m/px): front at 0.2 m, pivot at 0.1 m, 0.8 m up.
+        const pivot = new THREE.Vector3(0.1, 0.8, 0).applyMatrix4(mesh.matrix);
+        // Facing +X, the pivot stays put whichever way the body sways...
+        expect(pivot.x).toBeCloseTo(x + 0.1, 6);
+        expect(pivot.z).toBeCloseTo(0, 6);
+        // ...while the tail sweeps from side to side, much further than the front.
+        tails.push(new THREE.Vector3(-0.2, 0.8, 0).applyMatrix4(mesh.matrix).z);
+        heads.push(new THREE.Vector3(0.2, 0.8, 0).applyMatrix4(mesh.matrix).z);
       });
-      expect(Math.min(...yaws)).toBeLessThan(-0.1);
-      expect(Math.max(...yaws)).toBeGreaterThan(0.1);
+      const sweep = (zs: number[]) => Math.max(...zs) - Math.min(...zs);
+      expect(sweep(tails)).toBeGreaterThan(0.08);
+      expect(sweep(tails)).toBeGreaterThan(2.5 * sweep(heads));
+    });
+
+    it("keeps a resting swimmer bobbing gently in the water, without swaying", async () => {
+      const { layer, bodies } = make(undefined, { template: "swimmer" });
+      await loaded(bodies);
+      const tops: number[] = [];
+      const forwards: number[] = [];
+      for (let frame = 0; frame <= 180; frame++) {
+        const time = frame / 60;
+        const pose = { ...creature("a", { x: 0, y: 0, z: 0 }, Math.PI / 2), animation: "swim" };
+        bodies.update([{ ...pose, submersion: 0.4 }], { time, realTime: time });
+        tops.push(box(layer).max.y);
+        forwards.push(new THREE.Vector3(1, 0, 0).transformDirection(bodyOf(layer, "a").matrix).z);
+      }
+      // 0.8 m tall, 40% under: the top at 0.48 m, give or take a 3% bob.
+      expect(Math.min(...tops)).toBeGreaterThan(0.48 - 0.03 * 0.8 - 1e-6);
+      expect(Math.max(...tops)).toBeLessThan(0.48 + 0.03 * 0.8 + 1e-6);
+      expect(Math.max(...tops) - Math.min(...tops)).toBeGreaterThan(0.03);
+      expect(Math.max(...forwards.map(Math.abs))).toBeLessThan(1e-9);
     });
   });
 });

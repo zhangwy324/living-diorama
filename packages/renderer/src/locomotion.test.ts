@@ -4,6 +4,7 @@ import {
   FULL_MOTION_SPEED,
   locomotionMotion,
   locomotionTransform,
+  placePivots,
   restingLocomotion,
   restingMovement,
   trackMovement,
@@ -41,14 +42,32 @@ const range = (motions: LocomotionMotion[], key: (typeof NUMBERS)[number]) => {
 };
 
 describe("locomotionMotion", () => {
-  it("draws no motion for an unknown profile, no profile, or a creature at rest", () => {
+  it("draws no motion for an unknown profile, no profile, or a walker or hopper at rest", () => {
+    // -0 and 0 are the same pose.
+    const plain = (m: LocomotionMotion) => ({
+      ...m,
+      ...Object.fromEntries(NUMBERS.map((k) => [k, m[k] + 0])),
+    });
     const rest = restingLocomotion();
     for (const profile of [undefined, "fly", "toString", "__proto__"]) {
-      expect(motion({ profile, travelled: 1.234 })).toEqual(rest);
+      expect(plain(motion({ profile, travelled: 1.234 }))).toEqual(rest);
     }
-    for (const profile of ["walk", "hop", "swim"]) {
-      expect(motion({ profile, speed: 0, travelled: 1.234, time: 3.3 })).toEqual(rest);
+    for (const profile of ["walk", "hop"]) {
+      expect(plain(motion({ profile, speed: 0, travelled: 1.234, time: 3.3 }))).toEqual(rest);
     }
+  });
+
+  it("keeps a resting swimmer bobbing gently, floating, but without the sway", () => {
+    const lifts: number[] = [];
+    for (let time = 0; time < 3; time += 0.05) {
+      const m = motion({ profile: "swim", speed: 0, travelled: 1.234, time });
+      expect(m).toMatchObject({ pitch: 0, scaleY: 1, scaleXZ: 1 });
+      expect(Math.abs(m.yaw)).toBe(0);
+      expect(Math.abs(m.roll)).toBe(0);
+      lifts.push(m.lift);
+    }
+    expect(Math.min(...lifts)).toBeLessThan(-0.025);
+    expect(Math.max(...lifts)).toBeGreaterThan(0.025);
   });
 
   it("moves more as the creature moves faster, in full from FULL_MOTION_SPEED", () => {
@@ -115,9 +134,9 @@ describe("locomotionMotion", () => {
     expect(peak / arc.length).toBeCloseTo(0.5, 1);
   });
 
-  it("swims with a sway about the tail and a gentle bob, without squashing", () => {
+  it("swims with a sway about its front and a gentle bob, without squashing", () => {
     const motions = sweep({ profile: "swim" });
-    expect(motions.every((m) => m.pivot === "tail")).toBe(true);
+    expect(motions.every((m) => m.pivot === "front")).toBe(true);
     const yaw = range(motions, "yaw");
     expect(yaw.min).toBeLessThan(-0.15);
     expect(yaw.max).toBeGreaterThan(0.15);
@@ -192,7 +211,7 @@ describe("locomotionTransform", () => {
     minX: -0.3,
     maxX: 0.5,
     halfDepth: 0.1,
-    pivots: { feet: new THREE.Vector3(feetX, 0, 0), tail: new THREE.Vector3(-0.3, 0.4, 0) },
+    pivots: { feet: new THREE.Vector3(feetX, 0, 0), front: new THREE.Vector3(0.3, 0.4, 0) },
   });
   const at = (motion: Partial<LocomotionMotion>) => ({ ...restingLocomotion(), ...motion });
   const matrix = new THREE.Matrix4();
@@ -200,7 +219,7 @@ describe("locomotionTransform", () => {
   it("turns and scales the body about its pivot", () => {
     for (const motion of [
       at({ pitch: 0.2, roll: -0.1, scaleY: 0.8, scaleXZ: 1.1 }),
-      at({ pivot: "tail", yaw: 0.3, roll: 0.05 }),
+      at({ pivot: "front", yaw: 0.3, roll: 0.05 }),
     ]) {
       const b = body(0.2);
       locomotionTransform(motion, b, matrix);
@@ -220,7 +239,7 @@ describe("locomotionTransform", () => {
     expect(locomotionTransform(at({ roll: 0.1, lift: 0.5 }), body(0), matrix)).toBeCloseTo(
       0.1 * Math.sin(0.1) + 0.4,
     );
-    expect(locomotionTransform(at({ pivot: "tail", pitch: 0.1 }), body(0), matrix)).toBe(0);
+    expect(locomotionTransform(at({ pivot: "front", pitch: 0.1 }), body(0), matrix)).toBe(0);
     // The lowest corner ends up on the ground, not below it or above it.
     const b = body(0.2);
     const motion = at({ pitch: 0.15, scaleXZ: 1.05 });
@@ -229,5 +248,22 @@ describe("locomotionTransform", () => {
       ...[b.minX, b.maxX].map((x) => new THREE.Vector3(x, 0, 0).applyMatrix4(matrix).y + lift),
     );
     expect(lowest).toBeCloseTo(0, 9);
+  });
+});
+
+describe("placePivots", () => {
+  it("puts the feet on the ground and the swim's pivot near the front, in line with the tail", () => {
+    const body: LocomotionBody = {
+      height: 0.8,
+      minX: -0.4,
+      maxX: 0.4,
+      halfDepth: 0.1,
+      pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+    };
+    placePivots(body, new THREE.Vector3(-0.1, 0.3, 0), new THREE.Vector3(-0.4, 0.5, 0));
+    expect(body.pivots.feet.toArray()).toEqual([-0.1, 0, 0]);
+    // The tail mirrored onto the front (0.4), a quarter of the way back towards the tail.
+    expect(body.pivots.front.x).toBeCloseTo(0.2);
+    expect(body.pivots.front.y).toBe(0.5);
   });
 });

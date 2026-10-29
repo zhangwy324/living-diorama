@@ -1,4 +1,4 @@
-import type { AnchorName, Vec3 } from "@living-diorama/content-schema";
+import type { Vec3 } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { SNAP_SECONDS } from "./cues";
 import { SNAP_DISTANCE } from "./interpolation";
@@ -81,9 +81,15 @@ export interface LocomotionMotion {
   scaleY: number;
   /** Horizontal scale, along the drawing and its depth. */
   scaleXZ: number;
-  /** The anchor the body turns and scales about (ADR 0020 §10). */
-  pivot: AnchorName;
+  /** The point the body turns and scales about (`LocomotionBody.pivots`). */
+  pivot: LocomotionPivot;
 }
+
+/**
+ * Where a body turns and scales: about its feet on land; in water about a point near its front,
+ * so its tail sweeps from side to side like a fish's. Both come from the anchors (ADR 0020 §10).
+ */
+export type LocomotionPivot = "feet" | "front";
 
 export const restingLocomotion = (): LocomotionMotion => ({
   lift: 0,
@@ -161,8 +167,9 @@ const hop: Profile = (input, w, out) => {
   out.scaleXZ = 1 - stretch * 0.5;
 };
 
-// The swim: the body sways from side to side about its tail and rocks a little with it, and bobs
-// gently on its own slower time. About the tail.
+// The swim: the body sways from side to side about a point near its front, so the tail sweeps
+// like a fish's, and rocks a little with it; the sway follows the speed. It bobs gently on its own
+// slower time whether it moves or not, floating.
 const SWIM_SWAY = { base: 0.4, perHeight: 0.8 };
 const SWIM_YAW = 0.18;
 const SWIM_ROLL = 0.05;
@@ -173,11 +180,11 @@ const swim: Profile = (input, w, out) => {
   const sways = input.travelled / cycle(SWIM_SWAY.base, SWIM_SWAY.perHeight, input.height);
   out.yaw = w * SWIM_YAW * Math.sin(TAU * sways);
   out.roll = -w * SWIM_ROLL * Math.cos(TAU * sways);
-  out.lift = w * SWIM_BOB * Math.sin(TAU * (input.time / SWIM_BOB_PERIOD + input.phase));
+  out.lift = SWIM_BOB * Math.sin(TAU * (input.time / SWIM_BOB_PERIOD + input.phase));
   out.pitch = 0;
   out.scaleY = 1;
   out.scaleXZ = 1;
-  out.pivot = "tail";
+  out.pivot = "front";
 };
 
 /** The profiles by name. A name not here draws no motion (ADR 0020 §8). */
@@ -185,7 +192,8 @@ const PROFILES: Readonly<Record<string, Profile>> = { walk, hop, swim };
 
 /**
  * The body's motion for its way of moving. Writes into `out` and returns it, so the frame loop
- * allocates nothing. At rest, or for an unknown profile, it is the resting motion.
+ * allocates nothing. For an unknown profile it is the resting motion; at rest a profile shows
+ * only what it does standing still, which for `swim` is its bob and for the others nothing.
  */
 export function locomotionMotion(input: LocomotionInput, out: LocomotionMotion): LocomotionMotion {
   const name = input.profile;
@@ -199,7 +207,8 @@ export function locomotionMotion(input: LocomotionInput, out: LocomotionMotion):
   out.scaleY = 1;
   out.scaleXZ = 1;
   out.pivot = "feet";
-  if (profile && weight > 0) profile(input, weight, out);
+  // Each profile scales its moving parts by the weight, so at rest they vanish.
+  profile?.(input, weight, out);
   return out;
 }
 
@@ -211,8 +220,23 @@ export interface LocomotionBody {
   maxX: number;
   /** From the middle plane to the front or back face. */
   halfDepth: number;
-  /** Each anchor on the body. The feet are where it meets the ground, so their y is 0. */
-  pivots: Readonly<Record<AnchorName, THREE.Vector3>>;
+  /** The pivots on the body, as `placePivots` puts them. */
+  pivots: Readonly<Record<LocomotionPivot, THREE.Vector3>>;
+}
+
+/** The swim's pivot sits this share of the way from the front back towards the tail. */
+const FRONT_PIVOT_INSET = 0.25;
+
+/**
+ * Puts the pivots of `body` (its `minX` and `maxX` set) from its feet and tail anchors, in its
+ * metres. The feet are where the body meets the ground, so wherever they are placed along it only
+ * their x is taken. The front pivot lies on the line from the tail through the body, a little
+ * behind the front: the tail mirrored onto the front, moved back by `FRONT_PIVOT_INSET`.
+ */
+export function placePivots(body: LocomotionBody, feet: THREE.Vector3, tail: THREE.Vector3): void {
+  body.pivots.feet.set(feet.x, 0, feet.z);
+  const front = body.minX + body.maxX - tail.x;
+  body.pivots.front.set(front + (tail.x - front) * FRONT_PIVOT_INSET, tail.y, tail.z);
 }
 
 const turn = new THREE.Quaternion();
