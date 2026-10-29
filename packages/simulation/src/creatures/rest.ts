@@ -13,6 +13,7 @@ import type {
   CreatureObservation,
   OpenGroundQueries,
   PathState,
+  SpotOptions,
 } from "./contracts";
 import { isBackedOff, type KnownPlace } from "./knowledge";
 import { tirednessNeed } from "./needs";
@@ -31,7 +32,8 @@ import {
 // begun, or, napping by day, until fully rested. Knowing no shelter, it first walks out a few
 // times, further each time, looking for one, then sleeps in the open, clear of other sleepers
 // (issue #122). It looks the same way once every shelter it knows has failed it again and again
-// (issue #171). Starting values, to tune.
+// (issue #171). Sleepers at one shelter lie apart, and a shelter with no room left is full
+// (issue #158). Starting values, to tune.
 
 const REST = "core:rest";
 const SLEEP = "core:sleep";
@@ -81,7 +83,7 @@ const SEARCH_DRAWS = 8;
  * afresh.
  */
 export const SEARCH_FORGET_SECONDS = 12 * 60 * 60;
-/** Clearance between the bodies of two creatures asleep in the open, in metres. */
+/** Clearance between the bodies of two creatures asleep, in the open or at a shelter, in metres. */
 export const SLEEPER_GAP = 0.3;
 /** How far from where it stands a creature looks for a clear place to lie down, in metres. */
 export const OPEN_SPOT_RADII: readonly number[] = [3, 6];
@@ -89,6 +91,11 @@ export const OPEN_SPOT_RADII: readonly number[] = [3, 6];
 const OPEN_SPOT_DRAWS = 12;
 /** How many times a creature about to lie down in the open moves away from a sleeper. */
 export const OPEN_SPOT_MOVES = 3;
+/**
+ * A spot at a shelter clear of other sleepers, as in the open (issue #158): a shelter with none
+ * left is full.
+ */
+const CLEAR: SpotOptions = { clearOfSleepers: SLEEPER_GAP };
 
 /** Where a day phase falls in a creature's day (ADR 0018 §13 and amendments, §5). */
 export interface SleepCycle {
@@ -192,7 +199,9 @@ function allFailing(observation: CreatureObservation, failing: ReadonlySet<strin
  * offers shelter and can be reached, also after the creature has forgotten seeing it. A shelter
  * backed off after failed trips is left out, home too (issue #161); a forgotten home carries no
  * failures. A failing shelter is chosen only if no other can be, and a failing home counts as
- * any other shelter (issue #171). Undefined if the creature can reach no shelter it knows.
+ * any other shelter (issue #171). A full shelter, with no spot clear of other sleepers, is left
+ * out, home too, without changing home (issue #158). Undefined if the creature can reach no
+ * shelter it knows.
  */
 export function chooseShelter(
   observation: CreatureObservation,
@@ -200,9 +209,14 @@ export function chooseShelter(
   failing: ReadonlySet<string> = failingShelters(observation),
 ): PlaceChoice | undefined {
   const { home, world } = observation;
-  let routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id) || failing.has(id));
+  let routed = routeNearest(
+    observation,
+    SHELTER,
+    (id) => backedOff.has(id) || failing.has(id),
+    CLEAR,
+  );
   if (routed.length === 0 && failing.size > 0) {
-    routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id));
+    routed = routeNearest(observation, SHELTER, (id) => backedOff.has(id), CLEAR);
   }
   const nearest = routed[0];
   if (home === null || backedOff.has(home) || failing.has(home)) return nearest;
@@ -210,7 +224,8 @@ export function chooseShelter(
   let length = routed.find((c) => c.placementId === home)?.length;
   if (length === undefined) {
     const place = world.place(home);
-    const spot = place && Object.hasOwn(place.affordances, SHELTER) && world.spotAt(place.id);
+    const spot =
+      place && Object.hasOwn(place.affordances, SHELTER) && world.spotAt(place.id, CLEAR);
     length = spot ? world.routeLength(spot) : undefined;
   }
   if (length === undefined) return nearest;
@@ -355,7 +370,8 @@ export const restBehavior: BehaviorProvider = {
    * the nearest shelter it knows, else in the open: where it stands, or close by if a creature
    * placed before it sleeps too close (issue #122). Not within the release grace. Back-off after
    * failed shelter trips doesn't count here (issue #161): catch-up places the creature, it doesn't
-   * walk.
+   * walk. At a shelter it lies at a spot clear of the creatures placed before it, and a full
+   * shelter counts as none, home too (issue #158).
    */
   catchUp(observation, gap, rng) {
     const { creature, dayPhase, home, needs, traits, world } = observation;
@@ -365,11 +381,20 @@ export const restBehavior: BehaviorProvider = {
     const result: CatchUpResult = { needs: { [TIREDNESS]: tiredness } };
     if (!sleepCycle(dayPhase, nocturnal).sleeping || inReleaseGrace(observation)) return result;
     const homePlace = home === null ? undefined : world.place(home);
-    const atHome =
-      homePlace && Object.hasOwn(homePlace.affordances, SHELTER) && world.spotAt(homePlace.id);
-    const shelter = atHome ? home : chooseNearestByRoute(observation, SHELTER)?.placementId;
-    if (shelter) {
-      result.start = { action: SLEEP, params: { placementId: shelter, asleep: true }, at: shelter };
+    const homeSpot =
+      homePlace && Object.hasOwn(homePlace.affordances, SHELTER)
+        ? world.spotAt(homePlace.id, CLEAR)
+        : undefined;
+    const shelter = homeSpot
+      ? home
+      : chooseNearestByRoute(observation, SHELTER, undefined, CLEAR)?.placementId;
+    const shelterSpot = homeSpot ?? (shelter ? world.spotAt(shelter, CLEAR) : undefined);
+    if (shelter && shelterSpot) {
+      result.start = {
+        action: SLEEP,
+        params: { placementId: shelter, asleep: true },
+        at: { ...shelterSpot },
+      };
       return result;
     }
     // Crowded everywhere it looked, it lies down where it stands after all.
@@ -381,7 +406,10 @@ export const restBehavior: BehaviorProvider = {
 };
 
 interface SleepState {
-  /** The shelter it sleeps beside, or null to sleep where it stands. */
+  /**
+   * The shelter it sleeps beside, or null to sleep in the open: where it stands, or near a shelter
+   * it found full (issue #158).
+   */
   placementId: string | null;
   /**
    * The heading it lies down at, drawn from its own stream at the start: it settles beside the
@@ -415,10 +443,12 @@ const SLEEP_PARAMS = "{ placementId?, newHome? }";
  * without one, stays where it is, unless another creature sleeps too close there: it then walks to
  * a clear point close by, up to `OPEN_SPOT_MOVES` times, checked until it lies down; turns in
  * place to a resting heading drawn from its own stream (any way, not towards the shelter); then
- * sleeps there. Checked every tick: a night's sleep ends
- * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
- * reaches 0. Emits `fell_asleep` on lying down and `woke_up` on waking, also when interrupted. The
- * first shelter a creature sleeps at becomes its home, and so does one started with
+ * sleeps there. At a shelter its spot is clear of other sleepers, checked at the start and every
+ * tick until it lies down; at a full shelter it sleeps in the open near its spot there instead
+ * (issue #158). Checked every tick: a night's sleep ends once tiredness is below 0.1 and the
+ * creature's waking phase has begun, a nap once tiredness reaches 0. Emits `fell_asleep` on lying
+ * down and `woke_up` on waking, also when interrupted. The first shelter a creature sleeps at
+ * becomes its home, and so does one started with
  * `params.newHome` true, as `core:rest` does once home keeps failing (issue #171). Records in the
  * creature's knowledge whether it reached its spot at a shelter: no spot or route there, stuck on
  * the way, or arrived (issue #161, as `core:eat` does). With `params.asleep` true it starts
@@ -455,7 +485,11 @@ export const sleepAction: ActionProvider = {
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
       return { ok: false, reason: "not_shelter", detail: { placementId } };
     }
-    const spot = context.spotAt(placementId);
+    // A spot clear of other sleepers; with none, the shelter is full and it sleeps in the open
+    // near its own spot there, recording nothing (issue #158).
+    const clear = context.spotAt(placementId, CLEAR);
+    const spot = clear ?? context.spotAt(placementId);
+    const full = !clear && spot !== undefined;
     const route = spot && context.planRoute(spot);
     if (!route?.ok) {
       context.noteReach(SHELTER, placementId, "no_route");
@@ -463,20 +497,25 @@ export const sleepAction: ActionProvider = {
     }
     const path = pathFromRoute(route.route);
     const state: SleepState = {
-      placementId,
+      placementId: full ? null : placementId,
       heading: restingHeading(context),
       path,
       arrived: path.points.length === 0,
       asleep: false,
       moves: 0,
       nap: waking,
-      newHome,
+      newHome: newHome && !full,
     };
-    if (state.arrived) context.noteReach(SHELTER, placementId, "reached");
-    return { ok: true, state, detail: { placementId, length: route.route.length } };
+    if (state.arrived && !full) context.noteReach(SHELTER, placementId, "reached");
+    return {
+      ok: true,
+      state,
+      detail: { placementId, length: route.route.length, ...(full && { full }) },
+    };
   },
   step(state, context) {
     const sleep = state as SleepState;
+    if (!sleep.asleep && sleep.placementId !== null) keepClear(sleep, sleep.placementId, context);
     if (!sleep.arrived) {
       sleep.arrived = context.walk(sleep.path) === "arrived";
       if (sleep.arrived && sleep.placementId !== null) {
@@ -553,6 +592,29 @@ function movedAway(sleep: SleepState, context: ActionContext): boolean {
 }
 
 /**
+ * At a shelter, every tick until it lies down: if another sleeper now lies too close to the spot
+ * it walks to or stands at, it sets off for the next spot there clear of sleepers. With none it can
+ * get to, the shelter is full: it sleeps in the open instead, walking on to the spot it had and
+ * moving away from the sleeper there as `movedAway` does, and records nothing, neither a failure
+ * nor a new home (issue #158).
+ */
+function keepClear(sleep: SleepState, placementId: string, context: ActionContext): void {
+  const target = (!sleep.arrived && sleep.path.points.at(-1)) || context.position;
+  if (!context.sleeperNear(target, SLEEPER_GAP)) return;
+  const spot = context.spotAt(placementId, CLEAR);
+  const route = spot && context.planRoute(spot);
+  if (!route?.ok) {
+    sleep.placementId = null;
+    sleep.newHome = false;
+    return;
+  }
+  const wasArrived = sleep.arrived;
+  sleep.path = pathFromRoute(route.route);
+  sleep.arrived = sleep.path.points.length === 0;
+  if (sleep.arrived && !wasArrived) context.noteReach(SHELTER, placementId, "reached");
+}
+
+/**
  * Sleep already under way, for catch-up only (ADR 0018 §19; `not_catching_up` otherwise). At a
  * shelter `placementId`, the creature must already stand at its spot there, where the engine
  * placed it (`not_at_spot` otherwise); without one it sleeps where it stands. It is asleep from
@@ -566,8 +628,9 @@ function startAsleep(placementId: unknown, waking: boolean, context: ActionConte
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
       return { ok: false, reason: "not_shelter", detail: { placementId } };
     }
-    // Only where the creature already stands at its spot: catch-up puts it there first.
-    const spot = context.spotAt(place.id);
+    // Only where the creature already stands at its spot, clear of the creatures put to bed before
+    // it: catch-up puts it there first (issue #158).
+    const spot = context.spotAt(place.id, CLEAR);
     const here = context.position;
     const there =
       spot !== undefined &&

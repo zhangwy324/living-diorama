@@ -9,6 +9,7 @@ import {
   OPEN_SPOT_RADII,
   phaseSpans,
   planCatchUp,
+  rememberPlace,
   restBehavior,
   Rng,
   SHORT_GAP_MS,
@@ -35,6 +36,7 @@ const WORLD = "hollow:woodland-hollow";
 const MOSSLING = "hollow:mossling";
 const HUNGER = hungerNeed.id;
 const TIREDNESS = tirednessNeed.id;
+const SHELTER = "core:shelter";
 const SAVED_AT = Date.UTC(2026, 9, 28, 20, 40);
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -455,6 +457,57 @@ describe("catch-up after a long gap", () => {
         expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThanOrEqual(
           2 * OPEN_SPOT_RADII.at(-1)! + 1,
         );
+      }
+    }
+    expect(bed().creatures).toEqual(creatures);
+  });
+
+  it("puts creatures sharing a home to bed apart, those it can't fit in the open (issue #158)", () => {
+    const COUNT = 8;
+    const simulation = create(7, at(20, 40));
+    for (let k = 0; k < COUNT; k++) expect(simulation.spawn(MOSSLING).ok).toBe(true);
+    const [first] = simulation.state.creatures.values();
+    const { x, z } = first!.position;
+    const home = [...simulation.state.model.propsByAffordance.get(SHELTER)!].sort(
+      (a, b) =>
+        Math.hypot(a.transform.position.x - x, a.transform.position.z - z) -
+        Math.hypot(b.transform.position.x - x, b.transform.position.z - z),
+    )[0]!.id;
+    for (const creature of simulation.state.creatures.values()) {
+      creature.home = home;
+      creature.knowledge.places[SHELTER] = [];
+      rememberPlace(creature.knowledge, SHELTER, home, 0, 4);
+    }
+    const save = throughDisk(simulation.save(SAVED_AT));
+    const bed = () => {
+      const { simulation, report } = restored(structuredClone(save), {
+        nowMs: SAVED_AT + 3 * HOUR,
+        minutes: at(23, 40),
+      });
+      expect(report.catchUp.failures).toEqual([]);
+      const creatures = simulation.save(SAVED_AT).creatures;
+      const radius = simulation.state.pathfinderFor(MOSSLING)!.navigation.profile.radius;
+      return { creatures, radius };
+    };
+    const { creatures, radius } = bed();
+    const there = creatures.filter(
+      (c) => (c.action?.state as { placementId?: string | null }).placementId === home,
+    );
+    expect(there.length).toBeGreaterThanOrEqual(2);
+    expect(there.length).toBeLessThan(COUNT);
+    for (const creature of creatures) {
+      expect(creature.asleep).toBe(true);
+      expect(creature.action).toMatchObject({
+        id: "core:sleep",
+        state: { placementId: there.includes(creature) ? home : null, asleep: true },
+      });
+      // A full home stays home.
+      expect(creature.home).toBe(home);
+    }
+    const spots = there.map((c) => c.position);
+    for (const [i, a] of spots.entries()) {
+      for (const b of spots.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThanOrEqual(2 * radius + SLEEPER_GAP);
       }
     }
     expect(bed().creatures).toEqual(creatures);

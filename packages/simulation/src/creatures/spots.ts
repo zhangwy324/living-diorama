@@ -25,6 +25,8 @@ export interface SpotQuery {
   masks: ReadonlyMap<string, RegionMask>;
   /** Walkable cells the creature can reach, per region, in cell order. */
   reachable: ReachableCells;
+  /** Whether a spot is free to take; one that isn't is passed over. All are by default. */
+  clear?: (position: RegionPosition) => boolean;
 }
 
 interface Candidate {
@@ -59,12 +61,13 @@ function holds(cells: readonly number[], cell: number): boolean {
  * reachable walkable cell within `SPOT_SEARCH_RADIUS` of that point. If neither exists, the same
  * at the angle a step of 2π / `SPOT_ANGLES` on, and so on round the place. Only cells whose
  * surface is within `SPOT_MAX_RISE` of the place's base height count, and where regions overlap
- * (a bridge deck over a path) the one whose surface is nearest that height wins.
+ * (a bridge deck over a path) the one whose surface is nearest that height wins. A spot that
+ * isn't `clear` is passed over for the next angle (issue #158).
  */
 export function findSpot(query: SpotQuery): RegionPosition | undefined {
   for (let k = 0; k < SPOT_ANGLES; k++) {
     const spot = spotAt(query, query.angle + (2 * Math.PI * k) / SPOT_ANGLES);
-    if (spot) return spot;
+    if (spot && (!query.clear || query.clear(spot))) return spot;
   }
   return undefined;
 }

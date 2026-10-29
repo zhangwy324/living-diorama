@@ -1348,20 +1348,27 @@ export class Simulation {
     return { id: prop.id, x, y, z, blockRadius: prop.blockRadius, affordances: prop.affordances };
   }
 
-  /** Place lookups and the creature's own spot at a place (ADR 0018 §11). */
+  /**
+   * Place lookups and the creature's own spot at a place (ADR 0018 §11), clear of sleepers if
+   * asked (issue #158).
+   */
   #placeQueries(creature: CreatureState): PlaceQueries {
     return {
       place: (placementId) => this.#placeView(placementId),
-      spotAt: (placementId) => {
+      spotAt: (placementId, options) => {
         const place = this.#placeView(placementId);
         if (!place) return undefined;
         const pathfinder = this.#pathfinder(creature);
+        const gap = options?.clearOfSleepers;
         return findSpot({
           place,
           radius: pathfinder.navigation.profile.radius,
           angle: creature.spotAngle,
           masks: pathfinder.navigation.masks,
           reachable: pathfinder.reachableCells(creature.position),
+          ...(gap !== undefined && {
+            clear: (spot) => !this.#sleeperNear(creature, spot, gap),
+          }),
         });
       },
     };
