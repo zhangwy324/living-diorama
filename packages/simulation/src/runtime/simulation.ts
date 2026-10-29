@@ -585,7 +585,7 @@ export class Simulation {
     }
     let started: ActionStart;
     try {
-      started = this.#start(creature, profile, behavior, { action, params, utility: 0 });
+      started = this.#start(creature, profile, behavior, { action, params, utility: 0 }, true);
     } catch {
       delete creature.action;
       return fail("start_failed");
@@ -986,7 +986,13 @@ export class Simulation {
   }
 
   /** Starts the chosen proposal's action, if its behavior declared it and it can start. */
-  #start(creature: CreatureState, profile: SpeciesProfile, behavior: string, proposal: Proposal) {
+  #start(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    behavior: string,
+    proposal: Proposal,
+    catchingUp = false,
+  ) {
     const provider = this.#actions.get(proposal.action);
     // A behavior may only start actions it declared as dependencies.
     const declared = profile.behaviors
@@ -996,7 +1002,10 @@ export class Simulation {
       ? { ok: false, reason: "unknown_action" }
       : !declared
         ? { ok: false, reason: "undeclared_action" }
-        : provider.start(proposal.params, this.#actionContext(creature, profile));
+        : provider.start(
+            proposal.params,
+            this.#actionContext(creature, profile, undefined, catchingUp),
+          );
     if (start.ok) {
       creature.action = {
         id: proposal.action,
@@ -1106,14 +1115,19 @@ export class Simulation {
     return pathfinder;
   }
 
-  /** `activity` records whether the action walked this tick, for the watchdog and cues. */
+  /**
+   * `activity` records whether the action walked this tick, for the watchdog and cues.
+   * `catchingUp`: the action is started by catch-up after a gap.
+   */
   #actionContext(
     creature: CreatureState,
     profile: SpeciesProfile,
     activity?: { walked: boolean },
+    catchingUp = false,
   ): ActionContext {
     return {
       ...this.#placeQueries(creature),
+      catchingUp,
       tick: this.tick,
       tickSeconds: this.tickSeconds,
       get position() {

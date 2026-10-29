@@ -63,6 +63,11 @@ export interface PlaceQueries {
 
 /** What an action may do to the world. The engine applies every change itself. */
 export interface ActionContext extends PlaceQueries {
+  /**
+   * True only while catch-up starts an action already under way after a gap (ADR 0018 §19), e.g.
+   * sleep that begins asleep; false on every ordinary start and step.
+   */
+  readonly catchingUp: boolean;
   readonly tick: number;
   readonly tickSeconds: number;
   readonly position: Readonly<RegionPosition>;

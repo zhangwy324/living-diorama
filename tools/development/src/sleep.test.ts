@@ -220,6 +220,7 @@ function sleepContext({ phase = "night" as DayPhase, tiredness = 0.5, nocturnal 
   const homes: string[] = [];
   let walked = 0;
   const context = {
+    catchingUp: false,
     tick: 0,
     tickSeconds: 0.1,
     position: { regionId: "r", x: 0, z: 0 },

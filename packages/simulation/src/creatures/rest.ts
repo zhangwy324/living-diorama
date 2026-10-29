@@ -302,21 +302,21 @@ export const sleepAction: ActionProvider = {
 };
 
 /**
- * Sleep already under way, for catch-up (ADR 0018 §19): the creature stands at its spot by the
- * shelter `placementId`, placed there by the engine, and fails with `not_at_spot` otherwise; or it
- * sleeps where it stands without one. It is
- * asleep from the start, so it emits no `fell_asleep`; a shelter becomes its home if it has none,
- * as on falling asleep there.
+ * Sleep already under way, for catch-up only (ADR 0018 §19; `not_catching_up` otherwise). At a
+ * shelter `placementId`, the creature must already stand at its spot there, where the engine
+ * placed it (`not_at_spot` otherwise); without one it sleeps where it stands. It is asleep from
+ * the start, so it emits no `fell_asleep`; a shelter becomes its home if it has none, as on
+ * falling asleep there.
  */
 function startAsleep(placementId: unknown, waking: boolean, context: ActionContext): ActionStart {
+  if (!context.catchingUp) return { ok: false, reason: "not_catching_up" };
   let { x, z } = context.position;
   if (placementId !== undefined) {
     const place = typeof placementId === "string" ? context.place(placementId) : undefined;
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
       return { ok: false, reason: "not_shelter", detail: { placementId } };
     }
-    // Only where the creature already stands at its spot (catch-up puts it there first), so a
-    // proposal can't use this to move a creature into bed.
+    // Only where the creature already stands at its spot: catch-up puts it there first.
     const spot = context.spotAt(place.id);
     const here = context.position;
     const there =

@@ -408,6 +408,7 @@ describe("core:rest catching up", () => {
 
   it("can't start sleep already asleep away from the shelter's spot", () => {
     const context = {
+      catchingUp: true,
       dayPhase: "night",
       traits: {},
       position: { regionId: "r", x: 10, z: 0 },
@@ -424,6 +425,39 @@ describe("core:rest catching up", () => {
     expect(sleepAction.start({ placementId: "tree", asleep: true }, context)).toMatchObject({
       ok: false,
       reason: "not_at_spot",
+    });
+  });
+
+  it("can't start sleep already asleep outside catch-up, even where it stands", () => {
+    const context = {
+      catchingUp: false,
+      dayPhase: "night",
+      traits: {},
+      position: { regionId: "r", x: 0, z: 0 },
+    } as unknown as ActionContext;
+    expect(sleepAction.start({ asleep: true }, context)).toMatchObject({
+      ok: false,
+      reason: "not_catching_up",
+    });
+  });
+
+  it("rejects a normal proposal to sleep already asleep", () => {
+    const simulation = create(4, at(12));
+    expect(simulation.spawn(MOSSLING).ok).toBe(true);
+    const spy = vi
+      .spyOn(restBehavior, "evaluate")
+      .mockReturnValue({ action: "core:sleep", params: { asleep: true }, utility: 5 });
+    try {
+      simulation.step();
+    } finally {
+      spy.mockRestore();
+    }
+    const [creature] = simulation.save(0).creatures;
+    expect(creature!.action?.id).not.toBe("core:sleep");
+    expect(creature!.lastResult).toEqual({
+      action: "core:sleep",
+      outcome: "failed",
+      reason: "not_catching_up",
     });
   });
 });
