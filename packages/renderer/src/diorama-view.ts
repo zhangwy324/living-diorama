@@ -63,7 +63,10 @@ export interface DioramaView {
   setCameraState(state: CameraState | undefined): void;
   /** Clips a layer's materials with these planes; an empty list turns clipping off (ADR 0007 §4). */
   setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
-  /** Resolves once every prop model is placed (or replaced by its fallback). */
+  /**
+   * Resolves once the world's first props are placed, each model loaded or drawn as a fallback
+   * block (at the latest after the load timeout), or once a `replaceProps` call overtook them.
+   */
   readonly ready: Promise<void>;
   /**
    * Replaces the props, and the walkability and region graph of the debug overlays, from the
@@ -84,6 +87,12 @@ export interface DioramaView {
    * call on every pointer move. The model is a prop model's asset ref, as in `SceneProp`.
    */
   previewProp(preview: PropPreview | undefined): void;
+  /**
+   * Hides the placement with this ID, or none, e.g. the original while its preview is dragged;
+   * the one hidden before shows again. It stays hidden through `replaceProps` while it exists,
+   * and is never picked.
+   */
+  hideProp(placementId: string | undefined): void;
   dispose(): void;
 }
 
@@ -174,7 +183,7 @@ export interface DioramaScene {
   props: PropSet;
   /** Prop picking, selection and preview for the editor. */
   editing: PropEditing;
-  /** Resolves once every prop model is placed. */
+  /** As `DioramaView.ready`. */
   ready: Promise<void>;
   /**
    * Replaces the props, walkability and region graph from a rebuilt world, keeping terrain,
@@ -214,10 +223,11 @@ export function buildDioramaScene(
   layers.structures.add(structures);
   const resolveAsset = options.resolveAsset ?? (() => undefined);
   const propIcons = new PropIcons();
-  const props = new PropSet(layers.props, resolveAsset, options.loadModel ?? loadGltf, (models) =>
-    propIcons.place(models),
-  );
-  const editing = new PropEditing(props, terrain, [terrain, structures], world);
+  const props = new PropSet(layers.props, resolveAsset, {
+    load: options.loadModel ?? loadGltf,
+    placed: (models) => propIcons.place(models),
+  });
+  const editing = new PropEditing(props, { scene, occluders: [structures], layers }, world);
   const creatures = new CreatureBodies(layers.creatures, {
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
@@ -479,6 +489,10 @@ export function createDioramaView(
     },
     selectProp(placementId) {
       editing.select(placementId);
+      moved = true;
+    },
+    hideProp(placementId) {
+      props.hide(placementId);
       moved = true;
     },
     previewProp(preview) {

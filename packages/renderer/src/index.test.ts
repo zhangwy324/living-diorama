@@ -238,6 +238,50 @@ describe("replaceProps", () => {
   });
 });
 
+describe("replaceProps overtaken", () => {
+  it("leaves the overlays and the selection as the newer call placed them", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let arrive: (model: THREE.Object3D) => void = () => undefined;
+    const built = buildDioramaScene(scene, {
+      resolveAsset: (ref) => ({ kind: "model", url: `${ref}.glb` }),
+      loadModel: (url) =>
+        url === "test:slow.glb"
+          ? new Promise((resolve) => (arrive = resolve))
+          : Promise.resolve(pine()),
+    });
+    await built.ready;
+    built.editing.select("b");
+    const navigation = (): NavigationOverlay => ({
+      profileKey: "test",
+      regions: [{ regionId: "r", anchor: { x: 0, y: 1, z: 0 }, cells: [] }],
+      portals: [],
+    });
+    // The older call waits on a slow model; the newer one lands first.
+    const older = built.replaceProps(
+      { ...scene, props: [prop("b", "test:slow", -1)] },
+      navigation(),
+    );
+    const newer = built.replaceProps(
+      { ...scene, props: [prop("b", "test:pine", 1.5)] },
+      navigation(),
+    );
+    expect(await newer).toBe(true);
+    const graph = built.overlays.group.getObjectByName("region-graph");
+    const freed = vi.fn();
+    graph!.traverse((o) => {
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments)
+        o.geometry.addEventListener("dispose", freed);
+    });
+    arrive(pine());
+    expect(await older).toBe(false);
+    // The newer call's overlays stay, unfreed, and the ring stays on its prop.
+    expect(built.overlays.group.getObjectByName("region-graph")).toBe(graph);
+    expect(built.overlays.group.getObjectsByProperty("name", "region-graph")).toHaveLength(1);
+    expect(freed).not.toHaveBeenCalled();
+    expect(built.world.getObjectByName("prop-selection")!.position.x).toBeCloseTo(1.5);
+  });
+});
+
 describe("railingMeshes", () => {
   it("puts posts at most 1.2 m apart, shared where edges meet, and two rails per edge", () => {
     const corner = { x: 0, y: 1, z: 0 };
