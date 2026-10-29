@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { templatePlan } from "../body-plan";
+import { defaultPlan, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
 import {
   afterDrawingEdit,
   anchorNote,
   chosenMode,
   drawingPoint,
   placeAnchor,
+  placingAnchor,
   planHeading,
   previewModes,
   resetAnchors,
 } from "./body-plan-view";
+
+const LAND: LocomotionChoice = { land: true, gait: "walk", swim: false };
+const SWIM: LocomotionChoice = { land: false, gait: "walk", swim: true };
+const BOTH: LocomotionChoice = { land: true, gait: "walk", swim: true };
+const moving = (locomotion: LocomotionChoice): BodyPlanChoice => ({ locomotion, anchors: {} });
 
 describe("the preview's ways of moving", () => {
   it("plays the land gait's profile on land and the swim lowered into the water", () => {
@@ -42,16 +48,26 @@ describe("placing anchors", () => {
     expect(drawingPoint(0, 1000, box)).toEqual({ x: 0, y: 256 });
   });
 
-  it("places only the template's anchors, and resets to the defaults", () => {
-    const walker = placeAnchor(templatePlan("walker"), "centerOfGravity", { x: 90, y: 110 });
+  it("places only the points its ways of moving use, and resets to the defaults", () => {
+    const walker = placeAnchor(moving(LAND), "centerOfGravity", { x: 90, y: 110 });
     expect(walker.anchors).toEqual({ centerOfGravity: { x: 90, y: 110 } });
     expect(placeAnchor(walker, "tail", { x: 1, y: 1 })).toBe(walker);
-    const hopper = placeAnchor(templatePlan("hopper"), "centerOfGravity", { x: 90, y: 110 });
-    expect(hopper.anchors).toEqual({ centerOfGravity: { x: 90, y: 110 } });
-    const swimmer = templatePlan("swimmer");
+    const swimmer = moving(SWIM);
     expect(placeAnchor(swimmer, "centerOfGravity", { x: 1, y: 1 })).toBe(swimmer);
-    expect(resetAnchors(walker).anchors).toEqual({});
-    expect(resetAnchors(walker).locomotion).toEqual(walker.locomotion);
+    const both = placeAnchor(placeAnchor(moving(BOTH), "tail", { x: 5, y: 6 }), "centerOfGravity", {
+      x: 7,
+      y: 8,
+    });
+    expect(both.anchors).toEqual({ tail: { x: 5, y: 6 }, centerOfGravity: { x: 7, y: 8 } });
+    expect(resetAnchors(both).anchors).toEqual({});
+    expect(resetAnchors(both).locomotion).toEqual(both.locomotion);
+  });
+
+  it("places the point chosen while it is shown, else the first, and none with no way of moving", () => {
+    expect(placingAnchor(["centerOfGravity", "tail"], "tail")).toBe("tail");
+    expect(placingAnchor(["centerOfGravity", "tail"], undefined)).toBe("centerOfGravity");
+    expect(placingAnchor(["tail"], "centerOfGravity")).toBe("tail");
+    expect(placingAnchor([], "tail")).toBeUndefined();
   });
 });
 
@@ -63,7 +79,6 @@ it("names the creature in the reveal's heading when it has a name", () => {
 describe("after the drawing changes", () => {
   it("drops placed anchors, back to their defaults, and keeps every other choice", () => {
     const plan = {
-      template: "walker" as const,
       locomotion: { land: true, gait: "hop" as const, swim: true },
       anchors: { centerOfGravity: { x: 90, y: 110 } },
     };
@@ -71,18 +86,22 @@ describe("after the drawing changes", () => {
   });
 
   it("leaves a plan with nothing placed as it is", () => {
-    const plan = templatePlan("swimmer");
+    const plan = defaultPlan();
     expect(afterDrawingEdit(plan)).toBe(plan);
   });
 });
 
 describe("the anchor layer's note for screen readers", () => {
   it("says whether each point is placed or at its default", () => {
-    expect(anchorNote(templatePlan("walker"))).toBe(
-      "Center of gravity not placed, so the default position is used. Click the drawing to place it.",
+    expect(anchorNote(moving(LAND), "centerOfGravity")).toBe(
+      "Center of gravity not placed, so the default position is used. Click the drawing to place the center of gravity.",
     );
-    expect(anchorNote(placeAnchor(templatePlan("swimmer"), "tail", { x: 1, y: 2 }))).toBe(
-      "Tail placed. Click the drawing to move it.",
+    expect(anchorNote(placeAnchor(moving(SWIM), "tail", { x: 1, y: 2 }), "tail")).toBe(
+      "Tail placed. Click the drawing to move the tail.",
     );
+    expect(anchorNote(placeAnchor(moving(BOTH), "tail", { x: 1, y: 2 }), "tail")).toBe(
+      "Center of gravity not placed, so the default position is used. Tail placed. Click the drawing to move the tail.",
+    );
+    expect(anchorNote(moving({ ...BOTH, land: false, swim: false }), undefined)).toBe("");
   });
 });

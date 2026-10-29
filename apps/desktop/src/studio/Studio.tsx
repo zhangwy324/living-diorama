@@ -1,6 +1,7 @@
 import {
   BODY_THICKNESS,
   SIZE_CLASSES,
+  type AnchorName,
   type DrawingBounds,
   type SizeClass,
 } from "@living-diorama/content-schema";
@@ -11,7 +12,7 @@ import {
 } from "@living-diorama/desktop-integration";
 import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/renderer";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { canMove, changeTemplate, templatePlan, type BodyPlanChoice } from "../body-plan";
+import { canMove, defaultPlan, planAnchors, type BodyPlanChoice } from "../body-plan";
 import {
   NO_LOCOMOTION,
   type LibrarySnapshot,
@@ -23,6 +24,7 @@ import {
   afterDrawingEdit,
   chosenMode,
   placeAnchor,
+  placingAnchor,
   previewModes,
   resetAnchors,
   type PreviewMode,
@@ -103,8 +105,10 @@ export function Studio() {
   const sizeHintCache = useRef(new Map<string, string[]>());
   // Drawing, then the confirm step: the body plan and Release (ADR 0020 §12).
   const [step, setStep] = useState<"draw" | "plan">("draw");
-  const [plan, setPlan] = useState<BodyPlanChoice>(templatePlan);
+  const [plan, setPlan] = useState<BodyPlanChoice>(defaultPlan);
   const [previewMode, setPreviewMode] = useState<PreviewMode["key"]>();
+  // Which point a click on the drawing places, when both are shown.
+  const [placingChoice, setPlacingChoice] = useState<AnchorName>();
   // The drawn shape's bounds, from the latest check, for the anchors' defaults.
   const [bounds, setBounds] = useState<DrawingBounds>();
   const planHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -317,6 +321,7 @@ export function Studio() {
   const shownName = name ?? suggestion ?? "";
   const libraryNames = () => library?.species.map((species) => species.name) ?? [];
   const moves = canMove(plan.locomotion);
+  const placing = placingAnchor(planAnchors(plan.locomotion), placingChoice);
   const releasable = canRelease({ name: shownName, empty: !hasBody, releasing, moves });
   /** A change to the body plan: a different release from any tried before. */
   const changePlan = (next: BodyPlanChoice) => {
@@ -350,8 +355,9 @@ export function Studio() {
       setSuggestion(suggestName(randomNameSeed(), [...libraryNames(), released.name]));
       setSizeClass(DEFAULT_SIZE_CLASS);
       setThickness(BODY_THICKNESS.default);
-      setPlan(templatePlan());
+      setPlan(defaultPlan());
       setPreviewMode(undefined);
+      setPlacingChoice(undefined);
       setStep("draw");
       setCelebration(
         released.notAdded === undefined
@@ -459,6 +465,7 @@ export function Studio() {
               <AnchorLayer
                 plan={plan}
                 bounds={bounds}
+                placing={placing}
                 onPlace={(anchor, point) => changePlan(placeAnchor(plan, anchor, point))}
               />
             )}
@@ -471,8 +478,9 @@ export function Studio() {
               <BodyPlanPanel
                 name={shownName}
                 plan={plan}
-                onTemplate={(template) => changePlan(changeTemplate(plan, template))}
                 onLocomotion={(locomotion) => changePlan({ ...plan, locomotion })}
+                placing={placing}
+                onPlacing={setPlacingChoice}
                 onResetAnchors={() => changePlan(resetAnchors(plan))}
                 modes={modes}
                 mode={mode?.key}

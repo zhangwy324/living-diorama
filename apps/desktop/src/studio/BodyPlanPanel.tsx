@@ -1,49 +1,25 @@
 import {
-  BODY_TEMPLATES,
   DRAWING_SIZE,
   LAND_GAITS,
   defaultAnchor,
   type Anchor,
   type AnchorName,
-  type BodyTemplate,
   type DrawingBounds,
 } from "@living-diorama/content-schema";
-import type { ReactNode, Ref } from "react";
-import { templateAnchors, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
+import type { Ref } from "react";
+import { planAnchors, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
 import {
   ANCHOR_LABELS,
   GAIT_LABELS,
-  TEMPLATE_LABELS,
   anchorNote,
+  anchorWord,
   drawingPoint,
   planHeading,
   type PreviewMode,
 } from "./body-plan-view";
 
-// The confirm step between drawing and Release (ADR 0020 §12): the template, where the creature
-// can move and how it moves on land, its anchors, and which way of moving the preview plays.
-
-/** Small pictures of each template, in the toolbar's 16-unit icon style. */
-const TEMPLATE_ICONS: Readonly<Record<BodyTemplate, ReactNode>> = {
-  walker: (
-    <>
-      <ellipse cx="8" cy="7" rx="5" ry="3.6" />
-      <path className="stroke" d="M5.5 10.3v3M10.5 10.3v3" />
-    </>
-  ),
-  hopper: (
-    <>
-      <ellipse cx="9" cy="6" rx="4.2" ry="3.4" />
-      <path className="stroke" d="M2 14q2-5 4-1q2-4 4 0" />
-    </>
-  ),
-  swimmer: (
-    <>
-      <path d="M2.5 8q4-4.5 9 0q-5 4.5-9 0z" />
-      <path d="M11 8l3.5-2.5v5z" />
-    </>
-  ),
-};
+// The confirm step between drawing and Release (ADR 0020 §12): where the creature can move and how
+// it moves on land, the points those ways of moving use, and which way the preview plays.
 
 export function BodyPlanPanel({
   headingRef,
@@ -51,8 +27,10 @@ export function BodyPlanPanel({
 }: {
   name: string;
   plan: BodyPlanChoice;
-  onTemplate(template: BodyTemplate): void;
   onLocomotion(locomotion: LocomotionChoice): void;
+  /** The point a click on the drawing places, when there is one. */
+  placing: AnchorName | undefined;
+  onPlacing(name: AnchorName): void;
   onResetAnchors(): void;
   /** The ways of moving the preview can play, and the one it plays. */
   modes: readonly PreviewMode[];
@@ -64,7 +42,7 @@ export function BodyPlanPanel({
 }) {
   const { plan } = props;
   const { locomotion } = plan;
-  const anchors = templateAnchors(plan.template);
+  const anchors = planAnchors(locomotion);
   const set = (change: Partial<LocomotionChoice>) =>
     props.onLocomotion({ ...locomotion, ...change });
   return (
@@ -72,26 +50,6 @@ export function BodyPlanPanel({
       <h2 ref={headingRef} tabIndex={-1}>
         {planHeading(props.name)}
       </h2>
-      <fieldset className="field templates">
-        <legend>Body</legend>
-        {BODY_TEMPLATES.map((template) => (
-          <label key={template} title={TEMPLATE_LABELS[template].blurb}>
-            <input
-              type="radio"
-              name="template"
-              value={template}
-              checked={plan.template === template}
-              onChange={() => props.onTemplate(template)}
-            />
-            <span className="template-card">
-              <svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
-                {TEMPLATE_ICONS[template]}
-              </svg>
-              <span>{TEMPLATE_LABELS[template].name}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
       <fieldset className="field locomotion">
         <legend>Moves</legend>
         <div className="locomotion-row">
@@ -128,25 +86,47 @@ export function BodyPlanPanel({
           <span>Swims</span>
         </label>
       </fieldset>
-      <div className="field anchors">
-        <span>Points</span>
-        {anchors.map((name) => (
-          <p key={name} className="anchor-help">
-            <strong>{ANCHOR_LABELS[name].name}</strong>: {ANCHOR_LABELS[name].help}.{" "}
-            {plan.anchors[name]
-              ? "Placed."
-              : `Click the drawing to place ${ANCHOR_LABELS[name].them}.`}
-          </p>
-        ))}
-        <button
-          type="button"
-          className="reset-anchors"
-          disabled={anchors.every((name) => !plan.anchors[name])}
-          onClick={props.onResetAnchors}
-        >
-          Reset to default
-        </button>
-      </div>
+      {anchors.length > 0 && (
+        <fieldset className="field anchors">
+          <legend>Points</legend>
+          {anchors.map((name) => {
+            const only = anchors.length === 1;
+            const help = (
+              <>
+                <strong>{ANCHOR_LABELS[name].name}</strong>: {ANCHOR_LABELS[name].help}.{" "}
+                {plan.anchors[name]
+                  ? "Placed."
+                  : `At its default${only ? "; click the drawing to place it" : ""}.`}
+              </>
+            );
+            // With two points, each is a choice of which one a click places.
+            return only ? (
+              <p key={name} className="anchor-help">
+                {help}
+              </p>
+            ) : (
+              <label key={name} className="anchor-choice">
+                <input
+                  type="radio"
+                  name="placing"
+                  value={name}
+                  checked={props.placing === name}
+                  onChange={() => props.onPlacing(name)}
+                />
+                <span className="anchor-help">{help}</span>
+              </label>
+            );
+          })}
+          <button
+            type="button"
+            className="reset-anchors"
+            disabled={anchors.every((name) => !plan.anchors[name])}
+            onClick={props.onResetAnchors}
+          >
+            Reset to default
+          </button>
+        </fieldset>
+      )}
       {props.modes.length > 1 && (
         <fieldset className="field preview-modes">
           <legend>Preview</legend>
@@ -176,19 +156,20 @@ export function BodyPlanPanel({
 }
 
 /**
- * Over the drawing in the confirm step: the template's anchors as markers, placed or at their
- * defaults, and clicks that place them. Covers the canvas, so nothing is drawn meanwhile.
+ * Over the drawing in the confirm step: the anchors the ways of moving use, as markers placed or
+ * at their defaults, and clicks that place `placing`. Covers the canvas, so nothing is drawn
+ * meanwhile.
  */
 export function AnchorLayer(props: {
   plan: BodyPlanChoice;
   /** The drawn shape's bounds, for the default positions. */
   bounds: DrawingBounds | undefined;
+  /** The anchor a click places; undefined with no way of moving. */
+  placing: AnchorName | undefined;
   onPlace(name: AnchorName, point: Anchor): void;
 }) {
-  const anchors = templateAnchors(props.plan.template);
-  // A template has one anchor for now; a click places the first.
-  const placing = anchors[0];
-  const { bounds } = props;
+  const anchors = planAnchors(props.plan.locomotion);
+  const { bounds, placing } = props;
   return (
     <div
       className={placing ? "anchor-layer placing" : "anchor-layer"}
@@ -205,10 +186,16 @@ export function AnchorLayer(props: {
         anchors.map((name) => {
           const placed = props.plan.anchors[name];
           const at = placed ?? defaultAnchor(name, bounds);
+          // With two points, the one a click doesn't place is dimmed.
+          const classes = [
+            "anchor-marker",
+            placed ? "placed" : "",
+            anchors.length > 1 && name !== placing ? "inactive" : "",
+          ];
           return (
             <span
               key={name}
-              className={placed ? "anchor-marker placed" : "anchor-marker"}
+              className={classes.filter(Boolean).join(" ")}
               style={{
                 left: `${(at.x / DRAWING_SIZE) * 100}%`,
                 top: `${(at.y / DRAWING_SIZE) * 100}%`,
@@ -222,11 +209,11 @@ export function AnchorLayer(props: {
           );
         })}
       <span id="anchor-note" className="visually-hidden">
-        {anchorNote(props.plan)}
+        {anchorNote(props.plan, placing)}
       </span>
       <span className="anchor-guide" aria-hidden="true">
         {placing
-          ? `Click to ${props.plan.anchors[placing] ? "move" : "place"} the ${ANCHOR_LABELS[placing].name.toLowerCase()}`
+          ? `Click to ${props.plan.anchors[placing] ? "move" : "place"} the ${anchorWord(placing)}`
           : "Drawing locked while you choose how it moves"}
       </span>
     </div>

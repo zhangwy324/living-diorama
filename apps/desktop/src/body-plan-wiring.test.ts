@@ -2,7 +2,7 @@ import { formatDiagnostic, type Drawing, type Result } from "@living-diorama/con
 import { createMemoryLibraryStore } from "@living-diorama/desktop-integration";
 import { Simulation } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { templatePlan, type BodyPlanChoice } from "./body-plan";
+import { defaultPlan, type BodyPlanChoice } from "./body-plan";
 import { loadContent } from "./content";
 import { openSpeciesLibrary, type LibraryWorld } from "./species-library";
 import { STARTUP } from "./startup";
@@ -68,21 +68,22 @@ describe("a released body plan", () => {
     };
 
     // Released walkers and hoppers appear at a spawn point on land.
-    const hopper = await release("Hopper", templatePlan("hopper"));
+    const hopper = await release("Hopper", {
+      locomotion: { land: true, gait: "hop", swim: false },
+      anchors: {},
+    });
     expect(hopper.species?.capabilities).toEqual({ "core:land": 1 });
     expect(hopper.species?.body.locomotion.land.gait).toBe("hop");
     expect(hopper.kind).not.toBe("water");
     expect(hopper.creature).toMatchObject({ animation: "hop", submersion: 0 });
 
     const amphibian = await release("Newt", {
-      ...templatePlan("walker"),
       locomotion: { land: true, gait: "walk", swim: true },
-      anchors: { centerOfGravity: { x: 120, y: 200 } },
+      anchors: { centerOfGravity: { x: 120, y: 200 }, tail: { x: 40, y: 180 } },
     });
     expect(amphibian.species?.capabilities).toEqual({ "core:land": 1, "core:swim": 1 });
     expect(amphibian.species?.body).toMatchObject({
-      template: "walker",
-      anchors: { centerOfGravity: { x: 120, y: 200 } },
+      anchors: { centerOfGravity: { x: 120, y: 200 }, tail: { x: 40, y: 180 } },
     });
     // It may appear on land or at the river's spawn point; either way it moves as it should there.
     expect(amphibian.creature).toMatchObject(
@@ -96,7 +97,7 @@ describe("a released body plan", () => {
     const { simulation, world } = headlessWorld();
     const library = await openSpeciesLibrary(createMemoryLibraryStore(), world);
     const saved = await library.save(DRAWING, PNG, "Minnow", "small", {
-      plan: templatePlan("swimmer"),
+      plan: { ...defaultPlan(), locomotion: { land: false, gait: "walk", swim: true } },
     });
     const { speciesId } = value(saved);
     const id = value(await library.addCreature(speciesId));

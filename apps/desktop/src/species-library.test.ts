@@ -88,7 +88,7 @@ describe("saving", () => {
     expect(registered).toEqual([speciesId]);
     const [stored] = await store.list();
     expect(stored?.entry).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       species: {
         id: speciesId,
         appearance: appearanceId,
@@ -191,12 +191,12 @@ describe("startup", () => {
   it("skips entries that fail their schema or hold another ID, and leaves their files", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { schemaVersion: 4 }, DRAWING, PNG);
+    await store.save(UUIDS[0] ?? "", { schemaVersion: 5 }, DRAWING, PNG);
     const other = userSpeciesIds(UUIDS[0]);
     await store.save(
       UUIDS[1] ?? "",
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         createdAt: "2026-10-27T12:00:00Z",
         species: {
           schemaVersion: 1,

@@ -16,7 +16,7 @@ import {
 import type { LibraryStore, StoredLibraryEntry } from "@living-diorama/desktop-integration";
 import type { Limit } from "@living-diorama/simulation";
 import type { SimulationClient } from "./simulation-client";
-import { locomotionCapabilities, planBody, templatePlan, type BodyPlanChoice } from "./body-plan";
+import { locomotionCapabilities, planBody, defaultPlan, type BodyPlanChoice } from "./body-plan";
 import { DRAWN_SPECIES_DEFAULTS } from "./startup";
 import { userSpeciesIds } from "./user-species";
 
@@ -52,8 +52,8 @@ export interface SpeciesLibrary {
    * Makes a species from a drawing and its image (PNG bytes), registers it and stores it.
    * `options.id` is the lowercase UUID to keep it under, a fresh one by default; one already used
    * is refused. `options.thickness` is the body's depth as a share of its height, the default
-   * one if left out. `options.plan` is the body plan the player chose, a walker if left out: it
-   * gives the species its template, gait, anchors and capabilities (ADR 0020 §14).
+   * one if left out. `options.plan` is the body plan the player chose, on land and walking if left
+   * out: it gives the species its capabilities, gait and anchors (ADR 0020 §14).
    */
   save(
     drawing: Drawing,
@@ -219,7 +219,7 @@ export async function openSpeciesLibrary(
       image,
       name,
       sizeClass,
-      { id = uuid(), thickness, plan = templatePlan() } = {},
+      { id = uuid(), thickness, plan = defaultPlan() } = {},
     ) {
       const drawing = parseDrawing(drawingInput);
       if (!drawing.ok) return drawing;
