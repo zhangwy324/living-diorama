@@ -109,6 +109,7 @@ Agreed with the owner before implementation. Where these and the decisions above
 - **§11 and §13, changing needs:** actions change needs through `context.adjustNeed(id, delta)`. Hunger falls gradually over `eatSeconds`, so an interrupted meal counts in part. An action reports an explicit `asleep` flag, which selects the need rates.
 - **§15, cues while walking:** an action's cue shows only while the creature isn't walking.
 - **§17, phase events:** `day_phase_changed` is not emitted at init. A jump across several phases emits it once, with `from` and `to`.
+- **§19, short gaps (2026-10-28, [ADR 0019](0019-world-saving.md) §6):** a gap under 2 minutes is no gap, not ordinary ticks: the world is restored exactly and only the time of day jumps.
 
 ### Food and shelter
 
