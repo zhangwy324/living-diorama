@@ -79,7 +79,8 @@ export interface SimulationClient {
   /**
    * Replaces the world with the save in `json`, at the wall-clock time and time of day now
    * (ADR 0019 §3, §7). Resolves with what the restore left out and caught up, or with why the
-   * save was rejected, in which case the world is as it was. `onRestored` runs first.
+   * save was rejected, in which case the world is as it was. `onRestored` runs first. Until it
+   * resolves, no lost time is caught up, so the replaced world's never reaches the restored one.
    */
   restore(json: string): Promise<Result<RestoreReport>>;
   /** Turns debug data (routes, needs, knowledge and home) in snapshots on or off. */
@@ -188,6 +189,9 @@ export function startSimulation(
   };
   const timeOfDay = timeOfDayFeed((minutes) => send({ type: "set_time_of_day", minutes }), clock);
   const lostTime = lostTimeWatch();
+  // Restores sent and not yet answered. Until one is, a snapshot may still show the world it
+  // replaces, whose lost time must not be caught up in the restored world (issue #165).
+  let restoring = 0;
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
   const spawnStartingCreatures = async () => {
@@ -229,7 +233,7 @@ export function startSimulation(
         // Snapshots keep coming while the strip is hidden, unlike timers (issue #127).
         timeOfDay.snapshot(message.snapshot.paused);
         const gapMs = lostTime.snapshot(message.snapshot, message.wallMs);
-        if (gapMs > 0) {
+        if (gapMs > 0 && restoring === 0) {
           void request<CatchUpReport>({
             type: "catch_up",
             gapMs,
@@ -269,6 +273,7 @@ export function startSimulation(
         answer(message.requestId, { ok: true, value: message.json });
         break;
       case "restored":
+        restoring = Math.max(0, restoring - 1);
         lostTime.reset();
         onRestored?.(message.report);
         answer(message.requestId, { ok: true, value: message.report });
@@ -284,6 +289,7 @@ export function startSimulation(
         break;
       }
       case "rejected":
+        if (message.command === "restore") restoring = Math.max(0, restoring - 1);
         answer(message.requestId, { ok: false, diagnostics: message.diagnostics });
         break;
       case "error": {
@@ -330,8 +336,14 @@ export function startSimulation(
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
     spawnStartingCreatures,
     save: () => request({ type: "save", savedAt: clock.now() }),
-    restore: (json) =>
-      request({ type: "restore", json, nowMs: clock.now(), minutes: timeOfDay.minutes }),
+    restore: (json) => {
+      // Lost time counted so far belongs to the world being replaced, and none is caught up until
+      // the restore is answered. A rejected restore leaves the world as it was, so lost time seen
+      // while waiting is dropped then too, as for a speed change.
+      restoring++;
+      lostTime.reset();
+      return request({ type: "restore", json, nowMs: clock.now(), minutes: timeOfDay.minutes });
+    },
     setDebug: (enabled) => send({ type: "set_debug", enabled }),
     setPaused: (paused) => {
       // Before resuming, so the snapshot sent on resume already shows the time of day.
