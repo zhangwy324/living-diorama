@@ -45,6 +45,7 @@ import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
 import { useReducedMotion } from "./reduced-motion";
 import { NO_NAME, canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
+import { hasWarningTint, WarningToggle } from "./WarningToggle";
 
 // The Creation Studio's page (ADR 0015). It never starts a simulation and never creates a
 // DesktopShell, so the shell's events and quit_ready stay the strip's.
@@ -106,6 +107,10 @@ export function Studio() {
   const [suggestion, setSuggestion] = useState<string>();
   const [library, setLibrary] = useState<LibrarySnapshot>();
   const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
+  // The preview's warning tint: off until the player asks for it (issue #141), and only for a
+  // drawing that has parts to tint.
+  const [warningsShown, setWarningsShown] = useState(false);
+  const [warningTint, setWarningTint] = useState(false);
   const [sizeHints, setSizeHints] = useState<string[]>([]);
   // By size and ways of moving: the navigation profile the limits are for.
   const sizeHintCache = useRef(new Map<string, string[]>());
@@ -172,6 +177,7 @@ export function Studio() {
       const check = checkBody(pixels);
       preview.current?.setDrawing(check.empty ? undefined : pixels, check);
       setShapeHints(drawingHints(check));
+      setWarningTint(!check.empty && hasWarningTint(check));
       setHasBody(!check.empty);
       setBounds(check.bounds);
     };
@@ -202,6 +208,7 @@ export function Studio() {
 
   useEffect(() => preview.current?.setHeight(SIZE_CLASSES[sizeClass].height), [sizeClass]);
   useEffect(() => preview.current?.setThickness(thickness), [thickness]);
+  useEffect(() => preview.current?.setHighlightsShown(warningsShown), [warningsShown]);
 
   // The preview plays the chosen way of moving in the confirm step, and stands still while drawing.
   const modes = previewModes(plan.locomotion);
@@ -480,7 +487,14 @@ export function Studio() {
           </div>
         </div>
         <aside className={step === "draw" ? "side-panel" : "side-panel planning"}>
-          <div ref={previewBox} className="preview" aria-label="3D preview" role="img" />
+          <div className="preview-frame">
+            <div ref={previewBox} className="preview" aria-label="3D preview" role="img" />
+            <WarningToggle
+              available={warningTint}
+              shown={warningsShown}
+              onToggle={() => setWarningsShown(!warningsShown)}
+            />
+          </div>
           {step === "plan" ? (
             <>
               <BodyPlanPanel
