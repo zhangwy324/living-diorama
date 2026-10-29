@@ -110,7 +110,13 @@ describe("restore", () => {
     const expected = run(unbroken, M, spawnLater(unbroken));
 
     const { simulation, report } = restored(save);
-    expect(report).toEqual({ gapMs: 0, droppedCreatures: [], prunedPlacements: [] });
+    expect(report).toEqual({
+      gapMs: 0,
+      droppedCreatures: [],
+      prunedPlacements: [],
+      droppedActions: [],
+      catchUp: { applied: false, skipped: "no_gap", gapMs: 0, failures: [] },
+    });
     const actual = run(simulation, M, spawnLater(simulation));
 
     expect(actual).toEqual(expected);
@@ -308,6 +314,7 @@ describe("a save that doesn't fit the world", () => {
       simulation.state.model,
       simulation.state.registries,
       new Map([[failing.id, failing]]),
+      new Map(),
     );
     expect(checked.ok && checked.value.creatures[0]!.memory).toEqual({
       "core:wander": { kept: true },

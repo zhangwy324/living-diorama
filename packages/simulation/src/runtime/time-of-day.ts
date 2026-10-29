@@ -38,6 +38,14 @@ export function dayPhaseAt(minutes: number): DayPhase {
   return phase;
 }
 
+/** Minutes from `minutes` since midnight to the start of the next phase, more than 0. */
+export function minutesToNextPhase(minutes: number): number {
+  const m = wrapMinutes(minutes);
+  const next = PHASE_STARTS.find(([start]) => start > m)?.[0];
+  // Past the last start, the next phase starts with the first one tomorrow.
+  return (next ?? (PHASE_STARTS[0]?.[0] ?? 0) + MINUTES_PER_DAY) - m;
+}
+
 /**
  * The time of day `elapsedMs` of simulation time after `startMinutes`, for runs with no main
  * thread to send it (headless runs and tests).

@@ -27,6 +27,8 @@ import {
   type ActionStatus,
   type BehaviorMemory,
   type BehaviorProvider,
+  type CatchUpGap,
+  type CatchUpResult,
   type CreatureObservation,
   type PathState,
   type PlaceQueries,
@@ -45,7 +47,8 @@ import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } fro
 import type { ConnectionModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
 import { clonePlain } from "./plain";
-import { checkSave, type RestoreReport } from "./save";
+import { phaseSpans, planCatchUp, type CatchUpPlan, type ClockMode } from "./catch-up";
+import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport } from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
   normalizeHeading,
@@ -155,6 +158,11 @@ export interface RestoreOptions {
   nowMs: number;
   /** The time of day now, in minutes since local midnight. */
   minutes: number;
+  /**
+   * Where the time of day comes from; default `real_time`. In `custom_day` there is no catch-up and
+   * the saved time of day is kept, so `minutes` is ignored (ADR 0018 §5, §19).
+   */
+  clockMode?: ClockMode;
 }
 
 export interface SimulationOptions extends WorldStateOptions {
@@ -419,23 +427,30 @@ export class Simulation {
    * the world as it was, when the save is of another world or world version or its fields
    * disagree; the caller then carries on with a fresh world. Otherwise creatures whose species is
    * missing or of another major version are dropped, references to placements the world no
-   * longer has are pruned, and the report lists both. Whatever the world held before is gone,
-   * including events not yet returned by `step`.
+   * longer has are pruned, and running actions that are unknown or whose state fails their check
+   * are dropped; the report lists all three. Whatever the world held before is gone, including
+   * events not yet returned by `step`.
    *
    * The world resumes at the saved tick, time of day and day phase; then the time of day is set
-   * to `options.minutes` as `setTimeOfDay` does, so the next step announces a phase change only
-   * if the phase really changed since the save. Never throws on the save's content.
+   * to `options.minutes` as `setTimeOfDay` does. After a gap of 2 minutes or more in real time
+   * mode, catch-up then sets the world up for the present (`#catchUp`). Without catch-up, the next
+   * step announces a phase change only if the phase really changed since the save. Never throws on
+   * the save's content.
    */
-  restore(save: WorldSave, { nowMs, minutes }: RestoreOptions): Result<RestoreReport> {
+  restore(
+    save: WorldSave,
+    { nowMs, minutes, clockMode = "real_time" }: RestoreOptions,
+  ): Result<RestoreReport> {
     if (!Number.isFinite(nowMs)) {
       throw new RangeError(`The wall-clock time must be a finite number, got ${nowMs}`);
     }
     if (!Number.isFinite(minutes)) {
       throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
     }
-    const checked = checkSave(save, this.state.model, this.state.registries, this.#behaviors);
+    const { model, registries } = this.state;
+    const checked = checkSave(save, model, registries, this.#behaviors, this.#actions);
     if (!checked.ok) return checked;
-    const { creatures, droppedCreatures, prunedPlacements } = checked.value;
+    const { creatures, droppedCreatures, prunedPlacements, droppedActions } = checked.value;
     this.state.load({
       seed: save.seed,
       rng: { words: [...save.rng.words], key: save.rng.key },
@@ -451,20 +466,144 @@ export class Simulation {
     this.#actionCues.clear();
     this.#perceptionOffsets.clear();
     this.#events = [];
-    this.setTimeOfDay(minutes);
+    if (clockMode === "real_time") this.setTimeOfDay(minutes);
     const gapMs = Math.max(0, nowMs - save.savedAt);
-    this.#catchUp(gapMs);
-    return { ok: true, value: { gapMs, droppedCreatures, prunedPlacements } };
+    const catchUp = this.#catchUp(planCatchUp(save.savedAt, nowMs, clockMode));
+    return {
+      ok: true,
+      value: { gapMs, droppedCreatures, prunedPlacements, droppedActions, catchUp },
+    };
   }
 
   /**
-   * Catch-up for the wall-clock time the world was away (ADR 0019 §5, §6, ADR 0018 §19). Runs
+   * Catch-up for the wall-clock time the world was away (ADR 0018 §19, ADR 0019 §5, §6). Runs
    * once a save is restored and its time of day set to the present, after decision-7 pruning.
-   * Not applied yet: every gap is treated as no gap, so the world resumes exactly and only the
-   * time of day moves. M15 PR 3 fills this in.
+   * Without a gap to catch up, the world resumes exactly and only the time of day moves.
+   * Otherwise the day phase becomes the present one without an announcement, and each creature's
+   * running action is dropped, its behaviors' `catchUp` hooks set it up for the present, and it
+   * is placed: asleep where a hook asks, else awake at a random reachable point in its home's
+   * region (its own region without a home). No per-creature events are emitted.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- PR 3 reads the gap.
-  #catchUp(gapMs: number): void {}
+  #catchUp(plan: CatchUpPlan): CatchUpReport {
+    if (!plan.apply) return { applied: false, skipped: plan.reason, gapMs: 0, failures: [] };
+    const { gapMs } = plan;
+    this.state.dayPhase = dayPhaseAt(this.state.minutes);
+    const phases = phaseSpans(this.state.minutes, gapMs);
+    const gapTicks = Math.round((gapMs / 1000) * this.tickRateHz);
+    const failures: CatchUpFailure[] = [];
+    for (const creature of this.state.creatures.values()) {
+      const profile = this.#profile(creature.speciesId);
+      // Everything about the moment of the save goes with the action.
+      delete creature.action;
+      delete creature.lastResult;
+      delete creature.phaseReactionTick;
+      creature.asleep = false;
+      creature.decideAtTick = this.tick;
+      // The release lies the gap further back, so grace periods count the time away.
+      if (creature.releasedAtTick !== undefined) creature.releasedAtTick -= gapTicks;
+      const gap: CatchUpGap = {
+        ms: gapMs,
+        phases,
+        needRate: (id, asleep) => {
+          const need = profile.needs.find((n) => n.id === id);
+          return need && this.#needRate(creature, profile, need, asleep);
+        },
+      };
+      const start = this.#runCatchUpHooks(creature, profile, gap, failures);
+      if (!start || !this.#startCaughtUp(creature, profile, start, failures)) {
+        this.#placeAwake(creature);
+      }
+      creature.progress = { x: creature.position.x, z: creature.position.z, stalledTicks: 0 };
+    }
+    // Hooks and starts may have emitted; catch-up announces nothing (ADR 0018 §19).
+    this.#events = [];
+    return { applied: true, gapMs, failures };
+  }
+
+  /**
+   * Calls each of the creature's behaviors' `catchUp` hooks in the species' order and sets the
+   * needs they return. Returns the first action asked for, with the behavior that asked.
+   */
+  #runCatchUpHooks(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    gap: CatchUpGap,
+    failures: CatchUpFailure[],
+  ): { behavior: string; start: NonNullable<CatchUpResult["start"]> } | undefined {
+    let requested: { behavior: string; start: NonNullable<CatchUpResult["start"]> } | undefined;
+    for (const { id, provider } of profile.behaviors) {
+      if (!provider?.catchUp) continue;
+      let result: CatchUpResult | null;
+      try {
+        const rng = new Rng(creature.rng).fork(`catch-up:${id}`);
+        result = provider.catchUp(this.#observation(creature, profile), gap, rng);
+      } catch {
+        failures.push({ creatureId: creature.id, behavior: id, reason: "hook_failed" });
+        continue;
+      }
+      if (!result) continue;
+      for (const [need, value] of Object.entries(result.needs ?? {})) {
+        const declared = provider.dependencies?.some(
+          (d) => d.registry === "needs" && d.id === need,
+        );
+        if (declared && Object.hasOwn(creature.needs, need) && Number.isFinite(value)) {
+          creature.needs[need] = clamp01(value);
+        }
+      }
+      if (result.start && !requested) requested = { behavior: id, start: result.start };
+    }
+    return requested;
+  }
+
+  /**
+   * Moves the creature to its spot at `start.at`, if given, and starts the action there for
+   * `behavior`. On failure, puts the creature back, reports why and returns false.
+   */
+  #startCaughtUp(
+    creature: CreatureState,
+    profile: SpeciesProfile,
+    {
+      behavior,
+      start: { action, params, at },
+    }: { behavior: string; start: NonNullable<CatchUpResult["start"]> },
+    failures: CatchUpFailure[],
+  ): boolean {
+    const fail = (reason: string) => {
+      creature.position = saved;
+      failures.push({ creatureId: creature.id, behavior, reason });
+      return false;
+    };
+    const saved = creature.position;
+    if (at !== undefined) {
+      const spot = typeof at === "string" ? this.#placeQueries(creature).spotAt(at) : undefined;
+      if (!spot) return fail("no_spot");
+      creature.position = { ...spot };
+    }
+    let started: ActionStart;
+    try {
+      started = this.#start(creature, profile, behavior, { action, params, utility: 0 });
+    } catch {
+      delete creature.action;
+      return fail("start_failed");
+    }
+    return started.ok || fail(started.reason);
+  }
+
+  /**
+   * Places an awake creature after a gap (ADR 0018 §19): at a random point it can reach in its
+   * home's region, or in its own region if it has no home or can't reach it. Stays put if neither
+   * has a point it can reach. Draws from a stream forked off its own, so its behaviors' draws
+   * don't shift.
+   */
+  #placeAwake(creature: CreatureState) {
+    const rng = new Rng(creature.rng).fork("catch-up");
+    const queries = this.#queries(creature);
+    const home = creature.home === null ? undefined : queries.spotAt(creature.home)?.regionId;
+    const point =
+      (home === undefined ? undefined : queries.randomWalkablePoint(home, rng)) ??
+      queries.randomWalkablePoint(creature.position.regionId, rng);
+    if (point) creature.position = point;
+  }
 
   /**
    * A creature's spot at a placement, as its behaviors and actions would find it from where it
@@ -690,9 +829,8 @@ export class Simulation {
     const hours = this.tickSeconds / SECONDS_PER_HOUR;
     const triggers: DecisionTrigger[] = [];
     for (const need of profile.needs) {
-      const perHour = creature.asleep ? need.perHour.asleep : need.perHour.awake;
-      const scale = (profile.rateScales[need.id] ?? 1) * (creature.variation.needs[need.id] ?? 1);
-      const now = clamp01((creature.needs[need.id] ?? 0) + perHour * scale * hours);
+      const perHour = this.#needRate(creature, profile, need, creature.asleep);
+      const now = clamp01((creature.needs[need.id] ?? 0) + perHour * hours);
       creature.needs[need.id] = now;
       const was = before[need.id] ?? 0;
       for (const threshold of need.triggers) {
@@ -702,6 +840,12 @@ export class Simulation {
       }
     }
     return triggers;
+  }
+
+  /** How fast `need` changes per hour, awake or asleep, scaled by its rate trait and the variation. */
+  #needRate(creature: CreatureState, profile: SpeciesProfile, need: NeedType, asleep: boolean) {
+    const perHour = asleep ? need.perHour.asleep : need.perHour.awake;
+    return perHour * (profile.rateScales[need.id] ?? 1) * (creature.variation.needs[need.id] ?? 1);
   }
 
   #finish(creature: CreatureState, result: ActionResult) {
@@ -840,7 +984,7 @@ export class Simulation {
   }
 
   /** Starts the chosen proposal's action, if its behavior declared it and it can start. */
-  #start(creature: CreatureState, profile: SpeciesProfile, { behavior, proposal }: Chosen) {
+  #start(creature: CreatureState, profile: SpeciesProfile, behavior: string, proposal: Proposal) {
     const provider = this.#actions.get(proposal.action);
     // A behavior may only start actions it declared as dependencies.
     const declared = profile.behaviors
@@ -881,7 +1025,7 @@ export class Simulation {
     this.#commit(creature, best);
     const { action, params } = best.proposal;
     trace.chosen = { behavior: best.behavior, action, ...(params === undefined ? {} : { params }) };
-    const start = this.#start(creature, profile, best);
+    const start = this.#start(creature, profile, best.behavior, best.proposal);
     if (start.ok) {
       trace.result = "started";
     } else {
@@ -931,7 +1075,7 @@ export class Simulation {
     // started first; on success the old action's `interrupted` events are moved before anything
     // the start emitted, so e.g. `woke_up` precedes the new action's events.
     const mark = this.#events.length;
-    const start = this.#start(creature, profile, best);
+    const start = this.#start(creature, profile, best.behavior, best.proposal);
     if (start.ok) {
       const started = this.#events.splice(mark);
       this.#interrupted(creature, profile, running, "outranked");

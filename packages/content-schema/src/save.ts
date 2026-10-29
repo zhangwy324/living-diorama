@@ -85,7 +85,8 @@ export const CreatureSaveSchema = z.strictObject({
   spotAngle: z.number(),
   asleep: z.boolean(),
   phaseReactionTick: tick.optional(),
-  releasedAtTick: tick.optional(),
+  /** Before tick 0 once catch-up has moved it back by the time away (ADR 0018 §19). */
+  releasedAtTick: z.int().optional(),
 });
 export type CreatureSave = z.output<typeof CreatureSaveSchema>;
 

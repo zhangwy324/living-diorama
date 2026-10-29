@@ -1,0 +1,64 @@
+import { dayPhaseAt, minutesToNextPhase, wrapMinutes, type DayPhase } from "./time-of-day";
+
+// Catch-up after a gap (ADR 0018 §19, ADR 0019 §5, §6): when a saved world is restored in real
+// time mode, the wall-clock time it was away is not simulated. The world is set to a plausible
+// state for the present instead. This module holds the gap rules; the simulation applies them
+// to each creature, and behaviors set their needs through their `catchUp` hooks.
+
+/** The longest gap caught up; a longer one counts as this long. */
+export const CATCH_UP_CAP_MS = 12 * 60 * 60 * 1000;
+/** A shorter gap is no gap: the world resumes exactly, and only the time of day jumps (§6). */
+export const SHORT_GAP_MS = 2 * 60 * 1000;
+
+/**
+ * Where the time of day comes from (ADR 0018 §5). `real_time`: the OS clock, sent in. A custom
+ * day, whose time of day is simulation state, isn't built yet; a world restored in it carries on
+ * exactly from its save, with no catch-up and the saved time of day.
+ */
+export type ClockMode = "real_time" | "custom_day";
+
+/**
+ * Why a restore did no catch-up: the clock didn't move forwards (`no_gap`), the gap was under
+ * 2 minutes (`short_gap`) or the world runs a custom day (`custom_day`).
+ */
+export type CatchUpSkip = "no_gap" | "short_gap" | "custom_day";
+
+/** Whether a restore catches up, and over how long a gap. */
+export type CatchUpPlan = { apply: true; gapMs: number } | { apply: false; reason: CatchUpSkip };
+
+/** The catch-up rules for a world saved at `savedAt` and restored at `nowMs`. */
+export function planCatchUp(savedAt: number, nowMs: number, clockMode: ClockMode): CatchUpPlan {
+  if (clockMode === "custom_day") return { apply: false, reason: "custom_day" };
+  const gapMs = nowMs - savedAt;
+  if (!(gapMs > 0)) return { apply: false, reason: "no_gap" };
+  if (gapMs < SHORT_GAP_MS) return { apply: false, reason: "short_gap" };
+  return { apply: true, gapMs: Math.min(gapMs, CATCH_UP_CAP_MS) };
+}
+
+/** Time a gap spent in one day phase. */
+export interface PhaseSpan {
+  readonly phase: DayPhase;
+  readonly hours: number;
+}
+
+/**
+ * The day phases a gap of `gapMs` ending at `toMinutes` (the present time of day) passed through,
+ * oldest first, with the hours spent in each. The gap is taken to end now rather than to start at
+ * the saved time of day, so a capped gap covers the hours just before the present, and a clock
+ * change since the save (a time zone, daylight saving) can't put the two out of step.
+ */
+export function phaseSpans(toMinutes: number, gapMs: number): PhaseSpan[] {
+  const spans: { phase: DayPhase; minutes: number }[] = [];
+  let remaining = gapMs / 60_000;
+  let at = wrapMinutes(toMinutes - remaining);
+  while (remaining > 1e-9) {
+    const phase = dayPhaseAt(at);
+    const minutes = Math.min(remaining, minutesToNextPhase(at));
+    const last = spans.at(-1);
+    if (last?.phase === phase) last.minutes += minutes;
+    else spans.push({ phase, minutes });
+    remaining -= minutes;
+    at = wrapMinutes(at + minutes);
+  }
+  return spans.map(({ phase, minutes }) => ({ phase, hours: minutes / 60 }));
+}

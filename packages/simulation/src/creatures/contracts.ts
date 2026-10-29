@@ -1,7 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
-import type { ActionEvent } from "./action-event";
+import type { PhaseSpan } from "../runtime/catch-up";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
 import type { CreatureKnowledge } from "./knowledge";
@@ -141,6 +141,13 @@ export interface ActionProvider extends ActionType {
    * do when cut short, e.g. a sleeper emitting `woke_up`. Not called on despawn.
    */
   interrupted?(state: unknown, context: ActionContext, reason: string): void;
+  /**
+   * For an action with state: whether `state`, from a save, is one `step` can carry on from
+   * (ADR 0019 §7). False if it hasn't the shape `start` gives it, or names a placement for which
+   * `exists` is false. A restore drops an action whose check fails or throws, so the creature
+   * decides afresh; an action without the check is trusted.
+   */
+  checkState?(state: unknown, exists: (placementId: string) => boolean): boolean;
 }
 
 export function isActionProvider(entry: ActionType): entry is ActionProvider {
@@ -233,6 +240,43 @@ export interface Proposal {
   reason?: string;
 }
 
+/**
+ * The wall-clock time a restored world was away, as a behavior's `catchUp` hook sees it (ADR 0018
+ * §19, ADR 0019 §5).
+ */
+export interface CatchUpGap {
+  /** How long, in milliseconds, capped at 12 hours. */
+  readonly ms: number;
+  /**
+   * The day phases the gap passed through, oldest first, with the hours spent in each. The gap
+   * ends now, so the last is the present phase.
+   */
+  readonly phases: readonly PhaseSpan[];
+  /**
+   * How fast one of the creature's needs changes per hour, awake or asleep, with its rate trait
+   * and the individual's variation applied, as the engine changes it each tick. Undefined for a
+   * need the creature doesn't have.
+   */
+  needRate(needId: string, asleep: boolean): number | undefined;
+}
+
+/** What a behavior's `catchUp` hook sets for the present. */
+export interface CatchUpResult {
+  /**
+   * Need ID → its value now, clamped to [0, 1]. Only needs the behavior declares as dependencies
+   * and the creature has are set.
+   */
+  needs?: Record<string, number>;
+  /**
+   * An action to resume the present with, already under way, e.g. asleep at home. The engine
+   * moves the creature to its spot at the placement `at` (it stays where it is without one), then
+   * starts the action with `params`; the behavior must declare the action, as for a proposal, and
+   * its `start` must take the creature as already there. Only the first behavior's start is used.
+   * If the spot or the start fails, the creature is placed awake instead.
+   */
+  start?: { action: string; params?: unknown; at?: string };
+}
+
 /** Plain data the engine keeps per creature and behavior, for cooldowns and hysteresis. */
 export type BehaviorMemory = Record<string, unknown>;
 
@@ -264,6 +308,15 @@ export interface BehaviorProvider extends BehaviorType {
    * behavior writes; anything it doesn't recognise it should leave alone or drop, never throw.
    */
   forgetPlacements?(memory: BehaviorMemory, exists: (placementId: string) => boolean): void;
+  /**
+   * Sets the creature up for the present after a gap (ADR 0018 §19, ADR 0019 §5), e.g. a need's
+   * value as if the creature had lived through it. Called when a restored world catches up, once
+   * per creature, after its running action is dropped and with the day phase already the present
+   * one. `rng` is a stream of its own for this creature and behavior. The engine places creatures
+   * and emits no per-creature events for catch-up. A hook that throws has no effect, and the
+   * restore reports it. Return null to change nothing.
+   */
+  catchUp?(observation: CreatureObservation, gap: CatchUpGap, rng: Rng): CatchUpResult | null;
 }
 
 export function isBehaviorProvider(entry: BehaviorType): entry is BehaviorProvider {
