@@ -191,8 +191,11 @@ export interface ActionProvider extends ActionType {
   step(state: unknown, context: ActionContext): ActionStatus;
   /**
    * Called when the engine ends the action before `step` reported it finished: a challenger
-   * outranked it (`outranked`) or the watchdog stopped it (`stuck`). For what an action must
-   * do when cut short, e.g. a sleeper emitting `woke_up`. Not called on despawn.
+   * outranked it (`outranked`), the watchdog stopped it (`stuck`), or catch-up after a gap
+   * dropped it (`catch_up`, ADR 0019). For what an action must do when cut short, e.g. a sleeper
+   * emitting `woke_up`, or an action releasing what it holds. On `catch_up` the tick is already
+   * the present one, and events emitted are discarded, as catch-up announces nothing. Not called
+   * on despawn, nor for a saved action that restore drops because its state fails the check.
    */
   interrupted?(state: unknown, context: ActionContext, reason: string): void;
   /**
