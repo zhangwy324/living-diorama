@@ -204,6 +204,19 @@ describe("simulation client", () => {
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 
+  it("follows the clock on snapshots, with no timer firing", () => {
+    const time = { now: 21 * 60 };
+    const { callbacks, tick } = start(0, time);
+    const shown = () => callbacks.onSnapshot.mock.calls.at(-1)?.[0].timeOfDay;
+    tick(100);
+    time.now = 21 * 60 + 1;
+    // This snapshot's check sends the new minute, which the next tick shows.
+    tick(100);
+    tick(100);
+    expect(shown()).toBe(21 * 60 + 1);
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
   it("ignores messages that arrive after it stopped", () => {
     const worker: WorkerLike = {
       onmessage: null,

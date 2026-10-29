@@ -135,7 +135,7 @@ type Pending = (result: Result<unknown>) => void;
  * Starts the simulation worker on the startup world, still empty, and hands every snapshot and its
  * events to `onSnapshot`. The seed changes every launch and is logged so a run can be reproduced;
  * a restored save brings its own (ADR 0019 §8). The worker gets the local time of day at init,
- * whenever the minute changes and on resume (ADR 0018 §5).
+ * whenever the minute changes, as checked on its snapshots, and on resume (ADR 0018 §5).
  */
 export function startSimulation(
   { onReady, onSpeciesRegistered, onRestored, onSnapshot, onFailure }: SimulationCallbacks,
@@ -202,6 +202,8 @@ export function startSimulation(
         onReady(message);
         break;
       case "snapshot":
+        // Snapshots keep coming while the strip is hidden, unlike timers (issue #127).
+        timeOfDay.snapshot();
         onSnapshot(message.snapshot, message.events);
         break;
       case "species_registered":
