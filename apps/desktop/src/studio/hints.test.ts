@@ -33,13 +33,13 @@ describe("drawingHints", () => {
     expect(drawingHints(check({}))).toEqual([]);
   });
 
-  it("points out thin parts and shapes that aren't joined", () => {
+  it("points out thin parts and shapes that aren't joined, and how to see them tinted", () => {
     expect(drawingHints(check({ thinParts: 1 }))).toEqual([
-      expect.stringMatching(/^This part is very thin/),
+      "This part is very thin (orange with Show warnings), so it may look flat.",
     ]);
     expect(drawingHints(check({ thinParts: 3, shapes: 2 }))).toEqual([
-      expect.stringMatching(/^Some parts are very thin/),
-      expect.stringMatching(/^Parts aren't joined .*each separate shape becomes its own slab\.$/),
+      "Some parts are very thin (orange with Show warnings), so they may look flat.",
+      "Parts aren't joined (blue with Show warnings): each separate shape becomes its own slab.",
     ]);
   });
 });

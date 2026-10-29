@@ -9,13 +9,13 @@ export function drawingHints(check: BodyCheck): string[] {
   if (check.empty) return ["Nothing drawn yet."];
   const hints: string[] = [];
   if (check.thinParts === 1) {
-    hints.push("This part is very thin (orange in the preview), so it may look flat.");
+    hints.push("This part is very thin (orange with Show warnings), so it may look flat.");
   } else if (check.thinParts > 1) {
-    hints.push("Some parts are very thin (orange in the preview), so they may look flat.");
+    hints.push("Some parts are very thin (orange with Show warnings), so they may look flat.");
   }
   if (check.shapes > 1) {
     hints.push(
-      "Parts aren't joined (blue in the preview): each separate shape becomes its own slab.",
+      "Parts aren't joined (blue with Show warnings): each separate shape becomes its own slab.",
     );
   }
   return hints;

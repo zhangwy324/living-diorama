@@ -42,8 +42,16 @@ export interface BodyHighlights {
 }
 
 export interface BodyPreview {
-  /** Shows the body built from `pixels`, or nothing. Highlights tint parts of it. */
+  /**
+   * Shows the body built from `pixels`, or nothing. Highlights tint parts of it while
+   * `setHighlightsShown` says so.
+   */
   setDrawing(pixels: Pixels | undefined, highlights?: BodyHighlights): void;
+  /**
+   * Whether the highlights' tint shows; off at first (issue #141). It changes at once, for this
+   * drawing and the next, without a rebuild and without restarting the motion.
+   */
+  setHighlightsShown(shown: boolean): void;
   /** The body's height in metres: its size class's. */
   setHeight(height: number): void;
   /** The body's depth as a share of its height. It changes at once, without a rebuild. */
@@ -142,7 +150,14 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   frame();
 
   let body:
-    { body: Body; mesh: THREE.Mesh; highlight?: Highlight; look: LocomotionBody } | undefined;
+    | {
+        body: Body;
+        mesh: THREE.Mesh;
+        highlight?: Highlight & { mesh: THREE.Mesh };
+        look: LocomotionBody;
+      }
+    | undefined;
+  let highlightsShown = false;
   const clearBody = () => {
     if (!body) return;
     turntable.clear();
@@ -244,8 +259,12 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
       // Placed by `placeBody`, which composes the depth, the motion and its lift.
       mesh.matrixAutoUpdate = false;
       turntable.add(mesh);
-      const highlight = createHighlight(pixels, highlights);
-      if (highlight) mesh.add(new THREE.Mesh(built.geometry, highlight.material));
+      const tint = createHighlight(pixels, highlights);
+      const highlight = tint && { ...tint, mesh: new THREE.Mesh(built.geometry, tint.material) };
+      if (highlight) {
+        highlight.mesh.visible = highlightsShown;
+        mesh.add(highlight.mesh);
+      }
       built.geometry.computeBoundingBox();
       const box = built.geometry.boundingBox ?? new THREE.Box3();
       extent = { x: Math.max(-box.min.x, box.max.x), z: Math.max(-box.min.z, box.max.z) };
@@ -260,6 +279,11 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
       body = { body: built, mesh, look, ...(highlight ? { highlight } : {}) };
       placeAnchors();
       placeBody(0);
+    },
+    setHighlightsShown(shown) {
+      highlightsShown = shown;
+      if (body?.highlight) body.highlight.mesh.visible = shown;
+      dirty = true;
     },
     setHeight(next) {
       height = next;
