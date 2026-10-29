@@ -8,16 +8,20 @@ import {
   FEED_BASE_UTILITY,
   feedBehavior,
   findSpot,
+  gridCellAt,
   MEAL,
   normalizeHeading,
   perceive,
   RegionMask,
   perceptionOffset,
+  REACH_BACKOFF_SECONDS,
+  recordReach,
   rememberPlace,
   Rng,
   SPOT_GAP,
   SPOT_SEARCH_RADIUS,
   TURN_RATE,
+  VISION_SENSE,
   type ActionContext,
   type BehaviorProvider,
   type CreatureKnowledge,
@@ -261,16 +265,27 @@ describe("core:feed", () => {
     });
   });
 
-  it("skips food it failed to reach for a while", () => {
-    const memory = { target: "b" };
-    const { observation } = observe(stub, {
-      knowledge: knowing("a", "b", "c"),
-      lastResult: { action: "core:eat", outcome: "interrupted", reason: "stuck" },
+  it("leaves out food its knowledge backs off, until the back-off ends", () => {
+    const knowledge = knowing("a", "b", "c");
+    recordReach(knowledge, FOOD, "b", "stuck", {
+      tick: 900,
+      tickSeconds: 0.1,
+      cell: { x: 0, z: 0 },
     });
-    expect(feedBehavior.evaluate(observation, memory, Rng.fromSeed(1))).toMatchObject({
-      params: { placementId: "c" },
-    });
-    expect(memory).toEqual({ target: "c", avoid: { b: 1000 + 600 } });
+    const evaluate = (tick: number) => {
+      const memory = {};
+      const proposal = feedBehavior.evaluate(
+        observe(stub, { knowledge, tick }).observation,
+        memory,
+        Rng.fromSeed(1),
+      );
+      // Nothing about failures is kept in the behavior's memory.
+      expect(memory).toEqual({});
+      return proposal;
+    };
+    // Backed off for 30 s (300 ticks) from tick 900.
+    expect(evaluate(1199)).toMatchObject({ params: { placementId: "c" } });
+    expect(evaluate(1200)).toMatchObject({ params: { placementId: "b" } });
   });
 
   it("knowing no food, explores towards a grid cell not visited recently", () => {
@@ -333,6 +348,7 @@ function eatContext(
   const emitted: unknown[] = [];
   let walked = 0;
   const faced: { x: number; z: number }[] = [];
+  const reaches: { affordanceId: string; placementId: string; outcome: string }[] = [];
   const needs = { [HUNGER]: 0.9 };
   const context: ActionContext = {
     catchingUp: false,
@@ -373,8 +389,10 @@ function eatContext(
     emit: (event) => emitted.push(event),
     home: null,
     setHome: () => {},
+    noteReach: (affordanceId, placementId, outcome) =>
+      reaches.push({ affordanceId, placementId, outcome }),
   };
-  return { context, adjusted, emitted, walked: () => walked, needs, faced };
+  return { context, adjusted, emitted, walked: () => walked, needs, faced, reaches };
 }
 
 describe("core:eat", () => {
@@ -426,6 +444,39 @@ describe("core:eat", () => {
     expect(adjusted.reduce((a, b) => a + b, 0)).toBeCloseTo(-MEAL, 9);
     expect(emitted).toEqual([{ type: "ate", placementId: "m", hunger: needs[HUNGER] }]);
     expect(needs[HUNGER]).toBeCloseTo(0.1, 9);
+  });
+
+  it("notes in knowledge whether it reached its spot: arrived, no spot or route, or stuck", () => {
+    const reached = eatContext(["moving", "arrived"], [{ x: 1.3, z: 0 }]);
+    const start = eatAction.start({ placementId: "m" }, reached.context);
+    if (!start.ok) throw new Error("start failed");
+    eatAction.step(start.state, reached.context);
+    expect(reached.reaches).toEqual([]);
+    eatAction.step(start.state, reached.context);
+    expect(reached.reaches).toEqual([{ affordanceId: FOOD, placementId: "m", outcome: "reached" }]);
+    // Already at its spot: reached on start.
+    const there = eatContext([], []);
+    expect(eatAction.start({ placementId: "m" }, there.context).ok).toBe(true);
+    expect(there.reaches).toEqual([{ affordanceId: FOOD, placementId: "m", outcome: "reached" }]);
+
+    const blocked = eatContext([], []);
+    const noSpot = { ...blocked.context, spotAt: () => undefined };
+    expect(eatAction.start({ placementId: "m" }, noSpot)).toMatchObject({ reason: "no_spot" });
+    const noRoute = {
+      ...blocked.context,
+      planRoute: () => ({ ok: false as const, reason: "unreachable" as const, detail: "" }),
+    };
+    expect(eatAction.start({ placementId: "m" }, noRoute)).toMatchObject({ reason: "unreachable" });
+    expect(blocked.reaches.map((r) => r.outcome)).toEqual(["no_route", "no_route"]);
+
+    const stuck = eatContext(["moving"], [{ x: 1.3, z: 0 }]);
+    const walking = eatAction.start({ placementId: "m" }, stuck.context);
+    if (!walking.ok) throw new Error("start failed");
+    eatAction.step(walking.state, stuck.context);
+    eatAction.interrupted!(walking.state, stuck.context, "outranked");
+    expect(stuck.reaches).toEqual([]);
+    eatAction.interrupted!(walking.state, stuck.context, "stuck");
+    expect(stuck.reaches).toEqual([{ affordanceId: FOOD, placementId: "m", outcome: "stuck" }]);
   });
 });
 
@@ -555,6 +606,14 @@ describe("eating spots", () => {
 });
 
 // ---- In the simulation -----------------------------------------------------------------------
+
+/** Meals started, in order: their tick and placement. */
+const eats = (traces: DecisionTrace[]) =>
+  traces.flatMap((t) =>
+    t.chosen?.action === "core:eat" && t.result === "started"
+      ? [{ tick: t.tick, placementId: (t.chosen.params as { placementId: string }).placementId }]
+      : [],
+  );
 
 describe("feeding in Woodland Hollow", () => {
   function setup(seed: number, extra?: (registries: Registries) => void) {
@@ -741,48 +800,65 @@ describe("feeding in Woodland Hollow", () => {
     expect(events.some((e) => e.type === "ate")).toBe(false);
   });
 
-  it("skips food it got stuck on for 60 s and goes to other food", () => {
-    // So slow that walking never makes the watchdog's 5 cm of progress in 5 s.
-    const { simulation, traces, run } = setup(3, (r) => {
+  /** A mossling so slow that walking never makes the watchdog's 5 cm of progress in 5 s. */
+  function sluggish(seed: number, places = 2) {
+    const world = setup(seed, (r) => {
       r.species.register({
         ...r.species.get("hollow:mossling")!,
         id: "test:sluggish-mossling",
         baseSpeed: 0.001,
       });
     });
-    const spawned = simulation.spawn("test:sluggish-mossling", "meadow");
+    const spawned = world.simulation.spawn("test:sluggish-mossling", "meadow");
     if (!spawned.ok) throw new Error("spawn failed");
     const creature = spawned.value;
-    const [first, second] = nearestFood(simulation, creature.position.x, creature.position.z);
-    rememberPlace(creature.knowledge, FOOD, first!.id, 0, 8);
-    rememberPlace(creature.knowledge, FOOD, second!.id, 0, 8);
+    const nearest = nearestFood(world.simulation, creature.position.x, creature.position.z);
+    for (const food of nearest.slice(0, places))
+      rememberPlace(creature.knowledge, FOOD, food.id, 0, 8);
     creature.needs[HUNGER] = 0.5;
-    const eats = () =>
-      traces.flatMap((t) =>
-        t.chosen?.action === "core:eat" && t.result === "started"
-          ? [
-              {
-                tick: t.tick,
-                placementId: (t.chosen.params as { placementId: string }).placementId,
-              },
-            ]
-          : [],
-      );
-    for (let t = 0; t < 200 && eats().length < 2; t++) run(1);
-    const [stuckOn, then] = eats();
-    expect(stuckOn).toBeDefined();
-    expect(then).toBeDefined();
-    expect(traces.find((t) => t.tick === then!.tick)!.lastResult).toEqual({
-      action: "core:eat",
-      outcome: "interrupted",
-      reason: "stuck",
-    });
-    expect(then!.placementId).not.toBe(stuckOn!.placementId);
-    expect(
-      (creature.memory["core:feed"] as { avoid: Record<string, number> }).avoid[
-        stuckOn!.placementId
-      ],
-    ).toBe(then!.tick + 600);
+    return { ...world, creature };
+  }
+
+  it("backs off food it can't get to for longer after each failure, so it soon stops trying", () => {
+    const { creature, simulation, traces, run } = sluggish(3);
+    // Half an hour, rested, so only feeding moves it.
+    for (let t = 0; t < 18_000; t++) {
+      creature.needs["core:tiredness"] = 0;
+      run(1);
+    }
+    const meals = eats(traces);
+    // Each attempt got stuck, and the next decision knew it.
+    for (const { tick } of meals.slice(1)) {
+      expect(traces.find((t) => t.tick === tick)!.lastResult).toMatchObject({ reason: "stuck" });
+    }
+    const places = new Set(meals.map((m) => m.placementId));
+    expect(places.size).toBeGreaterThanOrEqual(2);
+    for (const placementId of places) {
+      const ticks = meals.filter((m) => m.placementId === placementId).map((m) => m.tick);
+      // Back-offs of 30, 60, 120, 240, 480 and 960 s fill the half hour after six attempts; the
+      // fixed 60 s skip it replaces would have allowed over twenty.
+      expect(ticks.length).toBeGreaterThanOrEqual(4);
+      expect(ticks.length).toBeLessThanOrEqual(7);
+      const gaps = ticks.slice(1).map((tick, k) => tick - ticks[k]!);
+      gaps.slice(1).forEach((gap, k) => expect(gap).toBeGreaterThan(gaps[k]!));
+      // The failures are in what it knows, counted as stuck, not in feed's memory.
+      const known = creature.knowledge.places[FOOD]!.find((p) => p.placementId === placementId)!;
+      expect(known.failures).toMatchObject({ noRoute: 0, stuck: ticks.length });
+      expect(known.failures!.retryTick).toBeGreaterThan(ticks.at(-1)!);
+    }
+    expect(creature.memory["core:feed"]).toEqual({});
+    expect(simulation.tick).toBe(18_000);
+  });
+
+  it("backs off unreachable food the same way for the same seed", () => {
+    const knowledge = (seed: number) => {
+      const { creature, run } = sluggish(seed);
+      run(6_000);
+      return creature.knowledge;
+    };
+    const first = knowledge(4);
+    expect(first.places[FOOD]!.some((p) => p.failures)).toBe(true);
+    expect(knowledge(4)).toEqual(first);
   });
 
   it("repeats the same meals for the same seed", () => {
@@ -824,42 +900,167 @@ describe("feeding in Woodland Hollow", () => {
   });
 });
 
+// ---- One berry bush by the river -------------------------------------------------------------
+
+const berry = { id: "berry-1", x: 2.5, z: -2 };
+
+/**
+ * The river fixture with berry bushes, by default one on the north bank; `extra` registers
+ * species. Without the bridge the banks are cut off from each other for a walker.
+ */
+function riverBerry(
+  seed: number,
+  extra: (registries: Registries) => void,
+  { berries = [berry], bridge = true }: { berries?: (typeof berry)[]; bridge?: boolean } = {},
+) {
+  const traces: DecisionTrace[] = [];
+  const simulation = createSimulation({
+    worldId: "test:river-berry",
+    seed,
+    onTrace: (t) => traces.push(t),
+    register: (r: Registries) => {
+      registerRiverCrossing(r);
+      r.props.register({
+        schemaVersion: 1,
+        id: "test:berry-bush",
+        version: "1.0.0",
+        name: "Berry bush",
+        model: "fixture:models/pine.glb",
+        blockRadius: 0.2,
+        affordances: { [FOOD]: { eatSeconds: 3 } },
+      });
+      r.worlds.register({
+        ...riverCrossingWorld,
+        id: "test:river-berry",
+        structures: bridge ? riverCrossingWorld.structures : [],
+        props: [
+          ...riverCrossingWorld.props,
+          ...berries.map(({ id, x, z }) => ({
+            id,
+            prop: "test:berry-bush",
+            transform: { position: { x, y: 0.5, z } },
+          })),
+        ],
+      });
+      extra(r);
+    },
+  });
+  return { simulation, traces };
+}
+
+/** Pebbles that feed: at a pebble's speed, and too slow to pass the stuck watchdog. */
+function feedingPebbles(r: Registries, senses: Record<string, number> = {}) {
+  const feeder = { ...pebble, behaviors: ["core:feed"], senses };
+  r.species.register({ ...feeder, id: "test:feeding-pebble" });
+  // So slow that walking never makes the watchdog's 5 cm of progress in 5 s.
+  r.species.register({ ...feeder, id: "test:sluggish-pebble", baseSpeed: 0.001 });
+}
+
+describe("food it failed to reach", () => {
+  it("is tried again once its back-off ends, and reaching it clears the failure", () => {
+    const { simulation, traces } = riverBerry(1, (r) => feedingPebbles(r));
+    const spawned = simulation.spawn("test:sluggish-pebble", "north-meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    rememberPlace(creature.knowledge, FOOD, berry.id, 0, 8);
+    creature.needs[HUNGER] = 0.5;
+    const events: SimulationEvent[] = [];
+    const run = (until: () => boolean, ticks: number) => {
+      for (let t = 0; t < ticks && !until(); t++) events.push(...simulation.step());
+    };
+    run(() => events.some((e) => e.type === "creature_stuck"), 200);
+    const known = () => creature.knowledge.places[FOOD]!.find((p) => p.placementId === berry.id)!;
+    expect(known().failures).toMatchObject({ noRoute: 0, stuck: 1 });
+    const { retryTick } = known().failures!;
+    const stuckAt = events.find((e) => e.type === "creature_stuck")!.tick;
+    expect(retryTick - stuckAt).toBe(REACH_BACKOFF_SECONDS.stuck * 10);
+
+    // The blockage clears: from now on it walks at a pebble's speed.
+    creature.speciesId = "test:feeding-pebble";
+    run(() => events.some((e) => e.type === "ate"), 6000);
+    const meals = eats(traces);
+    expect(meals.map((m) => m.placementId)).toEqual([berry.id, berry.id]);
+    // Back as soon as the back-off ended, exploring meanwhile.
+    expect(meals[1]!.tick).toBeGreaterThanOrEqual(retryTick);
+    expect(meals[1]!.tick).toBeLessThan(retryTick + 100);
+    expect(events.filter((e) => e.type === "ate")).toEqual([
+      expect.objectContaining({ placementId: berry.id }),
+    ]);
+    expect(known().failures).toBeUndefined();
+  });
+
+  it("keeps backing off food it got stuck on, though it walked off and saw it from elsewhere", () => {
+    const { simulation } = riverBerry(1, (r) => feedingPebbles(r, { [VISION_SENSE]: 8 }));
+    const spawned = simulation.spawn("test:sluggish-pebble", "north-meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    creature.needs[HUNGER] = 0.5;
+    const known = () => creature.knowledge.places[FOOD]?.find((p) => p.placementId === berry.id);
+    const stuck = (count: number) => {
+      for (let t = 0; t < 3000 && (known()?.failures?.stuck ?? 0) < count; t++) simulation.step();
+      expect(known()!.failures!.stuck).toBe(count);
+      return { failures: { ...known()!.failures! }, at: simulation.tick - 1 };
+    };
+    const first = stuck(1);
+    expect(first.failures.retryTick - first.at).toBe(REACH_BACKOFF_SECONDS.stuck * 10);
+    // At a pebble's speed it explores while backed off, and sees the berry from other cells.
+    creature.speciesId = "test:feeding-pebble";
+    const cells = new Set<string>();
+    while (simulation.tick < first.failures.retryTick - 1) {
+      simulation.step();
+      const cell = gridCellAt(creature.position.x, creature.position.z);
+      if (known()!.lastSeenTick === simulation.tick - 1) cells.add(`${cell.x},${cell.z}`);
+    }
+    cells.delete(`${first.failures.cell.x},${first.failures.cell.z}`);
+    expect(cells.size).toBeGreaterThan(0);
+    // Seeing it from elsewhere proves nothing about getting stuck: the failure is still known.
+    expect(known()!.failures).toEqual(first.failures);
+    // Slowed again on its way back, it gets stuck a second time: the back-off doubles.
+    creature.speciesId = "test:sluggish-pebble";
+    const second = stuck(2);
+    expect(second.failures.retryTick - second.at).toBe(REACH_BACKOFF_SECONDS.stuck * 2 * 10);
+  });
+
+  it("passes over known food it has no reachable spot at, so it can't hide food it can reach", () => {
+    // Without the bridge, three berries across the river are nearer than the one it can reach.
+    const across = [
+      { id: "across-1", x: -2, z: 1.2 },
+      { id: "across-2", x: -1, z: 1.4 },
+      { id: "across-3", x: -3, z: 1.4 },
+    ];
+    const reachable = { id: "near-side", x: 3.5, z: -2.5 };
+    const { simulation, traces } = riverBerry(1, (r) => feedingPebbles(r), {
+      berries: [...across, reachable],
+      bridge: false,
+    });
+    const spawned = simulation.spawn("test:feeding-pebble", "north-meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    for (const { id } of [...across, reachable]) rememberPlace(creature.knowledge, FOOD, id, 0, 8);
+    creature.needs[HUNGER] = 0.5;
+    const events: SimulationEvent[] = [];
+    for (let t = 0; t < 600 && !events.some((e) => e.type === "ate"); t++) {
+      events.push(...simulation.step());
+    }
+    // Its first decision already goes for the food it can reach, not exploring.
+    expect(traces[0]!.chosen).toMatchObject({
+      action: "core:eat",
+      params: { placementId: reachable.id },
+    });
+    expect(eats(traces).map((m) => m.placementId)).toEqual([reachable.id]);
+    expect(events.filter((e) => e.type === "ate")).toEqual([
+      expect.objectContaining({ placementId: reachable.id }),
+    ]);
+  });
+});
+
 // ---- Touch only ------------------------------------------------------------------------------
 
 describe("a species without vision", () => {
   it("learns of food only by coming within 1 m of it, then eats there", () => {
-    const berry = { id: "berry-1", x: 2.5, z: -2 };
-    const traces: DecisionTrace[] = [];
-    const simulation = createSimulation({
-      worldId: "test:river-berry",
-      seed: 1,
-      onTrace: (t) => traces.push(t),
-      register: (r: Registries) => {
-        registerRiverCrossing(r);
-        r.props.register({
-          schemaVersion: 1,
-          id: "test:berry-bush",
-          version: "1.0.0",
-          name: "Berry bush",
-          model: "fixture:models/pine.glb",
-          blockRadius: 0.2,
-          affordances: { [FOOD]: { eatSeconds: 3 } },
-        });
-        r.worlds.register({
-          ...riverCrossingWorld,
-          id: "test:river-berry",
-          props: [
-            ...riverCrossingWorld.props,
-            {
-              id: berry.id,
-              prop: "test:berry-bush",
-              transform: { position: { x: berry.x, y: 0.5, z: berry.z } },
-            },
-          ],
-        });
-        r.species.register({ ...pebble, id: "test:blind-pebble", behaviors: ["core:feed"] });
-      },
-    });
+    const { simulation, traces } = riverBerry(1, (r) =>
+      r.species.register({ ...pebble, id: "test:blind-pebble", behaviors: ["core:feed"] }),
+    );
     const spawned = simulation.spawn("test:blind-pebble", "north-meadow");
     if (!spawned.ok) throw new Error("spawn failed");
     const creature = spawned.value;

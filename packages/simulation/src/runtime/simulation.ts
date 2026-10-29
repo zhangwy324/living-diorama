@@ -41,7 +41,7 @@ import {
   type WorldQueries,
 } from "../creatures/contracts";
 import { clamp01, speciesNeeds, speciesTraits } from "../creatures/individual";
-import { copyKnowledge } from "../creatures/knowledge";
+import { copyKnowledge, gridCellAt, recordReach } from "../creatures/knowledge";
 import { PERCEPTION_HZ, perceive, perceptionOffset, VISION_SENSE } from "../creatures/perception";
 import { findSpot } from "../creatures/spots";
 import type { Pathfinder } from "../navigation/pathfinder";
@@ -857,6 +857,8 @@ export class Simulation {
       tick: this.tick,
       propsByAffordance: this.state.model.propsByAffordance,
       affordance: (id) => this.state.registries.affordances.get(id),
+      // A spot is found only on cells the creature can reach, so having one means a route.
+      canReach: (placementId) => this.#placeQueries(creature).spotAt(placementId) !== undefined,
     });
   }
 
@@ -1243,6 +1245,12 @@ export class Simulation {
           previous,
         });
       },
+      noteReach: (affordanceId, placementId, outcome) =>
+        recordReach(creature.knowledge, affordanceId, placementId, outcome, {
+          tick: this.tick,
+          tickSeconds: this.tickSeconds,
+          cell: gridCellAt(creature.position.x, creature.position.z),
+        }),
     };
   }
 

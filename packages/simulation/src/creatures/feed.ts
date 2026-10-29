@@ -2,7 +2,7 @@ import type { FoodAffordanceParams, RegionPosition } from "@living-diorama/conte
 import type { Rng } from "../runtime/rng";
 import { pathFromRoute } from "./core-actions";
 import type { ActionProvider, BehaviorProvider, CreatureObservation, PathState } from "./contracts";
-import { gridCellAt } from "./knowledge";
+import { gridCellAt, isBackedOff } from "./knowledge";
 import { hungerNeed } from "./needs";
 import { VISION_SENSE } from "./perception";
 import { chooseNearestByRoute, isIntFrom, isPathState, isRecord } from "./shared";
@@ -22,8 +22,6 @@ const HUNGER = hungerNeed.id;
 export const FEED_BASE_UTILITY = 0.2;
 /** How much a whole meal lowers hunger. */
 export const MEAL = 0.8;
-/** Food a creature failed to reach is skipped for this long. */
-const AVOID_SECONDS = 60;
 const EXPLORE_ATTEMPTS = 8;
 /** An exploration target closer than this is not worth walking to. */
 const MIN_EXPLORE_DISTANCE = 4;
@@ -36,13 +34,6 @@ const EXPLORE_VISION_FACTOR = 2;
 const MIN_EXPLORE_RANGE = 8;
 /** The reach of an exploration leg for a creature without vision. */
 const BLIND_EXPLORE_RANGE = 12;
-
-interface FeedMemory {
-  /** The food the last proposed meal was at, to skip it if the meal failed to get there. */
-  target?: string;
-  /** Placement ID → tick until which it is skipped. */
-  avoid?: Record<string, number>;
-}
 
 /** How far an exploration leg may reach: twice the vision range, at least 8 m; 12 m blind. */
 export function explorationRange(senses: Readonly<Record<string, number>>): number {
@@ -85,31 +76,22 @@ export const feedBehavior: BehaviorProvider = {
     { registry: "actions", id: EAT, version: "^1.0.0" },
     { registry: "actions", id: FOLLOW_PATH, version: "^1.0.0" },
   ],
-  evaluate(observation, memory, rng) {
+  evaluate(observation, _memory, rng) {
     const hunger = observation.needs[HUNGER] ?? 0;
     const utility = FEED_BASE_UTILITY + hunger;
-    const { action, lastResult, tick, tickSeconds } = observation;
+    const { action, knowledge, tick } = observation;
     // Asked to continue its own meal or search: say how much it still matters, even once hunger
     // has fallen below actAt mid-meal, so a wander can't cut the meal short.
     if (action?.behavior === FEED) return { action: action.id, utility, reason: "continue" };
     if (hunger < hungerNeed.actAt) return null;
 
-    const state = memory as FeedMemory;
-    const avoid = Object.fromEntries(
-      Object.entries(state.avoid ?? {}).filter(([, until]) => until > tick),
+    // Food the creature failed to reach lately is left out until its back-off ends; `core:eat`
+    // records the failures in its knowledge (ADR 0018 amendments, §11).
+    const backedOff = new Set(
+      (knowledge.places[FOOD] ?? []).flatMap((p) => (isBackedOff(p, tick) ? [p.placementId] : [])),
     );
-    const missed =
-      lastResult?.action === EAT &&
-      (lastResult.outcome === "failed" || lastResult.reason === "stuck");
-    if (state.target !== undefined && missed) {
-      avoid[state.target] = tick + Math.round(AVOID_SECONDS / tickSeconds);
-    }
-    state.avoid = avoid;
-    delete state.target;
-
-    const food = chooseNearestByRoute(observation, FOOD, (id) => Object.hasOwn(avoid, id));
+    const food = chooseNearestByRoute(observation, FOOD, (id) => backedOff.has(id));
     if (food) {
-      state.target = food.placementId;
       return {
         action: EAT,
         params: { placementId: food.placementId },
@@ -121,13 +103,6 @@ export const feedBehavior: BehaviorProvider = {
     return destination
       ? { action: FOLLOW_PATH, params: { destination }, utility, reason: "explore for food" }
       : null;
-  },
-  forgetPlacements(memory, exists) {
-    const { target, avoid } = memory as FeedMemory;
-    if (typeof target === "string" && !exists(target)) delete memory.target;
-    if (isRecord(avoid)) {
-      memory.avoid = Object.fromEntries(Object.entries(avoid).filter(([id]) => exists(id)));
-    }
   },
   // Back from a gap, the creature is taken to have eaten (ADR 0018 §19): integrating hunger over
   // hours away would leave every creature starving.
@@ -156,7 +131,9 @@ interface EatState {
  * Walks to the creature's spot at `params.placementId`, a place offering `core:food`, turns in
  * place to face the food (`ActionContext.face`, no cue while turning), then eats facing it
  * for the place's `eatSeconds`, lowering hunger a little every tick: a meal cut short counts in
- * part. Emits `ate` when the meal is finished.
+ * part. Emits `ate` when the meal is finished. Records in the creature's knowledge whether it
+ * reached its spot: no spot or route there, stuck on the way, or arrived (ADR 0018 amendments,
+ * §11).
  */
 export const eatAction: ActionProvider = {
   id: EAT,
@@ -171,9 +148,11 @@ export const eatAction: ActionProvider = {
     const food = place?.affordances[FOOD] as FoodAffordanceParams | undefined;
     if (!place || !food) return { ok: false, reason: "not_food", detail: { placementId } };
     const spot = context.spotAt(placementId);
-    if (!spot) return { ok: false, reason: "no_spot", detail: { placementId } };
-    const route = context.planRoute(spot);
-    if (!route.ok) return { ok: false, reason: route.reason, detail: { placementId } };
+    const route = spot && context.planRoute(spot);
+    if (!route?.ok) {
+      context.noteReach(FOOD, placementId, "no_route");
+      return { ok: false, reason: route?.reason ?? "no_spot", detail: { placementId } };
+    }
     const path = pathFromRoute(route.route);
     const ticks = Math.max(1, Math.round(food.eatSeconds / context.tickSeconds));
     const state: EatState = {
@@ -185,12 +164,14 @@ export const eatAction: ActionProvider = {
       ticksLeft: ticks,
       perTick: MEAL / ticks,
     };
+    if (state.arrived) context.noteReach(FOOD, placementId, "reached");
     return { ok: true, state, detail: { placementId, length: route.route.length } };
   },
   step(state, context) {
     const eat = state as EatState;
     if (!eat.arrived) {
       eat.arrived = context.walk(eat.path) === "arrived";
+      if (eat.arrived) context.noteReach(FOOD, eat.placementId, "reached");
       return { status: "running" };
     }
     // Turns to the food before the meal starts, and keeps facing it while eating.
@@ -203,6 +184,10 @@ export const eatAction: ActionProvider = {
     if (eat.ticksLeft > 0) return { status: "running", cue: "eating", cueProgress };
     context.emit({ type: "ate", placementId: eat.placementId, hunger: context.needs[HUNGER] ?? 0 });
     return { status: "done", cue: "eating" };
+  },
+  interrupted(state, context, reason) {
+    const eat = state as EatState;
+    if (reason === "stuck" && !eat.arrived) context.noteReach(FOOD, eat.placementId, "stuck");
   },
   checkState(state, exists) {
     if (!isRecord(state)) return false;
