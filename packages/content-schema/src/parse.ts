@@ -1,18 +1,17 @@
 import type { z } from "zod";
-import { SCHEMA_VERSIONS, type DefinitionKind } from "./constants";
+import { SCHEMA_VERSIONS, WORLD_SAVE_SCHEMA_VERSION, type DefinitionKind } from "./constants";
 import {
-  CreatureInstanceSchema,
   PropDefinitionSchema,
   SpeciesDefinitionSchema,
   StructureDefinitionSchema,
   WorldDefinitionSchema,
-  type CreatureInstance,
   type PropDefinition,
   type SpeciesDefinition,
   type StructureDefinition,
   type WorldDefinition,
 } from "./definitions";
 import { error, fromZodIssues, type Result } from "./diagnostics";
+import { WorldSaveSchema, type WorldSave } from "./save";
 
 /** Any content schema. Lets other packages hold schemas without depending on Zod. */
 export type Schema<T = unknown> = z.ZodType<T>;
@@ -67,5 +66,20 @@ export const parseSpeciesDefinition = (
   source?: string,
 ): Result<SpeciesDefinition> => parseDefinition("species", SpeciesDefinitionSchema, input, source);
 
-export const parseCreatureInstance = (input: unknown, source?: string): Result<CreatureInstance> =>
-  validate(CreatureInstanceSchema, input, source);
+/**
+ * Validates a world save. A save of another schema version gets one clear diagnostic
+ * (`unsupported_save_version`) and is never migrated: the caller discards it (ADR 0019).
+ */
+export function parseWorldSave(input: unknown, source?: string): Result<WorldSave> {
+  if (typeof input === "object" && input !== null && "schemaVersion" in input) {
+    const found = input.schemaVersion;
+    if (found !== WORLD_SAVE_SCHEMA_VERSION) {
+      const message = `World save version ${JSON.stringify(found)} is not supported (supported: ${WORLD_SAVE_SCHEMA_VERSION})`;
+      return {
+        ok: false,
+        diagnostics: [error("unsupported_save_version", message, ["schemaVersion"], source)],
+      };
+    }
+  }
+  return validate(WorldSaveSchema, input, source);
+}

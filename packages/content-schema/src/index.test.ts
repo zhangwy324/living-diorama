@@ -5,7 +5,6 @@ import {
   allRegions,
   formatDiagnostic,
   parseContentId,
-  parseCreatureInstance,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
@@ -413,25 +412,5 @@ describe("PropDefinition", () => {
       parsePropDefinition({ ...mushroom, blockRadius: -1, affordances: { food: {} } }),
     );
     expect(found.map((d) => d.path)).toEqual([["blockRadius"], ["affordances", "food"]]);
-  });
-});
-
-describe("CreatureInstance", () => {
-  const creature = {
-    id: "pebble-1",
-    species: "test:pebble",
-    speciesVersion: "0.1.0",
-    position: { regionId: "deck", x: 0, z: 0.1 },
-    heading: 0,
-  };
-
-  it("accepts a region-relative position", () => {
-    expect(parseCreatureInstance(creature).ok).toBe(true);
-  });
-
-  it("rejects a heading outside [-π, π)", () => {
-    expect(messages(parseCreatureInstance({ ...creature, heading: Math.PI }))).toEqual([
-      "error: heading: Heading must be normalised to [-π, π) (too_big)",
-    ]);
   });
 });
