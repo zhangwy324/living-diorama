@@ -534,9 +534,10 @@ export class Simulation {
    * once a save is restored and its time of day set to the present, after decision-7 pruning.
    * Without a gap to catch up, the world resumes exactly and only the time of day moves.
    * Otherwise the day phase becomes the present one without an announcement, and each creature's
-   * running action is dropped, its behaviors' `catchUp` hooks set it up for the present, and it
-   * is placed: asleep where a hook asks, else awake at a random reachable point in its home's
-   * region (its own region without a home). No per-creature events are emitted.
+   * running action is interrupted (`catch_up`) and dropped, its behaviors' `catchUp` hooks set
+   * it up for the present, and it is placed: asleep where a hook asks, else awake at a random
+   * reachable point in its home's region (its own region without a home). No per-creature events
+   * are emitted.
    */
   #catchUp(plan: CatchUpPlan): CatchUpReport {
     if (!plan.apply) return { applied: false, skipped: plan.reason, gapMs: 0, failures: [] };
@@ -547,14 +548,32 @@ export class Simulation {
     // included, uses the tick after the jump.
     this.state.tick += Math.round((gapMs / 1000) * this.tickRateHz);
     const failures: CatchUpFailure[] = [];
-    // All awake first, so a creature put to bed sees asleep only those put to bed before it.
-    for (const creature of this.state.creatures.values()) creature.asleep = false;
+    // Every running action is cut short (`catch_up`, issue #164) before any creature is placed,
+    // in creature order, so a hook sees the creatures before it already cut short and awake. A
+    // hook draws from a stream of its own, so the forks below don't depend on it; its events are
+    // discarded below, and one that throws is reported. Everything about the moment of the save
+    // goes with the action. All awake too, so a creature put to bed sees asleep only those put
+    // to bed before it.
     for (const creature of this.state.creatures.values()) {
-      const profile = this.#profile(creature.speciesId);
-      // Everything about the moment of the save goes with the action.
+      const { action } = creature;
+      if (action) {
+        try {
+          this.#interrupted(creature, this.#profile(creature.speciesId), action, "catch_up");
+        } catch {
+          failures.push({
+            creatureId: creature.id,
+            behavior: action.behavior,
+            reason: "interrupted_failed",
+          });
+        }
+      }
       delete creature.action;
       delete creature.lastResult;
       delete creature.phaseReactionTick;
+      creature.asleep = false;
+    }
+    for (const creature of this.state.creatures.values()) {
+      const profile = this.#profile(creature.speciesId);
       // The engine's own draws for this creature: a stream forked off its own, salted with the tick
       // so another restore draws afresh, and leaving its behaviors' draws unchanged.
       const rng = new Rng(creature.rng).fork(`catch-up@${this.tick}`);

@@ -2,6 +2,7 @@ import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import { parseWorldSave, type WorldSave } from "@living-diorama/content-schema";
 import {
   CATCH_UP_CAP_MS,
+  eatAction,
   feedBehavior,
   hungerNeed,
   minutesAfter,
@@ -16,6 +17,7 @@ import {
   tirednessAfter,
   tirednessNeed,
   type ActionContext,
+  type ActionProvider,
   type CatchUpGap,
   type CreatureObservation,
   type DayPhase,
@@ -634,6 +636,116 @@ describe("core:rest catching up", () => {
       outcome: "failed",
       reason: "not_catching_up",
     });
+  });
+});
+
+describe("running actions dropped by catch-up (issue #164)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Spies on `core:sleep`'s `interrupted` hook, calling through unless `mock` is given. */
+  function spyOnInterrupted(mock?: NonNullable<ActionProvider["interrupted"]>) {
+    const spy = vi.spyOn(sleepAction as Required<ActionProvider>, "interrupted");
+    if (mock) spy.mockImplementation(mock);
+    return spy;
+  }
+
+  /** Each call's saved state, reason and tick. */
+  const calls = (spy: ReturnType<typeof spyOnInterrupted>) =>
+    spy.mock.calls.map(([state, context, reason]) => ({
+      state: structuredClone(state),
+      reason,
+      tick: context.tick,
+    }));
+
+  it("are interrupted with the reason catch_up, at the tick after the jump, announcing nothing", () => {
+    const save = nightSave();
+    const spy = spyOnInterrupted();
+    const { simulation } = restored(save, { nowMs: SAVED_AT + 5 * HOUR, minutes: at(1, 40) });
+    expect(calls(spy)).toEqual(
+      save.creatures.map((c) => ({
+        state: c.action!.state,
+        reason: "catch_up",
+        tick: simulation.tick,
+      })),
+    );
+    // The sleepers' `woke_up` is discarded with the rest of catch-up's events.
+    expect(run(simulation, 1, at(1, 40)).filter((e) => PER_CREATURE.includes(e.type))).toEqual([]);
+  });
+
+  it("are not interrupted when there is no gap to catch up", () => {
+    const save = nightSave();
+    const spy = spyOnInterrupted();
+    restored(save, { nowMs: SAVED_AT + MINUTE, minutes: save.minutes });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("are interrupted alike on a relaunch and in place", () => {
+    const running = create(7, at(19, 15));
+    for (let k = 0; k < 3; k++) running.spawn(MOSSLING);
+    run(running, 85 * 60 * HZ, at(19, 15));
+    const save = throughDisk(running.save(SAVED_AT));
+    const spy = spyOnInterrupted();
+    restored(save, { nowMs: SAVED_AT + 11 * HOUR, minutes: at(7, 40) });
+    const relaunch = calls(spy);
+    spy.mockClear();
+    running.catchUp({ gapMs: 11 * HOUR, minutes: at(7, 40) });
+    expect(relaunch).toHaveLength(save.creatures.length);
+    expect(calls(spy)).toEqual(relaunch);
+  });
+
+  it("are dropped all the same when their hook throws, and the failure is reported", () => {
+    spyOnInterrupted(() => {
+      throw new Error("broken hook");
+    });
+    const save = nightSave();
+    const { simulation, report } = restored(save, {
+      nowMs: SAVED_AT + 11 * HOUR,
+      minutes: at(7, 40),
+    });
+    expect(report.catchUp.applied).toBe(true);
+    expect(report.catchUp.failures).toEqual(
+      save.creatures.map((c) => ({
+        creatureId: c.id,
+        behavior: c.action!.behavior,
+        reason: "interrupted_failed",
+      })),
+    );
+    // Catch-up went on: everyone is awake at a fresh decision by morning.
+    expect(simulation.save(0).creatures.every((c) => !c.action && !c.asleep)).toBe(true);
+    run(simulation, 50, at(7, 40));
+  });
+
+  it("record no back-off for a meal cut short on the way to its food", () => {
+    // A live world run until a creature is walking to its food.
+    const running = create(3, at(12));
+    for (let k = 0; k < 3; k++) running.spawn(MOSSLING);
+    const walking = (save: WorldSave) =>
+      save.creatures.find(
+        (c) => c.action?.id === "core:eat" && !(c.action.state as { arrived: boolean }).arrived,
+      );
+    let before: WorldSave | undefined;
+    for (let k = 0; k < 600 && !before; k++) {
+      run(running, 5, minutesAfter(at(12), (running.tick * 1000) / HZ));
+      const save = running.save(0);
+      if (walking(save)) before = save;
+    }
+    const eater = walking(before!)!;
+    const spy = vi.spyOn(eatAction as Required<ActionProvider>, "interrupted");
+    running.catchUp({ gapMs: 3 * HOUR, minutes: at(15) });
+    expect(spy.mock.calls.map(([, , reason]) => reason)).toContain("catch_up");
+    const after = running.save(0).creatures.find((c) => c.id === eater.id)!;
+    expect(after.knowledge).toEqual(eater.knowledge);
+  });
+
+  it("leave catch-up's draws unchanged when their hook draws", () => {
+    const options = { nowMs: SAVED_AT + 11 * HOUR, minutes: at(7, 40) };
+    spyOnInterrupted(() => {});
+    const quiet = restored(nightSave(), options).simulation.save(0);
+    vi.restoreAllMocks();
+    spyOnInterrupted((_state, context) => {
+      for (let k = 0; k < 5; k++) context.rng.next();
+    });
+    expect(restored(nightSave(), options).simulation.save(0)).toEqual(quiet);
   });
 });
 
