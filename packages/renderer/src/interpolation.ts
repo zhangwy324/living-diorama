@@ -1,4 +1,9 @@
-import { SIZE_CLASSES, WORLD_TOLERANCES, type Vec3 } from "@living-diorama/content-schema";
+import {
+  SIZE_CLASSES,
+  WORLD_TOLERANCES,
+  type SizeClass,
+  type Vec3,
+} from "@living-diorama/content-schema";
 import type { CreatureSnapshot, Cue, SimulationSnapshot } from "@living-diorama/simulation";
 
 // Creature poses between simulation snapshots (ADR 0007 §8). The renderer draws one tick behind
@@ -29,6 +34,8 @@ export const SNAP_DISTANCE = MAX_BANK_JUMP + 0.5;
 /**
  * A change of medium with a move at least this long in one tick is a bank jump. Shorter, it is a
  * walk across an authored shore exit, which changes region on a cell edge at walking pace.
+ * This assumes walking slower than 2 m/s at the default 10 Hz tick: `baseSpeed` is unbounded in
+ * the schema, so a faster species crossing a shore exit would get a small arc too.
  */
 export const MIN_BANK_JUMP = 0.2;
 
@@ -42,10 +49,14 @@ export const JUMP_MAX_INTERVALS = 4;
 
 /**
  * How far the arc's highest point rises above the higher end of the jump, in metres: a base plus a
- * share of the jump's horizontal length, so long jumps leap higher. 0.16 m for a 0.3 m jump,
- * 0.77 m for the longest.
+ * share of the jump's horizontal length, so long jumps leap higher, but never more than the
+ * creature's radius (half its height), so a small creature leaps like one and stays under a deck
+ * it may pass beneath: a tiny one 0.1 m, a large one up to 0.77 m on its longest jump.
  */
 export const JUMP_CLEARANCE = { base: 0.1, perMetre: 0.2 } as const;
+
+/** A species' size class, or undefined when unknown. `SpeciesResolver` fits. */
+export type JumpSizeResolver = (speciesId: string) => { sizeClass: SizeClass } | undefined;
 
 const MIN_INTERVAL_MS = 1000 / 120;
 /**
@@ -104,9 +115,12 @@ export function isBankJump(from: MediumOf, to: MediumOf): boolean {
   return length >= MIN_BANK_JUMP && length <= SNAP_DISTANCE;
 }
 
-/** How far above the higher end the arc of a jump `horizontal` metres long rises. */
-export const jumpClearance = (horizontal: number): number =>
-  JUMP_CLEARANCE.base + JUMP_CLEARANCE.perMetre * horizontal;
+/**
+ * How far above the higher end the arc of a jump `horizontal` metres long rises, for a creature
+ * of `radius` (uncapped when its size is unknown).
+ */
+export const jumpClearance = (horizontal: number, radius = Infinity): number =>
+  Math.min(JUMP_CLEARANCE.base + JUMP_CLEARANCE.perMetre * horizontal, radius);
 
 /**
  * The height `h` of the arc `y(s) = y0 + (y1 − y0)·s + 4h·s(1 − s)` from `y0` to `y1` whose
@@ -141,12 +155,16 @@ export interface Jump {
   height: number;
   startedAt: number;
   durationMs: number;
+  /** Where it was last drawn, so a jump made while this one is in the air takes off from there. */
+  drawn: Pick<CreaturePose, "world" | "submersion">;
 }
 
 /**
  * Where a creature is `s` (0–1) of the way through `jump` towards `pose`, its blended pose now:
- * level with the straight line between them at an even pace, and above it by the arc. The landing
- * moves on as the creature does once it has landed, so the arc ends exactly on the blended pose.
+ * on the straight line between them, `s` of the way along, and above it by the arc. The blended
+ * pose itself only leaves the take-off over the first snapshot interval, so the arc eases in over
+ * that interval and then moves at an even pace. The landing moves on as the creature does once it
+ * has landed, so the arc ends exactly on the blended pose.
  */
 export function jumpPose(
   jump: Pick<Jump, "from" | "fromSubmersion" | "height">,
@@ -175,9 +193,15 @@ export class SnapshotInterpolator {
   /** Bank jumps still in the air, by creature. */
   readonly #jumps = new Map<string, Jump>();
 
-  /** `intervalMs` is the first guess at the time between snapshots; arrivals refine it. */
-  constructor(intervalMs = 100) {
+  readonly #sizeOf: JumpSizeResolver | undefined;
+
+  /**
+   * `intervalMs` is the first guess at the time between snapshots; arrivals refine it. `sizeOf`
+   * gives a species' size class, which caps how high its bank jumps arc (`jumpClearance`).
+   */
+  constructor(intervalMs = 100, sizeOf?: JumpSizeResolver) {
     this.#intervalMs = intervalMs;
+    this.#sizeOf = sizeOf;
   }
 
   /** Adds a snapshot received at `now` (milliseconds). Snapshots of an older or the same tick are ignored. */
@@ -225,15 +249,18 @@ export class SnapshotInterpolator {
         this.#jumps.delete(creature.id);
         return pose;
       }
-      return { ...pose, ...jumpPose(jump, pose, Math.max(0, s)) };
+      const drawn = { ...pose, ...jumpPose(jump, pose, Math.max(0, s)) };
+      jump.drawn = drawn;
+      return drawn;
     });
   }
 
   /**
    * Starts an arc for each creature that jumped a bank since `previous`, from where it took off,
    * and forgets those of creatures gone. After a break or a reset there is no previous snapshot,
-   * so nothing is in the air. A jump made while the last is still in the air restarts from that
-   * one's landing, cutting it short (rare: the simulation walks between banks).
+   * so nothing is in the air. A jump made while the last is still in the air takes off from where
+   * that one was last drawn. That happens when a water leg of no length joins two bank crossings
+   * (both banks pair with the same water cell): the simulation then jumps in two ticks running.
    */
   #trackJumps(previous: SimulationSnapshot | undefined, latest: SimulationSnapshot, now: number) {
     if (!previous) {
@@ -246,14 +273,20 @@ export class SnapshotInterpolator {
       present.add(creature.id);
       const from = before.get(creature.id);
       if (!from || !isBankJump(from, creature)) continue;
+      // Still in the air from the last jump: take off from where it is drawn, not from its landing.
+      const takeOff = this.#jumps.get(creature.id)?.drawn ?? from;
+      const start = { ...takeOff.world };
       const { world } = creature;
-      const horizontal = Math.hypot(world.x - from.world.x, world.z - from.world.z);
+      const horizontal = Math.hypot(world.x - start.x, world.z - start.z);
+      const size = this.#sizeOf?.(creature.speciesId)?.sizeClass;
+      const radius = size === undefined ? undefined : SIZE_CLASSES[size].radius;
       this.#jumps.set(creature.id, {
-        from: { ...from.world },
-        fromSubmersion: from.submersion,
-        height: arcHeight(from.world.y, world.y, jumpClearance(horizontal)),
+        from: start,
+        fromSubmersion: takeOff.submersion,
+        height: arcHeight(start.y, world.y, jumpClearance(horizontal, radius)),
         startedAt: now,
         durationMs: Math.min(JUMP_MS, JUMP_MAX_INTERVALS * this.#intervalMs),
+        drawn: { world: start, submersion: takeOff.submersion },
       });
     }
     for (const id of this.#jumps.keys()) if (!present.has(id)) this.#jumps.delete(id);

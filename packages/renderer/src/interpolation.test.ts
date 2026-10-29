@@ -148,9 +148,15 @@ describe("arcHeight", () => {
     expect(arcHeight(0, 0, 0.4)).toBeCloseTo(0.4);
   });
 
-  it("rises higher the longer the jump", () => {
+  it("rises higher the longer the jump, up to the creature's radius", () => {
     expect(jumpClearance(0.3)).toBeCloseTo(0.16);
     expect(jumpClearance(MAX_BANK_JUMP)).toBeGreaterThan(jumpClearance(1));
+    const reach = (size: keyof typeof SIZE_CLASSES) =>
+      2 * SIZE_CLASSES[size].radius + WORLD_TOLERANCES.maxBankJumpGap;
+    expect(jumpClearance(reach("tiny"), SIZE_CLASSES.tiny.radius)).toBeCloseTo(0.1);
+    expect(jumpClearance(reach("small"), SIZE_CLASSES.small.radius)).toBeCloseTo(0.2);
+    expect(jumpClearance(reach("medium"), SIZE_CLASSES.medium.radius)).toBeCloseTo(0.4);
+    expect(jumpClearance(reach("large"), SIZE_CLASSES.large.radius)).toBeCloseTo(0.77);
   });
 });
 
@@ -220,6 +226,39 @@ describe("SnapshotInterpolator bank jumps", () => {
     const end = 10 + 10 * JUMP_MAX_INTERVALS;
     expect(interpolator.sample(end - 1)[0]!.jump).toBeDefined();
     expect(interpolator.sample(end)[0]!.jump).toBeUndefined();
+  });
+
+  it("keeps a tiny creature's arc low, under the Hollow deck's headroom of about 0.37 m", () => {
+    const tiny = new SnapshotInterpolator(100, () => ({ sizeClass: "tiny" }));
+    const reach = 2 * SIZE_CLASSES.tiny.radius + WORLD_TOLERANCES.maxBankJumpGap;
+    tiny.push(frame(1, on(0, 0, "land")), 0);
+    tiny.push(frame(2, on(reach, 0, "water")), 100);
+    const apex = Math.max(...track(tiny, 100, 100 + JUMP_MS - 1).map((pose) => pose.world.y));
+    expect(apex).toBeCloseTo(SIZE_CLASSES.tiny.radius, 2);
+    expect(apex + SIZE_CLASSES.tiny.height).toBeLessThan(0.37);
+  });
+
+  it("takes a second jump in the next tick off from where the first is drawn, without a pop", () => {
+    // A water leg of no length between two banks: in, then straight out on the far side.
+    const interpolator = new SnapshotInterpolator(100);
+    const pushes = new Map([
+      [0, frame(1, on(0, BANK_HEIGHT, "land"))],
+      [100, frame(2, on(LARGE_REACH, 0, "water"))],
+      [200, frame(3, on(2 * LARGE_REACH, BANK_HEIGHT, "land"))],
+    ]);
+    const poses = [];
+    for (let now = 0; now <= 700; now += 5) {
+      const snapshot = pushes.get(now);
+      if (snapshot) interpolator.push(snapshot, now);
+      poses.push(interpolator.sample(now)[0]!);
+    }
+    for (let k = 1; k < poses.length; k++) {
+      const [a, b] = [poses[k - 1]!, poses[k]!];
+      expect(Math.hypot(b.world.x - a.world.x, b.world.y - a.world.y)).toBeLessThan(0.15);
+      expect(Math.abs(b.submersion - a.submersion)).toBeLessThan(0.1);
+    }
+    expect(poses.at(-1)!.world).toEqual({ x: 2 * LARGE_REACH, y: BANK_HEIGHT, z: 0 });
+    expect(poses.at(-1)!.jump).toBeUndefined();
   });
 
   it("draws ordinary walking without an arc", () => {
