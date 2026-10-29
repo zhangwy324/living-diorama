@@ -7,6 +7,10 @@ import {
 import type { Registries } from "@living-diorama/extension-api";
 import {
   bankReach,
+  distanceToPolygonEdge,
+  isJumpClear,
+  JUMP_STRUCTURE_MARGIN,
+  pointInPolygon,
   CellState,
   checkWorld,
   SWIM_SUBMERSION,
@@ -293,6 +297,132 @@ describe("banks between land and water (ADR 0020 §4)", () => {
     const lines = jumpLines(world);
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.some((line) => line.some(inside))).toBe(false);
+  });
+
+  describe("near a raised surface (#132)", () => {
+    // A footbridge 0.4 m wide along the pond's south waterline (z = 2), at height `y`.
+    const footbridge = (y: number) => {
+      const world = pondVariant({ id: `fixture:footbridge-${y}` });
+      (world.regions as unknown[]).push({
+        id: "footbridge",
+        kind: "land",
+        surface: {
+          type: "core:deck",
+          params: {
+            centerline: [
+              { x: -3, y, z: 2 },
+              { x: 3, y, z: 2 },
+            ],
+            width: 0.4,
+          },
+        },
+        footprint: [
+          { x: -3, z: 1.8 },
+          { x: 3, z: 1.8 },
+          { x: 3, z: 2.2 },
+          { x: -3, z: 2.2 },
+        ],
+      });
+      const pathfinder = navigationOf(createSimulation({ ...variant(world), seed: 1 }), newt.id);
+      const jump = (land: { x: number; z: number }, water = { x: 0, z: 1.25 }) =>
+        isJumpClear(
+          pathfinder.world,
+          pathfinder.navigation.profile,
+          { ...land, y: pathfinder.world.terrain.heightAt(land.x, land.z) },
+          { ...water, y: 0 },
+        );
+      return Object.assign(jump, { navigation: pathfinder.navigation });
+    };
+    // The newt is small: radius 0.2 m, height 0.4 m. From 0.15 m up the bank its arc tops out
+    // at most 0.15 + 0.2 + 0.4 = 0.75 m.
+    const keep = 0.2 + JUMP_STRUCTURE_MARGIN;
+    const low = footbridge(0.3);
+    const high = footbridge(1.5);
+    const bank = { x: 0, z: 2.75 };
+
+    it("rejects a jump under a deck lower than the top of its arc, not under one above it", () => {
+      expect(2.75 - 2.2).toBeGreaterThan(keep);
+      expect(low(bank)).toBe(false);
+      expect(high(bank)).toBe(true);
+    });
+
+    it("rejects a take-off or landing under a deck or beside it, however high it is", () => {
+      for (const jump of [high, low]) {
+        expect(jump({ x: 0, z: 2.1 })).toBe(false);
+        expect(jump({ x: 0, z: 2.2 + keep - 0.05 })).toBe(false);
+        // Beside the deck's end, just within and just out of reach.
+        expect(jump({ x: 3 + keep - 0.05, z: 2.2 }, { x: 3 + keep - 0.05, z: 1.25 })).toBe(false);
+        expect(jump({ x: 3 + keep + 0.05, z: 2.2 }, { x: 3 + keep + 0.05, z: 1.25 })).toBe(true);
+      }
+    });
+
+    it("still jumps along the rest of the bank, past the deck's ends", () => {
+      const south = low.navigation.banks.find((b) => b.landRegionId === "south-bank")!;
+      expect(south.pairs.length).toBeGreaterThan(0);
+      // Distance from the deck's footprint, which has no curve: 0 inside.
+      const away = ({ x, z }: { x: number; z: number }) =>
+        Math.hypot(Math.max(0, Math.abs(x) - 3), Math.max(0, Math.abs(z - 2) - 0.2));
+      for (const pair of south.pairs) {
+        expect(away(pair.land)).toBeGreaterThanOrEqual(keep);
+        expect(away(pair.water)).toBeGreaterThanOrEqual(keep);
+        for (let k = 0; k <= 50; k++) {
+          const x = pair.land.x + ((pair.water.x - pair.land.x) * k) / 50;
+          const z = pair.land.z + ((pair.water.z - pair.land.z) * k) / 50;
+          expect(away({ x, z })).toBeGreaterThanOrEqual(keep - 1e-9);
+        }
+      }
+    });
+  });
+
+  describe("by the Hollow's bridge, at every size (#132)", () => {
+    const hollow = createSimulation({
+      register: registerBuiltInContent,
+      worldId: "hollow:woodland-hollow",
+      seed: 1,
+    });
+    const deck = hollow.state.model.regions.get("bridge-deck")!;
+    /** How far a point is from the deck's footprint: 0 inside it. */
+    const near = ({ x, z }: { x: number; z: number }) =>
+      pointInPolygon(x, z, deck.footprint) ? 0 : distanceToPolygonEdge(x, z, deck.footprint);
+
+    for (const size of ["tiny", "small", "medium", "large"] as const) {
+      it(`keeps a ${size} amphibian's jumps off and clear of the deck, with banks either side`, () => {
+        expect(hollow.checkLimits(size, { "core:land": 1, "core:swim": 1 }).ok).toBe(true);
+        const nav = hollow.state.navigations.find(
+          (n) => n.profile.sizeClass === size && n.profile.capabilities.has("core:swim"),
+        )!;
+        const { radius, height } = nav.profile;
+        const keep = radius + JUMP_STRUCTURE_MARGIN;
+        let closest = Infinity;
+        for (const bank of nav.banks) {
+          const land = nav.masks.get(bank.landRegionId)!;
+          for (const pair of bank.pairs) {
+            // Both ends clear of the deck: never under it, on it or against its side.
+            expect(near(pair.land)).toBeGreaterThanOrEqual(keep);
+            expect(near(pair.water)).toBeGreaterThanOrEqual(keep);
+            closest = Math.min(closest, near(pair.land), near(pair.water));
+            // Along the line, the deck is out of reach or above the arc's top (0.5 m water).
+            const top = land.height(pair.landCell) + radius + height;
+            for (let k = 0; k <= 50; k++) {
+              const x = pair.land.x + ((pair.water.x - pair.land.x) * k) / 50;
+              const z = pair.land.z + ((pair.water.z - pair.land.z) * k) / 50;
+              if (near({ x, z }) >= keep) continue;
+              expect(deck.surface.heightAt(x, z) ?? Infinity).toBeGreaterThanOrEqual(top);
+            }
+          }
+        }
+        // Jumps are still made close by the bridge, just not against it.
+        expect(closest).toBeLessThan(keep + 1);
+        // Into the river and out of it on either side: both media, and a way across besides the
+        // bridge (which a large creature doesn't fit on).
+        expect(nav.banks.map((b) => b.landRegionId).sort()).toEqual(["east-meadow", "west-woods"]);
+        for (const from of ["west-woods", "river", "east-meadow"]) {
+          expect([...nav.reachableRegions(from)]).toEqual(
+            expect.arrayContaining(["west-woods", "river", "east-meadow"]),
+          );
+        }
+      });
+    }
   });
 
   it("leaves a walker's navigation in the Hollow as it was at medium and large size", () => {

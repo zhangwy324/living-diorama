@@ -1,6 +1,6 @@
 import { WORLD_TOLERANCES, type RegionKind, type Vec2 } from "@living-diorama/content-schema";
-import { pointInPolygon, projectOnSegment } from "../world/geometry";
-import type { ConnectionModel, WorldModel } from "../world/world-model";
+import { pointInPolygon, polygonEdges, projectOnSegment } from "../world/geometry";
+import type { ConnectionModel, RegionModel, WorldModel } from "../world/world-model";
 import type { NavProfile } from "./profile";
 import { buildRegionMask, CellState, type RegionMask } from "./walkability";
 
@@ -208,13 +208,14 @@ function findBanks(
 ): Bank[] {
   if (!profile.maxSlopeByKind.has("water")) return [];
   const all = [...masks.values()];
+  const raised = raisedSurfaces(world);
   const banks: Bank[] = [];
   for (const land of all) {
     if (land.region.kind === "water" || !profile.maxSlopeByKind.has(land.region.kind)) continue;
     for (const water of all) {
       if (water.region.kind !== "water" || water.walkableCount === 0) continue;
       const pairs = bankPairs(land, water, bankReach(profile), (a, b) =>
-        isJumpClear(world, profile, a, b),
+        isJumpClear(world, profile, a, b, raised),
       );
       if (pairs.length > 0) {
         banks.push({ landRegionId: land.region.id, waterRegionId: water.region.id, pairs });
@@ -235,19 +236,85 @@ interface JumpEnd {
 const JUMP_SAMPLE_SPACING = 0.1;
 
 /**
- * Whether the straight line between two ends of a jump is clear for a creature of this profile
- * (ADR 0020 §4): along it, no prop's block radius comes within the creature's radius, the ground
- * rises no more than a step above the higher end, and no other surface (a bridge deck, say) lies
- * between the lower end and the creature's height above the higher one. Water surfaces don't
- * count, nor do regions whose surface is the ground itself, which the ground check covers.
+ * How far, in metres, a jump keeps its body (the creature's radius) from a raised surface's
+ * footprint, at both ends and along its line (#132): room for the deck's slab and posts, which the
+ * renderer draws at the footprint's edge, so a creature never lands against or under a bridge.
  */
-export function isJumpClear(world: WorldModel, profile: NavProfile, a: JumpEnd, b: JumpEnd) {
+export const JUMP_STRUCTURE_MARGIN = 0.25;
+
+/**
+ * The regions with a raised surface, such as a bridge deck: not water, and with a surface off the
+ * ground somewhere in the footprint, sampled at its corners and on a grid a terrain cell apart. A
+ * region whose surface is the ground everywhere is the jump's ground check's.
+ */
+export function raisedSurfaces(world: WorldModel): RegionModel[] {
+  const eps = WORLD_TOLERANCES.surfaceEpsilon;
+  const { terrain } = world;
+  const cs = terrain.cellSize;
+  const offGround = (region: RegionModel, x: number, z: number) => {
+    const y = region.surface.heightAt(x, z);
+    return y !== undefined && Math.abs(y - terrain.heightAt(x, z)) > eps;
+  };
+  return [...world.regions.values()].filter((region) => {
+    if (region.kind === "water") return false;
+    if (region.footprint.some((p) => offGround(region, p.x, p.z))) return true;
+    const { box } = region;
+    for (let z = (Math.floor(box.minZ / cs) + 0.5) * cs; z <= box.maxZ; z += cs) {
+      for (let x = (Math.floor(box.minX / cs) + 0.5) * cs; x <= box.maxX; x += cs) {
+        if (pointInPolygon(x, z, region.footprint) && offGround(region, x, z)) return true;
+      }
+    }
+    return false;
+  });
+}
+
+/** The point of `region`'s footprint nearest (x, z) and its distance: (x, z) itself if inside. */
+function nearestFootprintPoint(region: RegionModel, x: number, z: number) {
+  if (pointInPolygon(x, z, region.footprint)) return { x, z, distance: 0 };
+  let best = { x, z, distance: Infinity };
+  for (const [a, b] of polygonEdges(region.footprint)) {
+    const { t, distance } = projectOnSegment(x, z, a, b);
+    if (distance < best.distance) {
+      best = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, distance };
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether a jump between two ends is clear for a creature of this profile (ADR 0020 §4, #132).
+ * Along the straight line, no prop's block radius comes within the creature's radius and the
+ * ground rises no more than a step above the higher end. Raised surfaces (`raisedSurfaces`, a
+ * bridge deck, say) are kept the creature's radius plus `JUMP_STRUCTURE_MARGIN` away: from either
+ * end at any height, so it never takes off or lands on a deck, under one or against its side;
+ * and from the line where the surface lies between the lower end and the top of the creature's
+ * arc, its height above the higher end plus its radius, the most the renderer's arc rises. A deck
+ * higher than that may span a jump.
+ */
+export function isJumpClear(
+  world: WorldModel,
+  profile: NavProfile,
+  a: JumpEnd,
+  b: JumpEnd,
+  raised: readonly RegionModel[] = raisedSurfaces(world),
+) {
   const eps = WORLD_TOLERANCES.surfaceEpsilon;
   const low = Math.min(a.y, b.y);
   const high = Math.max(a.y, b.y);
+  const top = high + profile.radius + profile.height;
   const length = Math.hypot(b.x - a.x, b.z - a.z);
   const steps = Math.max(1, Math.ceil(length / JUMP_SAMPLE_SPACING));
-  const others = [...world.regions.values()].filter((r) => r.kind !== "water");
+  const keep = profile.radius + JUMP_STRUCTURE_MARGIN;
+  const near = raised.filter(
+    ({ box }) =>
+      box.maxX > Math.min(a.x, b.x) - keep &&
+      box.minX < Math.max(a.x, b.x) + keep &&
+      box.maxZ > Math.min(a.z, b.z) - keep &&
+      box.minZ < Math.max(a.z, b.z) + keep,
+  );
+  for (const end of [a, b]) {
+    if (near.some((r) => nearestFootprintPoint(r, end.x, end.z).distance < keep)) return false;
+  }
   for (let k = 0; k <= steps; k++) {
     const x = a.x + ((b.x - a.x) * k) / steps;
     const z = a.z + ((b.z - a.z) * k) / steps;
@@ -260,13 +327,14 @@ export function isJumpClear(world: WorldModel, profile: NavProfile, a: JumpEnd, 
     }
     const ground = world.terrain.heightAt(x, z);
     if (ground > high + WORLD_TOLERANCES.maxStepHeight) return false;
-    for (const region of others) {
-      const { box } = region;
-      if (x < box.minX || x > box.maxX || z < box.minZ || z > box.maxZ) continue;
-      if (!pointInPolygon(x, z, region.footprint)) continue;
-      const y = region.surface.heightAt(x, z);
-      if (y === undefined || Math.abs(y - ground) <= eps) continue;
-      if (y > low - eps && y < high + profile.height) return false;
+    for (const region of near) {
+      const point = nearestFootprintPoint(region, x, z);
+      if (point.distance >= keep) continue;
+      const y = region.surface.heightAt(point.x, point.z);
+      // No surface known there, as beside a curved deck: it may be in the way.
+      if (y === undefined) return false;
+      if (Math.abs(y - world.terrain.heightAt(point.x, point.z)) <= eps) continue;
+      if (y > low - eps && y < top) return false;
     }
   }
   return true;
