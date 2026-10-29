@@ -5,8 +5,10 @@ mod placement;
 mod platform;
 mod settings;
 mod shell;
+mod storage;
 mod studio;
 mod tray;
+mod world;
 
 pub fn run() {
     tauri::Builder::default()
@@ -26,6 +28,8 @@ pub fn run() {
             library::commands::load_library_image,
             library::commands::save_library_entry,
             library::commands::delete_library_entry,
+            world::commands::load_world,
+            world::commands::save_world,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
