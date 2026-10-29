@@ -60,6 +60,9 @@ export const LAYOUT = {
     { id: "woods-north", regionId: "west-woods", x: -22, z: -9, heading: 0 },
     { id: "meadow", regionId: "east-meadow", x: 13, z: 6, heading: -Math.PI / 2 },
     { id: "summit-dome", regionId: "summit", x: 22, z: -14, heading: 0 },
+    // For water-only creatures (ADR 0020 §6): mid-channel on the front stretch, 13 m downstream
+    // of the bridge, where the river is wide enough for every size; facing downstream.
+    { id: "river-pool", regionId: "river", x: 4.25, z: 14.25, heading: Math.atan2(3, 6) },
   ],
 } as const;
 
