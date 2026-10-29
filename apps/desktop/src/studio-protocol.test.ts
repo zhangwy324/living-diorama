@@ -27,6 +27,7 @@ import {
   type StudioRequests,
   type StudioServices,
 } from "./studio-protocol";
+import type { CheckedLimits } from "./simulation-client";
 import { userSpeciesIds } from "./user-species";
 
 const bridge: Limit = {
@@ -124,16 +125,24 @@ async function setUp({
 
 describe("the Studio's requests", () => {
   it("checks a size's limits with the capabilities of the chosen ways of moving", async () => {
+    const swim = { regionKinds: ["water" as const], animation: "swim", submersion: 0.5 };
     const checkLimits = vi.fn((sizeClass: SizeClass) =>
-      Promise.resolve({ ok: true as const, value: sizeClass === "large" ? [bridge] : [] }),
+      Promise.resolve<Result<CheckedLimits>>({
+        ok: true,
+        value:
+          sizeClass === "large"
+            ? { limits: [bridge], locomotion: {} }
+            : { limits: [], locomotion: { "core:swim": swim } },
+      }),
     );
     const { studio } = await setUp({ checkLimits });
     await expect(
       studio.request("limits", { sizeClass: "large", locomotion: LAND }),
-    ).resolves.toEqual([bridge]);
+    ).resolves.toEqual({ limits: [bridge], locomotion: {} });
+    // The capabilities' locomotion rules pass through for the preview (issue #136).
     await expect(
       studio.request("limits", { sizeClass: "small", locomotion: BOTH }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ limits: [], locomotion: { "core:swim": swim } });
     expect(checkLimits).toHaveBeenCalledWith("large", { "core:land": 1 });
     expect(checkLimits).toHaveBeenCalledWith("small", { "core:land": 1, "core:swim": 1 });
     await expect(

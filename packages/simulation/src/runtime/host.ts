@@ -5,7 +5,7 @@ import {
   type Result,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
-import type { AssetEntry, Registries } from "@living-diorama/extension-api";
+import type { AssetEntry, LocomotionRule, Registries } from "@living-diorama/extension-api";
 import { describeNavigation } from "../navigation/overlay";
 import {
   envelope,
@@ -254,7 +254,12 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           diagnostics = checked.diagnostics;
           break;
         }
-        send({ type: "limits", ...requestId, limits: checked.value });
+        const locomotion: Record<string, LocomotionRule> = {};
+        for (const id of Object.keys(command.capabilities)) {
+          const rule = sim.state.registries.capabilities.get(id)?.locomotion;
+          if (rule) locomotion[id] = rule;
+        }
+        send({ type: "limits", ...requestId, limits: checked.value, locomotion });
         return;
       }
       case "despawn": {

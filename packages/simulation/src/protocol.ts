@@ -5,7 +5,7 @@ import type {
   SizeClass,
   Vec3,
 } from "@living-diorama/content-schema";
-import type { AssetKind, Cue } from "@living-diorama/extension-api";
+import type { AssetKind, Cue, LocomotionRule } from "@living-diorama/extension-api";
 import type { ActionEvent } from "./creatures/action-event";
 import type { CreatureKnowledge } from "./creatures/knowledge";
 import type { NavigationOverlay } from "./navigation/overlay";
@@ -16,7 +16,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -268,9 +268,16 @@ export type SimulationMessage =
     }
   /**
    * The answer to `check_limits`: warnings where the profile's creatures don't fit, or the
-   * errors that keep it out of the world entirely (e.g. `no_spawn_point`).
+   * errors that keep it out of the world entirely (e.g. `no_spawn_point`). With them, how the
+   * asked capabilities move a creature, so the Studio's preview needn't repeat it (issue #136).
    */
-  | { type: "limits"; requestId?: string; limits: Limit[] }
+  | {
+      type: "limits";
+      requestId?: string;
+      limits: Limit[];
+      /** The locomotion rule of each asked capability that is a way of moving, by its ID. */
+      locomotion: Record<string, LocomotionRule>;
+    }
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }
   /**

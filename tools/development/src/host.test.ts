@@ -276,6 +276,37 @@ describe("simulation host", () => {
     expect(next?.events.map((e) => e.type)).toEqual(["creature_despawned"]);
   });
 
+  it("answers a limits query with the asked capabilities' locomotion rules, as content declares them", () => {
+    // A pack's own way of moving comes back as it registered it (issue #136).
+    const paddle = { regionKinds: ["water" as const], animation: "paddle", submersion: 0.8 };
+    const host = startHost((registries) => [
+      ...registerBuiltInContent(registries),
+      registries.capabilities.register({ id: "test:paddle", version: "1.0.0", locomotion: paddle }),
+      registries.capabilities.register({ id: "test:keen", version: "1.0.0" }),
+    ]);
+    host.init();
+    host.take();
+    host.send({
+      type: "check_limits",
+      requestId: "q",
+      sizeClass: "small",
+      capabilities: { "core:land": 1, "test:paddle": 1, "test:keen": 1 },
+    });
+    host.advance(100);
+    const [answer] = host.take();
+    expect(answer).toMatchObject({
+      type: "limits",
+      requestId: "q",
+      locomotion: { "core:land": { animation: { fromStyle: "land" } }, "test:paddle": paddle },
+    });
+    // A capability that is no way of moving has no rule.
+    expect(answer?.type === "limits" && Object.keys(answer.locomotion)).toEqual([
+      "core:land",
+      "test:paddle",
+    ]);
+    expect(structuredClone(answer)).toEqual(answer);
+  });
+
   it("rejects requests it can't apply without stopping the world", () => {
     const host = startHost();
     host.init();
@@ -647,8 +678,8 @@ describe("saving and restoring in the host", () => {
     expect(ticks).toEqual([12]);
   });
 
-  it("is protocol version 11, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(11);
+  it("is protocol version 12, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(12);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

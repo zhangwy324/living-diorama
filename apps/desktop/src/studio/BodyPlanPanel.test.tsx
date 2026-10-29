@@ -1,7 +1,7 @@
 import type { AnchorName } from "@living-diorama/content-schema";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { defaultPlan, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
+import { defaultPlan, planBody, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
 import { AnchorLayer, BodyPlanPanel } from "./BodyPlanPanel";
 import { previewModes } from "./body-plan-view";
 
@@ -19,7 +19,7 @@ const panel = (plan: BodyPlanChoice, mode?: "land" | "swim", placing?: AnchorNam
       placing={placing}
       onPlacing={() => {}}
       onResetAnchors={() => {}}
-      modes={previewModes(plan.locomotion)}
+      modes={previewModes(plan.locomotion, planBody(plan, 0.4), {})}
       mode={mode}
       onMode={() => {}}
       hints={["Could get stuck in the water: some banks are too high to climb out."]}

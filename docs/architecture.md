@@ -157,7 +157,7 @@ Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`
 | worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                                                                                     |
 |               | `snapshot`                     | Every tick: the time of day, creature positions, headings and cues, plus the events since the previous snapshot.                                                       |
 |               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                                                                                            |
-|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world.                                                                       |
+|               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world, and the locomotion rules of the capabilities asked about.             |
 |               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                                                                                           |
 |               | `saved`                        | The answer to `save`: the save as JSON text, ready to store.                                                                                                           |
 |               | `restored`                     | The answer to `restore`: the gap since the save and what was dropped or pruned. The next snapshot shows the restored world.                                            |
@@ -182,14 +182,14 @@ The window channel in [`packages/desktop-integration/src/channel.ts`](../package
 - `main` pushes `library-changed` with a library snapshot whenever the library changes, or the count of a species in the world does.
 - Each side listens with its own window label as the target, so it never hears events sent to the other window.
 
-| Request          | What the strip does                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `snapshot`       | Returns the library now: each species with its library UUID and count in the world, the world's total and its cap. |
-| `limits`         | Runs `check_limits` for a size class with the drawn species' capabilities.                                         |
-| `release`        | Saves the drawing as a species and adds one creature. Repeating a `releaseId` gets the first answer.               |
-| `addCreature`    | Adds a creature of a library species, unless the world is full.                                                    |
-| `removeCreature` | Takes the newest creature of a species out of the world.                                                           |
-| `deleteSpecies`  | Deletes a species from the library; its creatures leave the world.                                                 |
+| Request          | What the strip does                                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `snapshot`       | Returns the library now: each species with its library UUID and count in the world, the world's total and its cap.                 |
+| `limits`         | Runs `check_limits` for a size class with the drawn species' capabilities; the Studio's preview moves by the rules that come back. |
+| `release`        | Saves the drawing as a species and adds one creature. Repeating a `releaseId` gets the first answer.                               |
+| `addCreature`    | Adds a creature of a library species, unless the world is full.                                                                    |
+| `removeCreature` | Takes the newest creature of a species out of the world.                                                                           |
+| `deleteSpecies`  | Deletes a species from the library; its creatures leave the world.                                                                 |
 
 Images don't travel in snapshots. The Studio loads each species' PNG itself with `load_library_image` and makes its own `blob:` URL.
 

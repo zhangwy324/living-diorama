@@ -1,4 +1,5 @@
 import { formatDiagnostic, type Result, type SizeClass } from "@living-diorama/content-schema";
+import type { LocomotionRule } from "@living-diorama/extension-api";
 import {
   envelope,
   openEnvelope,
@@ -38,6 +39,13 @@ export interface RegisteredSpecies {
   limits: Limit[];
 }
 
+/** The answer to a limits query: where the profile doesn't fit, and how its capabilities move. */
+export interface CheckedLimits {
+  limits: Limit[];
+  /** The locomotion rule of each asked capability that is a way of moving, by its ID. */
+  locomotion: Record<string, LocomotionRule>;
+}
+
 export interface SimulationClient {
   /**
    * Adds a species while the world runs (ADR 0012). Resolves once the worker has registered it
@@ -47,9 +55,13 @@ export interface SimulationClient {
   /**
    * Where creatures of this size and these capabilities wouldn't fit, without registering anything
    * (ADR 0015 §8). Errors among the limits mean such a species can't be added; the result fails
-   * only for a size class or capability that doesn't exist.
+   * only for a size class or capability that doesn't exist. The capabilities' locomotion rules
+   * come with them, so the Studio's preview moves as the world would (issue #136).
    */
-  checkLimits(sizeClass: SizeClass, capabilities: Record<string, number>): Promise<Result<Limit[]>>;
+  checkLimits(
+    sizeClass: SizeClass,
+    capabilities: Record<string, number>,
+  ): Promise<Result<CheckedLimits>>;
   /**
    * Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added.
    * `released`: it comes from the Studio, so it gets the release grace (ADR 0018 amendments, §13).
@@ -214,7 +226,10 @@ export function startSimulation(
         });
         break;
       case "limits":
-        answer(message.requestId, { ok: true, value: message.limits });
+        answer(message.requestId, {
+          ok: true,
+          value: { limits: message.limits, locomotion: message.locomotion },
+        });
         break;
       case "spawned":
       case "despawned":
