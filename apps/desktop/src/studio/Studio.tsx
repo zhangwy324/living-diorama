@@ -8,11 +8,12 @@ import { checkBody, createBodyPreview, type BodyPreview } from "@living-diorama/
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LibrarySnapshot, StudioRequests, StudioSpecies } from "../studio-protocol";
 import { CloseDialog } from "./CloseDialog";
-import { CreatureDetails, DEFAULT_SIZE_CLASS, defaultName } from "./CreatureDetails";
+import { CreatureDetails, DEFAULT_SIZE_CLASS } from "./CreatureDetails";
 import { DeleteDialog } from "./DeleteDialog";
 import { DrawingEditor, type EditorState, type Tool } from "./editor";
 import { drawingHints, limitHints } from "./hints";
 import { MyCreatures } from "./MyCreatures";
+import { randomNameSeed, suggestName } from "./name-suggestion";
 import { canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 
@@ -69,10 +70,11 @@ export function Studio() {
   const preview = useRef<BodyPreview>(undefined);
   const [sizeClass, setSizeClass] = useState<SizeClass>(DEFAULT_SIZE_CLASS);
   const [thickness, setThickness] = useState<number>(BODY_THICKNESS.default);
-  // Undefined until the player types one, so the default follows the library.
+  // Undefined until the player types one, so the suggestion follows the library.
   const [name, setName] = useState<string>();
+  // One per drawing, so the suggested name stays put until the next release.
+  const [nameSeed, setNameSeed] = useState(randomNameSeed);
   const [library, setLibrary] = useState<LibrarySnapshot>();
-  const speciesInLibrary = library?.species.length;
   const [shapeHints, setShapeHints] = useState<string[]>(["Nothing drawn yet."]);
   const [sizeHints, setSizeHints] = useState<string[]>([]);
   const sizeHintCache = useRef(new Map<SizeClass, string[]>());
@@ -240,7 +242,14 @@ export function Studio() {
     return () => clearTimeout(timer);
   }, [celebration]);
 
-  const shownName = name ?? (speciesInLibrary === undefined ? "" : defaultName(speciesInLibrary));
+  const shownName =
+    name ??
+    (library === undefined
+      ? ""
+      : suggestName(
+          nameSeed,
+          library.species.map((species) => species.name),
+        ));
   const releasable = canRelease({ name: shownName, empty: !hasBody, releasing });
 
   const release = async () => {
@@ -264,6 +273,7 @@ export function Studio() {
       current.reset();
       releaseId.current = undefined;
       setName(undefined);
+      setNameSeed(randomNameSeed());
       setSizeClass(DEFAULT_SIZE_CLASS);
       setThickness(BODY_THICKNESS.default);
       setCelebration(

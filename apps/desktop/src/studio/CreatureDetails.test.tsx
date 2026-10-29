@@ -1,20 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { BODY_THICKNESS } from "@living-diorama/content-schema";
-import {
-  CreatureDetails,
-  DEFAULT_SIZE_CLASS,
-  defaultName,
-  thicknessLabel,
-} from "./CreatureDetails";
+import { CreatureDetails, DEFAULT_SIZE_CLASS, thicknessLabel } from "./CreatureDetails";
 
 it("starts a new creature at medium, the mossling's size", () => {
   expect(DEFAULT_SIZE_CLASS).toBe("medium");
-});
-
-it("names a new creature after the species already in the library", () => {
-  expect(defaultName(0)).toBe("Creature 1");
-  expect(defaultName(3)).toBe("Creature 4");
 });
 
 it("shows the name, the four sizes with one chosen, the thickness and the hints", () => {
