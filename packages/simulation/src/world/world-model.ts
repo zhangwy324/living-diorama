@@ -16,13 +16,13 @@ import { isSurfaceProvider, type Surface } from "./surfaces";
 import { Terrain } from "./terrain";
 
 export interface RegionModel {
-  id: string;
-  kind: RegionKind;
-  footprint: readonly Vec2[];
-  box: Box2;
-  surface: Surface;
+  readonly id: string;
+  readonly kind: RegionKind;
+  readonly footprint: readonly Vec2[];
+  readonly box: Readonly<Box2>;
+  readonly surface: Surface;
   /** Placement ID of the structure that contributed this region, if any. */
-  structureId?: string;
+  readonly structureId?: string;
 }
 
 export interface ConnectionModel extends ConnectionDefinition {
@@ -47,18 +47,24 @@ export interface PropModel {
   affordances: Readonly<Record<string, unknown>>;
 }
 
-/** A world definition with its terrain decoded, surfaces instantiated and props resolved. */
+/**
+ * A world definition with its terrain decoded, surfaces instantiated and props resolved.
+ *
+ * Never changed once built: an edit builds a new model (ADR 0021). Data derived from a model, such
+ * as navigation's shared cell facts (`navigation/region-cells.ts`) and `raisedSurfaces`, is
+ * cached by the model's identity and would go stale if it were changed in place.
+ */
 export interface WorldModel {
-  definition: WorldDefinition;
-  bounds: WorldBounds;
-  terrain: Terrain;
-  regions: ReadonlyMap<string, RegionModel>;
-  connections: readonly ConnectionModel[];
-  props: readonly PropModel[];
+  readonly definition: WorldDefinition;
+  readonly bounds: WorldBounds;
+  readonly terrain: Terrain;
+  readonly regions: ReadonlyMap<string, RegionModel>;
+  readonly connections: readonly ConnectionModel[];
+  readonly props: readonly PropModel[];
   /** Props by placement ID. */
-  propsById: ReadonlyMap<string, PropModel>;
+  readonly propsById: ReadonlyMap<string, PropModel>;
   /** Per affordance ID, the props offering it, in placement order, for perception (ADR 0018 §10). */
-  propsByAffordance: ReadonlyMap<string, readonly PropModel[]>;
+  readonly propsByAffordance: ReadonlyMap<string, readonly PropModel[]>;
 }
 
 /** Builds the runtime model. Expects references to be resolved (`resolveReferences`) first. */
