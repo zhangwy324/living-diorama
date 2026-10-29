@@ -3,7 +3,7 @@
 //! they are unit tested without the app.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
@@ -15,8 +15,16 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         fs::create_dir_all(dir)?;
     }
     let temporary = pending_path(path);
-    fs::write(&temporary, contents)?;
+    write_synced(&temporary, contents)?;
     fs::rename(&temporary, path)
+}
+
+/// Writes `contents` to `path` and flushes it to disk before returning, so a rename that follows
+/// never puts an empty or partial file in place after a power cut.
+pub fn write_synced(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(contents)?;
+    file.sync_all()
 }
 
 /// The temporary file `write_atomic` writes before renaming it into place.

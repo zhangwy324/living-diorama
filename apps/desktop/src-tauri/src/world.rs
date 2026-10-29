@@ -52,8 +52,9 @@ fn read_world(path: &Path) -> io::Result<String> {
 }
 
 /// Saves the world's text. The new file is written next to `world.json` first; the old
-/// `world.json` then becomes `world.prev.json` and the new one takes its place. A crash at any
-/// point leaves at least one complete save for `load`.
+/// `world.json` then becomes `world.prev.json`, if `load` could read it, and the new one takes its
+/// place. An unreadable `world.json` is just replaced, so it never overwrites a good backup. A
+/// crash at any point leaves at least one complete save for `load`.
 pub fn save(dir: &Path, json: &str) -> Result<(), String> {
     let size = json.len() as u64;
     if size > MAX_WORLD_BYTES {
@@ -70,8 +71,8 @@ pub fn save(dir: &Path, json: &str) -> Result<(), String> {
     // new file is written aside first, so a failed write leaves both saves as they were.
     let write = || -> io::Result<()> {
         fs::create_dir_all(dir)?;
-        fs::write(&pending, json)?;
-        if world.exists() {
+        storage::write_synced(&pending, json.as_bytes())?;
+        if read_world(&world).is_ok() {
             fs::rename(&world, dir.join(BACKUP_FILE))?;
         }
         fs::rename(&pending, &world)
@@ -153,6 +154,28 @@ mod tests {
         assert_eq!(dir.read(WORLD_FILE).as_deref(), Some(r#"{"tick":3}"#));
         assert_eq!(dir.read(BACKUP_FILE).as_deref(), Some(r#"{"tick":2}"#));
         assert_eq!(load(&dir.0).as_deref(), Some(r#"{"tick":3}"#));
+    }
+
+    #[test]
+    fn an_unreadable_save_never_replaces_the_backup() {
+        let dir = TempDir::new("unreadable-current");
+        save(&dir.0, r#"{"tick":1}"#).unwrap();
+        save(&dir.0, r#"{"tick":2}"#).unwrap();
+        fs::write(dir.0.join(WORLD_FILE), "{ torn").unwrap();
+        save(&dir.0, r#"{"tick":3}"#).unwrap();
+        assert_eq!(dir.read(WORLD_FILE).as_deref(), Some(r#"{"tick":3}"#));
+        assert_eq!(dir.read(BACKUP_FILE).as_deref(), Some(r#"{"tick":1}"#));
+    }
+
+    #[test]
+    fn a_missing_save_keeps_the_backup() {
+        let dir = TempDir::new("missing-current");
+        save(&dir.0, r#"{"tick":1}"#).unwrap();
+        save(&dir.0, r#"{"tick":2}"#).unwrap();
+        fs::remove_file(dir.0.join(WORLD_FILE)).unwrap();
+        save(&dir.0, r#"{"tick":3}"#).unwrap();
+        assert_eq!(dir.read(WORLD_FILE).as_deref(), Some(r#"{"tick":3}"#));
+        assert_eq!(dir.read(BACKUP_FILE).as_deref(), Some(r#"{"tick":1}"#));
     }
 
     #[test]
