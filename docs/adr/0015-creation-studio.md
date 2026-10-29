@@ -51,6 +51,8 @@
 
    As built in PR 3: v4 is still unreleased (v0.1.0 shipped v2), so `PROTOCOL_VERSION` stays 4. Each limit is a `Limit`, a `Diagnostic` with the structure it is about, if any (`structure: { id, name }`, from the diagnostic's path and the structure definition's name), so the Studio can say "too big to cross the wooden bridge" without parsing messages; `species_registered` carries the same. A profile whose check fails keeps its errors too. An unknown size class or capability is misuse and answered with `rejected`. The strip answers the Studio's `limits` request once the world is ready, with `DRAWN_SPECIES_DEFAULTS`' capabilities, and the Studio asks once per size class while it is open. Each code has a short line (`portal_unusable` names the structure; `disconnected_region`, `no_walkable_area`, `spawn_not_walkable` and `no_spawn_point` have their own), and any other code a general one; the same line is said once.
 
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §12 (planned, M16 PR 5):_ the Studio asks for limits with the capabilities the player chose in the confirm panel (land movement, swimming or both), not `DRAWN_SPECIES_DEFAULTS`' fixed set. The land gait doesn't change them.
+
 ### The drawing (PRs 2 and 4)
 
 9. **Strokes on a square 256-unit canvas, drawn as round lines through their points** (perfect-freehand outlines until the amendment below). The canvas is 256 × 256 units, the body image's size (ADR 0011 §1), shown scaled up to fit the window. Strokes keep the ADR 0014 format unchanged: tool (`pen` or `eraser`), colour, width at full pressure and flat `[x, y, pressure, …]` points in canvas units.

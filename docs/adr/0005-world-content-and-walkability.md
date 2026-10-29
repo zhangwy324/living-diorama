@@ -32,7 +32,7 @@
 
    They run for every registered species' profile. "Banks connected only through the bridge" is a test of the built-in world (removing the bridge disconnects them), not engine logic.
 
-   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §5 (planned, M16 PR 2):_ `unsatisfiable_connection` and `spawn_unusable` no longer fire at startup just because no species registered yet has the capability, since swimmers arrive from the library later. A capability that isn't registered at all still warns.
+   _Amended by [ADR 0020](0020-body-plans-swimming-and-live-edits.md) §5 (planned, M16 PR 2):_ `unsatisfiable_connection` is removed: reference resolution already rejects an unregistered capability, so it could only fire for a registered capability no species has yet, which is the normal case for swimmers drawn later. `spawn_unusable` fires only for a spawn point in a region kind no registered capability covers. Per-profile checks skip a connection with a side in a region kind the profile can't move in, and the bank beside a derived water entry is not a `region_seam`.
 
 6. **The built-in world is generated.** `tools/development/src/worldgen` turns a layout (river spline, plateau, ramp, bridge, groves, spawns) into the whole world definition with a seeded generator. `pnpm worldgen` writes `packages/built-in-content/src/woodland-hollow/world.json` and a top-down debug map (`tools/development/out/`). A test fails if the JSON differs from the generator's output. Heights are inline, in millimetres: the schema validates them fully and no decoder is needed. The asset heightfield path stays in the schema for larger worlds.
 
