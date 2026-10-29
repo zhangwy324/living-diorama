@@ -353,6 +353,35 @@ describe("catch-up after a long gap", () => {
     expect(after.position).toEqual(creature.position);
     expect(after.home).toBeNull();
   });
+  it("counts as asleep only creatures already put to bed, not those asleep at the save", () => {
+    const save = nightSave();
+    const [first, second] = save.creatures;
+    const { position } = first!;
+    // Both homeless on one point; the second was asleep there at the save, but wakes in catch-up.
+    for (const creature of [first!, second!]) {
+      creature.home = null;
+      creature.knowledge.places["core:shelter"] = [];
+      creature.position = { ...position };
+    }
+    expect(second!.asleep).toBe(true);
+    const original = restBehavior.catchUp!;
+    const spy = vi
+      .spyOn(restBehavior, "catchUp")
+      .mockImplementation((observation, gap, rng) =>
+        observation.creature.id === second!.id ? null : original(observation, gap, rng),
+      );
+    try {
+      const { simulation } = restored(save, { nowMs: SAVED_AT + 3 * HOUR, minutes: at(23, 10) });
+      const [after, awake] = simulation.save(SAVED_AT).creatures;
+      expect(awake!.action).toBeUndefined();
+      // The second's stale sleep at the save doesn't push the first off its point.
+      expect(after!.action).toMatchObject({ id: "core:sleep", state: { placementId: null } });
+      expect(after!.position).toEqual(position);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("puts creatures knowing no shelter to bed apart, the same for the same save", () => {
     const save = nightSave();
     const { position } = save.creatures[0]!;

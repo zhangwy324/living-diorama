@@ -193,8 +193,16 @@ describe("core:rest", () => {
       params: {},
       reason: "night in the open",
     });
-    // Sleeping, it forgets this bedtime's searches.
-    expect(memory).toEqual({});
+    // Sleeping in the open, it remembers having searched, so woken later in the night (or
+    // napping the next morning) it lies down again at once.
+    expect(memory).toEqual({ searches: 3, searchedAtTick: 101_200 });
+    const later = restBehavior.evaluate(
+      observe(stub, { dayPhase: "night", tick: 101_200 + 4 * 36_000 }),
+      memory,
+      Rng.fromSeed(1),
+    );
+    expect(later).toMatchObject({ action: "core:sleep", params: {} });
+    expect(asked).toEqual(SHELTER_SEARCH_RADII);
   });
 
   it("skips a search walk that would go less than half its radius", () => {
@@ -218,17 +226,19 @@ describe("core:rest", () => {
     expect(next).toMatchObject({ action: "core:sleep", params: {} });
   });
 
-  it("searches afresh once its last search is more than 30 minutes old", () => {
+  it("searches afresh once its last search is more than 12 hours old", () => {
     const stub: Stub = { places: {}, within: (d) => ({ x: d, z: 0 }) };
     const ticks = SEARCH_FORGET_SECONDS * 10;
+    const now = 1_000_000;
     const search = (searchedAtTick: number) =>
       restBehavior.evaluate(
-        observe(stub, { dayPhase: "night" }),
+        observe(stub, { dayPhase: "night", tick: now }),
         { searches: 3, searchedAtTick },
         Rng.fromSeed(1),
       );
-    expect(search(100_000 - ticks)).toMatchObject({ action: "core:sleep" });
-    expect(search(100_000 - ticks - 1)).toMatchObject({
+    expect(SEARCH_FORGET_SECONDS).toBe(12 * 3600);
+    expect(search(now - ticks)).toMatchObject({ action: "core:sleep" });
+    expect(search(now - ticks - 1)).toMatchObject({
       action: "core:follow_path",
       reason: "night: looking for shelter (1/3)",
     });

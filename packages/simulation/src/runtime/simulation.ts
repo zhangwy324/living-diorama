@@ -1171,11 +1171,12 @@ export class Simulation {
   ): ActionContext {
     const { tick } = this;
     let rng: Rng | undefined;
+    // Built when first asked, from where the creature stands then, and kept with its cache.
+    let queries: WorldQueries | undefined;
     return {
       ...this.#placeQueries(creature),
-      // From where the creature stands when asked.
-      randomWalkablePointWithin: (maxDistance, rng) =>
-        this.#queries(creature).randomWalkablePointWithin(maxDistance, rng),
+      randomWalkablePointWithin: (maxDistance, draw) =>
+        (queries ??= this.#queries(creature)).randomWalkablePointWithin(maxDistance, draw),
       sleeperNear: (position, gap) => this.#sleeperNear(creature, position, gap),
       catchingUp,
       tick: this.tick,

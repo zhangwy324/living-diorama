@@ -66,8 +66,12 @@ export const SHELTER_SEARCH_RADII: readonly number[] = [6, 12, 20];
 const SEARCH_MIN_SHARE = 0.5;
 /** Points drawn for a search walk before that walk is skipped. */
 const SEARCH_DRAWS = 8;
-/** Search walks older than this are forgotten, so each bedtime searches afresh. */
-export const SEARCH_FORGET_SECONDS = 30 * 60;
+/**
+ * A search that found nothing is remembered this long after its last walk: woken in the night, or
+ * napping the next morning, the creature sleeps in the open at once; the next bedtime searches
+ * afresh.
+ */
+export const SEARCH_FORGET_SECONDS = 12 * 60 * 60;
 /** Clearance between the bodies of two creatures asleep in the open, in metres. */
 export const SLEEPER_GAP = 0.3;
 /** How far from where it stands a creature looks for a clear place to lie down, in metres. */
@@ -253,8 +257,11 @@ export const restBehavior: BehaviorProvider = {
         };
       }
     }
-    delete rest.searches;
-    delete rest.searchedAtTick;
+    // Finding a shelter ends the search; sleeping in the open, it remembers having searched.
+    if (shelter) {
+      delete rest.searches;
+      delete rest.searchedAtTick;
+    }
     return shelter
       ? {
           action: SLEEP,
@@ -321,8 +328,9 @@ interface SleepState {
 /**
  * Walks to the creature's spot at `params.placementId`, a place offering `core:shelter`, or,
  * without one, stays where it is, unless another creature sleeps too close there: it then walks to
- * a clear point close by, up to `OPEN_SPOT_MOVES` times, checked until it lies down; turns in place to a resting heading drawn from its own stream
- * (any way, not towards the shelter); then sleeps there. Checked every tick: a night's sleep ends
+ * a clear point close by, up to `OPEN_SPOT_MOVES` times, checked until it lies down; turns in
+ * place to a resting heading drawn from its own stream (any way, not towards the shelter); then
+ * sleeps there. Checked every tick: a night's sleep ends
  * once tiredness is below 0.1 and the creature's waking phase has begun, a nap once tiredness
  * reaches 0. Emits `fell_asleep` on lying down and `woke_up` on waking, also when interrupted. The
  * first shelter a creature sleeps at becomes its home. With `params.asleep` true it starts already
@@ -446,8 +454,8 @@ function movedAway(sleep: SleepState, context: ActionContext): boolean {
  * Sleep already under way, for catch-up only (ADR 0018 §19; `not_catching_up` otherwise). At a
  * shelter `placementId`, the creature must already stand at its spot there, where the engine
  * placed it (`not_at_spot` otherwise); without one it sleeps where it stands. It is asleep from
- * the start, at a resting heading of its own with no turn, so it emits no `fell_asleep`; a shelter becomes its home if it has none, as on
- * falling asleep there.
+ * the start, at a resting heading of its own with no turn, so it emits no `fell_asleep`; a
+ * shelter becomes its home if it has none, as on falling asleep there.
  */
 function startAsleep(placementId: unknown, waking: boolean, context: ActionContext): ActionStart {
   if (!context.catchingUp) return { ok: false, reason: "not_catching_up" };
