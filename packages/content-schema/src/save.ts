@@ -22,7 +22,10 @@ export const RngStateSchema = z.strictObject({
 });
 export type RngStateSave = z.output<typeof RngStateSchema>;
 
-/** The four day phases (ADR 0018 §5), in the order a day passes through them. */
+/**
+ * The four day phases (ADR 0018 §5), in the order a day passes through them. The simulation's
+ * `DAY_PHASES` is this list, so the order is the phase order it uses.
+ */
 export const DayPhaseSchema = z.enum(["dawn", "day", "dusk", "night"]);
 
 /** A prop or structure placement a creature has seen, and the tick it was last seen. */

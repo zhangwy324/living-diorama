@@ -255,6 +255,13 @@ export interface BehaviorProvider extends BehaviorType {
    *   stream; an evaluation that chooses nothing advances it by one draw.
    */
   evaluate(observation: CreatureObservation, memory: BehaviorMemory, rng: Rng): Proposal | null;
+  /**
+   * For a behavior whose memory names placements: removes, in place, every placement for which
+   * `exists` is false. Called when a saved creature is restored into a world that may have lost
+   * placements since (ADR 0019 §7). `memory` comes from a save, so it may not have the shape the
+   * behavior writes; anything it doesn't recognise it should leave alone or drop, never throw.
+   */
+  forgetPlacements?(memory: BehaviorMemory, exists: (placementId: string) => boolean): void;
 }
 
 export function isBehaviorProvider(entry: BehaviorType): entry is BehaviorProvider {

@@ -2,11 +2,16 @@
 // sends local minutes since midnight; headless runs derive them from simulation time. The
 // simulation maps them to four phases, and everything downstream reads only those.
 
+import { DayPhaseSchema } from "@living-diorama/content-schema";
+
 export const MINUTES_PER_DAY = 24 * 60;
 
-/** The phases in the order a day passes through them, from dawn. */
-export const DAY_PHASES = ["dawn", "day", "dusk", "night"] as const;
-export type DayPhase = (typeof DAY_PHASES)[number];
+/**
+ * The phases in the order a day passes through them, from dawn. The save schema's list is the
+ * single source of truth, so a saved `dayPhase` is always one the simulation knows.
+ */
+export type DayPhase = (typeof DayPhaseSchema.options)[number];
+export const DAY_PHASES: readonly DayPhase[] = DayPhaseSchema.options;
 
 /** Where each phase starts, in minutes since midnight; it runs until the next one starts. */
 const PHASE_STARTS: readonly (readonly [number, DayPhase])[] = [
@@ -20,7 +25,9 @@ const PHASE_STARTS: readonly (readonly [number, DayPhase])[] = [
 export function wrapMinutes(minutes: number): number {
   const wrapped = minutes % MINUTES_PER_DAY;
   // `+ 0` turns -0 into 0.
-  return (wrapped < 0 ? wrapped + MINUTES_PER_DAY : wrapped) + 0;
+  const positive = (wrapped < 0 ? wrapped + MINUTES_PER_DAY : wrapped) + 0;
+  // A tiny negative remainder rounds to a whole day when the day is added back.
+  return positive >= MINUTES_PER_DAY ? 0 : positive;
 }
 
 /** The phase at `minutes` since midnight: dawn 06–08, day 08–18, dusk 18–20, night 20–06. */
