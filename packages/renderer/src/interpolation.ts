@@ -32,19 +32,10 @@ export interface CreaturePose {
    * How it moves now (ADR 0020 §8), e.g. "walk", "hop", "swim": the profile of the snapshot the
    * pose blends from, like its cues. None or an unknown name draws no motion.
    */
-  animation?: string | undefined;
+  animation: string | undefined;
   /** How far it sits in water, as a share of its body's height (0–1, ADR 0020 §9). Blended. */
-  submersion?: number;
+  submersion: number;
 }
-
-/**
- * The snapshot fields the animation reads. Until the simulation sends them (M16 PR 2) they are
- * read as optional here, the one place that does; then this becomes `CreatureSnapshot` itself.
- */
-type AnimatedSnapshot = SimulationSnapshot["creatures"][number] & {
-  animation?: string | undefined;
-  submersion?: number;
-};
 
 /** Blends two headings (radians) the short way round. */
 export function lerpHeading(from: number, to: number, t: number): number {
@@ -101,17 +92,13 @@ export class SnapshotInterpolator {
   sample(now: number): CreaturePose[] {
     if (!this.#latest) return [];
     const t = Math.min(1, Math.max(0, (now - this.#receivedAt) / this.#intervalMs));
-    const previous: readonly AnimatedSnapshot[] = this.#previous?.creatures ?? [];
-    const latest: readonly AnimatedSnapshot[] = this.#latest.creatures;
-    const before = new Map(previous.map((c) => [c.id, c]));
-    return latest.map((creature) => {
-      const { id, speciesId, world, heading, cues, cueProgress, animation } = creature;
-      const submersion = creature.submersion ?? 0;
+    const before = new Map(this.#previous?.creatures.map((c) => [c.id, c]));
+    return this.#latest.creatures.map((creature) => {
+      const { id, speciesId, world, heading, cues, cueProgress, animation, submersion } = creature;
       const from = before.get(id);
       if (!from || distance(from.world, world) > SNAP_DISTANCE) {
         return { id, speciesId, world, heading, cues, cueProgress, animation, submersion };
       }
-      const fromSubmersion = from.submersion ?? 0;
       return {
         id,
         speciesId,
@@ -135,7 +122,7 @@ export class SnapshotInterpolator {
               : cueProgress,
         animation: t < 1 ? from.animation : animation,
         // Blended, so a creature sinks smoothly as it goes into the water and rises as it leaves.
-        submersion: fromSubmersion + (submersion - fromSubmersion) * t,
+        submersion: from.submersion + (submersion - from.submersion) * t,
       };
     });
   }

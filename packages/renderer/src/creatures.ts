@@ -330,7 +330,7 @@ export class CreatureBodies {
       cue.lift * height +
       frontLift(Math.max(0, look.maxX) * cue.scaleXZ, cue.pitch) +
       locomotionTransform(move, look, moveMatrix) -
-      (pose.submersion ?? 0) * height;
+      pose.submersion * height;
     // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h).
     position.set(pose.world.x, pose.world.y + lift, pose.world.z);
     base.compose(position, turn.setFromAxisAngle(Y_AXIS, pose.heading - Math.PI / 2), ONE);

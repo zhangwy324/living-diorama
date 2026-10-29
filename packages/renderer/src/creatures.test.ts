@@ -109,9 +109,11 @@ describe("SnapshotInterpolator", () => {
   });
 
   it("carries the animation profile like the cues and blends the submersion", () => {
-    // The simulation adds both to the snapshot (M16 PR 2); until then a snapshot may lack them.
-    const animated = (x: number, animation: string, submersion: number) =>
-      ({ ...at(x), animation, submersion }) as CreatureSnapshot;
+    const animated = (x: number, animation: string, submersion: number): CreatureSnapshot => ({
+      ...at(x),
+      animation,
+      submersion,
+    });
     const interpolator = new SnapshotInterpolator(100);
     interpolator.push(snapshot(1, [at(0)]), 0);
     expect(interpolator.sample(0)[0]).toMatchObject({ animation: undefined, submersion: 0 });
