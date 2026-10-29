@@ -1,6 +1,7 @@
 import type { Vec3 } from "@living-diorama/content-schema";
 import type { SceneData, SurfaceMesh } from "@living-diorama/simulation";
 import * as THREE from "three";
+import { CUE_OCCLUDER_LAYER } from "./layers";
 
 // Static world geometry, built from the simulation's SceneData (ADR 0005 §9, ADR 0007 §3).
 
@@ -233,6 +234,8 @@ export function structureMeshes(scene: SceneData): THREE.Object3D {
     const slab = new THREE.Mesh(slabGeometry(surface.mesh, DECK_THICKNESS), wood);
     slab.castShadow = true;
     slab.receiveShadow = true;
+    // Decks hide the cues of creatures behind them; railings are too thin to.
+    slab.layers.enable(CUE_OCCLUDER_LAYER);
     group.add(slab);
     edges.push(...(surface.openEdges ?? []));
   }

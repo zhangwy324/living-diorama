@@ -16,6 +16,7 @@ import {
   type CueView,
   type CueWeights,
 } from "./cues";
+import { visibleState, type CueVisibility, type VisibilityState } from "./cue-visibility";
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import type { AssetResolver } from "./props";
@@ -38,6 +39,8 @@ export interface CreatureBodiesOptions {
   resolveSpecies: SpeciesResolver;
   resolveAsset: AssetResolver;
   readImage?: ImageReader;
+  /** Hides the cues of creatures the terrain or a structure hides. Without it cues always show. */
+  visibility?: CueVisibility;
 }
 
 interface SpeciesLook {
@@ -66,6 +69,7 @@ interface Creature {
   sprites: CreatureCueSprites;
   /** The meal's progress while eating, kept as the ring fades out after it. */
   progress: number | undefined;
+  visibility: VisibilityState;
 }
 
 /** Without a camera, cues are sized as if a pixel were this many metres. */
@@ -87,11 +91,14 @@ export class CreatureBodies {
   readonly #resolveSpecies: SpeciesResolver;
   readonly #resolveAsset: AssetResolver;
   readonly #readImage: ImageReader;
+  readonly #visibility: CueVisibility | undefined;
   readonly #cues = new CueSprites();
   readonly #screen = new ScreenScale();
   // Reused every frame, so placing creatures allocates nothing.
   readonly #motion = restingMotion();
   readonly #anchor: CueAnchor;
+  /** Where the visibility check looks from: the head's top, then the middle of the body. */
+  readonly #samples = [new THREE.Vector3(), new THREE.Vector3()] as const;
   readonly #seen = new Set<string>();
   #frame: CreatureFrame = { time: 0, realTime: 0 };
   #realTime: number | undefined;
@@ -101,11 +108,13 @@ export class CreatureBodies {
     this.#resolveSpecies = options.resolveSpecies;
     this.#resolveAsset = options.resolveAsset;
     this.#readImage = options.readImage ?? readImage;
+    this.#visibility = options.visibility;
     this.#anchor = {
       top: new THREE.Vector3(),
       creaturePx: 0,
       unitsPerPixel: DEFAULT_UNITS_PER_PIXEL,
       right: this.#screen.right,
+      visible: 1,
     };
     layer.group.add(this.#cues.group);
   }
@@ -156,6 +165,20 @@ export class CreatureBodies {
         ? this.#screen.unitsPerPixel(anchor.top.x, anchor.top.y, anchor.top.z)
         : DEFAULT_UNITS_PER_PIXEL;
       anchor.creaturePx = look.height / anchor.unitsPerPixel;
+      anchor.visible = 1;
+      const cued = weights.eating > 0 || weights.sleeping > 0 || weights.hungry > 0;
+      if (!cued) {
+        // Nothing to hide: skip the checks, and check afresh once a cue starts.
+        creature.visibility.due = undefined;
+      } else if (view && this.#visibility) {
+        this.#samples[0].copy(anchor.top);
+        this.#samples[1]
+          .copy(mesh.position)
+          .setY(mesh.position.y + 0.5 * look.height * motion.scaleY);
+        const visibility = creature.visibility;
+        this.#visibility.update(visibility, this.#samples, this.#screen.position, realTime, dt);
+        anchor.visible = visibility.weight;
+      }
       this.#cues.place(creature.sprites, weights, anchor, time, phase, creature.progress);
     }
     for (const [id, creature] of this.#creatures) {
@@ -185,12 +208,14 @@ export class CreatureBodies {
     mesh.name = id;
     mesh.castShadow = true;
     this.#layer.add(mesh);
+    const phase = cuePhase(id);
     const creature: Creature = {
       mesh,
       weights: { eating: 0, sleeping: 0, hungry: 0 },
-      phase: cuePhase(id),
+      phase,
       sprites: noCueSprites(),
       progress: undefined,
+      visibility: visibleState(phase),
     };
     this.#creatures.set(id, creature);
     return creature;
