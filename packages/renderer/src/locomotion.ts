@@ -231,8 +231,9 @@ const FRONT_PIVOT_INSET = 0.25;
 /**
  * Puts the pivots of `body` (its `minX` and `maxX` set) from its center of gravity and tail
  * anchors, in its metres. The body rocks and squashes about the ground below its center of
- * gravity, so wherever that is placed on the body only its x is taken. The front pivot lies on the line from the tail through the body, a little
- * behind the front: the tail mirrored onto the front, moved back by `FRONT_PIVOT_INSET`.
+ * gravity, so wherever that is placed on the body only its x is taken. The front pivot lies on
+ * the line from the tail through the body, a little behind the front: the tail mirrored onto the
+ * front, moved back by `FRONT_PIVOT_INSET`.
  */
 export function placePivots(
   body: LocomotionBody,
@@ -253,8 +254,8 @@ const unpivot = new THREE.Matrix4();
  * Writes into `out` the body's turn and scale for `motion` about its pivot, in the body's own
  * frame: the yaw about the vertical, the pitch about the depth axis, the roll about the drawing's
  * forward axis. Returns how far to lift the body, in metres: the motion's own lift plus, for a tilt
- * about the center of gravity, enough that its front, rear or side doesn't dip into the ground. Turns about
- * another pivot happen in water, where nothing needs lifting.
+ * about the center of gravity, enough that its front, rear or side doesn't dip into the ground.
+ * Turns about another pivot happen in water, where nothing needs lifting.
  */
 export function locomotionTransform(
   motion: LocomotionMotion,
