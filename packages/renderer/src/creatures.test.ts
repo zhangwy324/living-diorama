@@ -1,8 +1,9 @@
-import { defaultBody, type Vec3 } from "@living-diorama/content-schema";
+import { defaultBody, type BodyShape, type Vec3 } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
+import type { CreaturePose } from "./interpolation";
 import {
   MIN_CAMERA_CLEARANCE,
   SnapshotInterpolator,
@@ -11,6 +12,14 @@ import {
   terrainHeightAt,
 } from "./index";
 import { SceneLayer } from "./layers";
+
+/** A creature body's placement, read from its matrix (it composes more than position, rotation, scale). */
+const placed = (mesh: THREE.Object3D) => {
+  const position = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  mesh.matrix.decompose(position, new THREE.Quaternion(), scale);
+  return { position, scale };
+};
 
 const creature = (id: string, world: Vec3, heading = 0): CreatureSnapshot => ({
   id,
@@ -99,6 +108,22 @@ describe("SnapshotInterpolator", () => {
     expect(interpolator.sample(250)).toHaveLength(0);
   });
 
+  it("carries the animation profile like the cues and blends the submersion", () => {
+    // The simulation adds both to the snapshot (M16 PR 2); until then a snapshot may lack them.
+    const animated = (x: number, animation: string, submersion: number) =>
+      ({ ...at(x), animation, submersion }) as CreatureSnapshot;
+    const interpolator = new SnapshotInterpolator(100);
+    interpolator.push(snapshot(1, [at(0)]), 0);
+    expect(interpolator.sample(0)[0]).toMatchObject({ animation: undefined, submersion: 0 });
+    interpolator.push(snapshot(2, [animated(0.1, "swim", 0.4)]), 100);
+    const half = interpolator.sample(150)[0]!;
+    expect(half.animation).toBeUndefined();
+    expect(half.submersion).toBeCloseTo(0.2);
+    expect(interpolator.sample(200)[0]).toMatchObject({ animation: "swim", submersion: 0.4 });
+    interpolator.push(snapshot(3, [animated(10, "walk", 0)]), 200); // snapped
+    expect(interpolator.sample(210)[0]).toMatchObject({ animation: "walk", submersion: 0 });
+  });
+
   it("learns the real interval between snapshots, e.g. at double speed", () => {
     const interpolator = new SnapshotInterpolator(100);
     for (let tick = 0; tick < 40; tick++) interpolator.push(snapshot(tick, [at(tick)]), tick * 50);
@@ -157,7 +182,7 @@ describe("CreatureBodies", () => {
     height: 40,
     data: new Uint8Array(20 * 40 * 4).fill(255),
   };
-  const make = (readImage = vi.fn(async () => drawing)) => {
+  const make = (readImage = vi.fn(async () => drawing), body: Partial<BodyShape> = {}) => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
       resolveSpecies: (id) =>
@@ -165,7 +190,7 @@ describe("CreatureBodies", () => {
           ? {
               appearance: "test:img",
               sizeClass: "medium",
-              body: { ...defaultBody(), thickness: 0.25 },
+              body: { ...defaultBody(), thickness: 0.25, ...body },
             }
           : undefined,
       resolveAsset: (ref) =>
@@ -194,7 +219,7 @@ describe("CreatureBodies", () => {
     const body = bodyOf(layer, "a");
     expect(body.geometry.type).toBe("ExtrudeGeometry");
     expect(bodyOf(layer, "b").geometry).toBe(body.geometry);
-    expect(bodyOf(layer, "b").position.toArray()).toEqual([1, 0, 0]);
+    expect(placed(bodyOf(layer, "b")).position.toArray()).toEqual([1, 0, 0]);
     expect(boxOf(body).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
     expect(boxOf(body).max.z - boxOf(body).min.z).toBeCloseTo(0.8 * 0.25);
     expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
@@ -204,7 +229,7 @@ describe("CreatureBodies", () => {
     const { layer, bodies } = make();
     const facing = (heading: number) => {
       bodies.update([creature("a", { x: 0, y: 0, z: 0 }, heading)]);
-      return new THREE.Vector3(1, 0, 0).applyEuler(bodyOf(layer, "a").rotation);
+      return new THREE.Vector3(1, 0, 0).transformDirection(bodyOf(layer, "a").matrix);
     };
     for (const heading of [0, Math.PI / 2, -2]) {
       const forward = facing(heading);
@@ -255,5 +280,95 @@ describe("CreatureBodies", () => {
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
     expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
     expect(warn).toHaveBeenCalledWith("No opaque shape in test:img");
+  });
+  describe("animation", () => {
+    /** A creature walking along +X at 0.6 m/s, sampled each 1/60 s. */
+    const moving = (
+      frames: number,
+      pose: Partial<CreaturePose>,
+      bodies: CreatureBodies,
+      each?: (frame: number) => void,
+    ) => {
+      for (let frame = 0; frame <= frames; frame++) {
+        const time = frame / 60;
+        const world = { x: 0.6 * time, y: 0, z: 0 };
+        bodies.update([{ ...creature("a", world, Math.PI / 2), ...pose }], {
+          time,
+          realTime: time,
+        });
+        each?.(frame);
+      }
+    };
+    /** Builds the drawing's body before the creature moves. */
+    const loaded = async (bodies: CreatureBodies) => {
+      bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+      await bodies.ready;
+      bodies.update([]);
+    };
+    const box = (layer: SceneLayer) => new THREE.Box3().setFromObject(bodyOf(layer, "a"));
+
+    it("stands still at rest and for an unknown profile, and moves as it walks", async () => {
+      const { layer, bodies } = make();
+      await loaded(bodies);
+      const plain = new THREE.Matrix4().compose(
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Quaternion(),
+        new THREE.Vector3(1, 1, 1),
+      );
+      for (const animation of ["walk", "fly", undefined]) {
+        bodies.update([{ ...creature("a", { x: 1, y: 0, z: 0 }, Math.PI / 2), animation }]);
+        bodies.update([{ ...creature("a", { x: 1, y: 0, z: 0 }, Math.PI / 2), animation }]);
+        expect(bodyOf(layer, "a").matrix.equals(plain)).toBe(true);
+      }
+      bodies.update([]);
+      const unknown: number[] = [];
+      moving(60, { animation: "fly" }, bodies, () => unknown.push(box(layer).max.y));
+      expect(Math.max(...unknown) - Math.min(...unknown)).toBeLessThan(1e-9);
+      const walking: number[] = [];
+      moving(60, { animation: "walk" }, bodies, () => walking.push(box(layer).max.y));
+      expect(Math.max(...walking) - Math.min(...walking)).toBeGreaterThan(0.02);
+    });
+
+    it("keeps a walker's and a hopper's feet out of the ground as they tilt", async () => {
+      for (const animation of ["walk", "hop"]) {
+        const { layer, bodies } = make();
+        await loaded(bodies);
+        let deepest = Infinity;
+        moving(240, { animation }, bodies, () => {
+          deepest = Math.min(deepest, box(layer).min.y);
+        });
+        expect(deepest).toBeGreaterThanOrEqual(-1e-6);
+      }
+    });
+
+    it("lowers the body by its submersion, a share of its height", async () => {
+      const { layer, bodies } = make();
+      await loaded(bodies);
+      bodies.update([{ ...creature("a", { x: 0, y: 2, z: 0 }), submersion: 0.25 }]);
+      expect(placed(bodyOf(layer, "a")).position.y).toBeCloseTo(2 - 0.25 * 0.8);
+      expect(box(layer).max.y).toBeCloseTo(2 + 0.75 * 0.8);
+    });
+
+    it("sways a swimmer about its tail anchor", async () => {
+      // The tail placed at the drawing's top-left corner, so it's easy to find on the body.
+      const swimmer = { template: "swimmer" as const, anchors: { tail: { x: 0, y: 0 } } };
+      const { layer, bodies } = make(undefined, swimmer);
+      await loaded(bodies);
+      const yaws: number[] = [];
+      moving(120, { animation: "swim" }, bodies, (frame) => {
+        const mesh = bodyOf(layer, "a");
+        // The rear top corner of the body: x = -0.2 m (half of 20 px at 0.02 m/px), y = 0.8 m.
+        const tail = new THREE.Vector3(-0.2, 0.8, 0).applyMatrix4(mesh.matrix);
+        const x = (0.6 * frame) / 60;
+        // Facing +X, the tail stays 0.2 m behind the feet whichever way the body sways...
+        expect(tail.x).toBeCloseTo(x - 0.2, 6);
+        expect(tail.z).toBeCloseTo(0, 6);
+        // ...while the front swings from side to side.
+        const forward = new THREE.Vector3(1, 0, 0).transformDirection(mesh.matrix);
+        yaws.push(Math.atan2(-forward.z, forward.x));
+      });
+      expect(Math.min(...yaws)).toBeLessThan(-0.1);
+      expect(Math.max(...yaws)).toBeGreaterThan(0.1);
+    });
   });
 });

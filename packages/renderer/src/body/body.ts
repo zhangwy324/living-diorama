@@ -1,4 +1,4 @@
-import { BODY_THICKNESS } from "@living-diorama/content-schema";
+import { BODY_THICKNESS, DRAWING_SIZE, type DrawingBounds } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { traceOutline, type Outline, type Point } from "./outline";
@@ -24,7 +24,20 @@ export interface Body {
   geometry: THREE.BufferGeometry;
   /** One material for the front, back and walls: the extrusion's two groups share it. */
   material: THREE.Material;
+  /** How the drawing's pixels lie on the body, for its anchors (ADR 0020 §10). */
+  drawing: DrawingFrame;
   dispose(): void;
+}
+
+/** Where the drawing lies on its body. */
+export interface DrawingFrame {
+  /** The drawn shape's bounds, in drawing pixels. */
+  bounds: DrawingBounds;
+  /**
+   * Where a point on the drawing, in its pixels, lies on the body: in metres, the feet at the
+   * origin, facing +X, on the middle plane between front and back. Writes into `out`.
+   */
+  toBody(point: { x: number; y: number }, out: THREE.Vector3): THREE.Vector3;
 }
 
 /**
@@ -38,7 +51,7 @@ export function buildBody(
 ): Body | undefined {
   const outline = traceOutline(pixels);
   if (!outline.shapes.length) return undefined;
-  const geometry = bodyGeometry(outline, pixels, height, thickness);
+  const { geometry, drawing } = extrude(outline, pixels, height, thickness);
   // Faces and walls read the same texture, so a wall takes the colour of the rim it runs back from.
   const map = bodyTexture(bodyColours(pixels), pixels.width, pixels.height);
   const material = new THREE.MeshStandardMaterial({
@@ -52,6 +65,7 @@ export function buildBody(
   return {
     geometry,
     material,
+    drawing,
     dispose() {
       geometry.dispose();
       material.dispose();
@@ -71,6 +85,15 @@ export function bodyGeometry(
   height: number,
   thickness: number = BODY_THICKNESS.default,
 ): THREE.BufferGeometry {
+  return extrude(outline, image, height, thickness).geometry;
+}
+
+function extrude(
+  outline: Outline,
+  image: { width: number; height: number },
+  height: number,
+  thickness: number,
+): { geometry: THREE.BufferGeometry; drawing: DrawingFrame } {
   // Built in pixels with y up, then scaled. The texture's rows are top first, so v = -y / height.
   const drawn = outline.bounds.maxY - outline.bounds.minY;
   const shapes = outline.shapes.map(({ outer, holes, traced }) => {
@@ -101,9 +124,18 @@ export function bodyGeometry(
   geometry.computeBoundingBox();
   const box = geometry.boundingBox ?? new THREE.Box3();
   const centre = box.getCenter(new THREE.Vector3());
-  geometry.translate(-centre.x, -box.min.y, -centre.z);
+  // Kept, since moving the geometry updates its bounding box in place.
+  const bottom = box.min.y;
+  geometry.translate(-centre.x, -bottom, -centre.z);
   const scale = height / (box.max.y - box.min.y);
-  return geometry.scale(scale, scale, scale);
+  geometry.scale(scale, scale, scale);
+  const { minX, minY, maxX, maxY } = outline.bounds;
+  const drawing: DrawingFrame = {
+    bounds: { left: minX, top: minY, right: maxX, bottom: maxY },
+    // As the geometry was moved and scaled; the drawing's y runs down, the body's up.
+    toBody: (point, out) => out.set((point.x - centre.x) * scale, (-point.y - bottom) * scale, 0),
+  };
+  return { geometry, drawing };
 }
 
 /** A loop in the extrusion's plane: y up. */
@@ -152,9 +184,18 @@ export function fallbackBody(height: number, thickness: number = BODY_THICKNESS.
     roughness: ROUGHNESS,
     shadowSide: SHADOW_SIDE,
   });
+  // The block stands in for a drawing filling its height: anchors land roughly where they will.
+  const scale = height / DRAWING_SIZE;
+  const width = DRAWING_SIZE * FALLBACK_ASPECT;
+  const drawing: DrawingFrame = {
+    bounds: { left: 0, top: 0, right: width, bottom: DRAWING_SIZE },
+    toBody: (point, out) =>
+      out.set((point.x - width / 2) * scale, (DRAWING_SIZE - point.y) * scale, 0),
+  };
   return {
     geometry,
     material,
+    drawing,
     dispose() {
       geometry.dispose();
       material.dispose();

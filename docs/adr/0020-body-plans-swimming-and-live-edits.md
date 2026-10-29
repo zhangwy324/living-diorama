@@ -166,7 +166,15 @@ _Not yet built._
 
 ### PR 4: renderer
 
-_Not yet built._
+- **One module, two functions.** `packages/renderer/src/locomotion.ts` is the only code that turns a profile into motion. `trackMovement(movement, world, dt)` keeps each creature's speed, measured from how far its drawn position moves between frames on animation time and smoothed over about 0.2 s, and the distance it has moved. `locomotionMotion({ profile, speed, travelled, time, phase, height })` returns a whole-body pose: lift, pitch, roll, yaw, vertical and horizontal scale, and the anchor they turn about. Per-part animation replaces those two functions and the profile table behind them.
+- **Motion follows the ground, and stops at rest.** Each gait cycle is tied to the distance moved, not to time, so steps keep pace with the ground and a faster creature steps faster; a bigger body takes longer strides (a cycle is a base length plus a share of its height). How much of a profile shows eases from nothing at rest to full at 0.3 m/s (`FULL_MOTION_SPEED`), so a creature standing, turning on the spot, eating or sleeping doesn't move, and a pause holds the pose.
+  - `walk`: a bob up each step (5% of the height), a waddle from side to side over two steps (about 4°), a slight lean into the walk and a small squash as each foot lands, about the feet.
+  - `hop`: 30% of each hop on the ground, squashing as it lands and staying low as it gathers for the next; then an arc 35% of its height high, stretching as it leaves and comes down, nose up then nose down; about the feet.
+  - `swim`: a sway of about 10° from side to side about the tail with a little rocking, and a bob of 3% of the height on its own slower clock; no squash.
+  - Any other name, or none, draws no motion.
+- **Anchors are pivots.** Every species gets both anchors on its body, placed or by `defaultAnchor` from the drawn bounds, whatever its template, since a walker that can swim sways about a tail too. `buildBody` returns a `DrawingFrame` that maps drawing pixels onto the body; the grey block has one too, as a drawing filling its height. Images are read at `BODY_IMAGE_SIZE` along their longer side, so their pixels are the drawing's.
+- **How it adds up with cues and the heading.** A body's transform is composed, outermost first: the position lowered by `submersion` × height, the heading, ADR 0018's cue motion about the feet, then the profile's motion about its pivot. Lifts sum; tilts and scales compose, each about its own point. A tilt about the feet is lifted so the body's front, rear or side doesn't dip into the ground, as the eating peck already was. The mesh's matrix is set directly (`matrixAutoUpdate` off), since a pose about two different points is more than a position, a rotation and a scale. Cue sprites rise and fall with the head but don't swing aside with the sway.
+- **Submersion and the profile come from the snapshot, through one spot.** `CreaturePose` gains `animation` and `submersion`. The interpolator carries the profile of the snapshot the pose blends from, as it does cues, and blends the submersion, so a creature sinks smoothly as it enters the water. Until PR 2 adds the fields to `CreatureSnapshot`, the interpolator reads them as optional through a local type; that type goes when they land.
 
 ### PR 5: Studio confirm panel
 
