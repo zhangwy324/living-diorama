@@ -89,13 +89,18 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
     - **Placements keep their IDs.** An add-placement edit carries the new placement's ID, chosen when the edit is made, so later edits, inverse edits and replays all refer to the same placement.
     - **Storage stays JSON.** The edit list lives in `world.json` with the rest of the save, which closes the question ADR 0019 §1 left open for this step: no SQLite and no `persistence` package. SQLite can be revisited if edit lists grow large enough that writing the save whole costs too much.
 
-19. **A trapped creature is moved, never deleted.** When an edit leaves a creature off any walkable cell of its profile (a bridge removed under it, a prop placed on it), the engine moves it to the nearest valid cell in a region's main walkable area (the region's largest connected piece, so it isn't put on an island it can't leave): its own region's if that region still exists, else the nearest region its profile can move in. It emits an event saying so. The edit is rejected only when no such cell exists. A creature is never deleted.
+19. **A trapped creature is moved, never deleted.** When an edit leaves a creature off any walkable cell of its profile (a bridge removed under it, a prop placed on it), the engine moves it to the nearest valid cell in a region's main walkable area (the region's largest connected piece, so it isn't put on an island it can't leave): its own region's if that region still exists, else the nearest region its profile can move in. It emits an event saying so. The edit is rejected only when no such cell exists. A creature is never deleted. Routes that cross the edited area are replanned. Home and knowledge entries naming a removed placement are pruned as a restore prunes them (ADR 0019 §7).
 
-    **No stranding in water.** An edit that would remove or block the last exit out of a water region where amphibious creatures currently are is rejected, and the dry run (§21) reports it. Moving those creatures onto land instead would teleport them across the bank. Routes that cross the edited area are replanned. Home and knowledge entries naming a removed placement are pruned as a restore prunes them (ADR 0019 §7).
+    **Blocking an exit out of water is allowed, with a warning.** An edit that blocks one or more water→land exits, even the last one out of a water region, still applies; the result warns and names each blocked exit. Amphibious creatures in that water stay there until an exit opens again. Rejection is kept only for a creature trapped inside new solid geometry with no valid cell to move to (above).
 
 20. **Navigation rebuilds whole regions first.** An edit rebuilds the walkability masks, crossings and distance fields of every region it touches, for every profile, extending ADR 0006 §6's `invalidateRegions`. Finer, dirty-rectangle rebuilds wait until measurement shows whole regions are too slow.
 
-21. **Validate first; return the inverse.** The edit command has a dry-run `validate` that reports, without changing anything, whether the edit would be accepted and which creatures it would move. An applied edit returns its inverse edit, so an undo is one more edit. A player-facing undo comes later.
+21. **Validate first; return the inverse.** The edit command has a dry-run `validate` that reports, without changing anything:
+    - whether the edit would be accepted;
+    - which creatures it would move;
+    - preview data: the cells the edited placement would occupy (its footprint) and the water→land exits it would block.
+
+    The preview data is a contract for a later edit UI, which can show how much room a prop takes and highlight a blocked exit while the player places it. That preview UI is built with the player edit UI (structure drawing); M17 provides only the data in the `validate` result, with no dev overlay. An applied edit returns its inverse edit, so an undo is one more edit. A player-facing undo comes later.
 
 ## Contradictions resolved
 
