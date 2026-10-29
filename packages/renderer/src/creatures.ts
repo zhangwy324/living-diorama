@@ -16,6 +16,7 @@ import {
   type CueView,
   type CueWeights,
 } from "./cues";
+import { describeCues, emptyCueBox, layoutCues, type CueBox } from "./cue-layout";
 import { visibleState, type CueVisibility, type VisibilityState } from "./cue-visibility";
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
@@ -63,6 +64,7 @@ export interface CreatureFrame {
 }
 
 interface Creature {
+  id: string;
   mesh: THREE.Mesh;
   weights: CueWeights;
   phase: number;
@@ -70,10 +72,16 @@ interface Creature {
   /** The meal's progress while eating, kept as the ring fades out after it. */
   progress: number | undefined;
   visibility: VisibilityState;
+  /** Where its cue sprites go this frame. */
+  anchor: CueAnchor;
+  /** Its cues as the layout sees them. */
+  box: CueBox;
 }
 
 /** Without a camera, cues are sized as if a pixel were this many metres. */
 const DEFAULT_UNITS_PER_PIXEL = 0.02;
+
+const byId = (a: Creature, b: Creature) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** How far a body reaches forward (+X) of its feet. */
 function frontOf(body: Body): number {
@@ -96,10 +104,14 @@ export class CreatureBodies {
   readonly #screen = new ScreenScale();
   // Reused every frame, so placing creatures allocates nothing.
   readonly #motion = restingMotion();
-  readonly #anchor: CueAnchor;
   /** Where the visibility check looks from: the head's top, then the middle of the body. */
   readonly #samples = [new THREE.Vector3(), new THREE.Vector3()] as const;
   readonly #seen = new Set<string>();
+  /** Creatures by ID, so cues lay out the same whatever order poses come in; rebuilt on change. */
+  readonly #ordered: Creature[] = [];
+  readonly #boxes: CueBox[] = [];
+  #reorder = false;
+  readonly #onScreen = new THREE.Vector3();
   #frame: CreatureFrame = { time: 0, realTime: 0 };
   #realTime: number | undefined;
 
@@ -109,13 +121,6 @@ export class CreatureBodies {
     this.#resolveAsset = options.resolveAsset;
     this.#readImage = options.readImage ?? readImage;
     this.#visibility = options.visibility;
-    this.#anchor = {
-      top: new THREE.Vector3(),
-      creaturePx: 0,
-      unitsPerPixel: DEFAULT_UNITS_PER_PIXEL,
-      right: this.#screen.right,
-      visible: 1,
-    };
     layer.group.add(this.#cues.group);
   }
 
@@ -155,7 +160,7 @@ export class CreatureBodies {
       mesh.geometry = look.body.geometry;
       mesh.material = look.body.material;
 
-      const anchor = this.#anchor;
+      const anchor = creature.anchor;
       anchor.top.set(
         mesh.position.x,
         mesh.position.y + look.height * motion.scaleY,
@@ -179,13 +184,37 @@ export class CreatureBodies {
         this.#visibility.update(visibility, this.#samples, this.#screen.position, realTime, dt);
         anchor.visible = visibility.weight;
       }
-      this.#cues.place(creature.sprites, weights, anchor, time, phase, creature.progress);
+      const box = creature.box;
+      if (view && cued && this.#screen.project(anchor.top, this.#onScreen)) {
+        const ring = creature.progress !== undefined;
+        const { x, y } = this.#onScreen;
+        describeCues(box, weights, anchor.creaturePx, anchor.visible, ring, x, y);
+      } else {
+        box.weight = 0;
+        box.zWeight = 0;
+      }
     }
     for (const [id, creature] of this.#creatures) {
       if (seen.has(id)) continue;
       creature.mesh.removeFromParent();
       this.#cues.release(creature.sprites);
       this.#creatures.delete(id);
+      this.#reorder = true;
+    }
+    if (this.#reorder) this.#sort();
+
+    // Then keeps cues of creatures bunched together apart, and places them.
+    layoutCues(this.#boxes, dt);
+    const { right, up } = this.#screen;
+    for (const creature of this.#ordered) {
+      const { anchor, box } = creature;
+      anchor.shift
+        ?.copy(right)
+        .multiplyScalar(box.shiftX * anchor.unitsPerPixel)
+        .addScaledVector(up, box.shiftY * anchor.unitsPerPixel);
+      anchor.zThin = box.thin;
+      const { sprites, weights, phase, progress } = creature;
+      this.#cues.place(sprites, weights, anchor, time, phase, progress);
     }
   }
 
@@ -215,15 +244,38 @@ export class CreatureBodies {
     this.#layer.add(mesh);
     const phase = cuePhase(id);
     const creature: Creature = {
+      id,
       mesh,
       weights: { eating: 0, sleeping: 0, hungry: 0 },
       phase,
       sprites: noCueSprites(),
       progress: undefined,
       visibility: visibleState(phase),
+      anchor: {
+        top: new THREE.Vector3(),
+        creaturePx: 0,
+        unitsPerPixel: DEFAULT_UNITS_PER_PIXEL,
+        right: this.#screen.right,
+        visible: 1,
+        shift: new THREE.Vector3(),
+        zThin: false,
+      },
+      box: emptyCueBox(),
     };
     this.#creatures.set(id, creature);
+    this.#reorder = true;
     return creature;
+  }
+
+  /** Puts creatures in ID order, for the layout. Only when creatures come or go. */
+  #sort(): void {
+    this.#reorder = false;
+    const ordered = this.#ordered;
+    ordered.length = 0;
+    for (const creature of this.#creatures.values()) ordered.push(creature);
+    ordered.sort(byId);
+    this.#boxes.length = 0;
+    for (const creature of ordered) this.#boxes.push(creature.box);
   }
 
   #look(speciesId: string): SpeciesLook | undefined {

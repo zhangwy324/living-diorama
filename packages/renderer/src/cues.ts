@@ -110,6 +110,8 @@ export function bodyMotion(
 export const Z_COUNT = 3;
 /** ...and this many when they are small on screen, so they don't run together. */
 export const Z_COUNT_SMALL = 2;
+/** ...and one when its z's overlap an earlier sleeper's on screen (`layoutCues`). */
+export const Z_COUNT_THIN = 1;
 /** Seconds each z takes to rise and fade. */
 export const Z_PERIOD = 3.6;
 /** Each z leans by this much, alternately left and right, like hand lettering (radians, ~9°). */
@@ -185,10 +187,16 @@ export interface CueView {
 export class ScreenScale {
   /** Pointing right on screen, in world space. */
   readonly right = new THREE.Vector3(1, 0, 0);
+  /** Pointing up on screen, in world space. */
+  readonly up = new THREE.Vector3(0, 1, 0);
   /** The camera's position, in world space. */
   readonly position = new THREE.Vector3();
   readonly #forward = new THREE.Vector3(0, 0, -1);
+  readonly #ndc = new THREE.Vector3();
   #perPixelPerMetre = 0.002;
+  #camera: THREE.Camera | undefined;
+  #halfWidth = 0.5;
+  #halfHeight = 0.5;
 
   /** Takes the camera's current state; call once a frame before `unitsPerPixel`. */
   set({ camera, heightPx }: CueView): void {
@@ -196,8 +204,25 @@ export class ScreenScale {
     this.position.setFromMatrixPosition(camera.matrixWorld);
     camera.getWorldDirection(this.#forward);
     this.right.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    this.up.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
     const fov = THREE.MathUtils.degToRad(camera.getEffectiveFOV());
     this.#perPixelPerMetre = (2 * Math.tan(fov / 2)) / Math.max(1, heightPx);
+    this.#camera = camera;
+    this.#halfHeight = Math.max(1, heightPx) / 2;
+    this.#halfWidth = this.#halfHeight * camera.aspect;
+  }
+
+  /**
+   * Where `point` is on screen, in CSS pixels from the centre with y up, written into `out`.
+   * False, leaving `out` as it was, for a point behind the camera or before the first `set`.
+   */
+  project(point: THREE.Vector3, out: THREE.Vector3): boolean {
+    const camera = this.#camera;
+    if (!camera) return false;
+    const ndc = this.#ndc.copy(point).project(camera);
+    if (!(ndc.z < 1)) return false;
+    out.set(ndc.x * this.#halfWidth, ndc.y * this.#halfHeight, 0);
+    return true;
   }
 
   unitsPerPixel(x: number, y: number, z: number): number {
@@ -538,6 +563,8 @@ export interface CreatureCueSprites {
    * change never cuts a z short or moves one mid-rise.
    */
   zTarget: number | undefined;
+  /** The target for the z's size alone, kept for its hysteresis; thinning may lower `zTarget`. */
+  zSizeTarget: number | undefined;
   /** When the next z starts, or undefined while no z's rise. */
   zNext: number | undefined;
   /** The next z's serial number. */
@@ -551,6 +578,7 @@ export const noCueSprites = (): CreatureCueSprites => ({
   zStarts: [],
   zSerials: [],
   zTarget: undefined,
+  zSizeTarget: undefined,
   zNext: undefined,
   zSerial: 0,
 });
@@ -570,6 +598,13 @@ export interface CueAnchor {
    * opacity, and the sprites go back to the pool when it is 0.
    */
   visible: number;
+  /**
+   * How far the bubble and ring move, in world space, to keep clear of other creatures' cues
+   * (`layoutCues`). Undefined for none.
+   */
+  shift?: THREE.Vector3;
+  /** Whether this sleeper's z's are thinned, as they overlap another's on screen (`layoutCues`). */
+  zThin?: boolean;
 }
 
 /** Ring textures are this many pixels square. */
@@ -577,7 +612,8 @@ const RING_SIZE = 64;
 
 /** Below this weight a cue's sprites go back to the pool. */
 const HIDDEN = 0.001;
-const GAP_PX = 3;
+/** Cues sit this many CSS pixels above the head. */
+export const CUE_GAP_PX = 3;
 
 /** The z's, food bubbles and progress rings of every creature, pooled and drawn over the scene. */
 export class CueSprites {
@@ -627,13 +663,16 @@ export class CueSprites {
     phase: number,
     progress?: number,
   ): void {
-    const { top, right, unitsPerPixel, visible } = anchor;
-    const gap = GAP_PX * unitsPerPixel;
+    const { top, right, unitsPerPixel, visible, shift } = anchor;
+    const gap = CUE_GAP_PX * unitsPerPixel;
 
     const sleeping = ease(weights.sleeping);
     if (sleeping * visible > HIDDEN) {
       const zPx = cuePixels(Z_PX, anchor.creaturePx);
-      sprites.zTarget = zTarget(zPx, sprites.zTarget);
+      sprites.zSizeTarget = zTarget(zPx, sprites.zSizeTarget);
+      sprites.zTarget = anchor.zThin
+        ? Math.min(Z_COUNT_THIN, sprites.zSizeTarget)
+        : sprites.zSizeTarget;
       if (this.reducedMotion) this.#holdZs(sprites);
       else this.#streamZs(sprites, time, phase);
       const size = zPx * unitsPerPixel;
@@ -668,6 +707,7 @@ export class CueSprites {
         .copy(top)
         .addScaledVector(right, -0.45 * size * sleeping)
         .setY(top.y + gap + (this.reducedMotion ? 0 : bubbleBob(time, phase)) * size);
+      if (shift) sprites.bubble.position.add(shift);
       sprites.bubble.scale.set(scale, scale, 1);
       sprites.bubble.material.opacity = hungry * visible;
     } else if (sprites.bubble) {
@@ -682,6 +722,7 @@ export class CueSprites {
       const size = cuePixels(RING_PX, anchor.creaturePx) * unitsPerPixel;
       const scale = size * (0.6 + 0.4 * eating);
       sprites.ring.position.copy(top).setY(top.y + gap);
+      if (shift) sprites.ring.position.add(shift);
       sprites.ring.scale.set(scale, scale, 1);
       sprites.ring.material.map = this.#ringMap(ringStep(progress));
       sprites.ring.material.opacity = eating * visible;
