@@ -1,3 +1,4 @@
+import type { Vec3 } from "@living-diorama/content-schema";
 import type { NavigationOverlay, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -12,7 +13,8 @@ import { SnapshotInterpolator } from "./interpolation";
 import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "./layers";
 import { createDebugOverlays, type DebugOverlays } from "./overlays";
 import { followPixelRatio } from "./pixel-ratio";
-import { loadGltf, loadProps, type AssetResolver, type ModelLoader } from "./props";
+import { PropEditing, type PropPick, type PropPreview } from "./prop-editing";
+import { loadGltf, PropSet, type AssetResolver, type ModelLoader } from "./props";
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
 import { baseMeshes, structureMeshes, terrainMesh, waterSurfaceMeshes } from "./world-meshes";
@@ -63,7 +65,41 @@ export interface DioramaView {
   setClipping(layer: LayerName, planes: readonly ClipPlane[]): void;
   /** Resolves once every prop model is placed (or replaced by its fallback). */
   readonly ready: Promise<void>;
+  /**
+   * Replaces the props, and the walkability and region graph of the debug overlays, from the
+   * scene and navigation of a world rebuilt after a prop edit. Terrain, water and structures are
+   * kept as first built, whatever `scene` says of them. Props already loaded are reused, and the
+   * old props stay until the new ones are all placed. Safe to call any number of times: a later
+   * call overtakes one still loading, which then resolves to false.
+   */
+  replaceProps(scene: SceneData, navigation?: NavigationOverlay): Promise<boolean>;
+  /** The prop under the pointer, unless the terrain or a structure hides it there. */
+  pickProp(pointer: ViewPointer): PropPick | undefined;
+  /** The point of the terrain under the pointer, e.g. to drag a prop to; undefined off it. */
+  pickGround(pointer: ViewPointer): Vec3 | undefined;
+  /** Rings the placement with this ID, or none. The ring follows it through `replaceProps`. */
+  selectProp(placementId: string | undefined): void;
+  /**
+   * Shows a see-through preview of a placement, or none, e.g. while a prop is dragged. Cheap to
+   * call on every pointer move. The model is a prop model's asset ref, as in `SceneProp`.
+   */
+  previewProp(preview: PropPreview | undefined): void;
   dispose(): void;
+}
+
+/** A pointer position in CSS pixels of the page, as `clientX` and `clientY` of a pointer event. */
+export interface ViewPointer {
+  clientX: number;
+  clientY: number;
+}
+
+/** A pointer position in normalized device coordinates of `element`, from −1 to 1, y up. */
+export function pointerToNdc(pointer: ViewPointer, element: Element): THREE.Vector2 {
+  const rect = element.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((pointer.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+    -((pointer.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
+  );
 }
 
 const meanHeight = (scene: SceneData) =>
@@ -135,8 +171,16 @@ export interface DioramaScene {
   overlays: DebugOverlays;
   /** Pictures of the prop models for cue bubbles; drawn by `render` with the view's renderer. */
   propIcons: PropIcons;
+  props: PropSet;
+  /** Prop picking, selection and preview for the editor. */
+  editing: PropEditing;
   /** Resolves once every prop model is placed. */
   ready: Promise<void>;
+  /**
+   * Replaces the props, walkability and region graph from a rebuilt world, keeping terrain,
+   * water and structures. Resolves to whether they were placed, false if a later call overtook.
+   */
+  replaceProps(scene: SceneData, navigation?: NavigationOverlay): Promise<boolean>;
   /**
    * Lights the scene for `minutes` since local midnight; it starts in daylight. Returns whether
    * the light changed: it ignores non-finite minutes and changes only once per whole minute.
@@ -160,14 +204,20 @@ export function buildDioramaScene(
   const layers = createLayers(world);
   const water = createWaterMaterial();
   const base = baseMeshes(scene, water.material);
-  layers.terrain.add(terrainMesh(scene), base.soil);
+  const terrain = terrainMesh(scene);
+  layers.terrain.add(terrain, base.soil);
   layers.water.add(
     ...waterSurfaceMeshes(scene, water.material),
     ...(base.water ? [base.water] : []),
   );
-  layers.structures.add(structureMeshes(scene));
+  const structures = structureMeshes(scene);
+  layers.structures.add(structures);
   const resolveAsset = options.resolveAsset ?? (() => undefined);
   const propIcons = new PropIcons();
+  const props = new PropSet(layers.props, resolveAsset, options.loadModel ?? loadGltf, (models) =>
+    propIcons.place(models),
+  );
+  const editing = new PropEditing(props, terrain, [terrain, structures], world);
   const creatures = new CreatureBodies(layers.creatures, {
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
@@ -197,14 +247,27 @@ export function buildDioramaScene(
   };
   const overlays = createDebugOverlays(scene, options.navigation);
   world.add(overlays.group);
-  const ready = loadProps(
-    scene.props,
-    resolveAsset,
-    (objects) => layers.props.add(...objects),
-    options.loadModel ?? loadGltf,
-    (model, placementIds) => propIcons.add(model, placementIds),
-  );
-  return { world, layers, water, creatures, overlays, propIcons, ready, setTimeOfDay };
+  const ready = props.set(scene.props).then(() => undefined);
+  const replaceProps = async (next: SceneData, navigation?: NavigationOverlay) => {
+    // Overlays and the selection follow only the props actually placed, not an overtaken list.
+    if (!(await props.set(next.props))) return false;
+    overlays.setProps(next, navigation);
+    editing.refresh();
+    return true;
+  };
+  return {
+    world,
+    layers,
+    water,
+    creatures,
+    overlays,
+    propIcons,
+    props,
+    editing,
+    ready,
+    replaceProps,
+    setTimeOfDay,
+  };
 }
 
 export function createDioramaView(
@@ -219,8 +282,19 @@ export function createDioramaView(
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
-  const { world, layers, water, creatures, overlays, propIcons, ready, setTimeOfDay } =
-    buildDioramaScene(scene, options);
+  const {
+    world,
+    layers,
+    water,
+    creatures,
+    overlays,
+    propIcons,
+    props,
+    editing,
+    ready,
+    replaceProps: replaceSceneProps,
+    setTimeOfDay,
+  } = buildDioramaScene(scene, options);
   // Species sizes cap how high bank jumps arc.
   const snapshots = new SnapshotInterpolator(undefined, options.resolveSpecies);
   const stats = new DebugStats(container.ownerDocument);
@@ -293,6 +367,12 @@ export function createDioramaView(
     moved = true;
     limitCamera(scene, camera.position, controls.target);
   });
+
+  const raycaster = new THREE.Raycaster();
+  const raycast = (pointer: ViewPointer) => {
+    raycaster.setFromCamera(pointerToNdc(pointer, canvas), camera);
+    return raycaster;
+  };
 
   const timer = new THREE.Timer();
   const throttle = new FrameThrottle();
@@ -386,8 +466,29 @@ export function createDioramaView(
       layers[layer].setClipping(planes);
     },
     ready,
+    async replaceProps(next, navigation) {
+      const placed = await replaceSceneProps(next, navigation);
+      if (placed) moved = true;
+      return placed;
+    },
+    pickProp(pointer) {
+      return editing.pickProp(raycast(pointer));
+    },
+    pickGround(pointer) {
+      return editing.pickGround(raycast(pointer));
+    },
+    selectProp(placementId) {
+      editing.select(placementId);
+      moved = true;
+    },
+    previewProp(preview) {
+      void editing.preview(preview).then(() => (moved = true));
+      moved = true;
+    },
     dispose() {
       cancelAnimationFrame(raf);
+      editing.dispose();
+      props.dispose();
       container.ownerDocument.removeEventListener("visibilitychange", onVisibilityChange);
       canvas.removeEventListener("pointerenter", onPointerEnter);
       canvas.removeEventListener("pointerleave", onPointerLeave);

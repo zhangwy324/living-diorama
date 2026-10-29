@@ -28,15 +28,25 @@ interface PropIcon {
  */
 export class PropIcons {
   readonly #byPlacement = new Map<string, PropIcon>();
-  readonly #icons: PropIcon[] = [];
+  /** One per model, kept when the props are replaced, so each model is drawn only once. */
+  readonly #byModel = new Map<THREE.Object3D, PropIcon>();
   /** Models asked for and not drawn yet. */
   readonly #wanted = new Set<PropIcon>();
 
-  /** Adds a loaded model with the IDs of its placements. The model's parts are only read. */
-  add(model: THREE.Object3D, placementIds: readonly string[]): void {
-    const icon: PropIcon = { model, target: undefined };
-    this.#icons.push(icon);
-    for (const id of placementIds) this.#byPlacement.set(id, icon);
+  /**
+   * Sets the loaded models with the IDs of their placements, forgetting the placements known
+   * before, e.g. when the props are replaced. The models' parts are only read.
+   */
+  place(models: readonly (readonly [THREE.Object3D, readonly string[]])[]): void {
+    this.#byPlacement.clear();
+    for (const [model, placementIds] of models) {
+      let icon = this.#byModel.get(model);
+      if (!icon) {
+        icon = { model, target: undefined };
+        this.#byModel.set(model, icon);
+      }
+      for (const id of placementIds) this.#byPlacement.set(id, icon);
+    }
   }
 
   /** The picture of the placement's model once drawn; asking for one not drawn yet queues it. */
@@ -71,8 +81,8 @@ export class PropIcons {
   }
 
   dispose(): void {
-    for (const icon of this.#icons) icon.target?.dispose();
-    this.#icons.length = 0;
+    for (const icon of this.#byModel.values()) icon.target?.dispose();
+    this.#byModel.clear();
     this.#byPlacement.clear();
     this.#wanted.clear();
   }

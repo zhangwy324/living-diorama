@@ -40,8 +40,10 @@ function fakeRenderer() {
 describe("prop icons", () => {
   it("draws a model only once asked for, then finds it by any of its placements", () => {
     const icons = new PropIcons();
-    icons.add(model().group, ["bush-1", "bush-2"]);
-    icons.add(model().group, ["rock-1"]);
+    icons.place([
+      [model().group, ["bush-1", "bush-2"]],
+      [model().group, ["rock-1"]],
+    ]);
     const { renderer, drawn, setClearColor, target } = fakeRenderer();
     // Nothing asked for, nothing drawn: no tree or rock is drawn just for being loaded.
     icons.render(renderer);
@@ -67,9 +69,24 @@ describe("prop icons", () => {
     expect(drawn).toHaveLength(2);
   });
 
+  it("keeps a model's picture when the props are replaced, found by the new placements", () => {
+    const icons = new PropIcons();
+    const bush = model().group;
+    icons.place([[bush, ["bush-1"]]]);
+    const { renderer, drawn } = fakeRenderer();
+    icons.icon("bush-1");
+    icons.render(renderer);
+    const picture = icons.icon("bush-1");
+    icons.place([[bush, ["bush-2"]]]);
+    expect(icons.icon("bush-1")).toBeUndefined();
+    expect(icons.icon("bush-2")).toBe(picture);
+    icons.render(renderer);
+    expect(drawn).toHaveLength(1);
+  });
+
   it("frees its pictures on dispose", () => {
     const icons = new PropIcons();
-    icons.add(model().group, ["bush-1"]);
+    icons.place([[model().group, ["bush-1"]]]);
     const { renderer, drawn } = fakeRenderer();
     icons.icon("bush-1");
     icons.render(renderer);
