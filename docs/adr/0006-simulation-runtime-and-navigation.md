@@ -8,7 +8,7 @@
 
 ### Runtime
 
-1. **Clock.** `FixedClock` turns fed-in wall-clock time into fixed ticks (100 ms at 10 Hz). The host passes a monotonic time to `advance(wallMs)`, which returns how many ticks are due; the simulation never reads a clock. One `advance` releases at most `maxCatchUpTicks` (default 10), and time beyond that is dropped, which also covers sleep/resume. The speed multiplier scales elapsed time, not the tick length. Pausing discards accumulated time and resuming re-baselines, so paused time never ticks. The tick counter itself belongs to the simulation state (`WorldState.tick`), not the clock, so it is saved and replayed with that state.
+1. **Clock.** `FixedClock` turns fed-in wall-clock time into fixed ticks (100 ms at 10 Hz). The host passes a monotonic time to `advance(wallMs)`, which returns how many ticks are due; the simulation never reads a clock. One `advance` releases at most `maxCatchUpTicks` (default 10), and time beyond that is dropped, which also covers sleep/resume. The speed multiplier scales elapsed time, not the tick length. _Amended (issue #100):_ above speed 1 the limit is `ceil(maxCatchUpTicks × speed)`, about one real second of ticks, so a dev speed such as 60 is not held to 10×; speed is at most 100 (`MAX_SPEED`). Pausing discards accumulated time and resuming re-baselines, so paused time never ticks. The tick counter itself belongs to the simulation state (`WorldState.tick`), not the clock, so it is saved and replayed with that state.
 
 2. **Determinism contract.** The same seed and the same log of (tick, command) pairs produce the same trajectory. Commands are queued and applied at tick boundaries only (PR C).
 

@@ -1,4 +1,4 @@
-import { parseClockTime } from "@living-diorama/simulation";
+import { isValidSpeed, MAX_SPEED, parseClockTime } from "@living-diorama/simulation";
 import type { SimulationClient } from "./simulation-client";
 
 // A development-only console hook to the time of day (ADR 0018 §5), so night can be checked at
@@ -6,7 +6,8 @@ import type { SimulationClient } from "./simulation-client";
 //
 //   livingDiorama.time.set("21:30")   // fix the time of day; phases and lighting follow it
 //   livingDiorama.time.follow()       // back to the real clock
-//   livingDiorama.time.speed(60)      // run simulation time 60 times as fast (1 is normal)
+//   livingDiorama.time.speed(60)      // run simulation time 60 times as fast (1 is normal,
+//                                     // 100 the most)
 
 export interface TimeDevHook {
   set(time: string): void;
@@ -28,8 +29,10 @@ export function timeDevHook(
       client.fixTimeOfDay(undefined);
     },
     speed(multiplier) {
-      if (!(Number.isFinite(multiplier) && multiplier > 0)) {
-        throw new Error(`Expected a positive number, got ${String(multiplier)}`);
+      if (!isValidSpeed(multiplier)) {
+        throw new Error(
+          `Expected a number above 0 and at most ${MAX_SPEED}, got ${String(multiplier)}`,
+        );
       }
       client.setSpeed(multiplier);
     },

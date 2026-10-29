@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FixedClock, normalizeHeading, Rng } from "../index";
+import { FixedClock, isValidSpeed, MAX_SPEED, normalizeHeading, Rng } from "../index";
 
 describe("FixedClock", () => {
   it("releases whole ticks and carries the remainder", () => {
@@ -51,6 +51,21 @@ describe("FixedClock", () => {
     expect(clock.advance(3_600_250)).toBe(30);
     clock.setSpeed(2.5);
     expect(clock.catchUpLimit).toBe(25);
+    clock.setSpeed(1.1); // 10 × 1.1 is 11.000000000000002 in floating point
+    expect(clock.catchUpLimit).toBe(11);
+    clock.setSpeed(1.05);
+    expect(clock.catchUpLimit).toBe(11);
+  });
+
+  it("accepts speeds up to MAX_SPEED and rejects faster ones", () => {
+    const clock = new FixedClock({ tickRateHz: 10 });
+    clock.setSpeed(MAX_SPEED);
+    expect(clock.catchUpLimit).toBe(1000);
+    expect(() => clock.setSpeed(MAX_SPEED + 0.5)).toThrow(RangeError);
+    expect(clock.speed).toBe(MAX_SPEED);
+    expect(isValidSpeed(100)).toBe(true);
+    expect(isValidSpeed(101)).toBe(false);
+    expect(isValidSpeed(0)).toBe(false);
   });
 
   it("keeps the catch-up limit at speed 1 or slower", () => {

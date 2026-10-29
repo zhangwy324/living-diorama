@@ -187,6 +187,18 @@ describe("simulation host", () => {
     expect(host.snapshots()).toHaveLength(600);
   });
 
+  it("rejects a speed above 100 and keeps the speed it had", () => {
+    const host = startHost();
+    host.init();
+    host.send({ type: "set_speed", multiplier: 2 });
+    host.send({ type: "set_speed", multiplier: 101 });
+    host.advance(100);
+    expect(host.errorCodes()).toEqual(["invalid_speed"]);
+    host.take();
+    host.advance(1000);
+    expect(host.snapshots()).toHaveLength(20);
+  });
+
   it("rejects commands it cannot apply and keeps running", () => {
     const host = startHost();
     host.send({ type: "pause" });

@@ -98,16 +98,19 @@ describe("time dev hook", () => {
     hook.set("21:30");
     hook.follow();
     hook.speed(20);
+    hook.speed(100);
     expect(client.fixTimeOfDay.mock.calls).toEqual([[21 * 60 + 30], [undefined]]);
-    expect(client.setSpeed.mock.calls).toEqual([[20]]);
+    expect(client.setSpeed.mock.calls).toEqual([[20], [100]]);
   });
 
   it("refuses values the worker would reject", () => {
     const client = { fixTimeOfDay: vi.fn(), setSpeed: vi.fn() };
     const hook = timeDevHook(client);
     expect(() => hook.set("25:00")).toThrow(/21:30/);
-    expect(() => hook.speed(0)).toThrow(/positive/);
-    expect(() => hook.speed(Number.NaN)).toThrow(/positive/);
+    expect(() => hook.speed(0)).toThrow(/above 0/);
+    expect(() => hook.speed(Number.NaN)).toThrow(/above 0/);
+    expect(() => hook.speed(101)).toThrow(/at most 100/);
+    expect(() => hook.speed(Number.POSITIVE_INFINITY)).toThrow(/at most 100/);
     expect(client.fixTimeOfDay).not.toHaveBeenCalled();
     expect(client.setSpeed).not.toHaveBeenCalled();
   });

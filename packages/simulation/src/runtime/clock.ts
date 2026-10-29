@@ -8,6 +8,17 @@ export interface ClockOptions {
 }
 
 /**
+ * The fastest speed multiplier. Speeds above 1 are a development aid (the dev console's time
+ * hook), and the catch-up limit grows with the speed, so this bounds a tick burst after a sleep.
+ */
+export const MAX_SPEED = 100;
+
+/** Whether `multiplier` is a speed the clock accepts: above 0 and at most `MAX_SPEED`. */
+export function isValidSpeed(multiplier: number): boolean {
+  return Number.isFinite(multiplier) && multiplier > 0 && multiplier <= MAX_SPEED;
+}
+
+/**
  * Turns wall-clock time into fixed simulation ticks (roadmap M3 task 1). The host feeds the time
  * in; the simulation never reads a clock itself. The clock only says how many ticks are due: the
  * tick counter belongs to the simulation state, so it is saved and replayed with it.
@@ -50,10 +61,12 @@ export class FixedClock {
     this.#lastWallMs = undefined;
   }
 
-  /** Scales how much simulation time passes per wall-clock millisecond. */
+  /** Scales how much simulation time passes per wall-clock millisecond, up to `MAX_SPEED`. */
   setSpeed(multiplier: number): void {
-    if (!(Number.isFinite(multiplier) && multiplier > 0)) {
-      throw new RangeError(`Speed multiplier must be a positive number, got ${multiplier}`);
+    if (!isValidSpeed(multiplier)) {
+      throw new RangeError(
+        `Speed multiplier must be above 0 and at most ${MAX_SPEED}, got ${multiplier}`,
+      );
     }
     this.#speed = multiplier;
   }
@@ -65,7 +78,9 @@ export class FixedClock {
    * (issue #100), while speed 1 still drops a long sleep as before.
    */
   get catchUpLimit(): number {
-    return this.#speed > 1 ? Math.ceil(this.maxCatchUpTicks * this.#speed) : this.maxCatchUpTicks;
+    if (this.#speed <= 1) return this.maxCatchUpTicks;
+    // Rounded first, so float error doesn't push e.g. 10 × 1.1 (11.000000000000002) up to 12.
+    return Math.ceil(Number((this.maxCatchUpTicks * this.#speed).toPrecision(12)));
   }
 
   /** Feeds the current monotonic wall-clock time in milliseconds; returns the ticks now due. */
