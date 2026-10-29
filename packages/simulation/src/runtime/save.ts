@@ -72,11 +72,15 @@ export interface CatchUpFailure {
   creatureId: string;
   behavior: string;
   /**
-   * `hook_failed`: its `catchUp` hook threw, so nothing it would have set was. `no_spot`: the
-   * creature has no spot it can reach at the placement the hook named. Otherwise why the action it
-   * asked for failed to start (`start_failed` if it threw). The creature was placed awake.
+   * `hook_failed`: its `catchUp` hook threw, so nothing it would have set was.
+   * `undeclared_need` or `invalid_need`: it set `need`, which it doesn't declare, or to a value
+   * that isn't a finite number; that need was left alone. `no_spot`: the creature has no spot it
+   * can reach at the placement the hook named. Otherwise why the action it asked for failed to
+   * start (`start_failed` if it threw); the creature was placed awake then.
    */
   reason: string;
+  /** The need, for `undeclared_need` and `invalid_need`. */
+  need?: string;
 }
 
 /** What catch-up did for the time the world was away (ADR 0018 §19, ADR 0019 §5, §6). */

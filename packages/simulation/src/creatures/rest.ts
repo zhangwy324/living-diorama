@@ -48,6 +48,8 @@ export const WAKE_TIREDNESS = 0.1;
 export const HOME_DETOUR_FACTOR = 2;
 /** A creature released from the Studio doesn't sleep for this long (ADR 0018 amendments, §13). */
 export const RELEASE_GRACE_SECONDS = 10 * 60;
+/** How close to its spot at a shelter a creature must stand to start there already asleep. */
+const AT_SPOT_METRES = 1e-3;
 
 /** Where a day phase falls in a creature's day (ADR 0018 §13 and amendments, §5). */
 export interface SleepCycle {
@@ -301,7 +303,8 @@ export const sleepAction: ActionProvider = {
 
 /**
  * Sleep already under way, for catch-up (ADR 0018 §19): the creature stands at its spot by the
- * shelter `placementId`, placed there by the engine, or sleeps where it stands without one. It is
+ * shelter `placementId`, placed there by the engine, and fails with `not_at_spot` otherwise; or it
+ * sleeps where it stands without one. It is
  * asleep from the start, so it emits no `fell_asleep`; a shelter becomes its home if it has none,
  * as on falling asleep there.
  */
@@ -312,6 +315,15 @@ function startAsleep(placementId: unknown, waking: boolean, context: ActionConte
     if (!place || !Object.hasOwn(place.affordances, SHELTER)) {
       return { ok: false, reason: "not_shelter", detail: { placementId } };
     }
+    // Only where the creature already stands at its spot (catch-up puts it there first), so a
+    // proposal can't use this to move a creature into bed.
+    const spot = context.spotAt(place.id);
+    const here = context.position;
+    const there =
+      spot !== undefined &&
+      spot.regionId === here.regionId &&
+      Math.hypot(spot.x - here.x, spot.z - here.z) <= AT_SPOT_METRES;
+    if (!there) return { ok: false, reason: "not_at_spot", detail: { placementId } };
     ({ x, z } = place);
     context.face(place.x, place.z);
     if (context.home === null) context.setHome(place.id);

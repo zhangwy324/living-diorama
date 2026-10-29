@@ -47,7 +47,7 @@ import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } fro
 import type { ConnectionModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
 import { clonePlain } from "./plain";
-import { phaseSpans, planCatchUp, type CatchUpPlan, type ClockMode } from "./catch-up";
+import { phaseSpans, planCatchUp, type CatchUpPlan } from "./catch-up";
 import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport } from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
@@ -158,11 +158,6 @@ export interface RestoreOptions {
   nowMs: number;
   /** The time of day now, in minutes since local midnight. */
   minutes: number;
-  /**
-   * Where the time of day comes from; default `real_time`. In `custom_day` there is no catch-up and
-   * the saved time of day is kept, so `minutes` is ignored (ADR 0018 §5, §19).
-   */
-  clockMode?: ClockMode;
 }
 
 export interface SimulationOptions extends WorldStateOptions {
@@ -437,10 +432,7 @@ export class Simulation {
    * step announces a phase change only if the phase really changed since the save. Never throws on
    * the save's content.
    */
-  restore(
-    save: WorldSave,
-    { nowMs, minutes, clockMode = "real_time" }: RestoreOptions,
-  ): Result<RestoreReport> {
+  restore(save: WorldSave, { nowMs, minutes }: RestoreOptions): Result<RestoreReport> {
     if (!Number.isFinite(nowMs)) {
       throw new RangeError(`The wall-clock time must be a finite number, got ${nowMs}`);
     }
@@ -466,9 +458,10 @@ export class Simulation {
     this.#actionCues.clear();
     this.#perceptionOffsets.clear();
     this.#events = [];
-    if (clockMode === "real_time") this.setTimeOfDay(minutes);
+    this.setTimeOfDay(minutes);
     const gapMs = Math.max(0, nowMs - save.savedAt);
-    const catchUp = this.#catchUp(planCatchUp(save.savedAt, nowMs, clockMode));
+    // Custom day mode (ADR 0018 §5), once it has a clock source, must skip catch-up here (§19).
+    const catchUp = this.#catchUp(planCatchUp(save.savedAt, nowMs));
     return {
       ok: true,
       value: { gapMs, droppedCreatures, prunedPlacements, droppedActions, catchUp },
@@ -489,7 +482,10 @@ export class Simulation {
     const { gapMs } = plan;
     this.state.dayPhase = dayPhaseAt(this.state.minutes);
     const phases = phaseSpans(this.state.minutes, gapMs);
-    const gapTicks = Math.round((gapMs / 1000) * this.tickRateHz);
+    // The world's clock moves on by the gap, so every tick-based timer (the release grace,
+    // cooldowns, when places were last seen) counts the time away. Everything below, the forks
+    // included, uses the tick after the jump.
+    this.state.tick += Math.round((gapMs / 1000) * this.tickRateHz);
     const failures: CatchUpFailure[] = [];
     for (const creature of this.state.creatures.values()) {
       const profile = this.#profile(creature.speciesId);
@@ -498,9 +494,12 @@ export class Simulation {
       delete creature.lastResult;
       delete creature.phaseReactionTick;
       creature.asleep = false;
-      creature.decideAtTick = this.tick;
-      // The release lies the gap further back, so grace periods count the time away.
-      if (creature.releasedAtTick !== undefined) creature.releasedAtTick -= gapTicks;
+      // The engine's own draws for this creature: a stream forked off its own, salted with the tick
+      // so another restore draws afresh, and leaving its behaviors' draws unchanged.
+      const rng = new Rng(creature.rng).fork(`catch-up@${this.tick}`);
+      // Awake creatures decide after a random delay, so they don't all decide on the first tick.
+      const delay = rng.range(0, PHASE_REACTION_SECONDS);
+      creature.decideAtTick = this.tick + Math.round(delay * this.tickRateHz);
       const gap: CatchUpGap = {
         ms: gapMs,
         phases,
@@ -511,7 +510,7 @@ export class Simulation {
       };
       const start = this.#runCatchUpHooks(creature, profile, gap, failures);
       if (!start || !this.#startCaughtUp(creature, profile, start, failures)) {
-        this.#placeAwake(creature);
+        this.#placeAwake(creature, rng);
       }
       creature.progress = { x: creature.position.x, z: creature.position.z, stalledTicks: 0 };
     }
@@ -535,7 +534,7 @@ export class Simulation {
       if (!provider?.catchUp) continue;
       let result: CatchUpResult | null;
       try {
-        const rng = new Rng(creature.rng).fork(`catch-up:${id}`);
+        const rng = new Rng(creature.rng).fork(`catch-up@${this.tick}:${id}`);
         result = provider.catchUp(this.#observation(creature, profile), gap, rng);
       } catch {
         failures.push({ creatureId: creature.id, behavior: id, reason: "hook_failed" });
@@ -546,9 +545,14 @@ export class Simulation {
         const declared = provider.dependencies?.some(
           (d) => d.registry === "needs" && d.id === need,
         );
-        if (declared && Object.hasOwn(creature.needs, need) && Number.isFinite(value)) {
-          creature.needs[need] = clamp01(value);
-        }
+        const reason = !declared
+          ? "undeclared_need"
+          : !Number.isFinite(value)
+            ? "invalid_need"
+            : undefined;
+        if (reason) failures.push({ creatureId: creature.id, behavior: id, reason, need });
+        // A declared need the species doesn't give the creature is ignored, as by `adjustNeed`.
+        else if (Object.hasOwn(creature.needs, need)) creature.needs[need] = clamp01(value);
       }
       if (result.start && !requested) requested = { behavior: id, start: result.start };
     }
@@ -592,11 +596,9 @@ export class Simulation {
   /**
    * Places an awake creature after a gap (ADR 0018 §19): at a random point it can reach in its
    * home's region, or in its own region if it has no home or can't reach it. Stays put if neither
-   * has a point it can reach. Draws from a stream forked off its own, so its behaviors' draws
-   * don't shift.
+   * has a point it can reach.
    */
-  #placeAwake(creature: CreatureState) {
-    const rng = new Rng(creature.rng).fork("catch-up");
+  #placeAwake(creature: CreatureState, rng: Rng) {
     const queries = this.#queries(creature);
     const home = creature.home === null ? undefined : queries.spotAt(creature.home)?.regionId;
     const point =

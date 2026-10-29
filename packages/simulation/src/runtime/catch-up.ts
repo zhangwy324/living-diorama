@@ -11,24 +11,18 @@ export const CATCH_UP_CAP_MS = 12 * 60 * 60 * 1000;
 export const SHORT_GAP_MS = 2 * 60 * 1000;
 
 /**
- * Where the time of day comes from (ADR 0018 §5). `real_time`: the OS clock, sent in. A custom
- * day, whose time of day is simulation state, isn't built yet; a world restored in it carries on
- * exactly from its save, with no catch-up and the saved time of day.
+ * Why a restore did no catch-up: the clock didn't move forwards (`no_gap`) or the gap was under
+ * 2 minutes (`short_gap`).
  */
-export type ClockMode = "real_time" | "custom_day";
-
-/**
- * Why a restore did no catch-up: the clock didn't move forwards (`no_gap`), the gap was under
- * 2 minutes (`short_gap`) or the world runs a custom day (`custom_day`).
- */
-export type CatchUpSkip = "no_gap" | "short_gap" | "custom_day";
+export type CatchUpSkip = "no_gap" | "short_gap";
 
 /** Whether a restore catches up, and over how long a gap. */
 export type CatchUpPlan = { apply: true; gapMs: number } | { apply: false; reason: CatchUpSkip };
 
-/** The catch-up rules for a world saved at `savedAt` and restored at `nowMs`. */
-export function planCatchUp(savedAt: number, nowMs: number, clockMode: ClockMode): CatchUpPlan {
-  if (clockMode === "custom_day") return { apply: false, reason: "custom_day" };
+/**
+ * The catch-up rules, in real time mode, for a world saved at `savedAt` and restored at `nowMs`.
+ */
+export function planCatchUp(savedAt: number, nowMs: number): CatchUpPlan {
   const gapMs = nowMs - savedAt;
   if (!(gapMs > 0)) return { apply: false, reason: "no_gap" };
   if (gapMs < SHORT_GAP_MS) return { apply: false, reason: "short_gap" };

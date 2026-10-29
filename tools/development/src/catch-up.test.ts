@@ -8,8 +8,15 @@ import {
   phaseSpans,
   planCatchUp,
   restBehavior,
+  Rng,
   SHORT_GAP_MS,
+  sleepAction,
+  tirednessAfter,
   tirednessNeed,
+  type ActionContext,
+  type CatchUpGap,
+  type CreatureObservation,
+  type DayPhase,
   type Simulation,
   type SimulationEvent,
 } from "@living-diorama/simulation";
@@ -96,31 +103,27 @@ const PER_CREATURE = ["ate", "fell_asleep", "woke_up", "new_home_selected", "cre
 
 describe("gap rules", () => {
   it("caps the gap at 12 hours", () => {
-    expect(planCatchUp(0, 30 * HOUR, "real_time")).toEqual({ apply: true, gapMs: CATCH_UP_CAP_MS });
-    expect(planCatchUp(0, 5 * HOUR, "real_time")).toEqual({ apply: true, gapMs: 5 * HOUR });
+    expect(planCatchUp(0, 30 * HOUR)).toEqual({ apply: true, gapMs: CATCH_UP_CAP_MS });
+    expect(planCatchUp(0, 5 * HOUR)).toEqual({ apply: true, gapMs: 5 * HOUR });
   });
 
   it("counts a clock that went backwards, or didn't move, as no gap", () => {
-    expect(planCatchUp(10 * HOUR, 9 * HOUR, "real_time")).toEqual({
+    expect(planCatchUp(10 * HOUR, 9 * HOUR)).toEqual({
       apply: false,
       reason: "no_gap",
     });
-    expect(planCatchUp(HOUR, HOUR, "real_time")).toEqual({ apply: false, reason: "no_gap" });
+    expect(planCatchUp(HOUR, HOUR)).toEqual({ apply: false, reason: "no_gap" });
   });
 
   it("treats a gap under 2 minutes as no gap", () => {
-    expect(planCatchUp(0, SHORT_GAP_MS - 1, "real_time")).toEqual({
+    expect(planCatchUp(0, SHORT_GAP_MS - 1)).toEqual({
       apply: false,
       reason: "short_gap",
     });
-    expect(planCatchUp(0, SHORT_GAP_MS, "real_time")).toEqual({
+    expect(planCatchUp(0, SHORT_GAP_MS)).toEqual({
       apply: true,
       gapMs: SHORT_GAP_MS,
     });
-  });
-
-  it("does no catch-up in custom day mode", () => {
-    expect(planCatchUp(0, 5 * HOUR, "custom_day")).toEqual({ apply: false, reason: "custom_day" });
   });
 
   it("splits a gap ending now into the phases it passed through", () => {
@@ -168,24 +171,6 @@ describe("restore without catch-up", () => {
     expect(report.gapMs).toBe(0);
     expect(report.catchUp.skipped).toBe("no_gap");
     expect(simulation.save(SAVED_AT).creatures).toEqual(save.creatures);
-  });
-
-  it("carries on exactly from the save in custom day mode, at the saved time of day", () => {
-    const save = nightSave();
-    const { simulation, report } = restored(save, {
-      nowMs: SAVED_AT + 10 * HOUR,
-      minutes: at(6, 10),
-      clockMode: "custom_day",
-    });
-    expect(report.catchUp).toEqual({
-      applied: false,
-      skipped: "custom_day",
-      gapMs: 0,
-      failures: [],
-    });
-    const after = simulation.save(SAVED_AT);
-    expect(after.creatures).toEqual(save.creatures);
-    expect(after.minutes).toBe(save.minutes);
   });
 });
 
@@ -270,24 +255,176 @@ describe("catch-up after a long gap", () => {
     expect(a.simulation.save(0)).toEqual(b.simulation.save(0));
   });
 
-  it("moves a release back by the gap, so the release grace counts the time away", () => {
+  it("moves the tick on by the gap, so the release grace and cooldowns count the time away", () => {
     const simulation = create(5, at(21));
     expect(simulation.spawn(MOSSLING, undefined, { released: true }).ok).toBe(true);
     run(simulation, 60 * HZ, at(21));
-    const save = throughDisk(simulation.save(SAVED_AT));
+    const saved = simulation.save(SAVED_AT);
+    // A meal it failed to reach, skipped for another minute.
+    saved.creatures[0]!.memory["core:feed"] = { avoid: { "gone-later": saved.tick + 60 * HZ } };
+    const save = throughDisk(saved);
     const released = save.creatures[0]!.releasedAtTick!;
 
     // 3 minutes away: 4 minutes since the release, still in the grace, so awake.
     const short = restored(save, { nowMs: SAVED_AT + 3 * MINUTE, minutes: at(21, 4) });
+    expect(short.simulation.tick).toBe(save.tick + 3 * 60 * HZ);
     const [inGrace] = short.simulation.save(SAVED_AT).creatures;
-    expect(inGrace!.releasedAtTick).toBe(released - 3 * 60 * HZ);
+    expect(inGrace!.releasedAtTick).toBe(released);
     expect(inGrace!.action).toBeUndefined();
 
-    // An hour away: the grace is over, so it is put to bed.
+    // An hour away: the grace is over, so it is put to bed, and the cooldown has run out.
     const long = restored(save, { nowMs: SAVED_AT + HOUR, minutes: at(22, 1) });
-    const after = throughDisk(long.simulation.save(SAVED_AT));
-    expect(after.creatures[0]!.releasedAtTick).toBe(released - 3600 * HZ);
-    expect(after.creatures[0]!.action?.id).toBe("core:sleep");
+    expect(long.simulation.tick).toBe(save.tick + 3600 * HZ);
+    const after = throughDisk(long.simulation.save(SAVED_AT)).creatures[0]!;
+    expect(after.action?.id).toBe("core:sleep");
+    const avoid = (after.memory["core:feed"] as { avoid: Record<string, number> }).avoid;
+    expect(Object.values(avoid).every((until) => until <= long.simulation.tick)).toBe(true);
+  });
+
+  it("staggers the first decisions of awake creatures over up to 30 s", () => {
+    const { simulation } = restored(nightSave(), {
+      nowMs: SAVED_AT + 11 * HOUR,
+      minutes: at(7, 10),
+    });
+    const ticks = simulation.save(0).creatures.map((c) => c.decideAtTick - simulation.tick);
+    expect(ticks.every((t) => t >= 0 && t <= 30 * HZ)).toBe(true);
+    expect(new Set(ticks).size).toBeGreaterThan(1);
+  });
+
+  it("draws afresh on a second restore after time has passed", () => {
+    const save = nightSave();
+    const first = restored(save, { nowMs: SAVED_AT + 11 * HOUR, minutes: at(7, 10) });
+    const resaved = throughDisk(first.simulation.save(SAVED_AT + 11 * HOUR));
+    const second = restored(resaved, { nowMs: SAVED_AT + 22 * HOUR, minutes: at(18, 10) });
+    const a = first.simulation.save(0).creatures.map((c) => c.needs[HUNGER]);
+    const b = second.simulation.save(0).creatures.map((c) => c.needs[HUNGER]);
+    expect(a).not.toEqual(b);
+  });
+
+  it("lowers tiredness through a gap that ends mid-night, without resetting it", () => {
+    const save = nightSave();
+    const { simulation } = restored(save, { nowMs: SAVED_AT + 3 * HOUR, minutes: at(23, 10) });
+    for (const creature of simulation.save(SAVED_AT).creatures) {
+      const before = save.creatures.find((c) => c.id === creature.id)!;
+      const rate = tirednessNeed.perHour.asleep * (creature.variation.needs[TIREDNESS] ?? 1);
+      expect(creature.needs[TIREDNESS]).toBeCloseTo(
+        Math.max(0, before.needs[TIREDNESS]! + 3 * rate),
+        9,
+      );
+      expect(creature.action?.id).toBe("core:sleep");
+    }
+  });
+
+  it("puts a creature with no home to bed at the nearest shelter it knows", () => {
+    const save = nightSave();
+    const creature = save.creatures[0]!;
+    const shelters = creature.knowledge.places["core:shelter"]!.map((p) => p.placementId);
+    expect(shelters.length).toBeGreaterThan(0);
+    creature.home = null;
+    const { simulation } = restored(save, { nowMs: SAVED_AT + 3 * HOUR, minutes: at(23, 10) });
+    const after = simulation.save(SAVED_AT).creatures[0]!;
+    const placementId = (after.action?.state as { placementId: string }).placementId;
+    expect(shelters).toContain(placementId);
+    expect(after.position).toEqual(simulation.spotFor(after.id, placementId));
+    // It takes the shelter as home, as on falling asleep there.
+    expect(after.home).toBe(placementId);
+  });
+
+  it("puts a creature knowing no shelter to bed where it stands", () => {
+    const save = nightSave();
+    const creature = save.creatures[0]!;
+    creature.home = null;
+    creature.knowledge.places["core:shelter"] = [];
+    const { simulation } = restored(save, { nowMs: SAVED_AT + 3 * HOUR, minutes: at(23, 10) });
+    const after = simulation.save(SAVED_AT).creatures[0]!;
+    expect(after.action).toMatchObject({
+      id: "core:sleep",
+      state: { placementId: null, asleep: true },
+    });
+    expect(after.position).toEqual(creature.position);
+    expect(after.home).toBeNull();
+  });
+});
+
+describe("core:rest catching up", () => {
+  const gap = (phases: { phase: DayPhase; hours: number }[]): CatchUpGap => ({
+    ms: phases.reduce((sum, p) => sum + p.hours, 0) * HOUR,
+    phases,
+    needRate: (id, asleep) =>
+      id === TIREDNESS
+        ? asleep
+          ? tirednessNeed.perHour.asleep
+          : tirednessNeed.perHour.awake
+        : undefined,
+  });
+
+  it("rests a nocturnal creature through the day and wakes it at dusk", () => {
+    const awake = tirednessNeed.perHour.awake;
+    expect(
+      tirednessAfter(
+        0.5,
+        gap([
+          { phase: "day", hours: 9 },
+          { phase: "dusk", hours: 1 },
+        ]),
+        true,
+      ),
+    ).toBeCloseTo(awake, 9);
+    // Diurnal, the same hours are a day awake.
+    expect(
+      tirednessAfter(
+        0.2,
+        gap([
+          { phase: "day", hours: 9 },
+          { phase: "dusk", hours: 1 },
+        ]),
+        false,
+      ),
+    ).toBeCloseTo(0.2 + 10 * awake, 9);
+  });
+
+  it("puts a nocturnal creature to bed by day, not at night", () => {
+    const observation = (dayPhase: DayPhase) =>
+      ({
+        tick: 0,
+        tickSeconds: 1,
+        creature: { id: "c", speciesId: "s", position: { regionId: "r", x: 0, z: 0 }, heading: 0 },
+        dayPhase,
+        needs: { [TIREDNESS]: 0.5 },
+        traits: { "core:nocturnal": 1 },
+        senses: {},
+        knowledge: { places: {}, recentCells: [] },
+        home: null,
+        world: { place: () => undefined, spotAt: () => undefined },
+      }) as unknown as CreatureObservation;
+    const g = gap([{ phase: "day", hours: 3 }]);
+    const rng = new Rng({ words: [1, 2, 3, 4], key: 5 });
+    expect(restBehavior.catchUp!(observation("day"), g, rng)?.start).toEqual({
+      action: "core:sleep",
+      params: { asleep: true },
+    });
+    expect(restBehavior.catchUp!(observation("night"), g, rng)?.start).toBeUndefined();
+  });
+
+  it("can't start sleep already asleep away from the shelter's spot", () => {
+    const context = {
+      dayPhase: "night",
+      traits: {},
+      position: { regionId: "r", x: 10, z: 0 },
+      place: (id: string) => ({
+        id,
+        x: 0,
+        y: 0,
+        z: 0,
+        blockRadius: 0,
+        affordances: { "core:shelter": {} },
+      }),
+      spotAt: () => ({ regionId: "r", x: 1, z: 0 }),
+    } as unknown as ActionContext;
+    expect(sleepAction.start({ placementId: "tree", asleep: true }, context)).toMatchObject({
+      ok: false,
+      reason: "not_at_spot",
+    });
   });
 });
 
@@ -335,6 +472,27 @@ describe("catch-up hooks that fail", () => {
     expect(simulation.save(SAVED_AT).creatures.every((c) => !c.action)).toBe(true);
   });
 
+  it("leave alone a need their behavior doesn't declare, and report it", () => {
+    vi.spyOn(restBehavior, "catchUp").mockReturnValue({ needs: { [HUNGER]: 0.95 } });
+    const save = nightSave();
+    const { simulation, report } = restored(save, {
+      nowMs: SAVED_AT + 5 * HOUR,
+      minutes: at(1, 10),
+    });
+    expect(report.catchUp.failures).toEqual(
+      save.creatures.map((c) => ({
+        creatureId: c.id,
+        behavior: restBehavior.id,
+        reason: "undeclared_need",
+        need: HUNGER,
+      })),
+    );
+    // `core:feed`'s hunger stands.
+    expect(simulation.save(0).creatures.every((c) => c.needs[HUNGER]! < hungerNeed.actAt)).toBe(
+      true,
+    );
+  });
+
   it("can't start an action the behavior doesn't declare", () => {
     vi.spyOn(restBehavior, "catchUp").mockReturnValue({
       start: { action: "core:eat", params: { placementId: "x" } },
@@ -347,6 +505,8 @@ describe("catch-up hooks that fail", () => {
 });
 
 describe("saved running actions", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   /** A short-gap restore of the night save with the first creature's action replaced. */
   function withAction(action: WorldSave["creatures"][number]["action"]) {
     const save = nightSave();
@@ -383,6 +543,22 @@ describe("saved running actions", () => {
     });
   });
 
+  it("are dropped when their action's check throws", () => {
+    vi.spyOn(sleepAction, "checkState").mockImplementation(() => {
+      throw new Error("broken check");
+    });
+    const save = nightSave();
+    const { simulation, report } = restored(save, { nowMs: SAVED_AT, minutes: save.minutes });
+    expect(report.droppedActions).toEqual(
+      save.creatures.map((c) => ({
+        creatureId: c.id,
+        actionId: "core:sleep",
+        reason: "invalid_state",
+      })),
+    );
+    expect(simulation.save(0).creatures.every((c) => !c.action && !c.asleep)).toBe(true);
+  });
+
   it("are dropped when their state names a placement no longer in the world", () => {
     const sleeping = nightSave().creatures[0]!.action!;
     const { creature, after, report } = withAction({
@@ -410,6 +586,17 @@ describe("saved running actions", () => {
     ["core:eat", "core:feed", { ...eat, placementId: 7 }],
     ["core:eat", "core:feed", { ...eat, ticksLeft: 0 }],
     ["core:sleep", "core:rest", { placementId: null, x: 0, z: 0, path, arrived: 1 }],
+    [
+      "core:sleep",
+      "core:rest",
+      { placementId: null, x: 0, z: 0, path, arrived: true, asleep: true },
+    ],
+    [
+      "core:sleep",
+      "core:rest",
+      { placementId: null, x: "0", z: 0, path, arrived: true, asleep: true, nap: false },
+    ],
+    ["core:sleep", "core:rest", "asleep"],
     ["core:follow_path", "core:wander", { points: [{ regionId: "r", x: 1 }], next: 0 }],
     ["core:follow_path", "core:wander", { ...path, next: 2 }],
     ["core:idle", "core:wander", { remainingTicks: 0 }],

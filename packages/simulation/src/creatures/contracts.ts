@@ -1,6 +1,7 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { ActionCue, ActionType, BehaviorType } from "@living-diorama/extension-api";
 import type { RouteResult } from "../navigation/pathfinder";
+import type { ActionEvent } from "./action-event";
 import type { PhaseSpan } from "../runtime/catch-up";
 import type { Rng } from "../runtime/rng";
 import type { DayPhase } from "../runtime/time-of-day";
@@ -264,7 +265,7 @@ export interface CatchUpGap {
 export interface CatchUpResult {
   /**
    * Need ID → its value now, clamped to [0, 1]. Only needs the behavior declares as dependencies
-   * and the creature has are set.
+   * and the creature has are set; an undeclared need, or a value that isn't finite, is reported.
    */
   needs?: Record<string, number>;
   /**
@@ -311,10 +312,10 @@ export interface BehaviorProvider extends BehaviorType {
   /**
    * Sets the creature up for the present after a gap (ADR 0018 §19, ADR 0019 §5), e.g. a need's
    * value as if the creature had lived through it. Called when a restored world catches up, once
-   * per creature, after its running action is dropped and with the day phase already the present
-   * one. `rng` is a stream of its own for this creature and behavior. The engine places creatures
-   * and emits no per-creature events for catch-up. A hook that throws has no effect, and the
-   * restore reports it. Return null to change nothing.
+   * per creature, after its running action is dropped, with the tick already moved on by the gap
+   * and the day phase already the present one. `rng` is a stream of its own for this creature and
+   * behavior. The engine places creatures and emits no per-creature events for catch-up. A hook
+   * that throws has no effect, and the restore reports it. Return null to change nothing.
    */
   catchUp?(observation: CreatureObservation, gap: CatchUpGap, rng: Rng): CatchUpResult | null;
 }
