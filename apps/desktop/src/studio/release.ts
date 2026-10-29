@@ -20,6 +20,9 @@ export const canRelease = ({
   moves: boolean;
 }): boolean => name.trim() !== "" && !empty && !releasing && moves;
 
+/** Shown in the confirm step while the name is empty: the name is set while drawing. */
+export const NO_NAME = "Give your creature a name first: go back to name it.";
+
 /** The line shown when a creature goes into the world. */
 export const releasedMessage = (name: string) => `${name} is off into the world!`;
 

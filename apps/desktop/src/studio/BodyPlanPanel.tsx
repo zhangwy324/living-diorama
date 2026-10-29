@@ -8,12 +8,13 @@ import {
   type BodyTemplate,
   type DrawingBounds,
 } from "@living-diorama/content-schema";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { templateAnchors, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
 import {
   ANCHOR_LABELS,
   GAIT_LABELS,
   TEMPLATE_LABELS,
+  anchorNote,
   drawingPoint,
   planHeading,
   type PreviewMode,
@@ -44,7 +45,10 @@ const TEMPLATE_ICONS: Readonly<Record<BodyTemplate, ReactNode>> = {
   ),
 };
 
-export function BodyPlanPanel(props: {
+export function BodyPlanPanel({
+  headingRef,
+  ...props
+}: {
   name: string;
   plan: BodyPlanChoice;
   onTemplate(template: BodyTemplate): void;
@@ -55,6 +59,8 @@ export function BodyPlanPanel(props: {
   mode: PreviewMode["key"] | undefined;
   onMode(mode: PreviewMode["key"]): void;
   hints: readonly string[];
+  /** The heading, which takes the focus when the step opens. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const { plan } = props;
   const { locomotion } = plan;
@@ -63,7 +69,9 @@ export function BodyPlanPanel(props: {
     props.onLocomotion({ ...locomotion, ...change });
   return (
     <div className="body-plan">
-      <h2>{planHeading(props.name)}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>
+        {planHeading(props.name)}
+      </h2>
       <fieldset className="field templates">
         <legend>Body</legend>
         {BODY_TEMPLATES.map((template) => (
@@ -190,7 +198,9 @@ export function AnchorLayer(props: {
   return (
     <div
       className={placing ? "anchor-layer placing" : "anchor-layer"}
-      aria-label={placing ? `Click to place the ${ANCHOR_LABELS[placing].name.toLowerCase()}` : ""}
+      role="group"
+      aria-label="Points on the drawing"
+      aria-describedby="anchor-note"
       onClick={(event) => {
         if (!placing) return;
         const box = event.currentTarget.getBoundingClientRect();
@@ -217,6 +227,9 @@ export function AnchorLayer(props: {
             </span>
           );
         })}
+      <span id="anchor-note" className="visually-hidden">
+        {anchorNote(props.plan)}
+      </span>
       <span className="anchor-guide" aria-hidden="true">
         {placing
           ? `Click to ${props.plan.anchors[placing] ? "move" : "place"} the ${ANCHOR_LABELS[placing].name.toLowerCase()}`

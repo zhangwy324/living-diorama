@@ -20,6 +20,7 @@ import {
 } from "../studio-protocol";
 import { AnchorLayer, BodyPlanPanel } from "./BodyPlanPanel";
 import {
+  afterDrawingEdit,
   chosenMode,
   placeAnchor,
   previewModes,
@@ -33,7 +34,8 @@ import { DrawingEditor, type EditorState, type Tool } from "./editor";
 import { drawingHints, limitHints } from "./hints";
 import { MyCreatures } from "./MyCreatures";
 import { anotherName, randomNameSeed, suggestName } from "./name-suggestion";
-import { canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
+import { useReducedMotion } from "./reduced-motion";
+import { NO_NAME, canRelease, describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
 
 // The Creation Studio's page (ADR 0015). It never starts a simulation and never creates a
@@ -105,6 +107,16 @@ export function Studio() {
   const [previewMode, setPreviewMode] = useState<PreviewMode["key"]>();
   // The drawn shape's bounds, from the latest check, for the anchors' defaults.
   const [bounds, setBounds] = useState<DrawingBounds>();
+  const planHeadingRef = useRef<HTMLHeadingElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  // Where the focus goes when the step changes: the panel's heading on Next, the Next button on
+  // Back. Not on opening, and not after a release, which says so in its own words.
+  const focusOnStep = useRef(false);
+  useEffect(() => {
+    if (!focusOnStep.current) return;
+    focusOnStep.current = false;
+    (step === "plan" ? planHeadingRef.current : nextButton.current)?.focus();
+  }, [step]);
   // Made once per drawing and kept while it is unchanged, so retrying a release whose answer was
   // lost can't save it twice (ADR 0015 §5).
   const releaseId = useRef<string>(undefined);
@@ -158,6 +170,8 @@ export function Studio() {
       (next) => {
         setState(next);
         setHasBody(false);
+        // Anchors were placed on the drawing as it was: back to their defaults.
+        setPlan(afterDrawingEdit);
         releaseId.current = undefined;
         setReleaseError(undefined);
         clearTimeout(timer);
@@ -182,11 +196,18 @@ export function Studio() {
   // The preview plays the chosen way of moving in the confirm step, and stands still while drawing.
   const modes = previewModes(plan.locomotion);
   const mode = chosenMode(modes, previewMode);
+  // With reduced motion asked for, it holds the pose it has at rest: a swimmer still sits in the
+  // water, with only its slow bob.
+  const reducedMotion = useReducedMotion();
   const profile = step === "plan" ? mode?.motion.profile : undefined;
   const submersion = mode?.motion.submersion ?? 0;
+  const speed = reducedMotion ? 0 : (mode?.motion.speed ?? 0);
   useEffect(
-    () => preview.current?.setMotion(profile === undefined ? undefined : { profile, submersion }),
-    [profile, submersion],
+    () =>
+      preview.current?.setMotion(
+        profile === undefined ? undefined : { profile, submersion, speed },
+      ),
+    [profile, submersion, speed],
   );
   useEffect(() => preview.current?.setAnchors(plan.anchors), [plan.anchors]);
 
@@ -457,8 +478,14 @@ export function Studio() {
                 mode={mode?.key}
                 onMode={setPreviewMode}
                 hints={moves ? sizeHints : []}
+                headingRef={planHeadingRef}
               />
               <div className="release-slot">
+                {shownName.trim() === "" && (
+                  <p className="release-hint" role="status">
+                    {NO_NAME}
+                  </p>
+                )}
                 {!moves && (
                   <p className="release-hint" role="status">
                     {NO_LOCOMOTION}
@@ -476,6 +503,7 @@ export function Studio() {
                     disabled={releasing}
                     onClick={() => {
                       setReleaseError(undefined);
+                      focusOnStep.current = true;
                       setStep("draw");
                     }}
                   >
@@ -486,7 +514,6 @@ export function Studio() {
                     className="release"
                     disabled={!releasable}
                     aria-busy={releasing}
-                    title={shownName.trim() === "" ? "Give your creature a name first" : undefined}
                     onClick={() => void release()}
                   >
                     {releasing ? "Releasing…" : "Release"}
@@ -526,8 +553,10 @@ export function Studio() {
                   className="release"
                   disabled={!hasBody}
                   title={hasBody ? undefined : "Draw your creature first"}
+                  ref={nextButton}
                   onClick={() => {
                     setReleaseError(undefined);
+                    focusOnStep.current = true;
                     setStep("plan");
                   }}
                 >

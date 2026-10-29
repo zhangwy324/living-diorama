@@ -32,7 +32,7 @@ const inputs = (html: string, type: string, name: string) =>
 describe("the confirm panel", () => {
   it("names the creature and offers the three templates, one chosen", () => {
     const html = panel(templatePlan("hopper"));
-    expect(html).toContain("How does Mossy Pebble move?");
+    expect(html).toContain('<h2 tabindex="-1">How does Mossy Pebble move?</h2>');
     expect(inputs(html, "radio", "template")).toEqual(["walker", "hopper*", "swimmer"]);
     expect(inputs(html, "radio", "gait")).toEqual(["walk", "hop*"]);
     expect(html).toContain("A hopper has no points to place.");
@@ -77,6 +77,10 @@ describe("the anchor layer", () => {
     // The feet: centred on the bottom edge, at (128, 224) of 256.
     expect(html).toContain('class="anchor-marker" style="left:50%;top:87.5%"');
     expect(html).toContain("Feet (default)");
+    expect(html).toContain(
+      'role="group" aria-label="Points on the drawing" aria-describedby="anchor-note"',
+    );
+    expect(html).toContain("the default position is used");
     expect(html).toContain("Click to place the feet");
     const placed = renderToStaticMarkup(
       <AnchorLayer

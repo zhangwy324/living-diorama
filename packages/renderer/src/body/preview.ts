@@ -26,6 +26,11 @@ export interface PreviewMotion {
    * grid gives way to a water surface.
    */
   submersion: number;
+  /**
+   * Metres per second to move at, in place. At `FULL_MOTION_SPEED` or more a profile plays in
+   * full; 0 shows only what it does at rest (a swimmer's bob).
+   */
+  speed: number;
 }
 
 /** Masks the size of the drawing, 1 where a part should be highlighted (see `checkBody`). */
@@ -45,7 +50,7 @@ export interface BodyPreview {
   setThickness(thickness: number): void;
   /** While true nothing turns or renders, e.g. while a stroke is drawn, so drawing stays smooth. */
   setPaused(paused: boolean): void;
-  /** Plays a way of moving, as if moving at a drawn creature's pace; undefined stands still. */
+  /** Plays a way of moving in place, at its speed; undefined stands still. */
   setMotion(motion: PreviewMotion | undefined): void;
   /**
    * The body's anchors in drawing pixels, as pivots for its motion (ADR 0020 §10); one left out
@@ -55,11 +60,6 @@ export interface BodyPreview {
   dispose(): void;
 }
 
-/**
- * Metres per second the preview moves at: a drawn creature's base speed (the mossling's), above
- * `FULL_MOTION_SPEED`, so a profile plays in full.
- */
-const PREVIEW_SPEED = 0.6;
 const WATER_COLOUR = "#4f8fb0";
 const WATER_OPACITY = 0.55;
 
@@ -176,10 +176,10 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
     look.halfDepth = Math.max(0, extent.z * thickness);
     let lift = 0;
     if (motion) {
-      travelled += PREVIEW_SPEED * dt;
+      travelled += motion.speed * dt;
       clock += dt;
       locomotionMotion(
-        { profile: motion.profile, speed: PREVIEW_SPEED, travelled, time: clock, phase: 0, height },
+        { profile: motion.profile, speed: motion.speed, travelled, time: clock, phase: 0, height },
         pose,
       );
       lift = locomotionTransform(pose, look, moveMatrix) - motion.submersion;

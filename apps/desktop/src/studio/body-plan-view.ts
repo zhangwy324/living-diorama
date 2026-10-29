@@ -7,7 +7,13 @@ import {
 } from "@living-diorama/content-schema";
 import type { PreviewMotion } from "@living-diorama/renderer";
 import { SWIM_SUBMERSION } from "@living-diorama/simulation";
-import { templateAnchors, type BodyPlanChoice, type LocomotionChoice } from "../body-plan";
+import {
+  DRAWN_SPEED_FACTOR,
+  templateAnchors,
+  type BodyPlanChoice,
+  type LocomotionChoice,
+} from "../body-plan";
+import { DRAWN_SPECIES_DEFAULTS } from "../startup";
 
 // The confirm panel's words and small rules (ADR 0020 §12): what each template, gait and anchor is
 // called, which ways of moving the preview plays, and placing anchors by clicking the drawing.
@@ -19,6 +25,15 @@ export const TEMPLATE_LABELS: Readonly<Record<BodyTemplate, { name: string; blur
 };
 
 export const GAIT_LABELS: Readonly<Record<LandGait, string>> = { walk: "Walks", hop: "Hops" };
+
+/** What the preview says it plays for each gait. */
+export const GAIT_PREVIEW_LABELS: Readonly<Record<LandGait, string>> = {
+  walk: "Walking",
+  hop: "Hopping",
+};
+
+/** The preview moves at a drawn creature's pace: its base speed times a speed factor of 1. */
+export const PREVIEW_SPEED = DRAWN_SPECIES_DEFAULTS.baseSpeed * DRAWN_SPEED_FACTOR;
 
 export const ANCHOR_LABELS: Readonly<
   Record<AnchorName, { name: string; help: string; them: string }>
@@ -49,8 +64,8 @@ export function previewModes({ land, gait, swim }: LocomotionChoice): PreviewMod
       ? [
           {
             key: "land" as const,
-            label: gait === "walk" ? "Walking" : "Hopping",
-            motion: { profile: gait, submersion: 0 },
+            label: GAIT_PREVIEW_LABELS[gait],
+            motion: { profile: gait, submersion: 0, speed: PREVIEW_SPEED },
           },
         ]
       : []),
@@ -59,7 +74,7 @@ export function previewModes({ land, gait, swim }: LocomotionChoice): PreviewMod
           {
             key: "swim" as const,
             label: "Swimming",
-            motion: { profile: "swim", submersion: SWIM_SUBMERSION },
+            motion: { profile: "swim", submersion: SWIM_SUBMERSION, speed: PREVIEW_SPEED },
           },
         ]
       : []),
@@ -88,6 +103,28 @@ export function drawingPoint(
 export function placeAnchor(plan: BodyPlanChoice, name: AnchorName, point: Anchor): BodyPlanChoice {
   if (!templateAnchors(plan.template).includes(name)) return plan;
   return { ...plan, anchors: { ...plan.anchors, [name]: { ...point } } };
+}
+
+/**
+ * `plan` after the drawing changed: placed anchors are dropped, back to their defaults, since
+ * they were placed on the old drawing (owner's call). Everything else stays. The same object when
+ * nothing was placed.
+ */
+export const afterDrawingEdit = (plan: BodyPlanChoice): BodyPlanChoice =>
+  Object.values(plan.anchors).some((anchor) => anchor !== undefined) ? resetAnchors(plan) : plan;
+
+/** What the anchor layer says to a screen reader: each point, placed or at its default. */
+export function anchorNote(plan: BodyPlanChoice): string {
+  const anchors = templateAnchors(plan.template);
+  if (anchors.length === 0) return "A hopper has no points to place.";
+  return anchors
+    .map((name) => {
+      const { name: label, them } = ANCHOR_LABELS[name];
+      return plan.anchors[name]
+        ? `${label} placed. Click the drawing to move ${them}.`
+        : `${label} not placed, so the default position is used. Click the drawing to place ${them}.`;
+    })
+    .join(" ");
 }
 
 /** `plan` with every anchor back where `defaultAnchor` puts it. */

@@ -228,6 +228,8 @@ export async function openSpeciesLibrary(
         return failure("species_exists", `${ids.speciesId} is already in the library`);
       }
       const species: SpeciesDefinitionInput = {
+        // First, so the app defaults never override the plan or anything below.
+        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,
         version: "1.0.0",
@@ -236,7 +238,6 @@ export async function openSpeciesLibrary(
         sizeClass,
         body: planBody(plan, thickness ?? BODY_THICKNESS.default),
         capabilities: locomotionCapabilities(plan.locomotion),
-        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
       };
       const entry = parseLibraryEntry({
         schemaVersion: LIBRARY_ENTRY_SCHEMA_VERSION,
