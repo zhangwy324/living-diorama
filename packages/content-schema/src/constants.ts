@@ -1,4 +1,4 @@
-// Values defined in docs/world-coordinates.md. Change both together.
+// WORLD_TOLERANCES and SIZE_CLASSES are defined in docs/world-coordinates.md. Change both together.
 
 export const WORLD_TOLERANCES = {
   maxWalkableSlopeDeg: 35,
