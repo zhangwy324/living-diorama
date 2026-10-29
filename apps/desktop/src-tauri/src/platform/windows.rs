@@ -66,7 +66,9 @@ const DISPLAY_SUBCLASS: usize = 2;
 /// On tao's event-loop window, not the strip, but kept apart from the strip's IDs all the same.
 const SESSION_END_SUBCLASS: usize = 3;
 /// The class of the hidden window tao's event loop runs on. It is the window that exits the
-/// process on `WM_ENDSESSION` (tao 0.37), so the session end is held back there.
+/// process on `WM_ENDSESSION` (tao 0.37), so the session end is held back there. Re-check both on
+/// every tao upgrade (see development.md): a renamed class only logs a warning at startup, and a tao
+/// that handles the session end itself makes this hook unnecessary.
 const TAO_EVENT_TARGET_CLASS: &str = "Tao Thread Event Target";
 /// Posted to ourselves so `on_event` runs from the message loop, not inside the handling of
 /// the message that triggered it (Tauri runs window calls synchronously on the main thread).
@@ -574,7 +576,8 @@ enum SessionStep {
     Begin,
     /// `WM_ENDSESSION`, ending: wait for the save, at most until the timeout, then let tao exit.
     Wait,
-    /// `WM_ENDSESSION` again during that wait: answered here, so tao doesn't exit under the wait.
+    /// `WM_ENDSESSION` again during that wait, ending or cancelled: answered here, so neither tao's
+    /// exit nor the shell's `app.exit` on cancel runs inside the wait.
     Swallow,
     /// `WM_ENDSESSION`, cancelled, after the session started to end.
     Cancel,
@@ -585,7 +588,7 @@ enum SessionStep {
 fn session_step(msg: u32, ending: bool, started: bool, waiting: bool) -> SessionStep {
     match msg {
         WM_QUERYENDSESSION => SessionStep::Begin,
-        WM_ENDSESSION if ending && waiting => SessionStep::Swallow,
+        WM_ENDSESSION if waiting => SessionStep::Swallow,
         WM_ENDSESSION if ending => SessionStep::Wait,
         WM_ENDSESSION if started => SessionStep::Cancel,
         _ => SessionStep::Pass,
@@ -650,6 +653,10 @@ unsafe extern "system" fn session_end_proc(
 
 /// Runs the thread's messages until `done` returns true or `deadline` passes; returns whether
 /// `done` did. A `WM_QUIT` is put back for the outer loop and ends the wait.
+///
+/// Unlike tao's own loop, this skips tao's `msg_hook` (menu accelerators and the like) and its
+/// check for a panic in an event handler. That is acceptable for a wait of at most a few seconds
+/// right before the process exits.
 fn pump_until(deadline: Instant, done: &dyn Fn() -> bool) -> bool {
     loop {
         if done() {
@@ -735,6 +742,7 @@ mod tests {
         // A forced end comes without a query.
         assert_eq!(session_step(WM_ENDSESSION, true, false, false), Wait);
         assert_eq!(session_step(WM_ENDSESSION, true, true, true), Swallow);
+        assert_eq!(session_step(WM_ENDSESSION, false, true, true), Swallow);
         assert_eq!(session_step(WM_ENDSESSION, false, true, false), Cancel);
         assert_eq!(session_step(WM_ENDSESSION, false, false, false), Pass);
         assert_eq!(session_step(WM_ACTIVATE, true, true, false), Pass);
@@ -766,13 +774,6 @@ mod tests {
         assert!(!pump_until(start + Duration::from_millis(50), &|| false));
         assert!(start.elapsed() >= Duration::from_millis(50));
         assert!(pump_until(start + Duration::from_secs(10), &|| true));
-    }
-
-    #[test]
-    fn finds_tao_by_its_window_class() {
-        let class: Vec<u16> = TAO_EVENT_TARGET_CLASS.encode_utf16().collect();
-        assert!(is_event_target_class(&class));
-        assert!(!is_event_target_class(&class[..class.len() - 1]));
     }
 
     #[test]

@@ -37,6 +37,9 @@ const QUIT_REQUESTED: &str = "quit-requested";
 /// How long quitting waits for the frontend to save the world and shut down before exiting anyway
 /// (ADR 0008 §14, ADR 0019 §4).
 const QUIT_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a quit started by the OS session ending waits for the OS to end the process before it
+/// exits by itself, in case `WM_ENDSESSION` never follows the query (ADR 0019 §4).
+const SESSION_END_GRACE: Duration = Duration::from_secs(20);
 /// How long the height must stay put before it is saved and its space reserved, so a handle drag
 /// is one write and one change of other windows' work area.
 const HEIGHT_SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -121,9 +124,10 @@ impl QuitProgress {
         self.frontend_done.load(Ordering::SeqCst)
     }
 
-    /// Whether the quit timeout should exit the app; while the session ends, the OS does.
-    fn timeout_exits(&self) -> bool {
-        !self.session_ending.load(Ordering::SeqCst)
+    /// Whether the quit timeout should exit the app, `waited` after it started. While the session
+    /// ends the OS does, unless it still hasn't after `SESSION_END_GRACE`.
+    fn timeout_exits(&self, waited: Duration) -> bool {
+        !self.session_ending.load(Ordering::SeqCst) || waited >= SESSION_END_GRACE
     }
 }
 
@@ -801,13 +805,20 @@ pub fn quit(app: &AppHandle) {
 }
 
 /// Exits after `QUIT_TIMEOUT` unless the OS session is ending by then, in which case the OS ends
-/// the process.
+/// the process. If it still hasn't after `SESSION_END_GRACE`, the app exits anyway, so a session
+/// end that never comes doesn't leave it running with the frontend shut down.
 fn exit_after_timeout(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(QUIT_TIMEOUT);
-        if app.state::<QuitProgress>().timeout_exits() {
+        if app.state::<QuitProgress>().timeout_exits(QUIT_TIMEOUT) {
             log::warn!("The frontend did not shut down in time, exiting anyway");
+            app.exit(0);
+            return;
+        }
+        thread::sleep(SESSION_END_GRACE - QUIT_TIMEOUT);
+        if app.state::<QuitProgress>().timeout_exits(SESSION_END_GRACE) {
+            log::warn!("The OS session did not end in time, exiting anyway");
             app.exit(0);
         }
     });
@@ -945,7 +956,7 @@ fn accepts_quit_ready(label: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{QuitProgress, accepts_quit_ready};
+    use super::{QUIT_TIMEOUT, QuitProgress, SESSION_END_GRACE, accepts_quit_ready};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -957,7 +968,7 @@ mod tests {
     #[test]
     fn a_quit_exits_on_the_answer_or_the_timeout() {
         let progress = QuitProgress::default();
-        assert!(progress.timeout_exits());
+        assert!(progress.timeout_exits(QUIT_TIMEOUT));
         assert!(progress.frontend_finished());
     }
 
@@ -965,9 +976,18 @@ mod tests {
     fn at_session_end_the_os_ends_the_process() {
         let progress = QuitProgress::default();
         progress.session_ending.store(true, Ordering::SeqCst);
-        assert!(!progress.timeout_exits());
+        assert!(!progress.timeout_exits(QUIT_TIMEOUT));
         assert!(!progress.frontend_finished());
         assert!(progress.frontend_done.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_session_end_that_never_comes_exits_after_the_grace_period() {
+        let progress = QuitProgress::default();
+        progress.session_ending.store(true, Ordering::SeqCst);
+        progress.frontend_finished();
+        assert!(!progress.timeout_exits(SESSION_END_GRACE - QUIT_TIMEOUT));
+        assert!(progress.timeout_exits(SESSION_END_GRACE));
     }
 
     #[test]
@@ -980,7 +1000,7 @@ mod tests {
         let waiting = QuitProgress::default();
         waiting.session_ending.store(true, Ordering::SeqCst);
         assert!(!waiting.session_end_cancelled());
-        assert!(waiting.timeout_exits());
+        assert!(waiting.timeout_exits(QUIT_TIMEOUT));
         assert!(waiting.frontend_finished());
     }
 }
