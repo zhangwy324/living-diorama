@@ -7,6 +7,7 @@ import {
 import {
   buildNavigation,
   buildWorldModel,
+  CellState,
   navProfile,
   raisedSurfaces,
   registerCoreEngine,
@@ -16,6 +17,7 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { registerFarShelter } from "./fixtures/far-shelter";
+import { registerNavBoundaries } from "./fixtures/nav-boundaries";
 import { registerHollowCreatures, registerPond, registerRiverCrossing } from "./index";
 import { referenceBanks, referenceRaisedSurfaces, referenceRegionMask } from "./navigation-oracle";
 
@@ -56,6 +58,7 @@ describe.each([
   ["the pond fixture", registerPond, "fixture:pond"],
   ["the river-crossing fixture", registerRiverCrossing, "fixture:river-crossing"],
   ["the far-shelter fixture", registerFarShelter, "fixture:far-shelter"],
+  ["the boundaries fixture", registerNavBoundaries, "fixture:nav-boundaries"],
 ] as const)("navigation building on %s", (_, register, worldId) => {
   const registries = load(register);
   const world = registries.worlds.get(worldId)!;
@@ -79,4 +82,42 @@ describe.each([
       expect(nav.banks).toEqual(referenceBanks(model, masks, profile));
     },
   );
+});
+
+describe("the boundaries fixture", () => {
+  const registries = load(registerNavBoundaries);
+  const built = buildWorldModel(registries.worlds.get("fixture:nav-boundaries")!, registries);
+  if (!built.ok) throw new Error(built.diagnostics.map(formatDiagnostic).join("\n"));
+  const model = built.value;
+  const land = (size: SizeClass) => navProfile(size, ["core:land"], registries);
+  const stateAt = (size: SizeClass, x: number, z: number) => {
+    const mask = buildNavigation(model, land(size)).masks.get("ground")!;
+    return mask.state(mask.cellAt(x, z));
+  };
+
+  it.each(Object.keys(SIZE_CLASSES) as SizeClass[])(
+    "has a prop exactly the reach of size class %s from a cell centre",
+    (size) => {
+      const { radius } = land(size);
+      const mask = buildNavigation(model, land(size)).masks.get("ground")!;
+      const exact = model.props.some((p) =>
+        mask.states.some((_, cell) => {
+          const c = mask.center(cell);
+          const { x, z } = p.transform.position;
+          return Math.hypot(x - c.x, z - c.z) === p.blockRadius + radius;
+        }),
+      );
+      expect(exact).toBe(true);
+    },
+  );
+
+  it("has surfaces exactly epsilon, a step and a creature's height above the ground", () => {
+    // Epsilon above is the same surface; a step above is the pad's (covered).
+    expect(stateAt("tiny", -4.75, -2.75)).toBe(CellState.walkable);
+    expect(stateAt("tiny", -3.25, -2.75)).toBe(CellState.covered);
+    // The small pad lies exactly a small creature's height up: room for it, not for a medium one.
+    expect(stateAt("small", 0.25, -2.75)).toBe(CellState.walkable);
+    expect(stateAt("medium", 0.25, -2.75)).toBe(CellState.noHeadroom);
+    expect(stateAt("medium", 1.75, -2.75)).toBe(CellState.walkable);
+  });
 });
