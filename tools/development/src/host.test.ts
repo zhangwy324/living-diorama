@@ -1,7 +1,9 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
+import { parseWorldSave } from "@living-diorama/content-schema";
 import {
   envelope,
   openEnvelope,
+  PROTOCOL_VERSION,
   runSimulationHost,
   type SimulationCommand,
   type SimulationMessage,
@@ -462,5 +464,196 @@ describe("time of day in the host", () => {
     host.send({ type: "set_time_of_day", minutes: Number.POSITIVE_INFINITY });
     host.advance(100);
     expect(host.errorCodes()).toEqual(["invalid_time_of_day"]);
+  });
+});
+
+describe("saving and restoring in the host", () => {
+  const SAVED_AT = Date.UTC(2026, 9, 28, 19, 45);
+  type Host = ReturnType<typeof startHost>;
+
+  /** A host with three mosslings, run for `ms`, its messages so far taken. */
+  function running(seed = 7, ms = 20_000) {
+    const host = startHost();
+    host.init(seed);
+    for (let k = 0; k < 3; k++) host.send({ type: "spawn", speciesId: SPECIES_ID });
+    host.advance(ms);
+    host.take();
+    return host;
+  }
+
+  /** Saves at the next wake-up; the save's JSON and every message of that wake-up. */
+  function save(host: Host) {
+    host.send({ type: "save", requestId: "save", savedAt: SAVED_AT });
+    host.advance(100);
+    const messages = host.take();
+    const saved = messages.find((m) => m.type === "saved");
+    if (saved?.type !== "saved") throw new Error(`Expected saved, got ${JSON.stringify(messages)}`);
+    expect(saved.requestId).toBe("save");
+    return { json: saved.json, messages };
+  }
+
+  /** The save as the app reads it back: parsed JSON, untrusted. */
+  const parse = (json: string) => JSON.parse(json) as Record<string, unknown>;
+
+  const rejections = (messages: SimulationMessage[]) =>
+    messages.flatMap((m) =>
+      m.type === "rejected"
+        ? [{ id: m.requestId, command: m.command, codes: m.diagnostics.map((d) => d.code) }]
+        : [],
+    );
+
+  it("saves between ticks, after the commands sent before the save", () => {
+    const host = startHost();
+    host.init();
+    host.advance(1000);
+    host.take();
+    host.send({ type: "spawn", speciesId: SPECIES_ID });
+    const { json, messages } = save(host);
+    expect(messages.map((m) => m.type)).toEqual(["spawned", "saved", "snapshot"]);
+    const parsed = parseWorldSave(JSON.parse(json));
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    expect(parsed.value).toMatchObject({ savedAt: SAVED_AT, seed: 1, tick: 10, minutes: NOON });
+    expect(parsed.value.creatures.map((c) => c.id)).toEqual(["creature-1"]);
+  });
+
+  it("saves while paused, without a tick", () => {
+    const host = running();
+    host.send({ type: "pause" });
+    host.advance(100);
+    const [paused] = host.snapshots();
+    host.advance(5000);
+    const { json, messages } = save(host);
+    expect(messages.map((m) => m.type)).toEqual(["saved"]);
+    expect(parse(json)).toMatchObject({ tick: paused?.snapshot.tick });
+  });
+
+  it("restores a save into another world, which carries on as if it never stopped", () => {
+    const original = running(7);
+    const { json, messages } = save(original);
+    original.advance(3000);
+    const unbroken = [...messages, ...original.take()].filter((m) => m.type === "snapshot");
+    expect(unbroken.map((m) => m.snapshot.tick)).toEqual(
+      Array.from({ length: 31 }, (_, k) => 201 + k),
+    );
+
+    const host = startHost();
+    host.init(99);
+    host.advance(500);
+    host.take();
+    const saved = parse(json);
+    host.send({
+      type: "restore",
+      requestId: "restore",
+      save: saved,
+      nowMs: SAVED_AT + 1000,
+      minutes: saved.minutes as number,
+    });
+    host.advance(100);
+    // Time owed to the replaced world doesn't tick: the restored one starts at the next wake-up.
+    const restored = host.take();
+    expect(restored).toMatchObject([
+      {
+        type: "restored",
+        requestId: "restore",
+        report: { gapMs: 1000, droppedCreatures: [], prunedPlacements: [] },
+      },
+    ]);
+    expect(structuredClone(restored)).toEqual(restored);
+    host.advance(3100);
+    expect(host.take()).toEqual(unbroken);
+  });
+
+  it("shows the restored world at once while paused", () => {
+    const { json } = save(running(7));
+    const host = startHost();
+    host.init(99);
+    host.send({ type: "pause" });
+    host.advance(100);
+    host.take();
+    host.send({ type: "restore", save: parse(json), nowMs: SAVED_AT, minutes: 20 * 60 });
+    host.advance(100);
+    const messages = host.take();
+    expect(messages.map((m) => m.type)).toEqual(["restored", "snapshot"]);
+    const shown = messages[1];
+    if (shown?.type !== "snapshot") throw new Error("Expected a snapshot");
+    expect(shown.snapshot).toMatchObject({ tick: 200, paused: true, timeOfDay: 20 * 60 });
+    expect(shown.snapshot.creatures.map((c) => c.id)).toEqual([
+      "creature-1",
+      "creature-2",
+      "creature-3",
+    ]);
+  });
+
+  it("rejects an unusable save, leaving the world running as it was", () => {
+    const host = running(7, 5000);
+    const valid = parse(save(host).json);
+    const unusable: [unknown, string[]?][] = [
+      ["not a save"],
+      [null],
+      [undefined],
+      [{}],
+      [[1, 2, 3]],
+      [{ ...valid, creatures: "many" }],
+      [{ ...valid, schemaVersion: 2 }, ["unsupported_save_version"]],
+      [{ ...valid, world: { id: "hollow:elsewhere", version: "1.0.0" } }, ["save_world_mismatch"]],
+      [{ ...valid, nextCreature: 1 }, ["save_inconsistent"]],
+    ];
+    unusable.forEach(([bad], k) =>
+      host.send({ type: "restore", requestId: `r${k}`, save: bad, nowMs: SAVED_AT, minutes: NOON }),
+    );
+    host.advance(100);
+    const messages = host.take();
+    const rejected = rejections(messages);
+    expect(rejected.map((r) => [r.id, r.command])).toEqual(
+      unusable.map((_, k) => [`r${k}`, "restore"]),
+    );
+    unusable.forEach(([, codes], k) => {
+      expect(rejected[k]?.codes.length).toBeGreaterThan(0);
+      if (codes) expect(rejected[k]?.codes).toEqual(codes);
+    });
+    expect(messages.some((m) => m.type === "error" || m.type === "restored")).toBe(false);
+    // The world carries on from where it was, with its creatures.
+    const snapshots = messages.filter((m) => m.type === "snapshot");
+    expect(snapshots.map((m) => m.snapshot.tick)).toEqual([52]);
+    expect(snapshots[0]?.snapshot.creatures).toHaveLength(3);
+  });
+
+  it("rejects a wall-clock time, time of day or save time it can't use", () => {
+    const host = running(7, 1000);
+    const valid = parse(save(host).json);
+    const restore = (nowMs: number, minutes: number) =>
+      host.send({ type: "restore", save: valid, nowMs, minutes });
+    restore(Number.NaN, NOON);
+    restore(Number.POSITIVE_INFINITY, NOON);
+    restore(SAVED_AT, Number.NaN);
+    restore(SAVED_AT, Number.NEGATIVE_INFINITY);
+    for (const savedAt of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      host.send({ type: "save", savedAt });
+    }
+    host.advance(100);
+    const messages = host.take();
+    const rejected = (command: string, code: string) => ({ id: undefined, command, codes: [code] });
+    expect(rejections(messages)).toEqual([
+      rejected("restore", "invalid_wall_clock"),
+      rejected("restore", "invalid_wall_clock"),
+      rejected("restore", "invalid_time_of_day"),
+      rejected("restore", "invalid_time_of_day"),
+      ...Array(4).fill(rejected("save", "invalid_saved_at")),
+    ]);
+    const ticks = messages.filter((m) => m.type === "snapshot").map((m) => m.snapshot.tick);
+    expect(ticks).toEqual([12]);
+  });
+
+  it("is protocol version 10, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(10);
+    const host = running(7, 1000);
+    host.sendRaw({
+      protocolVersion: PROTOCOL_VERSION - 1,
+      message: { type: "save", savedAt: SAVED_AT },
+    });
+    host.advance(100);
+    const messages = host.take();
+    expect(messages.map((m) => m.type)).toEqual(["error", "snapshot"]);
+    expect(messages[0]).toMatchObject({ diagnostics: [{ code: "protocol_mismatch" }] });
   });
 });

@@ -6,21 +6,26 @@ import type {
   Vec3,
 } from "@living-diorama/content-schema";
 import type { AssetKind, Cue } from "@living-diorama/extension-api";
+import type { ActionEvent } from "./creatures/action-event";
 import type { CreatureKnowledge } from "./creatures/knowledge";
 import type { NavigationOverlay } from "./navigation/overlay";
+import type { RestoreReport } from "./runtime/save";
 import type { DayPhase } from "./runtime/time-of-day";
 import type { SceneData } from "./world/scene";
 
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
+
+export type { ActionEvent } from "./creatures/action-event";
 
 // ---- Main thread → worker -------------------------------------------------------------------
 
 /**
  * Commands that may fail in normal use (ADR 0012). Their outcome comes back as a reply with the
- * same `requestId`: `species_registered`, `spawned` or `despawned`, or `rejected`.
+ * same `requestId`: `species_registered`, `limits`, `spawned`, `despawned`, `saved` or
+ * `restored`, or `rejected`.
  */
 export type RequestCommand =
   /**
@@ -49,7 +54,23 @@ export type RequestCommand =
       requestId?: string;
       sizeClass: SizeClass;
       capabilities: Record<string, number>;
-    };
+    }
+  /**
+   * Saves the world (ADR 0019), answered by `saved`. Applied between ticks, after the commands
+   * sent before it (so a save sent after a spawn holds the new creature), and answered while
+   * paused too. `savedAt` is the wall-clock time in milliseconds since the epoch (`Date.now()`),
+   * a non-negative whole number.
+   */
+  | { type: "save"; requestId?: string; savedAt: number }
+  /**
+   * Replaces the world with a save (ADR 0019 §3, §7), answered by `restored`. `save` is the
+   * stored JSON, parsed, and untrusted: the worker validates it. A save that fails validation,
+   * is of another world or world version, or disagrees with itself is answered by `rejected`
+   * and leaves the world as it was, so the caller carries on with a fresh world. `nowMs` is the
+   * wall-clock time in milliseconds since the epoch, from which the gap since the save is
+   * computed; `minutes` is the present local time of day (ADR 0018 §5).
+   */
+  | { type: "restore"; requestId?: string; save: unknown; nowMs: number; minutes: number };
 
 export type SimulationCommand =
   /**
@@ -172,27 +193,6 @@ interface CreatureEventBase extends WorldEventBase {
 }
 
 /**
- * Events an action emits about its creature (`ActionContext.emit`), without the tick and creature
- * ID, which the engine adds.
- */
-export type ActionEvent =
-  /**
-   * A meal finished (ADR 0018 §17) at the placement. `hunger` is the creature's hunger after it.
-   * An interrupted meal lowers hunger in part but emits nothing.
-   */
-  | { type: "ate"; placementId: string; hunger: number }
-  /**
-   * The creature fell asleep (ADR 0018 §13, §17), beside the shelter `placementId`, or where it
-   * stood (null). `tiredness` is its tiredness then.
-   */
-  | { type: "fell_asleep"; placementId: string | null; tiredness: number }
-  /**
-   * The creature woke: `rested` when its sleep ended by itself, `interrupted` when something
-   * more pressing (hunger) or the watchdog cut it short.
-   */
-  | { type: "woke_up"; reason: "rested" | "interrupted"; tiredness: number };
-
-/**
  * Events about one creature (roadmap M3 task 10, M9 task 5). Structures are identified by
  * placement ID.
  */
@@ -260,7 +260,22 @@ export type SimulationMessage =
   | { type: "limits"; requestId?: string; limits: Limit[] }
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }
-  /** A request command could not be applied. Not a fault: the world keeps running. */
+  /**
+   * The answer to `save`: the save as JSON text, ready to store. It is serialized in the worker,
+   * so the main thread neither copies the world as objects nor stringifies it.
+   */
+  | { type: "saved"; requestId?: string; json: string }
+  /**
+   * The answer to `restore`: the world is now the save's, and the next snapshot shows it. The
+   * report says how long the world was away and what no longer fit it.
+   */
+  | { type: "restored"; requestId?: string; report: RestoreReport }
+  /**
+   * A request command could not be applied. Not a fault: the world keeps running. For `restore`
+   * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why: the
+   * schema's (e.g. `unsupported_save_version`), `save_world_mismatch` or `save_inconsistent`, or
+   * `invalid_wall_clock` / `invalid_time_of_day` for the options.
+   */
   | {
       type: "rejected";
       requestId?: string;

@@ -61,6 +61,15 @@ export class FixedClock {
     this.#lastWallMs = undefined;
   }
 
+  /**
+   * Drops the time not yet ticked; the next `advance` only sets the baseline. For a world that
+   * was replaced (a restore), so time owed to the old one never ticks the new one.
+   */
+  restart(): void {
+    this.#accumulatorMs = 0;
+    this.#lastWallMs = undefined;
+  }
+
   /** Scales how much simulation time passes per wall-clock millisecond, up to `MAX_SPEED`. */
   setSpeed(multiplier: number): void {
     if (!isValidSpeed(multiplier)) {

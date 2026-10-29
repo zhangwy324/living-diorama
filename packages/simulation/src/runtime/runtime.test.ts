@@ -29,6 +29,16 @@ describe("FixedClock", () => {
     expect(clock.advance(5100)).toBe(1);
   });
 
+  it("drops time not yet ticked on restart, and starts again from the next advance", () => {
+    const clock = new FixedClock({ tickRateHz: 10 });
+    clock.advance(0);
+    expect(clock.advance(190)).toBe(1); // 90 ms carried
+    clock.restart();
+    expect(clock.advance(5000)).toBe(0); // sets the baseline: no burst for the time owed
+    expect(clock.advance(5050)).toBe(0); // the 90 ms are gone
+    expect(clock.advance(5100)).toBe(1);
+  });
+
   it("scales elapsed time by the speed multiplier", () => {
     const clock = new FixedClock({ tickRateHz: 10 });
     clock.setSpeed(4);
