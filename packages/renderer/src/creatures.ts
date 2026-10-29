@@ -63,6 +63,11 @@ export interface CreatureBodiesOptions {
   readImage?: ImageReader;
   /** Hides the cues of creatures the terrain or a structure hides. Without it cues always show. */
   visibility?: CueVisibility;
+  /**
+   * The picture of a prop placement's model for a cue bubble (issue #110), or undefined for none
+   * yet. Without it the bubble always shows its neutral food icon.
+   */
+  propIcon?: (placementId: string | undefined) => THREE.Texture | undefined;
 }
 
 /** A species as drawn: its body, its size and reach in metres, and its anchors as pivots. */
@@ -94,6 +99,8 @@ interface Creature {
   sprites: CreatureCueSprites;
   /** The meal's progress while eating, kept as the ring fades out after it. */
   progress: number | undefined;
+  /** The placement it heads for while hungry, kept as the bubble fades out after it. */
+  target: string | undefined;
   visibility: VisibilityState;
   /** Where its cue sprites go this frame. */
   anchor: CueAnchor;
@@ -147,6 +154,7 @@ export class CreatureBodies {
   readonly #resolveAsset: AssetResolver;
   readonly #readImage: ImageReader;
   readonly #visibility: CueVisibility | undefined;
+  readonly #propIcon: (placementId: string | undefined) => THREE.Texture | undefined;
   readonly #cues = new CueSprites();
   readonly #screen = new ScreenScale();
   // Reused every frame, so placing creatures allocates nothing.
@@ -187,6 +195,7 @@ export class CreatureBodies {
     this.#resolveAsset = options.resolveAsset;
     this.#readImage = options.readImage ?? readImage;
     this.#visibility = options.visibility;
+    this.#propIcon = options.propIcon ?? (() => undefined);
     layer.group.add(this.#cues.group);
   }
 
@@ -219,6 +228,7 @@ export class CreatureBodies {
       const { mesh, weights, phase } = creature;
       stepCueWeights(weights, pose.cues, dt);
       if (pose.cues.includes("eating")) creature.progress = pose.cueProgress;
+      if (pose.cues.includes("hungry")) creature.target = pose.cueTarget;
       const airborne = pose.jump !== undefined;
       const { speed, travelled } = trackMovement(
         creature.movement,
@@ -293,8 +303,9 @@ export class CreatureBodies {
         .multiplyScalar(box.shiftX * anchor.unitsPerPixel)
         .addScaledVector(up, box.shiftY * anchor.unitsPerPixel);
       anchor.zThin = box.thin;
-      const { sprites, weights, phase, progress } = creature;
-      this.#cues.place(sprites, weights, anchor, time, phase, progress);
+      const { sprites, weights, phase, progress, target } = creature;
+      const icon = this.#propIcon(target);
+      this.#cues.place(sprites, weights, anchor, time, phase, progress, icon);
     }
   }
 
@@ -370,6 +381,7 @@ export class CreatureBodies {
       phase,
       sprites: noCueSprites(),
       progress: undefined,
+      target: undefined,
       visibility: visibleState(phase),
       anchor: {
         top: new THREE.Vector3(),

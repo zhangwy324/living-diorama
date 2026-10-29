@@ -185,6 +185,9 @@ export const eatAction: ActionProvider = {
     context.emit({ type: "ate", placementId: eat.placementId, hunger: context.needs[HUNGER] ?? 0 });
     return { status: "done", cue: "eating" };
   },
+  target(state) {
+    return (state as EatState).placementId;
+  },
   interrupted(state, context, reason) {
     const eat = state as EatState;
     if (reason === "stuck" && !eat.arrived) context.noteReach(FOOD, eat.placementId, "stuck");

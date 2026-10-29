@@ -7,6 +7,7 @@ import {
   BUBBLE_PX,
   CueSprites,
   FOOD_ICON,
+  COLORSPACE_FRAGMENT,
   MAP_SAMPLE,
   MIP_BIAS,
   RING_STEPS,
@@ -26,6 +27,7 @@ import {
   restingZ,
   ringPixels,
   ringStep,
+  premultiplied,
   sharpen,
   stepCueWeights,
   zAt,
@@ -314,6 +316,30 @@ describe("cue textures", () => {
     );
   });
 
+  it("fades a premultiplied picture's colour with its opacity, after encoding it", () => {
+    expect(THREE.ShaderLib.sprite.fragmentShader).toContain(COLORSPACE_FRAGMENT);
+    const material = premultiplied(new THREE.SpriteMaterial());
+    expect(material.premultipliedAlpha).toBe(true);
+    expect(material.fog).toBe(false);
+    const shader = {
+      fragmentShader: `void main() {
+#include <map_fragment>
+${COLORSPACE_FRAGMENT}
+}`,
+    } as THREE.WebGLProgramParametersWithUniforms;
+    material.onBeforeCompile(shader, undefined as unknown as THREE.WebGLRenderer);
+    // Sharpened like every cue...
+    expect(shader.fragmentShader).toContain(`texture2D( map, vMapUv, ${MIP_BIAS.toFixed(2)} )`);
+    // ...and its colour scaled by the opacity once encoded, as blending takes it as it is.
+    const encoded = shader.fragmentShader.indexOf(COLORSPACE_FRAGMENT);
+    const scaled = shader.fragmentShader.indexOf("gl_FragColor.rgb *= opacity;");
+    expect(scaled).toBeGreaterThan(encoded);
+    // Its own program, apart from the straight-alpha cues'.
+    expect(material.customProgramCacheKey()).not.toBe(
+      sharpen(new THREE.SpriteMaterial()).customProgramCacheKey(),
+    );
+  });
+
   it("draws a ring clear inside and around, filled clockwise from the top", () => {
     const red = (data: Uint8Array, x: number, y: number) =>
       data[(Math.floor(y * 64) * 64 + Math.floor(x * 64)) * 4];
@@ -348,7 +374,12 @@ describe("cue textures", () => {
 });
 
 describe("cue sprites", () => {
-  const creature = (id: string, cues: Cue[], cueProgress?: number): CreatureSnapshot => ({
+  const creature = (
+    id: string,
+    cues: Cue[],
+    cueProgress?: number,
+    cueTarget?: string,
+  ): CreatureSnapshot => ({
     id,
     speciesId: "test:critter",
     position: { regionId: "r", x: 0, z: 0 },
@@ -358,10 +389,12 @@ describe("cue sprites", () => {
     submersion: 0,
     cues,
     ...(cueProgress === undefined ? {} : { cueProgress }),
+    ...(cueTarget === undefined ? {} : { cueTarget }),
   });
-  const make = () => {
+  const make = (propIcon?: (placementId: string | undefined) => THREE.Texture | undefined) => {
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
+      ...(propIcon ? { propIcon } : {}),
       resolveSpecies: () => ({
         appearance: "x",
         sizeClass: "medium",
@@ -394,6 +427,75 @@ describe("cue sprites", () => {
       expect(sprite.material.depthTest).toBe(false);
       expect(sprite.material).toBeInstanceOf(THREE.SpriteMaterial);
     }
+  });
+
+  describe("the food it heads for (#110)", () => {
+    const bush = new THREE.Texture();
+    const icons = (id: string | undefined) => (id === "bush-1" ? bush : undefined);
+    const hungry = (target?: string) => creature("a", ["hungry"], undefined, target);
+    const named = (sprites: THREE.Sprite[], name: string) => sprites.filter((s) => s.name === name);
+
+    it("shows the target prop's picture in the bubble, over a bubble without its icon", () => {
+      const { bodies, sprites } = make(icons);
+      bodies.update([hungry("bush-1")], at(0));
+      bodies.update([hungry("bush-1")], at(1));
+      const [bubble] = named(sprites(), "cue:bubble");
+      const [icon] = named(sprites(), "cue:icon");
+      expect(icon!.material.map).toBe(bush);
+      expect(icon!.material.premultipliedAlpha).toBe(true);
+      // Faded by a shader that scales its colour with its opacity, not by its alpha alone.
+      expect(icon!.material.customProgramCacheKey()).toBe(
+        premultiplied(new THREE.SpriteMaterial()).customProgramCacheKey(),
+      );
+      expect(icon!.material.opacity).toBe(bubble!.material.opacity);
+      expect(icon!.position.toArray()).toEqual(bubble!.position.toArray());
+      expect(icon!.scale.x).toBeLessThan(bubble!.scale.x);
+      expect(icon!.renderOrder).toBeGreaterThan(bubble!.renderOrder);
+      // Without a target the bubble has its neutral icon drawn in: another texture.
+      const { bodies: plain, sprites: plainSprites } = make(icons);
+      plain.update([hungry()], at(0));
+      plain.update([hungry()], at(1));
+      expect(named(plainSprites(), "cue:icon")).toHaveLength(0);
+      expect(named(plainSprites(), "cue:bubble")[0]!.material.map).not.toBe(bubble!.material.map);
+    });
+
+    it("falls back to the neutral icon for a target with no picture, or with none at all", () => {
+      for (const propIcon of [icons, undefined]) {
+        const { bodies, sprites } = make(propIcon);
+        bodies.update([hungry("mushroom-9")], at(0));
+        bodies.update([hungry("mushroom-9")], at(1));
+        expect(named(sprites(), "cue:bubble")).toHaveLength(1);
+        expect(named(sprites(), "cue:icon")).toHaveLength(0);
+      }
+    });
+
+    it("drops the picture when the target goes, and fades it out with the bubble", () => {
+      const { bodies, sprites } = make(icons);
+      bodies.update([hungry("bush-1")], at(0));
+      bodies.update([hungry("bush-1")], at(1));
+      bodies.update([hungry()], at(1.1));
+      expect(named(sprites(), "cue:icon")).toHaveLength(0);
+      bodies.update([hungry("bush-1")], at(1.2));
+      expect(named(sprites(), "cue:icon")).toHaveLength(1);
+      // The cue ends: the picture keeps its target while it fades out with the bubble.
+      bodies.update([creature("a", [])], at(1.3));
+      const [icon] = named(sprites(), "cue:icon");
+      expect(icon!.material.map).toBe(bush);
+      expect(icon!.material.opacity).toBeLessThan(1);
+      for (let t = 1.4; t < 2.5; t += 0.1) bodies.update([creature("a", [])], at(t));
+      expect(sprites()).toHaveLength(0);
+      expect(bodies.cueSprites).toBe(0);
+    });
+
+    it("disposes its sprites but not the pictures, which it doesn't own", () => {
+      const { bodies } = make(icons);
+      bodies.update([hungry("bush-1")], at(0));
+      bodies.update([hungry("bush-1")], at(1));
+      const disposed = vi.fn();
+      bush.addEventListener("dispose", disposed);
+      bodies.dispose();
+      expect(disposed).not.toHaveBeenCalled();
+    });
   });
 
   it("hides the food bubble while eating, and shows it again after the meal", () => {

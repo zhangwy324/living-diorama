@@ -678,6 +678,27 @@ describe("feeding in Woodland Hollow", () => {
     expect(creature.needs[HUNGER]).toBeLessThan(0.05);
   });
 
+  it("names the food it heads for with the hungry cue, and stops once no longer hungry", () => {
+    const { simulation, run } = setup(3);
+    const spawned = simulation.spawn("hollow:mossling", "meadow");
+    if (!spawned.ok) throw new Error("spawn failed");
+    const creature = spawned.value;
+    const [food] = nearestFood(simulation, creature.position.x, creature.position.z);
+    rememberPlace(creature.knowledge, FOOD, food!.id, 0, 8);
+    creature.needs[HUNGER] = 0.85;
+    run(1);
+    expect(creature.action?.id).toBe("core:eat");
+    expect(simulation.snapshot().creatures[0]).toMatchObject({
+      cues: ["hungry"],
+      cueTarget: food!.id,
+    });
+    // Below the hungry cue's 0.8 the bubble goes, and its target with it.
+    creature.needs[HUNGER] = 0.7;
+    run(1);
+    expect(creature.action?.id).toBe("core:eat");
+    expect(simulation.snapshot().creatures[0]).not.toHaveProperty("cueTarget");
+  });
+
   it("at hunger 1, feeds before wandering and walks at 80% speed (sanctuary)", () => {
     const { simulation, traces, run } = setup(4);
     const spawned = simulation.spawn("hollow:mossling", "meadow");
