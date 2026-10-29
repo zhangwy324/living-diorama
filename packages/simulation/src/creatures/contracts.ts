@@ -90,7 +90,7 @@ export interface ActionContext extends PlaceQueries, OpenGroundQueries {
   readonly tick: number;
   readonly tickSeconds: number;
   readonly position: Readonly<RegionPosition>;
-  /** The day phase as of this tick (ADR 0018 §5). */
+  /** The creature's own day phase as of this tick (ADR 0018 §5, issue #85). */
   readonly dayPhase: DayPhase;
   /** The creature's needs, ID → value in [0, 1]. Change them through `adjustNeed`. */
   readonly needs: Readonly<Record<string, number>>;
@@ -280,6 +280,7 @@ export interface CreatureObservation {
    * The behavior that owns it is asked for its current utility, which challengers must beat.
    */
   readonly action?: RunningAction;
+  /** The creature's own day phase: the world's, moved by its offset for the day (issue #85). */
   readonly dayPhase: DayPhase;
   /** The creature's needs, ID → value in [0, 1]: those its species' behaviors depend on. */
   readonly needs: Readonly<Record<string, number>>;
@@ -310,8 +311,8 @@ export interface CatchUpGap {
   /** How long, in milliseconds, capped at 12 hours. */
   readonly ms: number;
   /**
-   * The day phases the gap passed through, oldest first, with the hours spent in each. The gap
-   * ends now, so the last is the present phase.
+   * The phases of the creature's own day the gap passed through, oldest first, with the hours
+   * spent in each. The gap ends now, so the last is the present phase.
    */
   readonly phases: readonly PhaseSpan[];
   /**

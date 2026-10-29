@@ -50,7 +50,8 @@ import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } fro
 import type { ConnectionModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
 import { clonePlain } from "./plain";
-import { phaseSpans, planCatchUp, type CatchUpPlan } from "./catch-up";
+import { creaturePhaseSpans, planCatchUp, type CatchUpPlan } from "./catch-up";
+import { settleDay } from "./creature-day";
 import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport } from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 import {
@@ -508,7 +509,6 @@ export class Simulation {
     if (!plan.apply) return { applied: false, skipped: plan.reason, gapMs: 0, failures: [] };
     const { gapMs } = plan;
     this.state.dayPhase = dayPhaseAt(this.state.minutes);
-    const phases = phaseSpans(this.state.minutes, gapMs);
     // The world's clock moves on by the gap, so every tick-based timer (the release grace,
     // cooldowns, when places were last seen) counts the time away. Everything below, the forks
     // included, uses the tick after the jump.
@@ -528,6 +528,14 @@ export class Simulation {
       // Awake creatures decide after a random delay, so they don't all decide on the first tick.
       const delay = rng.range(0, PHASE_REACTION_SECONDS);
       creature.decideAtTick = this.tick + Math.round(delay * this.tickRateHz);
+      // The gap in the creature's own day, which it leaves as of the present (issue #85).
+      let dayRng: Rng | undefined;
+      const phases = creaturePhaseSpans(
+        creature.day,
+        this.state.minutes,
+        gapMs,
+        () => (dayRng ??= new Rng(creature.rng).fork(`catch-up@${this.tick}:day`)),
+      );
       const gap: CatchUpGap = {
         ms: gapMs,
         phases,
@@ -657,7 +665,10 @@ export class Simulation {
   step(): SimulationEvent[] {
     const phase = dayPhaseAt(this.state.minutes);
     if (phase !== this.state.dayPhase) this.#dayPhaseChanged(this.state.dayPhase, phase);
-    for (const creature of this.state.creatures.values()) this.#stepCreature(creature);
+    for (const creature of this.state.creatures.values()) {
+      this.#settleDay(creature);
+      this.#stepCreature(creature);
+    }
     this.state.tick++;
     const events = this.#events;
     this.#events = [];
@@ -739,20 +750,28 @@ export class Simulation {
 
   /**
    * The day phase changed since the last tick, by however many phases the time of day jumped:
-   * one event from the old phase to the new. Each creature reacts to it as a decision trigger
-   * (ADR 0018 §7) after its own random delay of up to 30 s, so they don't all decide at once.
-   * The delay comes from a stream forked off the creature's own, so its behaviors' sequence
-   * doesn't shift.
+   * one event from the old phase to the new. Creatures react to their own day's phases instead
+   * (`#settleDay`).
    */
   #dayPhaseChanged(from: DayPhase, to: DayPhase) {
     this.state.dayPhase = to;
     this.#emit({ type: "day_phase_changed", tick: this.tick, from, to });
-    for (const creature of this.state.creatures.values()) {
-      const delay = new Rng(creature.rng)
-        .fork(`day-phase@${this.tick}`)
-        .range(0, PHASE_REACTION_SECONDS);
-      creature.phaseReactionTick = this.tick + Math.round(delay * this.tickRateHz);
-    }
+  }
+
+  /**
+   * Brings the creature's own day up to the time of day (issue #85), drawing a new day's offset
+   * from a stream forked off its own when one is due. When its phase changes, it reacts as to a
+   * decision trigger (ADR 0018 §7) after its own random delay of up to 30 s, so creatures whose
+   * days agree don't all decide at once. The forks leave its behaviors' sequence unshifted.
+   */
+  #settleDay(creature: CreatureState) {
+    const { tick } = this;
+    const changed = settleDay(creature.day, this.state.minutes, () =>
+      new Rng(creature.rng).fork(`day@${tick}`),
+    );
+    if (!changed) return;
+    const delay = new Rng(creature.rng).fork(`day-phase@${tick}`).range(0, PHASE_REACTION_SECONDS);
+    creature.phaseReactionTick = tick + Math.round(delay * this.tickRateHz);
   }
 
   /** What the engine derives once per species: its behaviors, needs and traits. */
@@ -819,7 +838,7 @@ export class Simulation {
     const triggers = before ? this.#integrateNeeds(creature, profile, before) : [];
     if (creature.phaseReactionTick !== undefined && this.tick >= creature.phaseReactionTick) {
       delete creature.phaseReactionTick;
-      triggers.push({ kind: "day_phase", phase: this.state.dayPhase });
+      triggers.push({ kind: "day_phase", phase: creature.day.phase });
     }
     // Several triggers on one tick make one evaluation, which records them all.
     if (triggers.length > 0) {
@@ -961,7 +980,7 @@ export class Simulation {
       },
       ...(creature.lastResult ? { lastResult: { ...creature.lastResult } } : {}),
       ...(action ? { action } : {}),
-      dayPhase: this.state.dayPhase,
+      dayPhase: creature.day.phase,
       needs: { ...creature.needs },
       traits: profile.traits,
       senses: Object.fromEntries(
@@ -1186,7 +1205,7 @@ export class Simulation {
       get position() {
         return creature.position;
       },
-      dayPhase: this.state.dayPhase,
+      dayPhase: creature.day.phase,
       get needs() {
         return creature.needs;
       },

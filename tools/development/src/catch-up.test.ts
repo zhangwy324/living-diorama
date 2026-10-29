@@ -33,7 +33,7 @@ const WORLD = "hollow:woodland-hollow";
 const MOSSLING = "hollow:mossling";
 const HUNGER = hungerNeed.id;
 const TIREDNESS = tirednessNeed.id;
-const SAVED_AT = Date.UTC(2026, 9, 28, 20, 10);
+const SAVED_AT = Date.UTC(2026, 9, 28, 20, 40);
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const at = (hours: number, minutes = 0) => hours * 60 + minutes;
@@ -65,14 +65,17 @@ function throughDisk(save: WorldSave): WorldSave {
   return parsed.value;
 }
 
-/** Three mosslings run from 19:15 to 20:10: in bed at their new homes. Built once. */
+/**
+ * Three mosslings run from 19:15 to 20:40: in bed at their new homes, also one whose night starts
+ * half an hour late (issue #85). Built once.
+ */
 const nightSave = (() => {
   let save: WorldSave | undefined;
   return () => {
     if (!save) {
       const simulation = create(7, at(19, 15));
       for (let k = 0; k < 3; k++) simulation.spawn(MOSSLING);
-      run(simulation, 55 * 60 * HZ, at(19, 15));
+      run(simulation, 85 * 60 * HZ, at(19, 15));
       save = throughDisk(simulation.save(SAVED_AT));
     }
     return structuredClone(save);
@@ -206,6 +209,39 @@ describe("catch-up after a long gap", () => {
     expect(events.filter((e) => e.type === "day_phase_changed")).toEqual([]);
     expect(events.filter((e) => PER_CREATURE.includes(e.type))).toEqual([]);
     expect(simulation.snapshot().creatures.every((c) => !c.cues.includes("sleeping"))).toBe(true);
+  });
+
+  it("wakes each creature by its own day: one whose dawn starts late still sleeps", () => {
+    const save = nightSave();
+    // Their nights have begun, so each morning is set: dawn at 05:45 or 06:25.
+    const mornings = [-15, 25, 25];
+    save.creatures.forEach((c, k) => {
+      expect(c.day).toMatchObject({ phase: "night" });
+      expect(c.day.evening).toBeUndefined();
+      c.day.morning = mornings[k]!;
+    });
+    // Back at 06:10.
+    const { simulation, report } = restored(save, {
+      nowMs: SAVED_AT + 9.5 * HOUR,
+      minutes: at(6, 10),
+    });
+    expect(report.catchUp.applied).toBe(true);
+    const after = simulation.save(SAVED_AT).creatures;
+    expect(after.map((c) => c.asleep)).toEqual([false, true, true]);
+    expect(after.map((c) => c.day.phase)).toEqual(["dawn", "night", "night"]);
+    const [early, late] = after;
+    // Up since 05:45: rested then, and tired by 25 minutes awake since.
+    const rate = tirednessNeed.perHour.awake * early!.variation.needs[TIREDNESS]!;
+    expect(early!.needs[TIREDNESS]).toBeCloseTo(rate * (25 / 60), 9);
+    // The early one drew its evening at its dawn; the late one draws its own at 06:25.
+    expect(early!.day.evening).toBeDefined();
+    expect(late!.day.evening).toBeUndefined();
+    const events = run(simulation, 20 * 60 * HZ, at(6, 10));
+    const woke = events.filter((e) => e.type === "woke_up");
+    expect(woke.map((e) => ("creatureId" in e ? e.creatureId : ""))).toEqual(
+      [after[1]!.id, after[2]!.id].sort(),
+    );
+    for (const e of woke) expect(e.tick - simulation.tick + 20 * 60 * HZ).toBe(15 * 60 * HZ);
   });
 
   it("puts creatures to bed at home when it is night, already asleep", () => {

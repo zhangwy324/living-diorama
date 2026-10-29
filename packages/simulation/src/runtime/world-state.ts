@@ -13,6 +13,7 @@ import { profileForSpecies, type NavProfile } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
 import { checkNavigation, checkWorld } from "../world/integrity";
 import type { WorldModel } from "../world/world-model";
+import { creaturePhaseAt, settleDay, type CreatureDay } from "./creature-day";
 import { Rng, type RngState } from "./rng";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
 
@@ -59,6 +60,11 @@ export interface CreatureState {
    * one place spread out (ADR 0018 amendments, §11). 0 is +Z of the place, π/2 is +X.
    */
   spotAngle: number;
+  /**
+   * Its own day (issue #85): the day phases its behaviors and actions see, the world's moved by an
+   * offset it draws each day.
+   */
+  day: CreatureDay;
   /** Whether its action reported it asleep on the last tick, which selects the need rates. */
   asleep: boolean;
   /** The tick at which it reacts to the last day-phase change (ADR 0018 §7), if still to come. */
@@ -347,8 +353,11 @@ export class WorldState {
       home: null,
       variation: individual.variation,
       spotAngle: individual.spotAngle,
+      day: { phase: creaturePhaseAt(individual, this.minutes), morning: individual.morning },
       asleep: false,
     };
+    // Its day as of now, drawing its first evening if it is born after its dawn.
+    settleDay(creature.day, this.minutes, () => new Rng(rng).fork(`day@${this.tick}`));
     this.creatures.set(id, creature);
     return { ok: true, value: creature };
   }

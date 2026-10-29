@@ -1,4 +1,12 @@
-import { dayPhaseAt, minutesToNextPhase, wrapMinutes, type DayPhase } from "./time-of-day";
+import { creatureShift, settleDay, type CreatureDay } from "./creature-day";
+import type { Rng } from "./rng";
+import {
+  dayPhaseAt,
+  minutesToNextPhase,
+  wrapMinutes,
+  type DayPhase,
+  type PhaseShift,
+} from "./time-of-day";
 
 // Catch-up after a gap (ADR 0018 §19, ADR 0019 §5, §6): when a saved world is restored in real
 // time mode, the wall-clock time it was away is not simulated. The world is set to a plausible
@@ -39,15 +47,52 @@ export interface PhaseSpan {
  * The day phases a gap of `gapMs` ending at `toMinutes` (the present time of day) passed through,
  * oldest first, with the hours spent in each. The gap is taken to end now rather than to start at
  * the saved time of day, so a capped gap covers the hours just before the present, and a clock
- * change since the save (a time zone, daylight saving) can't put the two out of step.
+ * change since the save (a time zone, daylight saving) can't put the two out of step. With
+ * `shift`, the phases' starts move by it throughout.
  */
-export function phaseSpans(toMinutes: number, gapMs: number): PhaseSpan[] {
+export function phaseSpans(toMinutes: number, gapMs: number, shift?: PhaseShift): PhaseSpan[] {
+  return spans(
+    toMinutes,
+    gapMs,
+    (at) => dayPhaseAt(at, shift),
+    (at) => minutesToNextPhase(at, shift),
+  );
+}
+
+/**
+ * The phases of a creature's own day (issue #85) that a gap passed through, as `phaseSpans`
+ * has them for the world. `day` is its day as saved; it is brought through the gap as each tick
+ * would have, drawing from `rng` the offset of a dawn the gap passed, and left as of the present.
+ */
+export function creaturePhaseSpans(
+  day: CreatureDay,
+  toMinutes: number,
+  gapMs: number,
+  rng: () => Rng,
+): PhaseSpan[] {
+  const phaseAt = (at: number) => {
+    settleDay(day, at, rng);
+    return day.phase;
+  };
+  const result = spans(toMinutes, gapMs, phaseAt, (at) =>
+    minutesToNextPhase(at, creatureShift(day)),
+  );
+  settleDay(day, toMinutes, rng);
+  return result;
+}
+
+function spans(
+  toMinutes: number,
+  gapMs: number,
+  phaseAt: (minutes: number) => DayPhase,
+  toNext: (minutes: number) => number,
+): PhaseSpan[] {
   const spans: { phase: DayPhase; minutes: number }[] = [];
   let remaining = gapMs / 60_000;
   let at = wrapMinutes(toMinutes - remaining);
   while (remaining > 1e-9) {
-    const phase = dayPhaseAt(at);
-    const minutes = Math.min(remaining, minutesToNextPhase(at));
+    const phase = phaseAt(at);
+    const minutes = Math.min(remaining, toNext(at));
     const last = spans.at(-1);
     if (last?.phase === phase) last.minutes += minutes;
     else spans.push({ phase, minutes });

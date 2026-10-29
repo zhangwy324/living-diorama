@@ -13,6 +13,8 @@ import {
   SLEEPER_GAP,
   sleepAction,
   sleepCycle,
+  tirednessNeed,
+  WAKE_TIREDNESS,
   type ActionContext,
   type ActionProvider,
   type BehaviorProvider,
@@ -24,7 +26,7 @@ import {
   type WorldQueries,
 } from "@living-diorama/simulation";
 import type { Registries } from "@living-diorama/extension-api";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createSimulation } from "./simulation-run";
 
 // Shelter, sleep and home (ADR 0018 §13, §14 and amendments, PR 5a): `core:rest` and `core:sleep`.
@@ -639,6 +641,14 @@ describe("sleeping in Woodland Hollow", () => {
       events.filter((e) => e.type === type && "creatureId" in e && e.creatureId === creature.id);
     return { simulation, traces, events, run, spawn, of };
   }
+  /**
+   * Its own day as the world's until its next draw (issue #85), so a test can time the phase
+   * starts to the tick: the next dawn draws a new evening, the night after that a new morning.
+   */
+  const steady = (creature: CreatureState) => {
+    creature.day.morning = 0;
+    creature.day.evening = 0;
+  };
   const HOUR = 36_000;
 
   it("goes to bed on the night bonus alone, at a shelter that becomes its home", () => {
@@ -864,6 +874,7 @@ describe("sleeping in Woodland Hollow", () => {
   it("wakes at dawn when rested, and stays awake", () => {
     const { run, spawn, of } = setup(5, 5 * 60 + 30, 2);
     const creature = spawn();
+    steady(creature);
     creature.needs[HUNGER] = 0;
     creature.needs[TIREDNESS] = 0.05;
     run(1_200, () => creature.asleep);
@@ -903,6 +914,7 @@ describe("sleeping in Woodland Hollow", () => {
       });
     });
     const creature = spawn(undefined, "test:night-mossling");
+    steady(creature);
     creature.needs[HUNGER] = 0;
     creature.needs[TIREDNESS] = 0.3;
     // Day is its sleeping phase: the bonus alone sends it to bed.
@@ -1021,7 +1033,10 @@ describe("sleeping in Woodland Hollow", () => {
     const { run, spawn, of } = setup(12, 18 * 60 + 30, 2);
     const rested = spawn();
     const tired = spawn();
-    for (const c of [rested, tired]) c.needs[HUNGER] = 0;
+    for (const c of [rested, tired]) {
+      steady(c);
+      c.needs[HUNGER] = 0;
+    }
     rested.needs[TIREDNESS] = 0.5;
     tired.needs[TIREDNESS] = 0.95;
     // 18:30 to 20:00: the dusk bonus alone doesn't start sleep, but adds to real tiredness.
@@ -1033,6 +1048,76 @@ describe("sleeping in Woodland Hollow", () => {
     const [bedtime] = of(rested, "fell_asleep");
     expect(bedtime).toBeDefined();
     expect(bedtime!.tick).toBeGreaterThanOrEqual(90 * 120);
+  });
+
+  describe("from night to night (issue #85)", () => {
+    const DAYS = 6;
+    /** Two mosslings over six days from noon at 1 Hz: their sleep events and own days. */
+    const nights = (seed: number) => {
+      const { simulation, events, run } = setup(seed, 12 * 60, 1);
+      for (let k = 0; k < 2; k++) simulation.spawn("hollow:mossling");
+      run(DAYS * 24 * 3_600);
+      const sleep = events.filter((e) => e.type === "fell_asleep" || e.type === "woke_up");
+      return { simulation, sleep };
+    };
+    // The time of day of a tick: noon plus simulated time at 1 Hz.
+    const at = (tick: number) => minutesAfter(12 * 60, tick * 1000);
+    let simulation: ReturnType<typeof nights>["simulation"];
+    let sleep: SimulationEvent[];
+    beforeAll(() => ({ simulation, sleep } = nights(3)), 60_000);
+    const ofCreature = (id: string) =>
+      sleep.filter((e) => "creatureId" in e && e.creatureId === id);
+
+    it("goes to bed and wakes within half an hour of dusk's end and dawn, not the same each night", () => {
+      for (const id of simulation.state.creatures.keys()) {
+        const events = ofCreature(id);
+        const bedtimes = events.filter((e) => e.type === "fell_asleep").map((e) => at(e.tick));
+        const wakes = events.filter((e) => e.type === "woke_up").map((e) => at(e.tick));
+        expect(bedtimes).toHaveLength(DAYS);
+        expect(wakes).toHaveLength(DAYS);
+        // Its own night starts 19:30–20:30; then up to 30 s to react and a short walk home.
+        for (const t of bedtimes) {
+          expect(t).toBeGreaterThanOrEqual(19 * 60 + 30);
+          expect(t).toBeLessThan(20 * 60 + 40);
+        }
+        // Its own dawn starts 05:30–06:30, and it is rested long before.
+        for (const t of wakes) {
+          expect(t).toBeGreaterThanOrEqual(5 * 60 + 30);
+          expect(t).toBeLessThan(6 * 60 + 30);
+        }
+        const spread = (times: number[]) => Math.max(...times) - Math.min(...times);
+        expect(spread(bedtimes)).toBeGreaterThan(10);
+        expect(spread(wakes)).toBeGreaterThan(10);
+      }
+    });
+
+    it("self-corrects through tiredness: every night rests it, and a longer day tires it more", () => {
+      for (const creature of simulation.state.creatures.values()) {
+        const events = ofCreature(creature.id) as Extract<
+          SimulationEvent,
+          { type: "fell_asleep" | "woke_up" }
+        >[];
+        const rate =
+          tirednessNeed.perHour.awake * (creature.variation.needs[TIREDNESS] ?? 1) * (1 / 3600);
+        for (const [k, event] of events.entries()) {
+          // Whatever the night before, it wakes rested, so a late night carries nothing over.
+          if (event.type === "woke_up") expect(event.tiredness).toBeLessThan(WAKE_TIREDNESS);
+          // What carries over is the day: it goes to bed as tired as its time awake since
+          // waking makes it, so one that woke early is more tired by its bedtime.
+          const woke = events[k - 1];
+          if (event.type !== "fell_asleep" || woke?.type !== "woke_up") continue;
+          expect(event.tiredness).toBeCloseTo(woke.tiredness + rate * (event.tick - woke.tick), 6);
+        }
+      }
+    });
+
+    it("draws the same nights for the same seed", { timeout: 30_000 }, () => {
+      const again = nights(3);
+      expect(again.sleep).toEqual(sleep);
+      expect([...again.simulation.state.creatures.values()].map((c) => c.day)).toEqual(
+        [...simulation.state.creatures.values()].map((c) => c.day),
+      );
+    });
   });
 
   it("repeats the same nights for the same seed", { timeout: 30_000 }, () => {

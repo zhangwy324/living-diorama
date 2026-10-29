@@ -52,6 +52,7 @@ function busyCreature() {
     home: "log-1",
     variation: { needs: { "core:hunger": 0.9 }, senses: { "core:vision": 1.1 } },
     spotAngle: 2.5,
+    day: { phase: "dusk", morning: -12.5, evening: 29.9 },
     asleep: false,
     phaseReactionTick: 130,
     releasedAtTick: 10,
@@ -76,6 +77,7 @@ function idleCreature() {
     home: null,
     variation: { needs: {}, senses: {} },
     spotAngle: 0,
+    day: { phase: "night", morning: 0 },
     asleep: false,
   };
 }
@@ -133,7 +135,7 @@ describe("parseWorldSave", () => {
         parseWorldSave({ ...validSave(), schemaVersion: 1, unexpected: true }, "world.json"),
       ),
     ).toEqual([
-      "error: world.json schemaVersion: World save version 1 is not supported (supported: 2) (unsupported_save_version)",
+      "error: world.json schemaVersion: World save version 1 is not supported (supported: 3) (unsupported_save_version)",
     ]);
   });
 
@@ -225,6 +227,7 @@ describe("parseWorldSave", () => {
             },
             recentCells: [{ x: 0.5, z: 0, tick: 1 }],
           },
+          day: { phase: "noon", morning: 60 },
           asleep: "no",
         },
       ],
@@ -241,6 +244,8 @@ describe("parseWorldSave", () => {
       at("knowledge", "recentCells", 0, "x"),
       at("home"),
       at("variation", "needs", "core:hunger"),
+      at("day", "phase"),
+      at("day", "morning"),
       at("asleep"),
     ]);
   });

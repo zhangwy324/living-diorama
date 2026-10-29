@@ -1,5 +1,6 @@
 import { formatDiagnostic, parseWorldSave, type WorldSave } from "@living-diorama/content-schema";
 import {
+  creatureShift,
   hungerNeed,
   phaseSpans,
   Rng,
@@ -141,17 +142,20 @@ export function catchUpProblems(
       `${state.creatures.size} creatures after catch-up, ${save.creatures.length} saved`,
     );
   }
-  const spans = phaseSpans(state.minutes, catchUp.gapMs);
   for (const creature of state.creatures.values()) {
+    // Its own day (issue #85). Its present offsets also moved the starts and ends of the nights
+    // in the gap: a 12-hour gap spans at most one of each, and a morning moves only at night.
+    const spans = phaseSpans(state.minutes, catchUp.gapMs, creatureShift(creature.day));
+    const phase = creature.day.phase;
     const who = creature.id;
     const hunger = creature.needs[hungerNeed.id];
     if (hunger !== undefined && !(hunger < hungerNeed.actAt)) {
       problems.push(`${who}: hunger ${hunger} after catch-up, not fed`);
     }
     if (!checkSleep(creature) || creature.releasedAtTick !== undefined) continue;
-    const { sleeping } = sleepCycle(state.dayPhase, false);
+    const { sleeping } = sleepCycle(phase, false);
     if (sleeping !== creature.asleep) {
-      problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at ${state.dayPhase}`);
+      problems.push(`${who}: ${creature.asleep ? "asleep" : "awake"} at its ${phase}`);
     }
     if (sleeping && creature.home !== null) {
       const spot = simulation.spotFor(who, creature.home);
