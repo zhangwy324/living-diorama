@@ -9,11 +9,15 @@ import { ContentIdSchema, LocalIdSchema, RegionPositionSchema, SemverSchema } fr
 // Action state and behavior memory are left `unknown`: their owning code validates them.
 
 const tick = z.int().nonnegative();
+const int32 = z.int().gte(-0x80000000).lte(0x7fffffff);
 const uint32 = z.int().gte(0).lte(0xffffffff);
 
-/** Plain-data state of one sfc32 stream (ADR 0006 §3). */
+/**
+ * Plain-data state of one sfc32 stream (ADR 0006 §3). The generator keeps its words as signed
+ * 32-bit integers (`| 0`), while the key is unsigned (`>>> 0`).
+ */
 export const RngStateSchema = z.strictObject({
-  words: z.tuple([uint32, uint32, uint32, uint32]),
+  words: z.tuple([int32, int32, int32, int32]),
   key: uint32,
 });
 export type RngStateSave = z.output<typeof RngStateSchema>;

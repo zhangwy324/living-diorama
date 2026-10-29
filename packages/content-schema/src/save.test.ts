@@ -9,7 +9,11 @@ function codesAndPaths<T>(result: Result<T>) {
   return result.ok ? [] : result.diagnostics.map((d) => ({ code: d.code, path: d.path }));
 }
 
-const rng = { words: [1, 2, 3, 0xffffffff], key: 42 };
+/**
+ * A real RNG state: `Rng.fromSeed(123).state` in the simulation. Its words are signed 32-bit
+ * integers, some negative, and its key is unsigned and above 2^31.
+ */
+const rng = { words: [1127421319, -934664643, 1264157164, 327006313], key: 2235285516 };
 
 /** A creature with every optional field set. */
 function busyCreature() {
@@ -195,7 +199,7 @@ describe("parseWorldSave", () => {
         {
           ...creature,
           heading: Math.PI,
-          rng: { words: [1, 2, 3, 2 ** 32], key: -1 },
+          rng: { words: [-(2 ** 31) - 1, -(2 ** 31), 2 ** 31 - 1, 2 ** 31], key: -1 },
           lastResult: { ...creature.lastResult, outcome: "crashed" },
           needs: { "core:hunger": 1.2 },
           home: undefined,
@@ -208,6 +212,7 @@ describe("parseWorldSave", () => {
     const at = (...path: (string | number)[]) => ["creatures", 0, ...path];
     expect(codesAndPaths(result).map((d) => d.path)).toEqual([
       at("heading"),
+      at("rng", "words", 0),
       at("rng", "words", 3),
       at("rng", "key"),
       at("lastResult", "outcome"),
