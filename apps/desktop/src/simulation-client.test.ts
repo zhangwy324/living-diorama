@@ -1,8 +1,11 @@
 import { defaultBody } from "@living-diorama/content-schema";
 import {
   envelope,
+  openEnvelope,
   runSimulationHost,
   type CatchUpReport,
+  type SimulationCommand,
+  type SimulationMessage,
   type SimulationSnapshot,
 } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
@@ -280,6 +283,93 @@ describe("simulation client", () => {
     expect(callbacks.onCaughtUp).not.toHaveBeenCalled();
     expect(callbacks.onSnapshot.mock.calls.at(-1)?.[0].timeOfDay).toBe(0);
     expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  describe("a restore pending", () => {
+    /** A worker the test answers by hand, recording the commands the client sends. */
+    function scripted() {
+      const sent: SimulationCommand[] = [];
+      const worker: WorkerLike = {
+        onmessage: null,
+        onerror: null,
+        onmessageerror: null,
+        postMessage: (data: unknown) => {
+          const command = openEnvelope<SimulationCommand>(data);
+          if (command) sent.push(command);
+        },
+        terminate: () => {},
+      };
+      const reply = (message: SimulationMessage) =>
+        worker.onmessage?.(new MessageEvent("message", { data: envelope(message) }));
+      const callbacks = { onReady: vi.fn(), onSnapshot: vi.fn(), onFailure: vi.fn() };
+      const client = startSimulation(callbacks, STARTUP, worker, 0, stillClock({ now: 12 * 60 }));
+      reply({ type: "ready", worldId: STARTUP.worldId } as SimulationMessage);
+      /** A running snapshot at simulation time `timeMs`, sent at wall-clock `wallMs`. */
+      const snapshot = (timeMs: number, wallMs: number) =>
+        reply({
+          type: "snapshot",
+          snapshot: { tick: timeMs / 100, timeMs, paused: false, timeOfDay: 720, creatures: [] },
+          events: [],
+          wallMs,
+        });
+      const catchUps = () => sent.filter((c) => c.type === "catch_up");
+      const idOf = (type: SimulationCommand["type"]) =>
+        (sent.findLast((c) => c.type === type) as { requestId?: string } | undefined)?.requestId;
+      return { client, callbacks, reply, snapshot, catchUps, idOf };
+    }
+    const HOUR = 3_600_000;
+
+    it.each(["restored", "rejected"] as const)(
+      "catches up none of the replaced world's lost time, then works again once %s",
+      async (answer) => {
+        const { client, callbacks, reply, snapshot, catchUps, idOf } = scripted();
+        snapshot(0, 0);
+        snapshot(100, 100);
+        const restoring = client.restore("{}");
+        // Snapshots of the world being replaced, sent before the worker applied the restore, one
+        // after the OS slept for three hours.
+        snapshot(200, 200);
+        snapshot(300, 3 * HOUR);
+        snapshot(400, 3 * HOUR + 100);
+        expect(catchUps()).toEqual([]);
+
+        const requestId = idOf("restore");
+        reply(
+          answer === "restored"
+            ? ({ type: "restored", requestId, report: {} } as SimulationMessage)
+            : { type: "rejected", requestId, command: "restore", diagnostics: [] },
+        );
+        await restoring;
+        snapshot(500, 3 * HOUR + 200);
+        snapshot(600, 3 * HOUR + 300);
+        expect(catchUps()).toEqual([]);
+        // The OS sleeps again, now with the world the restore left.
+        snapshot(700, 6 * HOUR);
+        expect(catchUps()).toMatchObject([{ gapMs: 6 * HOUR - (3 * HOUR + 300) - 100 }]);
+        expect(callbacks.onFailure).not.toHaveBeenCalled();
+      },
+    );
+
+    it("forgets lost time counted before the restore was sent", () => {
+      const { client, snapshot, catchUps } = scripted();
+      snapshot(0, 0);
+      snapshot(100, 100);
+      void client.restore("{}");
+      // The first snapshot after it only sets the baseline, even if the answer were lost.
+      snapshot(200, 3 * HOUR);
+      expect(catchUps()).toEqual([]);
+    });
+
+    it("keeps waiting when another request is rejected", () => {
+      const { client, reply, snapshot, catchUps, idOf } = scripted();
+      snapshot(0, 0);
+      void client.restore("{}");
+      void client.despawn("nobody");
+      reply({ type: "rejected", requestId: idOf("despawn"), command: "despawn", diagnostics: [] });
+      snapshot(100, 100);
+      snapshot(200, 3 * HOUR);
+      expect(catchUps()).toEqual([]);
+    });
   });
 
   it("ignores messages that arrive after it stopped", () => {
