@@ -1,7 +1,7 @@
 import type { Vec3 } from "@living-diorama/content-schema";
 import type { SceneData, SurfaceMesh } from "@living-diorama/simulation";
 import * as THREE from "three";
-import { CUE_OCCLUDER_LAYER } from "./cue-visibility";
+import { CUE_OCCLUDER_LAYER } from "./layers";
 
 // Static world geometry, built from the simulation's SceneData (ADR 0005 §9, ADR 0007 §3).
 

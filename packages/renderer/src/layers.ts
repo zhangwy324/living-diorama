@@ -4,6 +4,13 @@ import * as THREE from "three";
 // Scene layers with per-layer clipping planes (ADR 0007 §4, roadmap §1.5). Nothing clips in v1;
 // the future cave cutaway sets planes on the terrain layer without touching the scene graph.
 
+/**
+ * Raycast layer (`THREE.Layers`) of the meshes that hide creatures' cues (`CueVisibility`): the
+ * decks of structures, not their thin railings. Those meshes also stay on layer 0, so they are
+ * drawn and cast shadows as before.
+ */
+export const CUE_OCCLUDER_LAYER = 1;
+
 export const LAYER_NAMES = ["terrain", "water", "structures", "props", "creatures"] as const;
 export type LayerName = (typeof LAYER_NAMES)[number];
 

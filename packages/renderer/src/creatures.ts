@@ -171,9 +171,10 @@ export class CreatureBodies {
         // Nothing to hide: skip the checks, and check afresh once a cue starts.
         creature.visibility.due = undefined;
       } else if (view && this.#visibility) {
-        const [top, middle] = this.#samples;
-        top.copy(anchor.top);
-        middle.copy(mesh.position).setY(mesh.position.y + 0.5 * look.height * motion.scaleY);
+        this.#samples[0].copy(anchor.top);
+        this.#samples[1]
+          .copy(mesh.position)
+          .setY(mesh.position.y + 0.5 * look.height * motion.scaleY);
         const visibility = creature.visibility;
         this.#visibility.update(visibility, this.#samples, this.#screen.position, realTime, dt);
         anchor.visible = visibility.weight;

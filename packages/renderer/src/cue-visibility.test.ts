@@ -4,13 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
 import {
   CHECK_SECONDS,
-  CUE_OCCLUDER_LAYER,
   CueVisibility,
   HYSTERESIS_CHECKS,
   SLOPE_TOLERANCE,
   visibleState,
 } from "./cue-visibility";
-import { SceneLayer } from "./layers";
+import { CUE_OCCLUDER_LAYER, SceneLayer } from "./layers";
 import { structureMeshes } from "./world-meshes";
 
 const COLUMNS = 41; // x −10…10
@@ -182,10 +181,9 @@ describe("CueVisibility", () => {
     expect(state.weight).toBe(1);
   });
 
-  it("fades out the cue sprites of a creature behind the ridge", () => {
+  it("fades a creature's cues out behind the ridge and back in front of it", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const scene = world(3);
-    const { layers, visibility } = make(scene);
+    const { layers, visibility } = make(world(3));
     const bodies = new CreatureBodies(layers.creatures, {
       resolveSpecies: () => ({ appearance: "x", sizeClass: "small", body: { thickness: 0.25 } }),
       resolveAsset: () => undefined,
@@ -195,27 +193,48 @@ describe("CueVisibility", () => {
     camera.position.copy(CAMERA);
     camera.lookAt(0, 0, 0);
     const view = { camera, heightPx: 220 };
-    const sleeper = (id: string, z: number): CreatureSnapshot => ({
-      id,
+    // A hungry creature: once its cue has faded in, the bubble's opacity is the visibility weight.
+    const hungry = (z: number): CreatureSnapshot => ({
+      id: "a",
       speciesId: "test:critter",
       position: { regionId: "r", x: 0, z },
       world: { x: 0, y: 0, z },
       heading: 0,
-      cues: ["sleeping"],
+      cues: ["hungry"],
     });
-    const shown = () => {
-      const found: THREE.Sprite[] = [];
+    const bubble = () => {
+      let found: THREE.Sprite | undefined;
       layers.creatures.group.traverse((o) => {
-        if (o instanceof THREE.Sprite && o.visible) found.push(o);
+        if (o instanceof THREE.Sprite && o.visible && o.name === "cue:bubble") found = o;
       });
       return found;
     };
-    for (let t = 0; t <= 3; t += 0.1)
-      bodies.update([sleeper("a", 3)], { time: t, realTime: t, view });
-    expect(shown().length).toBeGreaterThan(0);
-    expect(Math.max(...shown().map((s) => s.material.opacity))).toBeGreaterThan(0.5);
-    for (let t = 3.1; t <= 6; t += 0.1)
-      bodies.update([sleeper("b", -3)], { time: t, realTime: t, view });
-    expect(shown()).toHaveLength(0); // hidden: the sprites are back in the pool
+    let t = 0;
+    /** Runs frames 0.05 s apart for `seconds` with the creature at `z`, noting the bubble's opacity. */
+    const run = (z: number, seconds: number) => {
+      const opacities: number[] = [];
+      for (const end = t + seconds; t < end - 1e-9;) {
+        t += 0.05;
+        bodies.update([hungry(z)], { time: t, realTime: t, view });
+        opacities.push(bubble()?.material.opacity ?? 0);
+      }
+      return opacities;
+    };
+    const between = (values: number[]) => values.some((o) => o > 0.05 && o < 0.95);
+
+    run(3, 2);
+    expect(bubble()?.material.opacity).toBe(1);
+    expect(bodies.cueSprites).toBe(1);
+
+    const out = run(-3, 2);
+    expect(between(out)).toBe(true); // fades rather than pops
+    expect(out.at(-1)).toBe(0);
+    expect(bubble()).toBeUndefined();
+    expect(bodies.cueSprites).toBe(0); // back in the pool
+
+    const back = run(3, 2);
+    expect(between(back)).toBe(true);
+    expect(bodies.cueSprites).toBe(1);
+    expect(bubble()?.material.opacity).toBe(1);
   });
 });

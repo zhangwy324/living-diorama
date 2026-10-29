@@ -2,7 +2,7 @@ import type { SceneData } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { terrainHeightAt } from "./camera";
 import { SNAP_SECONDS } from "./cues";
-import type { SceneLayer } from "./layers";
+import { CUE_OCCLUDER_LAYER, type SceneLayer } from "./layers";
 
 // Whether a creature's cues show (issue #93, ADR 0018 as built): the terrain and structures hide
 // the cues of a creature they hide from the camera, and so does a clipping plane that cuts its
@@ -22,12 +22,6 @@ const TERRAIN_STEP = 0.25;
  * a slope isn't hidden by the ground at its own feet.
  */
 export const SLOPE_TOLERANCE = 0.15;
-
-/**
- * Raycast layer of the meshes that hide cues: the decks of structures, not their thin railings.
- * Those meshes also stay on layer 0, so they are drawn and cast shadows as before.
- */
-export const CUE_OCCLUDER_LAYER = 1;
 
 /** The layers that hide cues or clip creatures. */
 export interface VisibilityLayers {
@@ -66,6 +60,10 @@ export class CueVisibility {
   readonly #hits: THREE.Intersection[] = [];
   readonly #direction = new THREE.Vector3();
   readonly #point = new THREE.Vector3();
+  /**
+   * The structures' bounds, a quick test before raycasting. Computed once: structures are built
+   * with the scene. If they ever change at runtime, this must be reset.
+   */
   #structureBox: THREE.Box3 | undefined;
 
   constructor(scene: SceneData, layers: VisibilityLayers) {
@@ -79,6 +77,9 @@ export class CueVisibility {
    * Steps `state` to `realTime`, `dt` seconds after the last step, for a creature whose sample
    * points are `points` (its head's top first) seen from `camera`. Checks only when due; the first
    * check sets the state at once. Mutates and returns `state`.
+   *
+   * Rays go to the camera's position, which assumes a perspective camera. An orthographic one
+   * would need rays along its view direction instead.
    */
   update(
     state: VisibilityState,
@@ -120,11 +121,13 @@ export class CueVisibility {
    * creature partly in view shows its cues in full.
    */
   hidden(points: readonly THREE.Vector3[], camera: THREE.Vector3): boolean {
-    const [top] = points;
+    const top = points[0];
     if (!top) return false;
     if (this.#layers.creatures.isClipped(top)) return true;
-    for (const point of points) {
-      if (!this.#terrainHides(point, camera) && !this.#structureHides(point, camera)) return false;
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      if (point && !this.#terrainHides(point, camera) && !this.#structureHides(point, camera))
+        return false;
     }
     return true;
   }
@@ -149,7 +152,8 @@ export class CueVisibility {
       // Above the highest ground and rising: nothing further on can hide it.
       if (y > this.#maxHeight && dy >= 0) return false;
       const ground = terrainHeightAt(this.#scene, x, z);
-      // Ground that a cutaway clips doesn't hide anything.
+      // Ground that a cutaway clips doesn't hide anything. An approximation: only the surface
+      // point above the ray is tested, so a cutaway's cut faces (side walls) aren't modelled.
       if (ground > y + SLOPE_TOLERANCE && !terrain.isClipped(point.set(x, ground, z))) {
         return true;
       }
@@ -174,8 +178,9 @@ export class CueVisibility {
     raycaster.intersectObject(group, true, hits);
     const structures = this.#layers.structures;
     let hidden = false;
-    for (const hit of hits) {
-      if (!structures.isClipped(hit.point)) {
+    for (let i = 0; i < hits.length; i++) {
+      const hit = hits[i];
+      if (hit && !structures.isClipped(hit.point)) {
         hidden = true;
         break;
       }
