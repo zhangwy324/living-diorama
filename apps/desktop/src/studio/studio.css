@@ -612,3 +612,226 @@ body,
 .close-dialog-buttons button.danger {
   background: rgb(200 67 58 / 70%);
 }
+
+/* The confirm step (ADR 0020 §12): the body plan, revealed beside a locked drawing. */
+.toolbar.locked {
+  opacity: 0.4;
+}
+.body-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: reveal 0.35s ease-out;
+}
+.body-plan h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.side-panel.planning .preview {
+  animation: reveal-glow 0.9s ease-out;
+}
+.templates,
+.preview-modes {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.templates legend,
+.preview-modes legend {
+  width: 100%;
+  margin-bottom: 4px;
+}
+.templates label,
+.preview-modes label,
+.gaits label {
+  flex: 1;
+}
+.templates input,
+.preview-modes input,
+.gaits input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.template-card,
+.preview-modes span,
+.gaits span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+.template-card svg {
+  fill: currentColor;
+}
+.template-card svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.templates label:hover .template-card,
+.preview-modes label:hover span,
+.gaits label:hover span {
+  background: rgb(255 255 255 / 16%);
+}
+.templates input:checked + .template-card,
+.preview-modes input:checked + span,
+.gaits input:checked + span {
+  background: rgb(110 160 90 / 80%);
+}
+.gaits input:disabled + span {
+  opacity: 0.35;
+  cursor: default;
+  background: rgb(255 255 255 / 8%);
+}
+.templates input:focus-visible + .template-card,
+.preview-modes input:focus-visible + span,
+.gaits input:focus-visible + span {
+  outline: 2px solid #eef3e8;
+  outline-offset: 1px;
+}
+.locomotion-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.gaits {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+.toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 82px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.toggle input {
+  accent-color: #6ea05a;
+}
+.anchor-help {
+  margin: 0;
+  font-size: 13px;
+  color: rgb(238 243 232 / 85%);
+}
+.reset-anchors,
+.step-buttons .back {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.reset-anchors:disabled,
+.step-buttons .back:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.step-buttons {
+  display: flex;
+  gap: 8px;
+}
+.step-buttons .back {
+  align-self: stretch;
+  padding: 0 12px;
+}
+.step-buttons .release {
+  flex: 1;
+}
+.release-hint {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: rgb(242 207 60 / 18%);
+}
+.anchor-layer {
+  position: absolute;
+  inset: 0;
+  background: rgb(47 59 47 / 6%);
+}
+.anchor-layer.placing {
+  cursor: crosshair;
+}
+.anchor-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px dashed #c8433a;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.anchor-marker.placed {
+  border-style: solid;
+  background: rgb(200 67 58 / 85%);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 70%);
+}
+.anchor-label {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #fff;
+  background: rgb(122 42 36 / 85%);
+}
+.anchor-guide {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  font-size: 12px;
+  text-align: center;
+  color: rgb(47 59 47 / 70%);
+  user-select: none;
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes reveal-glow {
+  from {
+    box-shadow: 0 0 0 4px rgb(242 207 60 / 80%);
+  }
+}
+.body-plan h2:focus {
+  outline: none;
+}
+.body-plan h2:focus-visible {
+  outline: 2px solid #eef3e8;
+  outline-offset: 2px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .body-plan,
+  .side-panel.planning .preview {
+    animation: none;
+  }
+}

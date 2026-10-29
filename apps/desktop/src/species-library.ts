@@ -16,6 +16,7 @@ import {
 import type { LibraryStore, StoredLibraryEntry } from "@living-diorama/desktop-integration";
 import type { Limit } from "@living-diorama/simulation";
 import type { SimulationClient } from "./simulation-client";
+import { locomotionCapabilities, planBody, templatePlan, type BodyPlanChoice } from "./body-plan";
 import { DRAWN_SPECIES_DEFAULTS } from "./startup";
 import { userSpeciesIds } from "./user-species";
 
@@ -51,7 +52,8 @@ export interface SpeciesLibrary {
    * Makes a species from a drawing and its image (PNG bytes), registers it and stores it.
    * `options.id` is the lowercase UUID to keep it under, a fresh one by default; one already used
    * is refused. `options.thickness` is the body's depth as a share of its height, the default
-   * one if left out.
+   * one if left out. `options.plan` is the body plan the player chose, a walker if left out: it
+   * gives the species its template, gait, anchors and capabilities (ADR 0020 §14).
    */
   save(
     drawing: Drawing,
@@ -76,6 +78,7 @@ export interface SpeciesLibrary {
 export interface SaveOptions {
   id?: string;
   thickness?: number;
+  plan?: BodyPlanChoice;
 }
 
 /** What the library needs of the running world. */
@@ -211,7 +214,13 @@ export async function openSpeciesLibrary(
         .map(({ species }) => species)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
 
-    async save(drawingInput, image, name, sizeClass, { id = uuid(), thickness } = {}) {
+    async save(
+      drawingInput,
+      image,
+      name,
+      sizeClass,
+      { id = uuid(), thickness, plan = templatePlan() } = {},
+    ) {
       const drawing = parseDrawing(drawingInput);
       if (!drawing.ok) return drawing;
       const ids = userSpeciesIds(id);
@@ -219,14 +228,16 @@ export async function openSpeciesLibrary(
         return failure("species_exists", `${ids.speciesId} is already in the library`);
       }
       const species: SpeciesDefinitionInput = {
+        // First, so the app defaults never override the plan or anything below.
+        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,
         version: "1.0.0",
         name,
         appearance: ids.appearanceId,
         sizeClass,
-        body: { thickness: thickness ?? BODY_THICKNESS.default },
-        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
+        body: planBody(plan, thickness ?? BODY_THICKNESS.default),
+        capabilities: locomotionCapabilities(plan.locomotion),
       };
       const entry = parseLibraryEntry({
         schemaVersion: LIBRARY_ENTRY_SCHEMA_VERSION,

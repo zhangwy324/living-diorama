@@ -1,13 +1,37 @@
-import { BODY_THICKNESS } from "@living-diorama/content-schema";
+import { BODY_THICKNESS, defaultAnchor, type Anchors } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
+import {
+  locomotionMotion,
+  locomotionTransform,
+  placePivots,
+  restingLocomotion,
+  type LocomotionBody,
+} from "../locomotion";
 import { followPixelRatio } from "../pixel-ratio";
 import { FrameThrottle } from "../throttle";
 import { buildBody, type Body } from "./body";
 import type { Pixels } from "./pixels";
 
 // The Creation Studio's live preview (ADR 0015 §7): one body, built like the diorama's and lit
-// like it, turning slowly over a ground grid. Its WebGL context lives until `dispose`.
+// like it, turning slowly over a ground grid. Its WebGL context lives until `dispose`. It can play
+// a way of moving in place, with the diorama's locomotion profiles (ADR 0020 §8, §12).
+
+/** A way of moving for the preview to play in place (ADR 0020 §8, §9). */
+export interface PreviewMotion {
+  /** The animation profile, e.g. "walk", "hop" or "swim". An unknown one plays no motion. */
+  profile: string;
+  /**
+   * How far the body sits below a water surface, as a share of its height. Above 0 the ground
+   * grid gives way to a water surface.
+   */
+  submersion: number;
+  /**
+   * Metres per second to move at, in place. At `FULL_MOTION_SPEED` or more a profile plays in
+   * full; 0 shows only what it does at rest (a swimmer's bob).
+   */
+  speed: number;
+}
 
 /** Masks the size of the drawing, 1 where a part should be highlighted (see `checkBody`). */
 export interface BodyHighlights {
@@ -26,8 +50,18 @@ export interface BodyPreview {
   setThickness(thickness: number): void;
   /** While true nothing turns or renders, e.g. while a stroke is drawn, so drawing stays smooth. */
   setPaused(paused: boolean): void;
+  /** Plays a way of moving in place, at its speed; undefined stands still. */
+  setMotion(motion: PreviewMotion | undefined): void;
+  /**
+   * The body's anchors in drawing pixels, as pivots for its motion (ADR 0020 §10); one left out
+   * sits where `defaultAnchor` puts it.
+   */
+  setAnchors(anchors: Anchors): void;
   dispose(): void;
 }
+
+const WATER_COLOUR = "#4f8fb0";
+const WATER_OPACITY = 0.55;
 
 /** Radians per second. */
 const TURN_SPEED = 0.35;
@@ -68,6 +102,17 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   scene.add(createSkyLight(), sun);
   const grid = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, "#8fa58a", "#a9bca3");
   scene.add(grid);
+  const water = new THREE.Mesh(
+    new THREE.CircleGeometry(GRID_SIZE / 2, 48).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: WATER_COLOUR,
+      transparent: true,
+      opacity: WATER_OPACITY,
+      depthWrite: false,
+    }),
+  );
+  water.visible = false;
+  scene.add(water);
   const turntable = new THREE.Group();
   scene.add(turntable);
 
@@ -96,13 +141,56 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   };
   frame();
 
-  let body: { body: Body; mesh: THREE.Mesh; highlight?: Highlight } | undefined;
+  let body:
+    { body: Body; mesh: THREE.Mesh; highlight?: Highlight; look: LocomotionBody } | undefined;
   const clearBody = () => {
     if (!body) return;
     turntable.clear();
     body.body.dispose();
     body.highlight?.dispose();
     body = undefined;
+  };
+
+  let anchors: Anchors = {};
+  let motion: PreviewMotion | undefined;
+  const feetOnBody = new THREE.Vector3();
+  const tailOnBody = new THREE.Vector3();
+  const placeAnchors = () => {
+    if (!body) return;
+    const { drawing } = body.body;
+    drawing.toBody(anchors.feet ?? defaultAnchor("feet", drawing.bounds), feetOnBody);
+    drawing.toBody(anchors.tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
+    placePivots(body.look, feetOnBody, tailOnBody);
+  };
+
+  // The body is built 1 tall and the turntable scaled to its height, so the pose is worked out in
+  // the body's own units; the gait's stride and the distance moved are in metres.
+  const pose = restingLocomotion();
+  const moveMatrix = new THREE.Matrix4();
+  const depthMatrix = new THREE.Matrix4();
+  let travelled = 0;
+  let clock = 0;
+  const placeBody = (dt: number) => {
+    if (!body) return;
+    const { mesh, look } = body;
+    look.halfDepth = Math.max(0, extent.z * thickness);
+    let lift = 0;
+    if (motion) {
+      travelled += motion.speed * dt;
+      clock += dt;
+      locomotionMotion(
+        { profile: motion.profile, speed: motion.speed, travelled, time: clock, phase: 0, height },
+        pose,
+      );
+      lift = locomotionTransform(pose, look, moveMatrix) - motion.submersion;
+    } else {
+      moveMatrix.identity();
+    }
+    mesh.matrix
+      .makeTranslation(0, lift, 0)
+      .multiply(moveMatrix)
+      .multiply(depthMatrix.makeScale(1, 1, thickness));
+    mesh.matrixWorldNeedsUpdate = true;
   };
 
   let paused = false;
@@ -112,13 +200,15 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
   const throttle = new FrameThrottle();
   let request = requestAnimationFrame(function loop(now) {
     request = requestAnimationFrame(loop);
-    const elapsed = last === undefined ? 0 : (now - last) / 1000;
+    const elapsed = last === undefined ? 0 : Math.min((now - last) / 1000, 0.1);
     last = now;
     if (paused) return;
-    angle += Math.min(elapsed, 0.1) * TURN_SPEED;
-    if (!throttle.due(now, false) && !dirty) return;
+    angle += elapsed * TURN_SPEED;
+    // A moving body is drawn at the display rate, so its steps stay smooth.
+    if (!throttle.due(now, motion !== undefined) && !dirty) return;
     dirty = false;
     turntable.rotation.y = angle;
+    placeBody(elapsed);
     renderer.render(scene, camera);
   });
 
@@ -148,7 +238,8 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
       const built = pixels && buildBody(pixels, 1, 1);
       if (!pixels || !built) return;
       const mesh = new THREE.Mesh(built.geometry, built.material);
-      mesh.scale.z = thickness;
+      // Placed by `placeBody`, which composes the depth, the motion and its lift.
+      mesh.matrixAutoUpdate = false;
       turntable.add(mesh);
       const highlight = createHighlight(pixels, highlights);
       if (highlight) mesh.add(new THREE.Mesh(built.geometry, highlight.material));
@@ -156,7 +247,16 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
       const box = built.geometry.boundingBox ?? new THREE.Box3();
       extent = { x: Math.max(-box.min.x, box.max.x), z: Math.max(-box.min.z, box.max.z) };
       frame();
-      body = highlight ? { body: built, mesh, highlight } : { body: built, mesh };
+      const look: LocomotionBody = {
+        height: 1,
+        minX: box.min.x,
+        maxX: box.max.x,
+        halfDepth: extent.z * thickness,
+        pivots: { feet: new THREE.Vector3(), front: new THREE.Vector3() },
+      };
+      body = { body: built, mesh, look, ...(highlight ? { highlight } : {}) };
+      placeAnchors();
+      placeBody(0);
     },
     setHeight(next) {
       height = next;
@@ -166,12 +266,25 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
     },
     setThickness(next) {
       thickness = next;
-      if (body) body.mesh.scale.z = thickness;
+      placeBody(0);
       frame();
       dirty = true;
     },
     setPaused(next) {
       paused = next;
+      dirty = true;
+    },
+    setMotion(next) {
+      motion = next && { ...next };
+      water.visible = (next?.submersion ?? 0) > 0;
+      grid.visible = !water.visible;
+      placeBody(0);
+      dirty = true;
+    },
+    setAnchors(next) {
+      anchors = structuredClone(next);
+      placeAnchors();
+      placeBody(0);
       dirty = true;
     },
     dispose() {
@@ -180,6 +293,8 @@ export function createBodyPreview(container: HTMLElement): BodyPreview {
       stopPixelRatio();
       clearBody();
       grid.dispose();
+      water.geometry.dispose();
+      water.material.dispose();
       renderer.dispose();
       // Frees the context now rather than whenever the canvas is collected.
       renderer.forceContextLoss();

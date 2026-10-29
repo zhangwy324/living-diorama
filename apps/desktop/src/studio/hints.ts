@@ -21,7 +21,10 @@ export function drawingHints(check: BodyCheck): string[] {
   return hints;
 }
 
-/** Where a creature of the chosen size won't fit in the world (ADR 0013), each said once. */
+/**
+ * Where a creature of the chosen size and ways of moving won't fit in the world (ADR 0013, ADR 0020
+ * §12), each said once.
+ */
 export function limitHints(limits: readonly Limit[]): string[] {
   return [...new Set(limits.map(describeLimit))];
 }
@@ -39,7 +42,9 @@ function describeLimit(limit: Limit): string {
     case "spawn_not_walkable":
       return "Won't appear at some of the world's starting spots.";
     case "no_spawn_point":
-      return "Doesn't fit anywhere in this world at this size.";
+      return "Has nowhere to appear in this world at this size, moving this way.";
+    case "no_water_exit":
+      return "Could get stuck in the water: some banks are too high to climb out.";
     default:
       return limit.severity === "error"
         ? "Something in this world doesn't work at this size."

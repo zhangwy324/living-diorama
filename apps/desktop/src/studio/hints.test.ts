@@ -12,6 +12,7 @@ const check = (fields: Partial<BodyCheck>): BodyCheck => ({
   thinParts: 0,
   thin: new Uint8Array(1),
   loose: new Uint8Array(1),
+  bounds: undefined,
   ...fields,
 });
 
@@ -58,6 +59,7 @@ describe("limitHints", () => {
       limit("no_walkable_area"),
       limit("spawn_not_walkable"),
       limit("no_spawn_point", { severity: "error" }),
+      limit("no_water_exit"),
       limit("something_new"),
       limit("something_broken", { severity: "error" }),
     ];
@@ -67,7 +69,8 @@ describe("limitHints", () => {
       expect(hint).not.toContain((limits[i] as Diagnostic).code);
       expect(hint).toMatch(/^[A-Z].*\.$/);
     }
-    expect(hints[4]).toBe("Doesn't fit anywhere in this world at this size.");
+    expect(hints[4]).toBe("Has nowhere to appear in this world at this size, moving this way.");
+    expect(hints[5]).toBe("Could get stuck in the water: some banks are too high to climb out.");
   });
 
   it("has nothing to say about a size that fits everywhere", () => {

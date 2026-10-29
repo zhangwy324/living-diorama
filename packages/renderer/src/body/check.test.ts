@@ -28,6 +28,23 @@ describe("checkBody", () => {
     expect(checkBody(image())).toMatchObject({ empty: true, shapes: 0, thinParts: 0 });
   });
 
+  it("gives the solid shapes' bounds, right and bottom exclusive, specks left out", () => {
+    expect(checkBody(image()).bounds).toBeUndefined();
+    // A one-pixel speck far off doesn't stretch the bounds; a second shape does.
+    expect(checkBody(image(BODY, [250, 250, 251, 251])).bounds).toEqual({
+      left: 30,
+      top: 20,
+      right: 150,
+      bottom: 220,
+    });
+    expect(checkBody(image(BODY, [170, 100, 200, 130])).bounds).toEqual({
+      left: 30,
+      top: 20,
+      right: 200,
+      bottom: 220,
+    });
+  });
+
   it("finds no thin parts or loose shapes in one solid shape", () => {
     const check = checkBody(image(BODY));
     expect(check).toMatchObject({ empty: false, shapes: 1, thinParts: 0 });

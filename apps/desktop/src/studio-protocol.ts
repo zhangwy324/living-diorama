@@ -2,7 +2,12 @@ import type { Diagnostic, Drawing, Result, SizeClass } from "@living-diorama/con
 import type { RequestHandlers } from "@living-diorama/desktop-integration";
 import type { Limit } from "@living-diorama/simulation";
 import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
-import { DRAWN_SPECIES_DEFAULTS } from "./startup";
+import {
+  canMove,
+  locomotionCapabilities,
+  type BodyPlanChoice,
+  type LocomotionChoice,
+} from "./body-plan";
 import { userSpeciesIds, userSpeciesUuid } from "./user-species";
 
 // What the Creation Studio and the strip say to each other over the window channel (ADR 0015 §5).
@@ -37,6 +42,8 @@ export interface ReleaseParams {
   sizeClass: SizeClass;
   /** The body's depth as a share of its height. */
   thickness: number;
+  /** The body plan chosen in the confirm panel (ADR 0020 §12, §14). */
+  plan: BodyPlanChoice;
 }
 
 export interface Released {
@@ -50,10 +57,13 @@ export type StudioRequests = {
   /** The library now. The Studio asks when it opens, since a push before then is lost. */
   snapshot: { params: undefined; result: LibrarySnapshot };
   /**
-   * Where a drawn species of this size wouldn't fit in the world, registering nothing (ADR 0015
-   * §8). Errors among them mean it can't be released at that size.
+   * Where a drawn species of this size, moving this way, wouldn't fit in the world, registering
+   * nothing (ADR 0015 §8, ADR 0020 §12). Errors among them mean it can't be released so.
    */
-  limits: { params: { sizeClass: SizeClass }; result: Limit[] };
+  limits: {
+    params: { sizeClass: SizeClass; locomotion: Pick<LocomotionChoice, "land" | "swim"> };
+    result: Limit[];
+  };
   /** Saves the drawing as a species in the library and adds one of it to the world. */
   release: { params: ReleaseParams; result: Released };
   /** Adds a creature of a library species. Resolves with its ID. */
@@ -87,6 +97,27 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const describe = (diagnostics: readonly Diagnostic[]) =>
   diagnostics.map((d) => d.message).join("; ");
+
+/** Release needs at least one way of moving (ADR 0020 §1). */
+export const NO_LOCOMOTION = "Choose at least one way for it to move: on land, swimming or both.";
+
+/**
+ * Why a release failed, in the player's words where the reason is one they can act on. A world
+ * with no starting spot for this size and way of moving refuses the species (`no_spawn_point`,
+ * ADR 0020 §6): for a creature that only swims, a world whose spawn points are all on land.
+ */
+export function releaseFailure(
+  name: string,
+  locomotion: LocomotionChoice,
+  diagnostics: readonly Diagnostic[],
+): string {
+  if (diagnostics.some((d) => d.code === "no_spawn_point")) {
+    return locomotion.land
+      ? `${name} has nowhere to appear in this world at this size. Try another size.`
+      : `${name} has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or try another size.`;
+  }
+  return `${name} couldn't be released: ${describe(diagnostics)}`;
+}
 
 /** How many creatures of each species are in the world. */
 export function countBySpecies(creatures: readonly Creature[]): Map<string, number> {
@@ -131,9 +162,11 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     name,
     sizeClass,
     thickness,
+    plan,
   }: ReleaseParams): Promise<Released> => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Give your creature a name first.");
+    if (!canMove(plan.locomotion)) throw new Error(NO_LOCOMOTION);
     if (!UUID.test(releaseId)) throw new Error(`Not a release ID: ${releaseId}`);
     const library = open();
     // Kept by an earlier try whose answer was lost, before the strip reloaded: add it, don't save.
@@ -144,9 +177,9 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       const saved = await library.save(drawing, Uint8Array.from(image), trimmed, sizeClass, {
         id: releaseId,
         thickness,
+        plan,
       });
-      if (!saved.ok)
-        throw new Error(`${trimmed} couldn't be released: ${describe(saved.diagnostics)}`);
+      if (!saved.ok) throw new Error(releaseFailure(trimmed, plan.locomotion, saved.diagnostics));
       species = saved.value;
     }
     const added = await library.addCreature(species.speciesId);
@@ -161,9 +194,10 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
 
   return {
     snapshot: () => librarySnapshot(services),
-    limits: async ({ sizeClass }) => {
-      // Drawn species all move like this (ADR 0014 §11), so size is the only part that varies.
-      const checked = await services.checkLimits(sizeClass, DRAWN_SPECIES_DEFAULTS.capabilities);
+    limits: async ({ sizeClass, locomotion }) => {
+      if (!canMove(locomotion)) throw new Error(NO_LOCOMOTION);
+      // A navigation profile is the size and the capabilities; the gait doesn't change it.
+      const checked = await services.checkLimits(sizeClass, locomotionCapabilities(locomotion));
       if (!checked.ok) throw new Error(describe(checked.diagnostics));
       return checked.value;
     },
