@@ -36,7 +36,7 @@ At least:
 
 4. **When to save.** On quit, every 60 seconds, and after a creature is spawned, despawned or released from the Studio. The quit timeout (ADR 0008 §14) rises from 1 second to about 3, so a save on quit can finish; PR 6 measures how long a save takes and records it.
 
-   _Known limitation:_ while the strip is hidden, WebView2 throttles the 60-second autosave timer, so the save can fall minutes behind until quit ([issue #117](https://github.com/zhangwy324/living-diorama/issues/117)); the save on quit still runs.
+   _Amended (2026-10-28, [issue #117](https://github.com/zhangwy324/living-diorama/issues/117)):_ while the strip was hidden, WebView2 throttled the 60-second autosave timer, so the save fell minutes behind until quit. The autosave now runs off the snapshots instead: on each one the app saves if the last save was asked for 60 seconds ago or more. The worker keeps sending snapshots while the strip is hidden (ADR 0008 §12), and their messages are not throttled as timers are: in a development build with the strip hidden for 11 minutes, the world was saved on hiding and then every 60–61 seconds, never more than 56 seconds old when checked every 15 seconds. While paused no snapshots come, but nothing changes then either. The world is also saved when the strip is hidden. Windows shutdown, restart and log-off don't go through the quit path: tao exits the process on `WM_ENDSESSION` without an event, so no save on quit runs and the autosave is all that protects the world then.
 
 ### Catch-up
 

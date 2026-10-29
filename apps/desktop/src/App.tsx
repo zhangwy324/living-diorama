@@ -205,6 +205,8 @@ export function App() {
         created?.pushSnapshot(snapshot);
         if (countChanged(snapshot) && library) pushLibrary();
         if (counter.observe(snapshot, events)) recordCounts();
+        // Snapshots keep coming while the strip is hidden, so they drive the autosave (#117).
+        void world.saveIfDue();
       },
       onFailure: (summary, details) => fail({ summary, details }),
     });
