@@ -20,6 +20,7 @@ runSimulationHost(
   {
     loadContent,
     now: () => performance.now(),
+    wallNow: () => Date.now(),
     schedule: (callback, delayMs) => setTimeout(callback, delayMs),
     close: () => scope.close(),
   },

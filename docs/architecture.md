@@ -138,9 +138,11 @@ Tray → Quit asks the page to stop first: the app saves the world, sends `shutd
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 12; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 13; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
-Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8): `save` resolves with the save's JSON text, `restore` with the restore report.
+Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`, `catch_up`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8): `save` resolves with the save's JSON text, `restore` with the restore report.
+
+The client sends `catch_up` itself when the running world lost wall-clock time, for example while the OS slept with the app open ([ADR 0019](adr/0019-world-saving.md), as built, issue #113). Lost time is the gap between two consecutive snapshots' `wallMs` stamps less the simulation time between them, at the speed; paused snapshots and the first one after them don't count, so a paused world is never caught up.
 
 | Direction     | Message                        | Meaning                                                                                                                                                                |
 | ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -150,17 +152,19 @@ Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`
 |               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.                                                                           |
 |               | `save`                         | Save the world between ticks, also while paused; `savedAt` is the wall-clock time.                                                                                     |
 |               | `restore`                      | Replace the world with a save, as JSON text parsed and checked by the worker, given the wall-clock time and time of day ([ADR 0019](adr/0019-world-saving.md) §3, §7). |
+|               | `catch_up`                     | Catch the running world up for wall-clock time it lost, given the gap and the time of day, as a restore after the same gap would.                                      |
 |               | `pause`, `resume`, `set_speed` | Control the clock.                                                                                                                                                     |
 |               | `set_time_of_day`              | The local time of day, every minute and on resume ([ADR 0018](adr/0018-living-behavior.md) §5).                                                                        |
 |               | `set_debug`                    | Include each walking creature's remaining route, need values, knowledge and home in snapshots.                                                                         |
 |               | `shutdown`                     | Stop the clock and close the worker.                                                                                                                                   |
 | worker → main | `ready`                        | The world loaded: scene data, navigation overlays, and assets and species to draw.                                                                                     |
-|               | `snapshot`                     | Every tick: the time of day, creature positions, headings and cues, plus the events since the previous snapshot.                                                       |
+|               | `snapshot`                     | Every tick: the time of day, creature positions, headings and cues, plus the events since the previous snapshot and the worker's wall-clock time (`wallMs`).           |
 |               | `species_registered`           | A species was registered: its summary, its appearance asset and its limits.                                                                                            |
 |               | `limits`                       | The answer to `check_limits`: the profile's limits, or the errors that keep it out of the world, and the locomotion rules of the capabilities asked about.             |
 |               | `spawned`, `despawned`         | A request succeeded, with the creature's ID.                                                                                                                           |
 |               | `saved`                        | The answer to `save`: the save as JSON text, ready to store.                                                                                                           |
 |               | `restored`                     | The answer to `restore`: the gap since the save and what was dropped or pruned. The next snapshot shows the restored world.                                            |
+|               | `caught_up`                    | The answer to `catch_up`: whether catch-up ran, over how long a gap, and which behaviors' catch-up failed.                                                             |
 |               | `rejected`                     | A request failed, with diagnostics (for example `world_full`). Not fatal: the world keeps running. A rejected `restore` leaves the world unchanged: start fresh.       |
 |               | `error`                        | A command was misused, with diagnostics. The app treats it as fatal.                                                                                                   |
 

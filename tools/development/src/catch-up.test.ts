@@ -459,6 +459,68 @@ describe("catch-up after a long gap", () => {
   });
 });
 
+describe("catch-up in place, for time a running world lost (issue #113)", () => {
+  /** Three mosslings run live from `start` for `minutes`, never saved. */
+  function live(seed: number, start: number, minutes: number) {
+    const simulation = create(seed, start);
+    for (let k = 0; k < 3; k++) simulation.spawn(MOSSLING);
+    run(simulation, minutes * 60 * HZ, start);
+    return simulation;
+  }
+
+  it.each([
+    ["overnight, from bedtime to the morning", 7, at(19, 15), 85, 11 * HOUR, at(7, 40)],
+    ["by day, while some walk or eat", 3, at(12), 5, 3 * HOUR, at(15, 5)],
+    ["beyond the cap", 5, at(12), 5, 20 * HOUR, at(8, 5)],
+  ])("leaves the world as a relaunch after the same gap: %s", (_, seed, start, mins, gap, now) => {
+    const running = live(seed, start, mins);
+    const { simulation: relaunched, report: restore } = restored(
+      throughDisk(running.save(SAVED_AT)),
+      { nowMs: SAVED_AT + gap, minutes: now },
+    );
+    const report = running.catchUp({ gapMs: gap, minutes: now });
+    expect(report.applied).toBe(true);
+    expect(report).toEqual(restore.catchUp);
+    expect(running.save(0)).toEqual(relaunched.save(0));
+    expect(run(running, 600, now)).toEqual(run(relaunched, 600, now));
+    expect(running.save(0)).toEqual(relaunched.save(0));
+  });
+
+  it("is the same for the same world and gap, and announces nothing", () => {
+    const [a, b] = [live(7, at(19, 15), 85), live(7, at(19, 15), 85)];
+    expect(a.catchUp({ gapMs: 9 * HOUR, minutes: at(5, 40) })).toEqual(
+      b.catchUp({ gapMs: 9 * HOUR, minutes: at(5, 40) }),
+    );
+    expect(a.save(0)).toEqual(b.save(0));
+    const events = run(a, 1, at(5, 40));
+    expect(events.filter((e) => e.type === "day_phase_changed")).toEqual([]);
+    expect(events.filter((e) => PER_CREATURE.includes(e.type))).toEqual([]);
+  });
+
+  it("does nothing but set the time of day for a gap under 2 minutes or a clock set back", () => {
+    for (const gapMs of [SHORT_GAP_MS - 1, 0, -HOUR]) {
+      const a = live(3, at(12), 5);
+      const b = live(3, at(12), 5);
+      const report = a.catchUp({ gapMs, minutes: at(12, 6) });
+      expect(report).toEqual({
+        applied: false,
+        skipped: gapMs > 0 ? "short_gap" : "no_gap",
+        gapMs: 0,
+        failures: [],
+      });
+      b.setTimeOfDay(at(12, 6));
+      expect(a.save(0)).toEqual(b.save(0));
+      expect(run(a, 200, at(12, 6))).toEqual(run(b, 200, at(12, 6)));
+    }
+  });
+
+  it("refuses a gap or time of day that isn't a number", () => {
+    const simulation = create(1);
+    expect(() => simulation.catchUp({ gapMs: Number.NaN, minutes: 0 })).toThrow(RangeError);
+    expect(() => simulation.catchUp({ gapMs: HOUR, minutes: Infinity })).toThrow(RangeError);
+  });
+});
+
 describe("core:rest catching up", () => {
   const gap = (phases: { phase: DayPhase; hours: number }[]): CatchUpGap => ({
     ms: phases.reduce((sum, p) => sum + p.hours, 0) * HOUR,

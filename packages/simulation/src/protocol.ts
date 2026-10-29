@@ -9,14 +9,14 @@ import type { AssetKind, Cue, LocomotionRule } from "@living-diorama/extension-a
 import type { ActionEvent } from "./creatures/action-event";
 import type { CreatureKnowledge } from "./creatures/knowledge";
 import type { NavigationOverlay } from "./navigation/overlay";
-import type { RestoreReport } from "./runtime/save";
+import type { CatchUpReport, RestoreReport } from "./runtime/save";
 import type { DayPhase } from "./runtime/time-of-day";
 import type { SceneData } from "./world/scene";
 
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -24,8 +24,8 @@ export type { ActionEvent } from "./creatures/action-event";
 
 /**
  * Commands that may fail in normal use (ADR 0012). Their outcome comes back as a reply with the
- * same `requestId`: `species_registered`, `limits`, `spawned`, `despawned`, `saved` or
- * `restored`, or `rejected`.
+ * same `requestId`: `species_registered`, `limits`, `spawned`, `despawned`, `saved`, `restored`
+ * or `caught_up`, or `rejected`.
  */
 export type RequestCommand =
   /**
@@ -71,7 +71,15 @@ export type RequestCommand =
    * wall-clock time in milliseconds since the epoch, from which the gap since the save is
    * computed; `minutes` is the present local time of day (ADR 0018 §5).
    */
-  | { type: "restore"; requestId?: string; json: string; nowMs: number; minutes: number };
+  | { type: "restore"; requestId?: string; json: string; nowMs: number; minutes: number }
+  /**
+   * Catches the running world up for `gapMs` of wall-clock time it lost, e.g. while the OS slept
+   * with the app open (issue #113), answered by `caught_up`. The gap rules and catch-up of
+   * `restore` apply (ADR 0019 §5, §6), so the world ends up as a save of it restored after the
+   * same gap would. `minutes` is the present local time of day, set first as `set_time_of_day`
+   * sets it. Applied while paused too, though the main thread sends none then.
+   */
+  | { type: "catch_up"; requestId?: string; gapMs: number; minutes: number };
 
 export type SimulationCommand =
   /**
@@ -260,8 +268,17 @@ export interface CheckedLimits {
 
 export type SimulationMessage =
   | ({ type: "ready"; worldId: string } & WorldContent)
-  /** Sent every tick; `events` are those emitted since the previous snapshot. */
-  | { type: "snapshot"; snapshot: SimulationSnapshot; events: SimulationEvent[] }
+  /**
+   * Sent every tick; `events` are those emitted since the previous snapshot. `wallMs` is the
+   * worker's wall-clock time (`Date.now()`) when it was sent, so the main thread can tell time the
+   * worker lost from a late delivery (issue #113).
+   */
+  | {
+      type: "snapshot";
+      snapshot: SimulationSnapshot;
+      events: SimulationEvent[];
+      wallMs: number;
+    }
   /**
    * A species was registered: what the main thread needs to draw its creatures, and where they
    * don't fit in this world, as warnings (ADR 0013).
@@ -293,10 +310,16 @@ export type SimulationMessage =
    */
   | { type: "restored"; requestId?: string; report: RestoreReport }
   /**
+   * The answer to `catch_up`: what catch-up did. When it ran, the next snapshot shows the world
+   * caught up, its tick far ahead of the last one.
+   */
+  | { type: "caught_up"; requestId?: string; report: CatchUpReport }
+  /**
    * A request command could not be applied. Not a fault: the world keeps running. For `restore`
    * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why:
    * `invalid_save_json`, the schema's (e.g. `unsupported_save_version`), `save_world_mismatch`
-   * or `save_inconsistent`, or `invalid_wall_clock` / `invalid_time_of_day` for the options.
+   * or `save_inconsistent`, or `invalid_wall_clock` / `invalid_time_of_day` for the options;
+   * for `catch_up`, `invalid_gap` or `invalid_time_of_day`.
    */
   | {
       type: "rejected";

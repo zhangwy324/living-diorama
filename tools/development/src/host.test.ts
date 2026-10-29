@@ -18,10 +18,18 @@ import { createSimulation, loadContent } from "./simulation-run";
 const WORLD_ID = "hollow:woodland-hollow";
 const SPECIES_ID = "hollow:mossling";
 const NOON = 12 * 60;
+const HOUR = 3_600_000;
 
-/** Runs the host against a fake port and a fake clock whose timers fire only in `advance`. */
+/** The fake wall clock's time at the fake monotonic clock's 0. */
+const WALL_START = Date.UTC(2026, 9, 28, 12);
+
+/**
+ * Runs the host against a fake port and fake clocks whose timers fire only in `advance`: a
+ * monotonic one and a wall clock that moves with it, and on its own in `sleep`.
+ */
 function startHost(register = registerBuiltInContent) {
   let time = 0;
+  let slept = 0;
   let timers: { at: number; fn: () => void }[] = [];
   let handler: ((data: unknown) => void) | undefined;
   let closed = false;
@@ -38,6 +46,7 @@ function startHost(register = registerBuiltInContent) {
     {
       loadContent: () => loadContent(register),
       now: () => time,
+      wallNow: () => WALL_START + time + slept,
       schedule: (fn, delayMs) => timers.push({ at: time + delayMs, fn }),
       close: () => (closed = true),
     },
@@ -65,13 +74,16 @@ function startHost(register = registerBuiltInContent) {
         const next = timers.toSorted((a, b) => a.at - b.at)[0];
         if (!next || next.at > end) break;
         timers = timers.filter((t) => t !== next);
-        time = next.at;
+        // A timer overdue after a stall fires now, not in the past.
+        time = Math.max(time, next.at);
         next.fn();
       }
       time = end;
     },
     /** Moves time forward without firing timers, like a worker that was not scheduled. */
     stall: (ms: number) => (time += ms),
+    /** Moves only the wall clock forward, as an OS sleep may leave the monotonic one. */
+    sleep: (ms: number) => (slept += ms),
     take() {
       return received.splice(0);
     },
@@ -591,7 +603,7 @@ describe("saving and restoring in the host", () => {
     ]);
     expect(structuredClone(restored)).toEqual(restored);
     host.advance(3100);
-    expect(host.take()).toEqual(unbroken);
+    expect(unstamped(host.take())).toEqual(unstamped(unbroken));
   });
 
   it("shows the restored world at once while paused", () => {
@@ -685,8 +697,102 @@ describe("saving and restoring in the host", () => {
     expect(ticks).toEqual([12]);
   });
 
-  it("is protocol version 12, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(12);
+  /** Snapshots and their events, without the wall-clock stamp, which differs between hosts. */
+  const unstamped = (messages: SimulationMessage[]) =>
+    messages.flatMap((m) =>
+      m.type === "snapshot" ? [{ snapshot: m.snapshot, events: m.events }] : [],
+    );
+
+  it("stamps each snapshot with the worker's wall-clock time", () => {
+    const host = running(7, 1000);
+    host.sleep(3 * HOUR);
+    host.advance(100);
+    expect(host.snapshots().map((m) => m.wallMs)).toEqual([WALL_START + 1100 + 3 * HOUR]);
+  });
+
+  it("catches up in place as a relaunch after the same gap would, with no burst of ticks", () => {
+    const GAP = 8 * HOUR;
+    const host = running(7);
+    // The worker wasn't scheduled for a while, so ticks are owed when the catch-up arrives.
+    host.stall(5000);
+    host.send({ type: "save", requestId: "save", savedAt: SAVED_AT });
+    host.send({ type: "catch_up", requestId: "up", gapMs: GAP, minutes: 20 * 60 });
+    host.advance(1);
+    const applied = host.take();
+    const saved = applied[0];
+    if (saved?.type !== "saved") throw new Error("Expected saved");
+    // No tick at the wake-up that caught up, then one per tick, from the tick after the gap.
+    expect(applied.slice(1)).toEqual([
+      {
+        type: "caught_up",
+        requestId: "up",
+        report: { applied: true, gapMs: GAP, failures: [] },
+      },
+    ]);
+    const tick = (JSON.parse(saved.json) as { tick: number }).tick + (GAP / 1000) * 10;
+    host.advance(3000);
+    const after = unstamped(host.take());
+    expect(after.map((m) => m.snapshot.tick)).toEqual(
+      Array.from({ length: 30 }, (_, k) => tick + 1 + k),
+    );
+
+    const relaunched = startHost();
+    relaunched.init(99);
+    relaunched.advance(500);
+    relaunched.send({ type: "restore", json: saved.json, nowMs: SAVED_AT + GAP, minutes: 20 * 60 });
+    relaunched.advance(1);
+    relaunched.take();
+    // Its wake-ups fall at other times, so it is run a little longer.
+    relaunched.advance(3100);
+    expect(unstamped(relaunched.take()).slice(0, after.length)).toEqual(after);
+  });
+
+  it("only sets the time of day for a short gap or a clock set back", () => {
+    const host = running(7, 1000);
+    host.send({ type: "catch_up", gapMs: 90_000, minutes: NOON + 5 });
+    host.send({ type: "catch_up", gapMs: -HOUR, minutes: NOON + 5 });
+    host.advance(100);
+    const messages = host.take();
+    expect(messages.map((m) => (m.type === "caught_up" ? m.report : m.type))).toEqual([
+      { applied: false, skipped: "short_gap", gapMs: 0, failures: [] },
+      { applied: false, skipped: "no_gap", gapMs: 0, failures: [] },
+      "snapshot",
+    ]);
+    expect(unstamped(messages)[0]?.snapshot).toMatchObject({ tick: 11, timeOfDay: NOON + 5 });
+  });
+
+  it("rejects a gap or time of day it can't use", () => {
+    const host = running(7, 1000);
+    host.send({ type: "catch_up", gapMs: Number.NaN, minutes: NOON });
+    host.send({ type: "catch_up", gapMs: HOUR, minutes: Number.POSITIVE_INFINITY });
+    host.advance(100);
+    const messages = host.take();
+    const rejected = (code: string) => ({ id: undefined, command: "catch_up", codes: [code] });
+    expect(rejections(messages)).toEqual([
+      rejected("invalid_gap"),
+      rejected("invalid_time_of_day"),
+    ]);
+    expect(unstamped(messages).map((m) => m.snapshot.tick)).toEqual([11]);
+  });
+
+  it("shows the caught-up world at once while paused", () => {
+    const host = running(7, 1000);
+    host.send({ type: "pause" });
+    host.advance(100);
+    host.take();
+    host.send({ type: "catch_up", gapMs: HOUR, minutes: NOON + 60 });
+    host.advance(1000);
+    const messages = host.take();
+    expect(messages.map((m) => m.type)).toEqual(["caught_up", "snapshot"]);
+    expect(unstamped(messages)[0]?.snapshot).toMatchObject({
+      tick: 10 + 3600 * 10,
+      paused: true,
+      timeOfDay: NOON + 60,
+    });
+  });
+
+  it("is protocol version 13, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(13);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

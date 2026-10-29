@@ -13,6 +13,7 @@ import {
   type AssetSummary,
   type RequestCommand,
   type SimulationCommand,
+  type SimulationEvent,
   type SimulationMessage,
   type SpeciesSummary,
   type WorldContent,
@@ -36,6 +37,11 @@ export interface HostOptions {
   loadContent(): Result<Registries>;
   /** Monotonic wall-clock time in milliseconds, e.g. `performance.now`. */
   now(): number;
+  /**
+   * Wall-clock time in milliseconds since the epoch, e.g. `Date.now`, which moves on while the OS
+   * sleeps. Only stamped on snapshots (`wallMs`); the tick loop runs on `now`.
+   */
+  wallNow(): number;
   /** Calls `callback` once after about `delayMs`, e.g. `setTimeout`. */
   schedule(callback: () => void, delayMs: number): void;
   /** Ends the host's process on `shutdown`, e.g. a worker's `close`. */
@@ -112,8 +118,13 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
 
   const send = (message: SimulationMessage) => port.postMessage(envelope(message));
   const reject = (diagnostics: Diagnostic[]) => send({ type: "error", diagnostics });
-  const sendSnapshot = (sim: Simulation, paused: boolean) =>
-    send({ type: "snapshot", snapshot: sim.snapshot({ paused, debug }), events: [] });
+  const sendSnapshot = (sim: Simulation, paused: boolean, events: SimulationEvent[] = []) =>
+    send({
+      type: "snapshot",
+      snapshot: sim.snapshot({ paused, debug }),
+      events,
+      wallMs: options.wallNow(),
+    });
 
   const init = (command: Extract<SimulationCommand, { type: "init" }>) => {
     if (simulation) {
@@ -201,6 +212,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "check_limits":
       case "save":
       case "restore":
+      case "catch_up":
         request(sim, ticks, command);
         break;
       case "shutdown":
@@ -299,6 +311,24 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         if (ticks.paused) sendSnapshot(sim, true);
         return;
       }
+      case "catch_up": {
+        const { gapMs, minutes } = command;
+        if (!Number.isFinite(gapMs)) {
+          const message = `The gap must be a number of milliseconds, got ${String(gapMs)}`;
+          diagnostics = [error("invalid_gap", message)];
+          break;
+        }
+        if (!Number.isFinite(minutes)) {
+          diagnostics = [invalidTimeOfDay(minutes)];
+          break;
+        }
+        const report = sim.catchUp({ gapMs, minutes });
+        // Time owed from before the gap must not tick the caught-up world in a burst.
+        if (report.applied) ticks.restart();
+        send({ type: "caught_up", ...requestId, report });
+        if (ticks.paused) sendSnapshot(sim, true);
+        return;
+      }
     }
     send({ type: "rejected", ...requestId, command: command.type, diagnostics });
   };
@@ -310,10 +340,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       if (stopped) return;
     }
     const due = clock.advance(options.now());
-    for (let n = 0; n < due; n++) {
-      const events = simulation.step();
-      send({ type: "snapshot", snapshot: simulation.snapshot({ debug }), events });
-    }
+    for (let n = 0; n < due; n++) sendSnapshot(simulation, false, simulation.step());
     options.schedule(loop, clock.tickMs);
   };
 

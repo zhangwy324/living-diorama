@@ -50,7 +50,7 @@ import type { Limit, RouteLegSnapshot, SimulationEvent, SimulationSnapshot } fro
 import type { ConnectionModel } from "../world/world-model";
 import { Rng, type RngState } from "./rng";
 import { clonePlain } from "./plain";
-import { creaturePhaseSpans, planCatchUp, type CatchUpPlan } from "./catch-up";
+import { creaturePhaseSpans, planCatchUp, planGap, type CatchUpPlan } from "./catch-up";
 import { settleDay } from "./creature-day";
 import { checkSave, type CatchUpFailure, type CatchUpReport, type RestoreReport } from "./save";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
@@ -183,6 +183,14 @@ export interface SpawnOptions {
 export interface RestoreOptions {
   /** The wall-clock time now, in milliseconds since the epoch; the gap is measured to it. */
   nowMs: number;
+  /** The time of day now, in minutes since local midnight. */
+  minutes: number;
+}
+
+/** The time a running world lost, and the present (issue #113). */
+export interface CatchUpOptions {
+  /** The wall-clock time lost, in milliseconds. */
+  gapMs: number;
   /** The time of day now, in minutes since local midnight. */
   minutes: number;
 }
@@ -481,11 +489,7 @@ export class Simulation {
       dayPhase: save.dayPhase,
       creatures,
     });
-    // Caches of the world that was replaced. Cues come back on the first step.
-    this.#paths.clear();
-    this.#actionCues.clear();
-    this.#perceptionOffsets.clear();
-    this.#events = [];
+    this.#clearCaches();
     this.setTimeOfDay(minutes);
     const gapMs = Math.max(0, nowMs - save.savedAt);
     // Custom day mode (ADR 0018 §5), once it has a clock source, must skip catch-up here (§19).
@@ -494,6 +498,35 @@ export class Simulation {
       ok: true,
       value: { gapMs, droppedCreatures, prunedPlacements, droppedActions, catchUp },
     };
+  }
+
+  /**
+   * Catch-up in place for wall-clock time this running world lost (issue #113), e.g. while the OS
+   * slept with the app open. The time of day is set to `minutes` as `setTimeOfDay` does; then the
+   * gap rules and catch-up of a restore apply to `gapMs` (`#catchUp`). When catch-up runs, the
+   * world ends up as a save of it restored after the same gap would: the caches a restored world
+   * starts without are dropped too. Best called between steps.
+   */
+  catchUp({ gapMs, minutes }: CatchUpOptions): CatchUpReport {
+    if (!Number.isFinite(gapMs)) {
+      throw new RangeError(`The gap must be a finite number, got ${gapMs}`);
+    }
+    if (!Number.isFinite(minutes)) {
+      throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
+    }
+    const plan = planGap(gapMs);
+    if (plan.apply) this.#clearCaches();
+    this.setTimeOfDay(minutes);
+    return this.#catchUp(plan);
+  }
+
+  /** Drops what a restored world starts without, with events not yet returned by `step`. */
+  #clearCaches() {
+    // Cues come back on the first step.
+    this.#paths.clear();
+    this.#actionCues.clear();
+    this.#perceptionOffsets.clear();
+    this.#events = [];
   }
 
   /**

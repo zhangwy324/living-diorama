@@ -41,7 +41,7 @@ function fakeClock(startMinutes: number) {
     snapshots(feed: TimeOfDayFeed, by: number, every: number) {
       for (let left = by; left > 0; left -= every) {
         ms += Math.min(every, left);
-        feed.snapshot();
+        feed.snapshot(false);
       }
     },
     /** Moves the clock on without firing checks, as while the OS sleeps. */
@@ -158,18 +158,18 @@ describe("time of day feed on snapshots", () => {
     const send = vi.fn();
     const feed = timeOfDayFeed(send, fake.clock);
     feed.start();
-    feed.snapshot();
+    feed.snapshot(false);
     // A stall of over JUMP_MS resends even within the same minute and the same check interval.
     fake.sleep(JUMP_MS + 1);
-    expect(feed.snapshot()).toBe(JUMP_MS + 1);
+    feed.snapshot(false);
     expect(send.mock.calls).toEqual([[12 * 60]]);
     // The OS slept for eight hours.
     fake.sleep(8 * 3_600_000);
-    feed.snapshot();
+    feed.snapshot(false);
     expect(send.mock.calls.at(-1)).toEqual([20 * 60]);
     // The clock was set back an hour: sent at once, and checks carry on from there.
     fake.sleep(-3_600_000);
-    expect(feed.snapshot()).toBe(-3_600_000);
+    feed.snapshot(false);
     expect(send.mock.calls.at(-1)).toEqual([19 * 60]);
     fake.snapshots(feed, 60_000, TICK_MS);
     expect(send.mock.calls.at(-1)).toEqual([19 * 60 + 1]);
@@ -180,12 +180,42 @@ describe("time of day feed on snapshots", () => {
     const send = vi.fn();
     const feed = timeOfDayFeed(send, fake.clock);
     fake.sleep(3_600_000);
-    expect(feed.snapshot()).toBe(0);
+    feed.snapshot(false);
     feed.start();
     feed.stop();
     fake.sleep(3_600_000);
-    expect(feed.snapshot()).toBe(0);
+    feed.snapshot(false);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends each minute once while paused, the paused snapshot it brings counting as no jump", () => {
+    const fake = fakeClock(12 * 60);
+    const send = vi.fn();
+    // The paused worker answers each new time with a snapshot.
+    const feed = timeOfDayFeed(() => (send(), feed.snapshot(true)), fake.clock);
+    feed.start();
+    feed.snapshot(true);
+    fake.pass(10 * 60_000);
+    expect(send).toHaveBeenCalledTimes(10);
+  });
+
+  it("counts no jump across the snapshot that resumes, then counts the next one again", () => {
+    const fake = fakeClock(12 * 60);
+    const send = vi.fn();
+    const feed = timeOfDayFeed(send, fake.clock);
+    feed.start();
+    feed.snapshot(true);
+    // Paused for an hour with no timer firing (hidden), then resumed: the resync sends the time.
+    fake.sleep(3_600_000);
+    feed.resync();
+    feed.snapshot(true);
+    feed.snapshot(false);
+    expect(send.mock.calls).toEqual([[13 * 60]]);
+    // Running again: the OS slept for an hour.
+    fake.snapshots(feed, 1000, TICK_MS);
+    fake.sleep(3_600_000);
+    feed.snapshot(false);
+    expect(send.mock.calls).toEqual([[13 * 60], [14 * 60]]);
   });
 });
 
