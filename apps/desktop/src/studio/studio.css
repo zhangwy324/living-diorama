@@ -351,6 +351,17 @@ body,
   background: rgb(110 160 90 / 80%);
 }
 
+.sizes .suggested {
+  display: block;
+  min-height: 1.4em;
+  padding-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  /* About 6.6:1 on the panel: small text, so well clear of AA's 4.5:1. */
+  color: rgb(238 243 232 / 75%);
+}
+
 .sizes input:focus-visible + span {
   outline: 2px solid #eef3e8;
   outline-offset: 1px;
