@@ -64,6 +64,8 @@ interface Creature {
   weights: CueWeights;
   phase: number;
   sprites: CreatureCueSprites;
+  /** The meal's progress while eating, kept as the ring fades out after it. */
+  progress: number | undefined;
 }
 
 /** Without a camera, cues are sized as if a pixel were this many metres. */
@@ -132,6 +134,7 @@ export class CreatureBodies {
       seen.add(pose.id);
       const { mesh, weights, phase } = creature;
       stepCueWeights(weights, pose.cues, dt);
+      if (pose.cues.includes("eating")) creature.progress = pose.cueProgress;
       const motion = bodyMotion(weights, time, phase, this.#motion);
       // The pitch turns about the feet, so the body rises as its front dips, to keep it above ground.
       const lift = motion.lift * look.height + frontLift(look.front * motion.scaleXZ, motion.pitch);
@@ -153,7 +156,7 @@ export class CreatureBodies {
         ? this.#screen.unitsPerPixel(anchor.top.x, anchor.top.y, anchor.top.z)
         : DEFAULT_UNITS_PER_PIXEL;
       anchor.creaturePx = look.height / anchor.unitsPerPixel;
-      this.#cues.place(creature.sprites, weights, anchor, time, phase);
+      this.#cues.place(creature.sprites, weights, anchor, time, phase, creature.progress);
     }
     for (const [id, creature] of this.#creatures) {
       if (seen.has(id)) continue;
@@ -187,6 +190,7 @@ export class CreatureBodies {
       weights: { eating: 0, sleeping: 0, hungry: 0 },
       phase: cuePhase(id),
       sprites: noCueSprites(),
+      progress: undefined,
     };
     this.#creatures.set(id, creature);
     return creature;

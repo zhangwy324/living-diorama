@@ -138,6 +138,11 @@ export interface CreatureSnapshot {
    * each need at or above the value it shows from (`hungry`).
    */
   cues: Cue[];
+  /**
+   * How far through the action showing its cue the creature is, 0–1, if the action reports it.
+   * The renderer currently draws it only for the `eating` cue.
+   */
+  cueProgress?: number;
   /** Waypoints still to reach, per region, from where the creature stands. Only with debug on. */
   route?: RouteLegSnapshot[];
   /** Need ID → value in [0, 1]. Only with debug on. */
