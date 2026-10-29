@@ -1,6 +1,7 @@
 import { checkBody } from "@living-diorama/renderer";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import type { ReactElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 import { hasWarningTint, WarningToggle } from "./WarningToggle";
 
 const toggle = (available: boolean, shown: boolean) => {
@@ -9,6 +10,9 @@ const toggle = (available: boolean, shown: boolean) => {
   );
   return /<button[^>]*>/.exec(html)?.[0] ?? "";
 };
+
+/** Clicks the button the component returned, if it handles clicks. */
+const clickOn = (button: ReactElement<{ onClick?: () => void }>) => button.props.onClick?.();
 
 describe("WarningToggle", () => {
   it("is a labelled button, off by default", () => {
@@ -19,20 +23,31 @@ describe("WarningToggle", () => {
     expect(html).toMatch(/^<button type="button"/);
     expect(html.replace(/<[^>]*>/g, "")).toBe("Show warnings");
     expect(toggle(true, false)).toContain('aria-pressed="false"');
-    expect(toggle(true, false)).not.toContain("disabled");
+    expect(toggle(true, false)).toContain('aria-disabled="false"');
+  });
+
+  it("toggles on a click", () => {
+    const onToggle = vi.fn();
+    clickOn(WarningToggle({ available: true, shown: false, onToggle }));
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 
   it("says it is pressed while the tint shows", () => {
     expect(toggle(true, true)).toContain('aria-pressed="true"');
   });
 
-  it("is disabled, and reads as off, with nothing to tint", () => {
+  it("is disabled, and reads as off, with nothing to tint, but keeps the focus", () => {
     for (const shown of [false, true]) {
       const button = toggle(false, shown);
-      expect(button).toContain("disabled");
+      // Not natively disabled, which would drop the focus and skip it on Tab.
+      expect(button).not.toMatch(/ disabled[ =>]/);
+      expect(button).toContain('aria-disabled="true"');
       expect(button).toContain('aria-pressed="false"');
       expect(button).toContain('title="No warnings to show"');
     }
+    const onToggle = vi.fn();
+    clickOn(WarningToggle({ available: false, shown: false, onToggle }));
+    expect(onToggle).not.toHaveBeenCalled();
   });
 });
 

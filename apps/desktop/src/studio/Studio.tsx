@@ -492,7 +492,7 @@ export function Studio() {
             <WarningToggle
               available={warningTint}
               shown={warningsShown}
-              onToggle={() => setWarningsShown(!warningsShown)}
+              onToggle={() => setWarningsShown((shown) => !shown)}
             />
           </div>
           {step === "plan" ? (

@@ -227,7 +227,7 @@ body,
   cursor: pointer;
 }
 
-.warning-toggle:hover:not(:disabled) {
+.warning-toggle:hover:not([aria-disabled="true"]) {
   background: rgb(38 48 38 / 90%);
 }
 
@@ -235,7 +235,7 @@ body,
   background: rgb(110 160 90 / 92%);
 }
 
-.warning-toggle:disabled {
+.warning-toggle[aria-disabled="true"] {
   opacity: 0.45;
   cursor: default;
 }

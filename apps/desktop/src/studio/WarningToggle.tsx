@@ -8,7 +8,8 @@ export const hasWarningTint = (check: BodyCheck) => check.thinParts > 0 || check
 
 /**
  * Off by default, and disabled while there is nothing to tint; it then reads as off, whatever
- * was chosen before.
+ * was chosen before. Disabled with `aria-disabled` rather than `disabled`, so it keeps the focus
+ * when a drawing becomes clean and can still be reached by keyboard for its tooltip.
  */
 export function WarningToggle(props: { available: boolean; shown: boolean; onToggle(): void }) {
   return (
@@ -17,8 +18,8 @@ export function WarningToggle(props: { available: boolean; shown: boolean; onTog
       className="warning-toggle"
       title={props.available ? undefined : "No warnings to show"}
       aria-pressed={props.available && props.shown}
-      disabled={!props.available}
-      onClick={props.onToggle}
+      aria-disabled={!props.available}
+      onClick={props.available ? props.onToggle : undefined}
     >
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
         <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
