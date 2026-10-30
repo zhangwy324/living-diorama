@@ -91,6 +91,10 @@ describe("starter creatures", () => {
     // the tail are roots.
     const headless = { parts: parts.filter((p) => p.id !== "test:torso"), lookup };
     expect(starterRoots(headless).map((p) => p.id)).toEqual(["test:head", "test:leg", "test:tail"]);
+    // In any order, by ID, so a seed picks the same root.
+    const reversed = { parts: [...headless.parts].reverse(), lookup };
+    expect(starterRoots(reversed)).toEqual(starterRoots(headless));
+    expect(assembleStarter(reversed, { seed: 5 })).toEqual(assembleStarter(headless, { seed: 5 }));
   });
 
   it("builds the same creature for the same seed, one that fits the registered types", () => {
@@ -135,7 +139,10 @@ describe("starter creatures", () => {
     expect(codes(assembleStarter(starter, { root: "test:wing", seed: 1 }))).toEqual([
       "unknown_part",
     ]);
-    expect(codes(assembleStarter({ parts: [], lookup }, { seed: 1 }))).toEqual(["no_root"]);
+    const none = assembleStarter({ parts: [], lookup }, { seed: 1 });
+    expect(none.ok ? [] : none.diagnostics.map((d) => [d.code, d.message])).toEqual([
+      ["no_root", "No voxel parts are registered"],
+    ]);
   });
 
   it("saves the creature, adds it to the world and says how to build it again", async () => {

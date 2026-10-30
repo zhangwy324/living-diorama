@@ -148,11 +148,14 @@ export interface StarterParts {
 
 /**
  * The parts a starter creature can be built on: those no part in the set has a socket for, such as
- * the torsos. Read from fits and sockets, not from IDs, so a pack's parts work the same.
+ * the torsos. Read from fits and sockets, not from IDs, so a pack's parts work the same. Sorted by
+ * ID, so the root a seed picks doesn't depend on the order the parts come in.
  */
 export function starterRoots({ parts, lookup }: StarterParts): PartSummary[] {
   const offered = new Set(parts.flatMap(({ part }) => part.sockets.map((s) => s.type)));
-  return parts.filter(({ part }) => !(lookup.fitsOf(part.type) ?? []).some((t) => offered.has(t)));
+  return parts
+    .filter(({ part }) => !(lookup.fitsOf(part.type) ?? []).some((t) => offered.has(t)))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 /** A random seed for the assembler: a whole number from 0 to 2³² − 1. */
@@ -196,7 +199,12 @@ export function assembleStarter(
     const roots = starterRoots(starter);
     start = roots[seed % roots.length];
     if (!start) {
-      return failure("no_root", `None of the ${starter.parts.length} registered parts is a root`);
+      const { length } = starter.parts;
+      const message =
+        length === 0
+          ? "No voxel parts are registered"
+          : `None of the ${length} registered voxel parts is a root`;
+      return failure("no_root", message);
     }
   } else {
     start = starter.parts.find((p) => p.id === root);
