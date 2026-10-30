@@ -4,9 +4,14 @@ import {
   decodeVoxels,
   formatDiagnostic,
   measureAssembly,
+  placeInstances,
+  replacePart,
+  stepPart,
+  stepUnits,
   validate,
   VoxelAssemblySchema,
   type VoxelAssembly,
+  type VoxelPart,
 } from "@living-diorama/content-schema";
 import {
   checkAssemblyTypes,
@@ -149,6 +154,35 @@ describe("the reference creatures", () => {
     expect(warnings).toEqual([]);
   });
 
+  it.each(Object.keys(creatures))("%s has every part's attach point on its socket", (name) => {
+    // Every joint is on the finer grid already, so the snap (ADR 0022 §13, as amended in M21
+    // PR 7) moves nothing: the creatures, the mossling's asset among them, place as they did.
+    const assembly = creatures[name as keyof typeof creatures];
+    const placements = placeInstances(assembly);
+    const index = new Map(assembly.instances.map((instance, i) => [instance.id, i]));
+    const at = (i: number, point: { x: number; y: number; z: number }, step: number) => {
+      const { linear, offset } = placements[i]!;
+      const p = [point.x * step, point.y * step, point.z * step];
+      return [0, 1, 2].map(
+        (r) =>
+          linear[r * 3]! * p[0]! +
+          linear[r * 3 + 1]! * p[1]! +
+          linear[r * 3 + 2]! * p[2]! +
+          offset[r]!,
+      );
+    };
+    assembly.instances.forEach((instance, i) => {
+      if (!instance.parent) return;
+      const part = assembly.parts[instance.part]!;
+      const p = index.get(instance.parent.instance)!;
+      const parentPart = assembly.parts[assembly.instances[p]!.part]!;
+      const socket = parentPart.sockets.find((s) => s.id === instance.parent?.socket)!;
+      expect(at(i, part.attach, stepUnits(part.step)), instance.id).toEqual(
+        at(p, socket.position, stepUnits(parentPart.step)),
+      );
+    });
+  });
+
   it("are all medium, the mossling about 52 × 60 × 45 cm", () => {
     const sizes = Object.fromEntries(
       Object.entries(creatures).map(([name, assembly]) => {
@@ -238,6 +272,120 @@ describe("assembled at random from each torso", () => {
       "right-hip": ["hollow:leg"],
       neck: ["hollow:head"],
     });
+  });
+});
+
+describe("stepping the starter parts one at a time (ADR 0023 §8)", () => {
+  // Each starter part, on the first reference creature with a part of its type (put in its place,
+  // with its mirror twin), steps one rung up and one down with its twin. A joint a step moves half
+  // a finer cube off the grid snaps onto it (ADR 0022 §13, as amended in M21 PR 7).
+  const registries = registered();
+  const creatures = Object.values(referenceCreatures(partOf(registries)));
+  const lookup = {
+    fitsOf: (type: string) => registries.partTypes.get(type)?.fits,
+    isSocketType: (type: string) => registries.socketTypes.get(type) !== undefined,
+    roleOf: (type: string) => registries.partTypes.get(type)?.role,
+  };
+  const MIRROR = { mirror: true };
+
+  /** A reference creature with `id` in the place of the first part of its type, and where. */
+  function wearing({ id, part }: { id: string; part: VoxelPart }) {
+    for (const creature of creatures) {
+      const instance = creature.instances.find((i) => creature.parts[i.part]?.type === part.type);
+      if (!instance) continue;
+      const placed = replacePart(creature, instance.id, { id, part }, lookup, MIRROR);
+      if (!placed.ok) throw new Error(`${id}: ${placed.refusal.message}`);
+      return { assembly: placed.assembly, instance: instance.id };
+    }
+    throw new Error(`No reference creature has a part of type ${part.type}`);
+  }
+
+  /** Whether every mirror pair's two parts are mirror images about their parent's middle. */
+  function mirrored(assembly: VoxelAssembly): boolean {
+    const placements = placeInstances(assembly);
+    const index = new Map(assembly.instances.map((instance, i) => [instance.id, i]));
+    // The root-frame z extent of an instance's part, in units, ignoring its holes.
+    const zOf = (id: string) => {
+      const i = index.get(id) ?? -1;
+      const instance = assembly.instances[i];
+      const placement = placements[i];
+      const part = instance && assembly.parts[instance.part];
+      if (!part || !placement) throw new Error(id);
+      const z = placement.linear.slice(6, 9).map((m, a) => {
+        const size = [part.size.x, part.size.y, part.size.z][a] ?? 0;
+        return m * size * stepUnits(part.step);
+      });
+      const far = placement.offset[2] + z.reduce((sum, v) => sum + v, 0);
+      return [Math.min(placement.offset[2], far), Math.max(placement.offset[2], far)];
+    };
+    return assembly.instances.every(({ id, parent }) => {
+      const socket = parent && assembly.parts[byId(assembly, parent.instance).part]?.sockets;
+      const pair = socket?.find((s) => s.id === parent?.socket)?.mirrors;
+      if (!parent || pair === undefined) return true;
+      const twin = assembly.instances.find(
+        (i) => i.parent?.instance === parent.instance && i.parent.socket === pair,
+      );
+      if (!twin) return true;
+      const [lo, hi] = zOf(parent.instance);
+      const [a0, a1] = zOf(id);
+      const [b0, b1] = zOf(twin.id);
+      return a0! + b1! === lo! + hi! && a1! + b0! === lo! + hi!;
+    });
+  }
+
+  const byId = (assembly: VoxelAssembly, id: string) => {
+    const found = assembly.instances.find((instance) => instance.id === id);
+    if (!found) throw new Error(id);
+    return found;
+  };
+
+  it("steps every part up and down but face details up and heads down, valid and mirrored", () => {
+    const refused: string[] = [];
+    for (const entry of sortedParts(registries)) {
+      const { assembly, instance } = wearing(entry);
+      expect(mirrored(assembly), entry.id).toBe(true);
+      for (const direction of [1, -1] as const) {
+        const result = stepPart(assembly, instance, direction, MIRROR);
+        if (!result.ok) {
+          refused.push(`${entry.id} ${direction}: ${result.refusal.message}`);
+          continue;
+        }
+        const name = `${entry.id} ${direction}`;
+        expect(checkAssemblyTypes(registries, result.assembly).map(formatDiagnostic), name).toEqual(
+          [],
+        );
+        expect(mirrored(result.assembly), name).toBe(true);
+        // Stepping back puts every part where it was (a shared copy stays a copy of its own).
+        const back = stepPart(result.assembly, instance, direction === 1 ? -1 : 1, MIRROR);
+        expect(back.ok && placeInstances(back.assembly), name).toEqual(placeInstances(assembly));
+      }
+    }
+    // Eyes, noses and mouths are thin raised parts sunk half a 5 cm cube into the face, one of their
+    // 2.5 cm cubes (ADR 0022 §12). At 5 cm cubes their mount would have to lie a whole 5 cm cube
+    // deep, and on a head of 2.5 cm cubes it lies only 1.25 cm deep, too shallow for the eyes.
+    expect(refused.map((r) => r.replace(/: .*/, ""))).toEqual([
+      "hollow:bead-eye 1",
+      "hollow:button-nose 1",
+      "hollow:mossling-head -1",
+      "hollow:open-mouth 1",
+      "hollow:pink-nose 1",
+      "hollow:round-eye 1",
+      "hollow:round-head -1",
+      "hollow:smile 1",
+      "hollow:snout-head -1",
+      "hollow:wide-head -1",
+    ]);
+    for (const reason of refused) expect(reason).toMatch(/deep inside part/);
+  });
+
+  it("steps a head down once its face details have stepped down", () => {
+    let fox = creatures[0]!;
+    for (const id of ["eye-left", "nose", "mouth"]) {
+      const result = stepPart(fox, id, -1, MIRROR);
+      if (!result.ok) throw new Error(result.refusal.message);
+      fox = result.assembly;
+    }
+    expect(stepPart(fox, "head", -1, MIRROR).ok).toBe(true);
   });
 });
 

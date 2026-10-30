@@ -52,15 +52,13 @@ export type AssemblyEditRefusalCode =
   | "root"
   /** Only a part whose type has the `root` role can replace the root (ADR 0023 §10). */
   | "not_root"
-  /** No quarter turn about the socket's Y axis leaves the assembly valid. */
-  | "no_turn"
   /** The step is at the end of the ladder (`VOXEL_STEPS`) already. */
   | "ladder_end"
   /** The part has no colour of the given index. */
   | "unknown_color"
   /** The colour isn't `#rrggbb`. */
   | "invalid_color"
-  /** The result would fail `VoxelAssemblySchema`: a joint, the grid snap or the face cap. */
+  /** The result would fail `VoxelAssemblySchema`: a joint (ADR 0022 §12) or the face cap. */
   | "invalid";
 
 export interface AssemblyEditRefusal {
@@ -424,8 +422,9 @@ const turnAboutY = (rotation: Quaternion) => snapQuarterTurn(multiply(QUARTER_TU
  * Turns an instance a quarter turn about its socket's Y axis (ADR 0023 §7): +X toward −Z, or for
  * a mirrored part, drawn reflected, the other way; with `mirror`, its twin takes the same stored
  * rotation, so a pair stays (or becomes again) mirror images even when its sides were turned
- * apart while mirroring was off. A turn that would leave the assembly invalid (a joint, the
- * grid snap) is skipped for the next; refused when all three other turns are. The root can't turn.
+ * apart while mirroring was off. Refused (`invalid`) if the turned assembly fails the validator,
+ * which no quarter turn does today: a turn changes no joint's depth (ADR 0022 §12), and a part a
+ * turn moves off the finer grid snaps onto it (§13, as amended in M21 PR 7). The root can't turn.
  */
 export function rotatePart(
   assembly: VoxelAssembly,
@@ -436,16 +435,13 @@ export function rotatePart(
   if (!target) return refuse("unknown_instance", `No instance "${id}"`);
   if (!target.parent) return refuse("root", "The root hangs from no socket to turn about");
   const targets = withTwin(assembly, target, options);
-  const ids = targets.map((t) => t.id);
-  let rotation = target.rotation;
-  for (let turn = 1; turn < 4; turn++) {
-    rotation = turnAboutY(rotation);
-    const turned = new Map(targets.map((t) => [t.id, { ...t, rotation }]));
-    const instances = assembly.instances.map((instance) => turned.get(instance.id) ?? instance);
-    const result = settle({ parts: assembly.parts, instances }, ids);
-    if (result.ok) return result;
-  }
-  return refuse("no_turn", `No other quarter turn of "${id}" leaves the assembly valid`);
+  const rotation = turnAboutY(target.rotation);
+  const turned = new Map(targets.map((t) => [t.id, { ...t, rotation }]));
+  const instances = assembly.instances.map((instance) => turned.get(instance.id) ?? instance);
+  return settle(
+    { parts: assembly.parts, instances },
+    targets.map((t) => t.id),
+  );
 }
 
 /**
@@ -491,7 +487,8 @@ const nextStep = (step: VoxelPart["step"], direction: 1 | -1) =>
  * Moves an instance's part one rung up (+1, larger cubes) or down (−1) the step ladder (ADR 0023
  * §8): the part copy of the instance and, with `mirror`, of its twin, copied first when shared
  * beyond them. The part keeps its cubes, so it grows or shrinks. Refused at the end of the ladder
- * and when a joint (ADR 0022 §12) or the finer-grid snap (§13) would break.
+ * and when a joint (ADR 0022 §12) would break. A joint left half a finer cube off the finer grid
+ * snaps onto it (§13, as amended in M21 PR 7: `placeInstances`).
  */
 export function stepPart(
   assembly: VoxelAssembly,

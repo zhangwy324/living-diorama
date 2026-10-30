@@ -100,7 +100,7 @@ const FINE_LEG: LibraryPart = {
   id: "test:legs/fine",
   part: box(2, 6, 2, { type: "test:leg", step: 0.0125, attach: { x: 1, y: 6, z: 1 } }),
 };
-/** A leg two cubes wide: on the torso's hips, half a cube off its grid. */
+/** A leg two cubes wide: on the torso's hips, half a cube off its grid until it snaps (§13). */
 const FAT_LEG: LibraryPart = {
   id: "test:legs/fat",
   part: box(2, 3, 2, { type: "test:leg", attach: { x: 1, y: 3, z: 1 } }),
@@ -163,7 +163,7 @@ const SEGMENT: LibraryPart = {
   }),
 };
 
-const LIBRARY = [THIN_LEG, FINE_LEG, FAT_LEG, HEAD, EYE, BIG_EYE, TAIL, WING, CLAWED_LEG];
+const LIBRARY = [THIN_LEG, FINE_LEG, HEAD, EYE, BIG_EYE, TAIL, WING, CLAWED_LEG];
 
 const partType = (id: string, fits: string[]): PartTypeDefinition => ({
   schemaVersion: 1,
@@ -279,21 +279,27 @@ describe("assembleParts", () => {
     expect(assembly.parts.torso?.source).toBe("test:torso");
   });
 
-  it("uses no part whose types aren't registered or that misses the grid or joint depth", () => {
+  it("uses no part whose types aren't registered or that misses the joint depth", () => {
     const used = new Set(
       SEEDS.flatMap((seed) => Object.values(assemble(seed).parts).map((p) => p.source)),
     );
-    // Wing: unregistered type. Clawed leg: unregistered socket type. Fat leg: off the grid on
-    // every hip. Big eye: its mount isn't one of its cubes deep.
-    for (const id of ["test:wing", "test:legs/clawed", "test:legs/fat", "test:big-eye"]) {
+    // Wing: unregistered type. Clawed leg: unregistered socket type. Big eye: its mount isn't one
+    // of its cubes deep.
+    for (const id of ["test:wing", "test:legs/clawed", "test:big-eye"]) {
       expect(used.has(id), id).toBe(false);
     }
   });
 
   it("leaves a socket empty when no part can go there", () => {
-    const assembly = assemble(SEEDS[0]!, [FAT_LEG, BIG_EYE, HEAD]);
+    const assembly = assemble(SEEDS[0]!, [WING, BIG_EYE, HEAD]);
     expectSound(assembly);
     expect(assembly.instances.map((instance) => instance.id)).toEqual(["torso", "neck"]);
+  });
+
+  it("snaps a part half a cube off the grid onto it (§13) rather than passing it over", () => {
+    const assembly = assemble(SEEDS[0]!, [FAT_LEG]);
+    expectSound(assembly);
+    expect(Object.values(partsById(assembly))).toEqual(["torso", ...Array(4).fill("legs-fat")]);
   });
 
   it("passes over a part that would make faces flush, unless every part would", () => {

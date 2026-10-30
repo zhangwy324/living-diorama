@@ -75,14 +75,14 @@ const TORSO: LibraryPart = {
   }),
 };
 
-/** A torso whose right hip is half a cube off: a leg fits its left hip but not, mirrored, its right. */
+/** A torso whose right hip is too shallow for a 2.5 cm leg (§12): one fits its left hip only. */
 const LOPSIDED: LibraryPart = {
   id: "test:lopsided",
   part: box(8, 4, 6, {
     attach: { x: 4, y: 2, z: 3 },
     sockets: [
       { id: "left-hip", type: "test:hip", position: { x: 2, y: 1, z: 2 } },
-      { id: "right-hip", type: "test:hip", position: { x: 2, y: 1, z: 4.5 }, mirrors: "left-hip" },
+      { id: "right-hip", type: "test:hip", position: { x: 2, y: 1, z: 5.5 }, mirrors: "left-hip" },
     ],
   }),
 };
@@ -157,12 +157,12 @@ const EYE: LibraryPart = {
   id: "test:eye",
   part: box(2, 2, 2, { type: "test:eye", step: 0.0125, attach: { x: 0, y: 1, z: 1 } }),
 };
-/** A fin whose attach point is off its middle: only half turns keep it on the grid. */
+/** A fin whose attach point is off its middle: quarter turns move it half a cube off the grid. */
 const FIN: LibraryPart = {
   id: "test:fin",
   part: box(2, 2, 2, { type: "test:fin", attach: { x: 0.5, y: 2, z: 1 } }),
 };
-/** A fin on the grid at its own step only. */
+/** A fin on the grid at its own step only: a step moves it half a cube off. */
 const STICK: LibraryPart = {
   id: "test:stick",
   part: box(1, 4, 2, { type: "test:fin", attach: { x: 0.5, y: 4, z: 1 } }),
@@ -341,7 +341,7 @@ describe("attachPart", () => {
     ).toBe("socket_taken");
   });
 
-  it("refuses a pair when the mirrored side breaks the grid, both or neither", () => {
+  it("refuses a pair when the mirrored side breaks a joint, both or neither", () => {
     const a = start(LOPSIDED);
     expect(
       refusal(attachPart(a, { instance: "lopsided", socket: "left-hip" }, LEG, lookup, MIRROR)),
@@ -556,7 +556,7 @@ describe("replacePart", () => {
 
   it("replaces the root, re-hanging what fits", () => {
     const after = ok(replacePart(legged(), "torso", LOPSIDED, lookup, MIRROR));
-    // The lopsided torso's right hip is off the grid for a mirrored leg.
+    // The lopsided torso's right hip is too shallow for the leg.
     expect(ids(after)).toEqual(["torso", "left-hip", "foot"]);
     expect(Object.keys(after.parts)).toEqual(["legs-long", "foot", "lopsided"]);
   });
@@ -588,10 +588,10 @@ describe("replacePart", () => {
   });
 });
 
-/** A leg one cube deep: on the grid on the lopsided torso's right hip, mirrored. */
+/** A leg of 1.25 cm cubes, shallow enough for the lopsided torso's right hip. */
 const ODD_LEG: LibraryPart = {
   id: "test:legs/odd",
-  part: box(2, 4, 1, { type: "test:leg", attach: { x: 1, y: 4, z: 0.5 } }),
+  part: box(2, 4, 2, { type: "test:leg", step: 0.0125, attach: { x: 1, y: 4, z: 1 } }),
 };
 
 describe("removePart", () => {
@@ -649,12 +649,21 @@ describe("rotatePart", () => {
     expect(byId(a, "right-hip").rotation).toEqual([0, 0, 0, 1]);
   });
 
-  it("skips turns that break the grid", () => {
+  it("turns a part through every quarter turn, snapping it onto the grid", () => {
+    // ADR 0022 §13 as amended in M21 PR 7: a quarter turn puts the fin's attach point half a cube
+    // off the grid, and it snaps, so no turn is skipped.
     let a = ok(attachPart(start(), { instance: "torso", socket: "belly" }, FIN, lookup, MIRROR));
-    a = ok(rotatePart(a, "belly", MIRROR));
-    expect(byId(a, "belly").rotation).toEqual([0, 1, 0, 0]);
-    a = ok(rotatePart(a, "belly", MIRROR));
-    expect(byId(a, "belly").rotation).toEqual([0, 0, 0, 1]);
+    const turns = [];
+    for (let i = 0; i < 4; i++) {
+      a = ok(rotatePart(a, "belly", MIRROR));
+      turns.push(byId(a, "belly").rotation);
+    }
+    expect(turns).toEqual([
+      [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+      [0, 1, 0, 0],
+      [0, -Math.SQRT1_2, 0, Math.SQRT1_2],
+      [0, 0, 0, 1],
+    ]);
   });
 
   it("never drifts off exact quarter turns", () => {
@@ -723,16 +732,62 @@ describe("stepPart", () => {
     expect(byId(after, "left-hip").part).toBe("legs-long-2");
   });
 
-  it("refuses at the ladder's ends and where the grid snap breaks", () => {
+  it("refuses at the ladder's ends and where a joint breaks", () => {
     let a = ok(attachPart(start(), { instance: "torso", socket: "neck" }, HEAD, lookup, MIRROR));
     a = ok(attachPart(a, { instance: "neck", socket: "left-eye" }, EYE, lookup, MIRROR));
     expect(refusal(stepPart(a, "left-eye", -1, MIRROR))).toBe("ladder_end");
+    // A 2.5 cm eye's mount would have to lie a 2.5 cm cube deep in the head (§12).
+    expect(refusal(stepPart(a, "left-eye", 1, MIRROR))).toBe("invalid");
+    expect(refusal(stepPart(a, "nope", 1, MIRROR))).toBe("unknown_instance");
+  });
+
+  it("snaps a part a step moves half a cube off the grid, and steps back exactly", () => {
+    // ADR 0022 §13 as amended in M21 PR 7: once refused, now snapped toward the torso's middle.
     const stick = ok(
       attachPart(start(), { instance: "torso", socket: "belly" }, STICK, lookup, MIRROR),
     );
-    expect(refusal(stepPart(stick, "belly", 1, MIRROR))).toBe("invalid");
-    expect(refusal(stepPart(stick, "belly", -1, MIRROR))).toBe("invalid");
-    expect(refusal(stepPart(stick, "nope", 1, MIRROR))).toBe("unknown_instance");
+    const belly = (a: VoxelAssembly) => placeInstances(a)[1]?.offset;
+    const up = ok(stepPart(stick, "belly", 1, MIRROR));
+    const down = ok(stepPart(stick, "belly", -1, MIRROR));
+    // The belly socket at x = 4.5 is past the torso's middle (x = 4), so the stick moves −x.
+    expect([belly(stick), belly(up), belly(down)]).toEqual([
+      [0, -20, -4],
+      [-4, -36, -8],
+      [0, -12, -2],
+    ]);
+    expect(ok(stepPart(up, "belly", -1, MIRROR))).toEqual(stick);
+    expect(ok(stepPart(down, "belly", 1, MIRROR))).toEqual(stick);
+    // The same edit gives the same placement every time.
+    expect(placeInstances(ok(stepPart(stick, "belly", 1, MIRROR)))).toEqual(placeInstances(up));
+  });
+
+  it("keeps a stepped pair mirror images about the torso's middle", () => {
+    // A leg one cube wide on whole-cube hips sits half a cube off the grid at its own step and
+    // half a 1.25 cm cube off a rung down: it snaps toward the torso's middle on both sides.
+    const thin: LibraryPart = {
+      id: "test:legs/thin",
+      part: box(1, 3, 1, { type: "test:leg", attach: { x: 0.5, y: 3, z: 0.5 } }),
+    };
+    const a = ok(
+      attachPart(start(), { instance: "torso", socket: "left-hip" }, thin, lookup, MIRROR),
+    );
+    const lefts = [];
+    for (const stepped of [
+      a,
+      ok(stepPart(a, "left-hip", 1, MIRROR)),
+      ok(stepPart(a, "left-hip", -1, MIRROR)),
+    ]) {
+      const [, left, right] = placeInstances(stepped);
+      // The torso's middle is at z = 0; the right leg is drawn reflected.
+      expect(right?.linear).toEqual([1, 0, 0, 0, 1, 0, 0, 0, -1]);
+      expect(right?.offset).toEqual([left?.offset[0], left?.offset[1], -(left?.offset[2] ?? 0)]);
+      lefts.push(left?.offset);
+    }
+    expect(lefts).toEqual([
+      [-8, -16, -4],
+      [-12, -28, -8],
+      [-8, -10, -4],
+    ]);
   });
 
   it("refuses where a joint breaks", () => {
