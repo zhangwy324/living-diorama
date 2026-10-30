@@ -2,7 +2,7 @@ import { z } from "zod";
 import { SIZE_CLASSES, type SizeClass } from "./constants";
 import type { PartRole, PartTypeDefinition, SocketTypeDefinition } from "./definitions";
 import { error, warning, type Diagnostic } from "./diagnostics";
-import { LocalIdSchema, type Vec3 } from "./primitives";
+import { LocalIdSchema, parseContentId, type Vec3 } from "./primitives";
 import {
   MAX_ASSEMBLY_FACES,
   MAX_ASSEMBLY_INSTANCES,
@@ -14,6 +14,7 @@ import {
   voxelIndex,
   type VoxelPart,
   type VoxelPoint,
+  type VoxelSocket,
 } from "./voxel";
 
 // A voxel creature's body (ADR 0022 §9–§13): a tree of part instances with one root. Exact checks
@@ -199,6 +200,42 @@ const mod = (value: number, by: number) => ((value % by) + by) % by;
 
 const centimetres = (unitCount: number) => `${+(unitCount * VOXEL_UNIT * 100).toFixed(4)} cm`;
 
+/**
+ * §12: whether `socket` of `parentPart` lies at least one cube of the finer grid of the parent
+ * and `part` deep inside the parent's filled cubes. `parentGrid` is the parent's decoded cubes.
+ */
+function isSocketBuried(
+  parentPart: VoxelPart,
+  parentGrid: Uint8Array,
+  socket: VoxelSocket,
+  part: VoxelPart,
+): boolean {
+  const parentStep = stepUnits(parentPart.step);
+  const finer = Math.min(parentStep, stepUnits(part.step));
+  return isBuried(parentPart, parentGrid, units(socket.position, parentStep), finer);
+}
+
+/**
+ * §13: whether `part`, hanging from `socket` of `parentPart` with the rest rotation `turn` (a
+ * `quarterTurnMatrix`) and mirrored or not, sits on the finer grid of the two.
+ */
+function isOnFinerGrid(
+  parentPart: VoxelPart,
+  socket: VoxelSocket,
+  part: VoxelPart,
+  turn: Matrix,
+  mirrored: boolean,
+): boolean {
+  const parentStep = stepUnits(parentPart.step);
+  const finer = Math.min(parentStep, stepUnits(part.step));
+  const at = units(socket.position, parentStep);
+  const attach = apply(
+    mirrored ? multiply(MIRROR, turn) : turn,
+    units(part.attach, stepUnits(part.step)),
+  );
+  return at.every((value, a) => mod(value - num(attach, a), finer) === 0);
+}
+
 /** The structural checks (ADR 0022 §9, §11–§13, §16): they need no registered types. */
 function checkAssembly(assembly: VoxelAssembly, issue: Issue): void {
   const { parts, instances } = assembly;
@@ -273,19 +310,14 @@ function checkAssembly(assembly: VoxelAssembly, issue: Issue): void {
     }
     if (!part || !turn) return;
 
-    // §12: at least one cube of the finer grid deep. §13: on the finer grid.
-    const parentStep = stepUnits(parentPart.step);
-    const finer = Math.min(parentStep, stepUnits(part.step));
-    const at = units(socket.position, parentStep);
-    if (!isBuried(parentPart, gridOf(parentKey, parentPart), at, finer)) {
+    const finer = Math.min(stepUnits(parentPart.step), stepUnits(part.step));
+    if (!isSocketBuried(parentPart, gridOf(parentKey, parentPart), socket, part)) {
       issue(
         `Socket "${socket.id}" must lie at least one cube of the finer grid (${centimetres(finer)}) deep inside part "${parentKey}"`,
         socketPath,
       );
     }
-    const linear = instance.mirrored ? multiply(MIRROR, turn) : turn;
-    const attach = apply(linear, units(part.attach, stepUnits(part.step)));
-    if (at.some((value, a) => mod(value - num(attach, a), finer) !== 0)) {
+    if (!isOnFinerGrid(parentPart, socket, part, turn, instance.mirrored)) {
       issue(
         `The part must sit on the finer grid of it and its parent (${centimetres(finer)} cubes): move its attach point or the socket by half a cube`,
         [...path, "part"],
@@ -745,4 +777,258 @@ export function measureAssembly(
     centerOfGravity: toBody(moment.map((m) => m / volume)),
     tail,
   };
+}
+
+/** A part of a library to assemble from: its content ID and the part, as a part definition has. */
+export interface LibraryPart {
+  readonly id: string;
+  readonly part: VoxelPart;
+}
+
+/** What `assembleParts` builds from. */
+export interface AssembleOptions {
+  /**
+   * What to build on: a library part, the root of a new assembly, or a valid assembly (one that
+   * `VoxelAssemblySchema` accepts), whose instances are all kept and whose free sockets are filled.
+   */
+  start: LibraryPart | VoxelAssembly;
+  /** The parts to fill sockets with, in any order. Each ID once. */
+  parts: readonly LibraryPart[];
+  /** The registered part and socket types, for what fits where. */
+  lookup: VoxelTypeLookup;
+  /** The same seed and inputs give the same assembly. */
+  seed: number;
+}
+
+/** A small seeded generator of numbers in [0, 1) (mulberry32): the same seed, the same numbers. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const IDENTITY_MATRIX: Matrix = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+/** A deep copy of a part, with `source` when given. */
+const copyPart = (part: VoxelPart, source?: string): VoxelPart => ({
+  ...part,
+  ...(source === undefined ? {} : { source }),
+  size: { ...part.size },
+  colors: [...part.colors],
+  voxels: [...part.voxels],
+  attach: { ...part.attach },
+  sockets: part.sockets.map((socket) => ({ ...socket, position: { ...socket.position } })),
+});
+
+const copyInstance = ({ parent, rotation, ...rest }: VoxelInstance): VoxelInstance => ({
+  ...rest,
+  ...(parent ? { parent: { ...parent } } : {}),
+  rotation: [...rotation],
+});
+
+/** A local ID from a content ID's name: `hollow:legs/short` becomes `legs-short`. */
+const localName = (id: string): string => parseContentId(id)?.name.replace(/[./]/g, "-") ?? "part";
+
+/** `base`, or `base-2`, `base-3`… when that is taken; marks the one it returns taken. */
+function claim(base: string, taken: Set<string>): string {
+  let id = base;
+  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+  taken.add(id);
+  return id;
+}
+
+/** A part that may go on a socket: a library part, or one the assembly already holds. */
+interface Option {
+  part: VoxelPart;
+  library?: LibraryPart;
+  key?: string;
+}
+
+/** One socket of a pair (or a socket without a pair), and whether a part on it is mirrored. */
+interface Side {
+  socket: VoxelSocket;
+  mirrored: boolean;
+}
+
+/**
+ * Fills every free socket of an assembly with library parts that fit it (ADR 0022 §9, M20
+ * decisions: a pure assembler), the same way for the same seed and inputs. M21's Randomize uses
+ * it. Pure: it changes none of its inputs and shares no objects with them. The result passes
+ * `VoxelAssemblySchema` and `checkAssemblyFit` (given a valid start).
+ *
+ * - Sockets are filled in the order of the instances, then of each part's sockets, so the root's
+ *   first; each new part's own sockets after those of the parts listed before it, until no
+ *   socket is free or the assembly holds `MAX_ASSEMBLY_INSTANCES` parts. Every free socket gets a
+ *   part when one can go there: a socket has no way to say it may stay empty.
+ * - A part can go on a socket when its type fits the socket's type and every part and socket type
+ *   it has is registered (`checkAssemblyFit`), the socket lies deep enough in its parent (§12), it
+ *   sits on the finer grid (§13) at the identity rest rotation, and the assembly stays within
+ *   `MAX_ASSEMBLY_FACES`.
+ * - Each socket type gets one seeded order of the library parts that fit it, and each socket of
+ *   that type takes the first part in it that can go there, so a creature's hips all get the same
+ *   leg where they can. A part that would make faces flush with another part's
+ *   (`assemblyWarnings`) is passed over for the next one; when every part would, the first is
+ *   used.
+ * - Both sockets of a mirror pair get the same part, the one on the mirrored socket mirrored.
+ *   When one is taken already, the other gets the part that's there first, if it fits.
+ * - A library part used several times is held once, keyed by its ID's name (`legs-short` for
+ *   `hollow:legs/short`), with its ID as `source`. A new instance is named after its socket, and
+ *   below the root after its parent and its socket (`head-left-eye`).
+ */
+export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): VoxelAssembly {
+  const random = seededRandom(seed);
+  const assembly: VoxelAssembly = { parts: {}, instances: [] };
+  if ("instances" in start) {
+    for (const [key, part] of Object.entries(start.parts)) assembly.parts[key] = copyPart(part);
+    assembly.instances = start.instances.map(copyInstance);
+  } else {
+    const key = localName(start.id);
+    assembly.parts[key] = copyPart(start.part, start.id);
+    assembly.instances.push({
+      id: key,
+      part: key,
+      rotation: [...IDENTITY_QUATERNION],
+      mirrored: false,
+    });
+  }
+  const keys = new Set(Object.keys(assembly.parts));
+  const ids = new Set(assembly.instances.map((instance) => instance.id));
+
+  const grids = new Map<VoxelPart, Uint8Array>();
+  const gridOf = (part: VoxelPart) => {
+    let grid = grids.get(part);
+    if (!grid) grids.set(part, (grid = decodeVoxels(part.voxels, part.size)));
+    return grid;
+  };
+  const faceCounts = new Map<VoxelPart, number>();
+  const facesOf = (part: VoxelPart) => {
+    let count = faceCounts.get(part);
+    if (count === undefined) {
+      faceCounts.set(part, (count = visibleFaces(gridOf(part), part.size)));
+    }
+    return count;
+  };
+  let faces = 0;
+  for (const instance of assembly.instances) faces += facesOf(partOf(assembly, instance));
+
+  // Who holds each taken socket: `instance/socket` to the instance hanging there.
+  const holders = new Map<string, VoxelInstance>();
+  for (const instance of assembly.instances) {
+    const { parent } = instance;
+    if (parent) holders.set(`${parent.instance}/${parent.socket}`, instance);
+  }
+
+  const fits = (part: VoxelPart, socketType: string) =>
+    lookup.partType(part.type)?.fits.includes(socketType) ?? false;
+  const library = [...parts]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .filter((entry, i, sorted) => {
+      if (sorted[i - 1]?.id === entry.id) throw new Error(`Part "${entry.id}" is listed twice`);
+      return (
+        lookup.partType(entry.part.type) !== undefined &&
+        entry.part.sockets.every((socket) => lookup.socketType(socket.type) !== undefined)
+      );
+    });
+  // The seeded order of the library parts that fit each socket type, made when first needed.
+  const orders = new Map<string, LibraryPart[]>();
+  const orderFor = (socketType: string) => {
+    let order = orders.get(socketType);
+    if (!order) {
+      order = library.filter((entry) => fits(entry.part, socketType));
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [order[i], order[j]] = [item(order, j), item(order, i)];
+      }
+      orders.set(socketType, order);
+    }
+    return order;
+  };
+  // The key of each library part the assembly holds.
+  const libraryKeys = new Map<string, string>();
+
+  for (let i = 0; i < assembly.instances.length; i++) {
+    const parent = item(assembly.instances, i);
+    const parentPart = partOf(assembly, parent);
+    const slot = (side: Side) => `${parent.id}/${side.socket.id}`;
+    for (const socket of parentPart.sockets) {
+      // The mirrored socket of a pair is filled with its pair.
+      if (socket.mirrors !== undefined) continue;
+      const mirror = parentPart.sockets.find((s) => s.mirrors === socket.id);
+      const pair: Side[] = [{ socket, mirrored: false }];
+      if (mirror) pair.push({ socket: mirror, mirrored: true });
+      const free = pair.filter((side) => !holders.has(slot(side)));
+      if (free.length === 0) continue;
+      if (assembly.instances.length + free.length > MAX_ASSEMBLY_INSTANCES) continue;
+
+      const options: Option[] = [];
+      // One side of the pair is taken already (only in an assembly to fill): its part first.
+      const takenSide = pair.find((side) => holders.has(slot(side)));
+      const held = takenSide && holders.get(slot(takenSide));
+      if (held) {
+        const part = partOf(assembly, held);
+        if (fits(part, socket.type)) options.push({ part, key: held.part });
+      }
+      for (const entry of orderFor(socket.type)) options.push({ part: entry.part, library: entry });
+
+      const placeable = options.filter(
+        ({ part }) =>
+          faces + facesOf(part) * free.length <= MAX_ASSEMBLY_FACES &&
+          free.every(
+            (side) =>
+              isSocketBuried(parentPart, gridOf(parentPart), side.socket, part) &&
+              isOnFinerGrid(parentPart, side.socket, part, IDENTITY_MATRIX, side.mirrored),
+          ),
+      );
+      if (placeable.length === 0) continue;
+
+      const keyFor = (option: Option): string => {
+        if (option.key !== undefined) return option.key;
+        const id = option.library?.id ?? "";
+        return libraryKeys.get(id) ?? claim(localName(id), new Set(keys));
+      };
+      const instancesFor = (option: Option) => {
+        const taken = new Set(ids);
+        const part = keyFor(option);
+        return free.map((side) => ({
+          id: claim(i === 0 ? side.socket.id : `${parent.id}-${side.socket.id}`, taken),
+          part,
+          parent: { instance: parent.id, socket: side.socket.id },
+          rotation: [...IDENTITY_QUATERNION] as Quaternion,
+          mirrored: side.mirrored,
+        }));
+      };
+      const first = assembly.instances.length;
+      const clean = placeable.find((option) => {
+        const trial: VoxelAssembly = {
+          parts: { ...assembly.parts, [keyFor(option)]: option.part },
+          instances: [...assembly.instances, ...instancesFor(option)],
+        };
+        // A warning names the later of its two parts.
+        return !assemblyWarnings(trial).some((found) => Number(found.path[1]) >= first);
+      });
+      const chosen = clean ?? item(placeable, 0);
+
+      const key = keyFor(chosen);
+      if (chosen.library && !libraryKeys.has(chosen.library.id)) {
+        keys.add(key);
+        libraryKeys.set(chosen.library.id, key);
+        const copy = copyPart(chosen.part, chosen.library.id);
+        assembly.parts[key] = copy;
+        grids.set(copy, gridOf(chosen.part));
+        faceCounts.set(copy, facesOf(chosen.part));
+      }
+      for (const instance of instancesFor(chosen)) {
+        ids.add(instance.id);
+        holders.set(`${parent.id}/${instance.parent.socket}`, instance);
+        assembly.instances.push(instance);
+        faces += facesOf(chosen.part);
+      }
+    }
+  }
+  return assembly;
 }
