@@ -106,3 +106,5 @@ export function registerBuiltInContent(registries: Registries): Result<unknown>[
     ...builtInDefinitions.worlds.map((d) => registries.worlds.register(d)),
   ];
 }
+
+export { sampleVoxelAssembly } from "./voxel-sample";

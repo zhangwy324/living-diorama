@@ -1,9 +1,16 @@
-import { formatDiagnostic, type Drawing, type SizeClass } from "@living-diorama/content-schema";
+import {
+  error,
+  formatDiagnostic,
+  type Drawing,
+  type Result,
+  type SizeClass,
+} from "@living-diorama/content-schema";
+import type { LocomotionChoice } from "./body-plan";
 import { encodePng, paintHistory } from "./drawing";
 import { sampleSpecies } from "./sample-species";
 import type { TimeDevHook } from "./dev-time";
 import type { WorldDevHook } from "./dev-world";
-import type { SpeciesLibrary } from "./species-library";
+import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
 
 // A development-only console hook to the species library (ADR 0014), for checks the Studio (M11)
 // doesn't cover. In the dev app's console:
@@ -11,6 +18,7 @@ import type { SpeciesLibrary } from "./species-library";
 //   await livingDiorama.library.saveSample("Puddle", "small")
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
 //   await livingDiorama.library.saveSamples()   // the twenty species measurements use
+//   await livingDiorama.library.saveVoxelSample("hop")   // a voxel creature (ADR 0022), added
 //
 // `dev-time.ts` adds `livingDiorama.time`, and `dev-world.ts` `livingDiorama.world`.
 
@@ -71,9 +79,47 @@ export async function saveSampleSpecies(library: SpeciesLibrary): Promise<string
   return failed;
 }
 
+/** The body plans the voxel sample can have, through the Studio's mapping (`body-plan.ts`). */
+export const VOXEL_SAMPLE_PLANS = {
+  walk: { land: true, gait: "walk", swim: false },
+  hop: { land: true, gait: "hop", swim: false },
+  swim: { land: false, gait: "walk", swim: true },
+  "land+swim": { land: true, gait: "walk", swim: true },
+} as const satisfies Record<string, LocomotionChoice>;
+export type VoxelSamplePlan = keyof typeof VOXEL_SAMPLE_PLANS;
+
 /**
- * Puts the library on `window.livingDiorama.library`, with `saveSample` to add a drawn species
- * and `saveSamples` to add the twenty sample species.
+ * Saves the sample voxel creature (`sampleVoxelAssembly`) as a species of `plan`, and adds one of
+ * its creatures to the world. Resolves with the species and the creature's ID.
+ */
+export async function saveVoxelSample(
+  library: SpeciesLibrary,
+  plan: VoxelSamplePlan = "walk",
+  name = `Voxel ${plan}`,
+): Promise<Result<{ species: LibrarySpecies; creatureId: string }>> {
+  const locomotion: LocomotionChoice | undefined = Object.hasOwn(VOXEL_SAMPLE_PLANS, plan)
+    ? VOXEL_SAMPLE_PLANS[plan]
+    : undefined;
+  if (!locomotion) {
+    const plans = Object.keys(VOXEL_SAMPLE_PLANS).join(", ");
+    return {
+      ok: false,
+      diagnostics: [error("unknown_plan", `"${plan}" is not one of ${plans}`, [])],
+    };
+  }
+  // Loaded only when asked for, so the pack stays out of the strip's own bundle.
+  const { sampleVoxelAssembly } = await import("@living-diorama/built-in-content");
+  const saved = await library.saveVoxel(sampleVoxelAssembly(), name, {
+    locomotion: { ...locomotion },
+  });
+  if (!saved.ok) return saved;
+  const added = await library.addCreature(saved.value.speciesId);
+  return added.ok ? { ok: true, value: { species: saved.value, creatureId: added.value } } : added;
+}
+
+/**
+ * Puts the library on `window.livingDiorama.library`, with `saveSample` to add a drawn species,
+ * `saveSamples` to add the twenty sample species and `saveVoxelSample` to add a voxel one.
  */
 export function installLibraryDevHook(library: SpeciesLibrary): void {
   window.livingDiorama = {
@@ -83,6 +129,8 @@ export function installLibraryDevHook(library: SpeciesLibrary): void {
       saveSample: (name = "Sample", sizeClass: SizeClass = "small") =>
         saveDrawn(library, SAMPLE_DRAWING, name, sizeClass),
       saveSamples: () => saveSampleSpecies(library),
+      saveVoxelSample: (plan?: VoxelSamplePlan, name?: string) =>
+        saveVoxelSample(library, plan, name),
     },
   };
 }

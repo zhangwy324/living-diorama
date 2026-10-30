@@ -18,6 +18,7 @@ import { ControlsOverlay } from "./ControlsOverlay";
 import { EditHistory } from "./edit-history";
 import { EditToolbar } from "./EditToolbar";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
+import { checkAssemblyAgainstContent } from "./assembly-types";
 import { installLibraryDevHook } from "./dev-library";
 import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
@@ -204,6 +205,7 @@ export function App() {
           spawn: (speciesId, options) => client.spawn(speciesId, options).then(savedAfter),
           despawn: (creatureId) => client.despawn(creatureId).then(savedAfter),
           creatures: () => latest?.creatures ?? [],
+          checkAssembly: checkAssemblyAgainstContent,
         },
         { onChange: pushLibrary },
       );

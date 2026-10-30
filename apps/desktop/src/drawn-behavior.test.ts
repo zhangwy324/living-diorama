@@ -12,6 +12,7 @@ import {
   type CreatureState,
   type SimulationEvent,
 } from "@living-diorama/simulation";
+import { checkAssemblyTypes } from "@living-diorama/extension-api";
 import { describe, expect, it } from "vitest";
 import { loadContent } from "./content";
 import { openSpeciesLibrary, type LibraryWorld } from "./species-library";
@@ -65,6 +66,8 @@ function headlessWorld(startMinutes: number) {
       return Promise.resolve(despawned.ok ? { ok: true as const, value: creatureId } : despawned);
     },
     creatures: () => [...simulation.state.creatures.values()],
+    checkAssembly: (assembly) =>
+      Promise.resolve(checkAssemblyTypes(simulation.state.registries, assembly)),
   };
   const run = (ticks: number, until?: () => boolean) => {
     for (let t = 0; t < ticks && !until?.(); t++) {

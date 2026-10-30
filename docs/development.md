@@ -266,6 +266,16 @@ Prop editing (once, in the dev app at any scale; ADR 0021, M17). Edit mode edits
 - [ ] Edit, then quit from the tray and relaunch: the edits are there, and Undo is greyed out (the history isn't saved). Edit, then `await livingDiorama.world.reset()`: the edits stay, the selection and the undo history go.
 - [ ] Move a round tree a mossling sleeps by at night (`livingDiorama.time.set("21:00")`): it gets up and walks to its home where it now stands, or picks another. Delete it: the mossling picks a new home. No creature is ever left inside a prop or stuck.
 
+Voxel creatures (once, in the dev app at any scale; ADR 0022, M19). The Studio can't make voxel creatures yet (M21), so a sample one, a small fox-coloured creature of boxes, is added from the console. Use a data folder of its own, as for World saving (`$env:LIVING_DIORAMA_DEV_DATA_DIR = "$env:TEMP\diorama-voxel"; pnpm dev`), then expand the strip and press Ctrl+Shift+I for the dev tools. `await livingDiorama.library.saveVoxelSample("walk")` saves the sample as a new species and adds one of its creatures; the plan is `"walk"`, `"hop"`, `"swim"` or `"land+swim"`, and a name may follow it. The answer is `{ ok: true, value: { species, creatureId } }`, or `ok: false` with the reasons.
+
+- [ ] Add a walker, a hopper, a swimmer and a land-and-swim one. Each appears as a body of blocks (a torso, four legs, a head with two small dark eyes, a tail), standing on the ground with its feet, not sunk into it or floating, and facing the way it goes.
+- [ ] The walker walks with the whole-body bob and waddle of the drawn creatures, and the hopper hops with the squash and stretch; both cross the bridge and keep out of the water.
+- [ ] The swimmer appears in the river and stays there, half under the surface, swaying from near its head so the tail sweeps. The land-and-swim one walks, jumps into the river from a bank now and then, swims and climbs out.
+- [ ] Its colours sit with the world's: shaded like the props and terrain, not glowing or flat. The joins between parts don't flicker as the camera turns, and its shadow meets its feet.
+- [ ] By night (`livingDiorama.time.set("22:00")`) the voxel creatures are lit like the others and still readable, and they sleep like them. `livingDiorama.time.follow()` afterwards.
+- [ ] Open the Creation Studio: My creatures lists each voxel species with a placeholder block for its picture, its name and its count. + and − add and take out creatures of it, and Delete removes the species and its creatures.
+- [ ] Quit from the tray and relaunch: the voxel species are listed again, and every voxel creature is back where it was, moving its own way. The app log has no warning about the library.
+
 ## Releasing
 
 1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`. Add the player-facing notes as `docs/release-notes/<version>.md` (for example `0.2.0.md`), and merge it. Every version needs its notes file before it is tagged: the workflow publishes it and fails without it. A release candidate tag such as `v0.2.0-rc.1` publishes `0.2.0.md`.

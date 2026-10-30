@@ -1,5 +1,8 @@
+import type { LibraryBodyKind } from "@living-diorama/content-schema";
+
 // The images in My creatures. `blob:` URLs from the strip belong to its document, so the Studio
-// loads each species' PNG itself and makes its own URL (ADR 0015 §5).
+// loads each species' PNG itself and makes its own URL (ADR 0015 §5). A voxel species has no
+// image; My creatures shows a placeholder for it until the Studio can draw one (ADR 0022, M21).
 
 export interface ThumbnailOptions {
   /** The PNG bytes of the species stored under `libraryId`. */
@@ -32,8 +35,12 @@ export class Thumbnails {
     return this.urls.get(speciesId);
   }
 
-  /** Loads the images of species new to the list and revokes those of species no longer in it. */
-  sync(species: readonly { speciesId: string; libraryId: string }[]): void {
+  /**
+   * Loads the images of drawn species new to the list and revokes those of species no longer in
+   * it. Voxel species have none to load.
+   */
+  sync(all: readonly { speciesId: string; libraryId: string; body?: LibraryBodyKind }[]): void {
+    const species = all.filter(({ body }) => body !== "voxel");
     const listed = new Set(species.map(({ speciesId }) => speciesId));
     for (const [speciesId, url] of this.urls) {
       if (listed.has(speciesId)) continue;

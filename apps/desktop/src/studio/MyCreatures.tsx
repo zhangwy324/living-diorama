@@ -76,7 +76,10 @@ export function MyCreatures(props: MyCreaturesProps) {
               key={species.speciesId}
               className={species.available ? "species" : "species unavailable"}
             >
-              {image ? (
+              {species.body === "voxel" ? (
+                // A placeholder until the Studio can draw voxel creatures (ADR 0022, M21).
+                <span className="thumbnail voxel-placeholder" />
+              ) : image ? (
                 <img className="thumbnail" src={image} alt="" />
               ) : (
                 <span className="thumbnail" />

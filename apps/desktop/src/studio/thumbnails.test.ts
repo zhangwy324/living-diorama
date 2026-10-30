@@ -22,6 +22,17 @@ function setUp() {
 const settle = () => new Promise((resolve) => setTimeout(resolve));
 
 describe("thumbnails", () => {
+  it("loads no image for a voxel species", async () => {
+    const { thumbnails, load } = setUp();
+    thumbnails.sync([
+      { ...species(1), body: "voxel" },
+      { ...species(2), body: "drawn" },
+    ]);
+    await settle();
+    expect(load.mock.calls.map(([id]) => id)).toEqual(["2"]);
+    expect(thumbnails.get("user:1")).toBeUndefined();
+  });
+
   it("loads each species' image once", async () => {
     const { thumbnails, load } = setUp();
     thumbnails.sync([species(1)]);

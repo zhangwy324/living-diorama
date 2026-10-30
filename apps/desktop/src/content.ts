@@ -7,9 +7,10 @@ import {
 } from "@living-diorama/extension-api";
 import { registerCoreEngine } from "@living-diorama/simulation";
 
-// Composition root for content (ADR 0010). Only the simulation worker imports this module: it is
+// Composition root for content (ADR 0010). The simulation worker imports this module: it is
 // the one place content is registered and checked, and the main thread draws what the worker's
-// `ready` message describes.
+// `ready` message describes. The one exception is `assembly-types.ts`, which loads it on the
+// main thread, lazily, to check a voxel creature's part types at release.
 
 /** Registers the engine's entries, then the built-in pack, and resolves references. */
 export function loadContent(): Result<Registries> {

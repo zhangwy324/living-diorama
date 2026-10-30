@@ -6,7 +6,7 @@ export interface UserSpeciesIds {
   uuid: string;
   /** The species ID, e.g. `user:3f9c2a1e-…`. */
   speciesId: string;
-  /** The ID of its appearance image, e.g. `user:3f9c2a1e-…/appearance.png`. */
+  /** The ID of a drawn body's appearance image, e.g. `user:3f9c2a1e-…/appearance.png`. */
   appearanceId: string;
 }
 

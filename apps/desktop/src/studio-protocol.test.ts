@@ -104,7 +104,7 @@ async function setUp({
   if (open) {
     library = await openSpeciesLibrary(
       store,
-      { ...world, creatures: () => world.creatures },
+      { ...world, creatures: () => world.creatures, checkAssembly: () => Promise.resolve([]) },
       { onChange: changed },
     );
   }

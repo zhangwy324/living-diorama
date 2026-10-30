@@ -84,9 +84,15 @@ export function locomotionCapabilities({
 
 /** The species' `body` for this plan and thickness (`BodyShape`'s input). */
 export function planBody(plan: BodyPlanChoice, thickness: number): BodyShape {
-  return {
-    thickness,
-    locomotion: { land: { gait: plan.locomotion.gait } },
-    anchors: activeAnchors(plan),
-  };
+  return { thickness, ...planVoxelBody(plan), anchors: activeAnchors(plan) };
 }
+
+/**
+ * A voxel species' `body` for these ways of moving: its gait only, since its cubes give its shape
+ * and anchors (ADR 0022, M19 decisions).
+ */
+export const planVoxelBody = ({
+  locomotion,
+}: Pick<BodyPlanChoice, "locomotion">): Pick<BodyShape, "locomotion"> => ({
+  locomotion: { land: { gait: locomotion.gait } },
+});
