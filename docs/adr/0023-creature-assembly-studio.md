@@ -26,7 +26,7 @@ This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build 
 
 7. **One rotate button.** It turns the selected part a quarter turn about its socket's Y axis, cycling. Turns that would make the assembly invalid, such as failing the joint depth (ADR 0022 §12), are skipped. The rest rotation stays a stored quaternion (ADR 0022 §9), so other axes can be added later without a format change.
 
-8. **Ladder steps, per part and per creature.** A part's step can go one rung up or down the ladder (ADR 0022 §1): it changes the step of the part copy, and is refused if a joint (§12 there) or the snap to the finer grid (§13 there) would break. The whole creature can step up or down too: every part's step moves together, keeping their ratios. Stepping can push the derived size class up.
+8. **Ladder steps, per part and per creature.** A part's step can go one rung up or down the ladder (ADR 0022 §1): it changes the step of the part copy for the instance and its mirror twin only, copying the part first when the copy is shared beyond that pair, the same reach as recolouring (§12; owner, M21). It is refused if a joint (ADR 0022 §12) or the snap to the finer grid (ADR 0022 §13) would break. The whole creature can step up or down too: every part's step moves together, keeping their ratios. Stepping can push the derived size class up.
 
 9. **Randomize and Fill empty.** Randomize builds a new creature with `assembleParts` from a new root and seed; Fill empty fills the current assembly's free sockets and keeps its parts. Part-type fits are tightened first (#225, PR 4), so random creatures stay plausible. An `optional` flag on sockets (ADR 0022, M20 PR 5a) is deferred.
 
@@ -124,4 +124,3 @@ _To be written by PR 6._
 - Undo snapshots keep the Studio's edit code free of inverse operations; their memory grows with the history's length, which PR 1 may cap.
 - A creature can be made larger than `large` or with hints while editing; only release stops it.
 - Deferred: an `optional` socket flag, faster assembly warnings (#205), run-time parts on the main thread (#226), drafts, and editing a released species in place.
-- Open for PR 1: whether a per-part step change on a copy shared beyond a mirror pair copies on write, as recolouring does (§8, §12).
