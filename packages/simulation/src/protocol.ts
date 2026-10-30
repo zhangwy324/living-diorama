@@ -151,6 +151,17 @@ export interface SpeciesSummary {
 }
 
 /**
+ * What the prop editor needs of a registered prop type (ADR 0021 §12): its name for the palette,
+ * and its model and block radius (at scale 1) to preview a new placement.
+ */
+export interface PropSummary {
+  name: string;
+  /** Asset ref of the model. */
+  model: string;
+  blockRadius: number;
+}
+
+/**
  * Everything the main thread needs to draw the world, resolved by the worker, which is the only
  * place content is registered and checked (ADR 0010).
  */
@@ -161,6 +172,8 @@ export interface WorldContent {
   /** Every registered asset and species, by ID. */
   assets: Record<string, AssetSummary>;
   species: Record<string, SpeciesSummary>;
+  /** Every registered prop type, by ID, for the prop editor's palette. */
+  props: Record<string, PropSummary>;
 }
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */

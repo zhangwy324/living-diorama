@@ -53,7 +53,8 @@ body,
   opacity: 1;
 }
 
-.controls button {
+.controls button,
+.editor-toolbar button {
   display: grid;
   place-items: center;
   width: 28px;
@@ -66,24 +67,82 @@ body,
   cursor: pointer;
 }
 
-.controls button:hover {
+.controls button:hover,
+.editor-toolbar button:hover:enabled {
   background: rgb(0 0 0 / 65%);
 }
 
-.controls button[aria-pressed="true"] {
+.controls button[aria-pressed="true"],
+.editor-toolbar button[aria-pressed="true"] {
   background: rgb(110 160 90 / 80%);
 }
 
-.controls svg {
+.controls svg,
+.editor-toolbar svg {
   fill: currentColor;
 }
 
-.controls svg .stroke {
+.controls svg .stroke,
+.editor-toolbar svg .stroke {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* Edit mode (ADR 0021 §12): compact, in the top-left corner, and shown all the while it is on. */
+.editor {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  max-width: calc(100% - 20px);
+  pointer-events: none;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.editor-palette {
+  display: flex;
+  gap: 2px;
+  margin-right: 4px;
+}
+
+.editor-toolbar .editor-chip {
+  width: auto;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.editor-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.editor-line {
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.editor-line.editor-warning {
+  background: rgb(150 110 20 / 85%);
+}
+
+.editor-line.editor-error {
+  background: rgb(160 50 40 / 85%);
 }
 
 .error-screen {

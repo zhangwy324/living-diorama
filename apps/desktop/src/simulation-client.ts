@@ -1,4 +1,11 @@
-import { formatDiagnostic, type Result, type SizeClass } from "@living-diorama/content-schema";
+import {
+  formatDiagnostic,
+  type Result,
+  type SizeClass,
+  type WorldEditCheck,
+  type WorldEditInput,
+  type WorldEditResult,
+} from "@living-diorama/content-schema";
 import {
   envelope,
   isValidSpeed,
@@ -83,6 +90,17 @@ export interface SimulationClient {
    * resolves, no lost time is caught up, so the replaced world's never reaches the restored one.
    */
   restore(json: string): Promise<Result<RestoreReport>>;
+  /**
+   * Applies a world edit between ticks (ADR 0021 §1, §3). Resolves with the edit as applied, its
+   * inverse, footprints, warnings and moved creatures, or with why it was refused, in which case
+   * nothing changed. `onWorldChanged` runs after an applied edit resolves.
+   */
+  edit(edit: WorldEditInput): Promise<WorldEditResult>;
+  /**
+   * What `edit` would do, without doing it (ADR 0021 §10): the outcome, or why it would be
+   * refused. It rebuilds the world, so it is for single checks, not for every pointer move.
+   */
+  validateEdit(edit: WorldEditInput): Promise<WorldEditCheck>;
   /** Turns debug data (routes, needs, knowledge and home) in snapshots on or off. */
   setDebug(enabled: boolean): void;
   /** Stops or restarts the simulation clock. */
@@ -150,6 +168,11 @@ export function creatureCap(config: StartupConfig, countOverride = COUNT_OVERRID
 }
 
 type Pending = (result: Result<unknown>) => void;
+
+/** A request answered by a result of its own, which a refusal fails like a `Result`. */
+const unwrap = <T extends { ok: boolean }>(
+  result: Result<T>,
+): T | Extract<Result<T>, { ok: false }> => (result.ok ? result.value : result);
 
 /**
  * Starts the simulation worker on the startup world, still empty, and hands every snapshot and its
@@ -350,6 +373,9 @@ export function startSimulation(
       request({ type: "spawn", speciesId, ...(released ? { released } : {}) }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),
     spawnStartingCreatures,
+    edit: (edit) =>
+      request<Extract<WorldEditResult, { ok: true }>>({ type: "edit", edit }).then(unwrap),
+    validateEdit: (edit) => request<WorldEditCheck>({ type: "validate_edit", edit }).then(unwrap),
     save: () => request({ type: "save", savedAt: clock.now() }),
     restore: (json) => {
       // Lost time counted so far belongs to the world being replaced, and none is caught up until

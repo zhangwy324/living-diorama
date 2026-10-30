@@ -79,6 +79,11 @@ export function describeContent({ state }: Simulation): WorldContent {
     species: Object.fromEntries(
       registries.species.values().map((s) => [s.id, summarizeSpecies(s)]),
     ),
+    props: Object.fromEntries(
+      registries.props
+        .values()
+        .map(({ id, name, model, blockRadius }) => [id, { name, model, blockRadius }]),
+    ),
   };
 }
 

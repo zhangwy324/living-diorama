@@ -3,6 +3,7 @@ import { createMemoryWorldStore, type WorldStore } from "@living-diorama/desktop
 import type { RestoreReport } from "@living-diorama/simulation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installWorldDevHook } from "./dev-world";
+import { EditHistory } from "./edit-history";
 import { AUTOSAVE_MS, describeRestore, worldSaving, type SavedWorld } from "./world-saving";
 
 const report = (overrides: Partial<RestoreReport> = {}): RestoreReport => ({
@@ -371,7 +372,12 @@ describe("worldSaving saves", () => {
   it("resets the world from the dev hook: creatures out, starting ones in, then saved", async () => {
     const { fake, saving, written } = await opened('{"saved":true}');
     vi.stubGlobal("window", {});
-    const uninstall = installWorldDevHook(saving);
+    const clear = vi.fn();
+    const uninstall = installWorldDevHook(saving, {
+      history: new EditHistory(() => Promise.reject(new Error("no edits"))),
+      validateEdit: () => Promise.reject(new Error("no edits")),
+      clear,
+    });
     const resetting = window.livingDiorama?.world?.reset();
     await fake.answerSave();
     await resetting;
@@ -382,6 +388,8 @@ describe("worldSaving saves", () => {
       "save",
     ]);
     expect(written).toEqual(["save-2"]);
+    // The undo history and the selection are forgotten too.
+    expect(clear).toHaveBeenCalledOnce();
     uninstall();
     expect(window.livingDiorama?.world).toBeUndefined();
   });
