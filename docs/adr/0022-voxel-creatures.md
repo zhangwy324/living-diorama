@@ -21,9 +21,9 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 1. **A ladder of four cube sizes: 1.25, 2.5, 5 and 10 cm.** Each step is twice the one below. 1.25 cm is the detail step, for eyes and other small features on tiny creatures. 10 cm is the coarsest and also the step for houses. No 20 cm step for now.
 
-2. **Any part may use any step.** The format allows every step on every part. The Studio hints, without blocking, when a part is two or more steps from the creature's main step, the step of its root part (§11).
+2. **Any part may use any step.** The format allows every step on every part. The Studio hints, without blocking, when a part is two or more steps from the creature's main step, the step of the assembly's root part (§11).
 
-3. **A creature is the size of its cubes; its size class is derived.** A creature's bounds are measured from its assembled cubes (cubes × step), and its size class is the smallest class that contains them. The body is not scaled to the class's height. The Studio's size buttons become a display of the derived class, updated live as parts are added, moved or changed, since one cube can tip it (issue #145 covers using the measured bounds for collision).
+3. **A creature is the size of its cubes; its size class is derived.** A creature's bounds are measured from its assembled cubes (cubes × step) in the rest pose (§9), and its size class is the smallest class that contains it in both height and footprint: its height within the class's height and its footprint within the class's radius (issue #145). The body is not scaled to the class's height. The Studio's size buttons become a display of the derived class, updated live as parts are added, moved or changed, since one cube can tip it. The Studio blocks the release of a creature that doesn't fit inside the large class.
 
 ### Colour
 
@@ -33,7 +33,7 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 ### Look
 
-6. **Lit like the rest of the world, with less glow.** Voxel creatures share the world's lighting. Their emissive glow is 0.15 of their colour, down from ADR 0011 §6's 0.35.
+6. **Lit like the rest of the world, with less glow.** Voxel creatures share the world's lighting. Their emissive glow is 0.15 of their colour, down from ADR 0011 §6's 0.35. This is for voxel creatures only: drawn creatures keep 0.35 until they go (§22).
 
 7. **Ambient occlusion as today; no colour variation, no outlines.** Each cube face takes per-vertex ambient occlusion at today's strength, and each quad is split along the diagonal that interpolates its occlusion evenly. Per-cube colour variation is off and there are no outlines. Fine-tuning these (glow, variation, outlines, contact darkening, other tricks) is issue #200.
 
@@ -41,13 +41,13 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 ### Parts, sockets and assembly
 
-9. **Typed sockets at fixed points, rotation at the socket.** A part declares any number of sockets, each at a fixed point with a socket type; a torso may have several leg sockets. A part fits any free socket whose type matches it. A part turns only about its socket: it is attached at its attach point, which is also its pivot, and the assembly may rotate it there.
+9. **Typed sockets at fixed points, rotation at the socket.** A part declares any number of sockets, each at a fixed point with a socket type; a torso may have several leg sockets. A part fits any free socket whose type matches it. A part turns only about its socket: it is attached at its attach point, which is also its pivot, and the assembly may rotate it there. In the rest pose that rotation is limited to quarter turns, so cubes stay on the grid; animation may then rotate parts freely. The rest rotation is stored in a general form (not as a quarter-turn count), so loosening the limit later is a change to the validator only. Bounds, size class (§3) and ground contact (§21) are measured in the rest pose.
 
 10. **Socket types and part types are content.** They are registered by packs like M17's prop categories, so a pack can add them. Engine and app code never branch on their IDs. M22 adds a motion field to part types.
 
-11. **An assembly is a tree of parts with the torso at its root.** Each part other than the root hangs from one socket of its parent.
+11. **An assembly is a tree of parts with one root part,** the torso in practice. Each part other than the root hangs from one socket of its parent. Part types are content (§10), so the engine knows the root by its place in the tree, not by its type.
 
-12. **A socket lies at least one cube deep inside its parent part,** so a part that swings never shows a gap at its joint. Depth is counted in the child's cubes: a fine detail part sits one of its own cubes deep, not one of its parent's. The validator checks it.
+12. **A socket lies at least one cube deep inside its parent part,** so a part that swings never shows a gap at its joint. Depth is counted in cubes of the finer of the two grids: when the child is finer (a detail part, the spike's case) that is one of the child's cubes, not one of its parent's, so the detail isn't buried. A coarser child still sits inside its parent. The validator checks it.
 
 13. **A child snaps to the finer grid.** At its attach point, a child part is placed on the finer of its own and its parent's grids.
 
@@ -57,9 +57,9 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 15. **A part is at most 32³ cubes,** its voxels stored as indices into the part's own list of sRGB colours, run-length encoded. Raising the cap moves meshing to a worker (§19).
 
-16. **Axes: +X forward, Y up, Z to the side.** This is ADR 0011 §7's frame: a creature faces +X. Mirroring uses paired sockets with a mirror flag: the part on the mirrored socket of a pair is reflected across Z, which swaps left and right.
+16. **Axes: +X forward, Y up, +Z to the creature's right.** The frame is right-handed and is ADR 0011 §7's: a creature faces +X. Mirroring uses paired sockets with a mirror flag: the part on the mirrored socket of a pair is mapped z → −z (reflected in the XY plane), which swaps left and right.
 
-17. **The assembly is stored inline in the library entry,** which goes to version 5. It references its parts by ID. No migration (AGENTS.md, backward compatibility).
+17. **A released species keeps a frozen copy of its parts.** Parts come from content packs (the starter parts, M20) and from the player's own parts library (M23). The assembly is stored inline in the library entry, which goes to version 5, and holds a copy of every part it uses, each with the ID of the part it was copied from, kept as provenance only. Editing or deleting a part later never changes a released creature. The assembly sits beside the species data the simulation sees, not inside it (§20). No migration (AGENTS.md, backward compatibility).
 
 ### Rendering
 
@@ -67,9 +67,9 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 19. **The mesher is a pure function over typed arrays, run on the main thread.** It takes a part's voxels and colours as typed arrays and returns vertex and index arrays, with no three.js, so it is tested in Vitest and can move to a worker unchanged. At the 32³ cap it meshes a creature in a few milliseconds on the main thread; if the cap is raised (64³ costs 10–52 ms per part), it moves to a worker. When many creatures appear at once (startup, a restore), their meshing is spread over frames. It culls hidden faces and doesn't greedy-mesh; vertex size is kept small instead (for example `Uint8` positions within a part).
 
-20. **A voxel body frame replaces drawing pixels.** ADR 0020 §10's anchors, the centre of gravity and the tail, are points in the body's frame (metres, axes as §16) and come from the assembly instead of from a drawing. M19 fixes how they are derived from the assembly. The simulation is unchanged: it sees a species' size class and capabilities, never its cubes.
+20. **A voxel body frame replaces drawing pixels.** ADR 0020 §10's anchors, the centre of gravity and the tail, are points in the body's frame (metres, axes as §16) and come from the assembly instead of from a drawing. M19 fixes how they are derived from the assembly. The simulation is unchanged: it sees a species' size class and capabilities, never its cubes. The assembly must not travel through the simulation worker. Today `species.body` does (the worker's content summary hands it back to the main thread), so the assembly is kept beside the species data the simulation gets, and the renderer receives it on a path that doesn't go through the worker. M19 picks the mechanism.
 
-21. **A creature rests on its lowest cube.** The bottom of the assembly's lowest cube is the body's ground contact, which replaces ADR 0011 §3's feet for voxel bodies.
+21. **A creature rests on its lowest cube.** The bottom of the assembly's lowest cube in the rest pose is the body's ground contact, which replaces ADR 0011 §3's feet for voxel bodies.
 
 ### Drawn creatures
 
@@ -80,7 +80,7 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 - **ADR 0011 §3:** a voxel body isn't scaled to its size class's height (§3), and stands on its lowest cube (§21).
 - **ADR 0011 §6:** voxel creatures glow at 0.15, not 0.35 (§6).
 - **ADR 0013 and ADR 0015 §7:** a voxel creature's size class is derived from its measured bounds (§3), not picked. The limits of ADR 0013 still apply per size class.
-- **ADR 0020 §8:** voxel creatures have per-part rigid transforms, drawn as a skinned mesh with one bone per part (§18), in place of "no skinned meshes, no bones". The whole-body profiles still apply on top.
+- **ADR 0020 §8:** voxel creatures have one rigid transform per part (§18), in place of "no skinned meshes, no bones". The whole-body profiles still apply on top.
 - **ADR 0020 §10:** anchors are in the voxel body frame (§20), not drawing pixels.
 - **ADR 0014 §5, ADR 0020 §13:** library entries go to version 5 with the assembly inline (§17).
 
@@ -90,5 +90,5 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 - Small changes to a part can change the size class and so the creature's limits; the Studio shows it as it happens (§3).
 - One draw call per creature and a small vertex layout keep many creatures cheap to draw.
 - The look values are starting points, not tuned (issue #200).
-- Open for M19: which bounds a size class must contain (height alone, or the footprint too) with issue #145; what happens to an assembly bigger than the largest class; whether coplanar faces are culled or warned (§14); and how anchors are derived (§20).
+- Open for M19: whether coplanar faces are culled or warned (§14); how anchors are derived (§20); whether colour index 0 means an empty cube; the run-length encoding's scan order (§15); how a socket type declares which parts fit it (§9); and whether the derived size class is stored on release or recomputed on load. Since a species keeps frozen parts (§17), recomputing gives the same answer, but M19 says which it does.
 - Next: M19 builds the part and assembly schema, the mesher and an assembled body that lives, saves and restores in the world.
