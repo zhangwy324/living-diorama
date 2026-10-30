@@ -6,7 +6,7 @@ import {
   MAX_ASSEMBLY_INSTANCES,
   MAX_UNDO_STEPS,
   measureAssembly,
-  mirrorTwin,
+  mirrorImage,
   placeInstances,
   recolorPart,
   recordEdit,
@@ -114,6 +114,23 @@ const STUMP: LibraryPart = {
     attach: { x: 1, y: 3, z: 1 },
     sockets: [{ id: "foot", type: "test:foot", position: { x: 1, y: 1, z: 1 } }],
   }),
+};
+/** A leg with a mirror pair of claw sockets of its own. */
+const CLAWED: LibraryPart = {
+  id: "test:legs/clawed",
+  part: box(2, 4, 4, {
+    type: "test:leg",
+    attach: { x: 1, y: 4, z: 2 },
+    sockets: [
+      { id: "left-claw", type: "test:foot", position: { x: 1, y: 1, z: 1 } },
+      { id: "right-claw", type: "test:foot", position: { x: 1, y: 1, z: 3 }, mirrors: "left-claw" },
+    ],
+  }),
+};
+/** Another foot. */
+const PAD: LibraryPart = {
+  id: "test:pad",
+  part: box(2, 1, 2, { type: "test:foot", colors: ["#123123"], attach: { x: 1, y: 1, z: 1 } }),
 };
 const FOOT: LibraryPart = {
   id: "test:foot",
@@ -382,15 +399,86 @@ describe("compatibleSockets", () => {
   });
 });
 
-describe("mirrorTwin", () => {
+describe("mirrorImage", () => {
   it("finds the instance on the other socket of the pair", () => {
     const a = legged();
-    expect(mirrorTwin(a, "left-hip")?.id).toBe("right-hip");
-    expect(mirrorTwin(a, "right-hip")?.id).toBe("left-hip");
-    expect(mirrorTwin(a, "torso")).toBeUndefined();
-    expect(mirrorTwin(a, "foot")).toBeUndefined();
+    expect(mirrorImage(a, "left-hip")?.id).toBe("right-hip");
+    expect(mirrorImage(a, "right-hip")?.id).toBe("left-hip");
+    expect(mirrorImage(a, "torso")).toBeUndefined();
     const one = ok(removePart(a, "right-hip", SINGLE));
-    expect(mirrorTwin(one, "left-hip")).toBeUndefined();
+    expect(mirrorImage(one, "left-hip")).toBeUndefined();
+  });
+
+  it("follows the same sockets down the other side of the nearest pair", () => {
+    const a = legged();
+    expect(mirrorImage(a, "foot")?.id).toBe("foot-2");
+    expect(mirrorImage(a, "foot-2")?.id).toBe("foot");
+    expect(mirrorImage(ok(removePart(a, "foot-2", SINGLE)), "foot")).toBeUndefined();
+  });
+
+  it("finds no image when the sides differ", () => {
+    let a = ok(attachPart(start(), { instance: "torso", socket: "left-hip" }, LEG, lookup, SINGLE));
+    a = ok(attachPart(a, { instance: "torso", socket: "right-hip" }, PEG, lookup, SINGLE));
+    a = ok(attachPart(a, { instance: "left-hip", socket: "foot" }, FOOT, lookup, MIRROR));
+    a = ok(attachPart(a, { instance: "right-hip", socket: "toe" }, FOOT, lookup, MIRROR));
+    expect(ids(a)).toEqual(["torso", "left-hip", "right-hip", "foot", "toe"]);
+    expect(mirrorImage(a, "foot")).toBeUndefined();
+    expect(mirrorImage(a, "toe")).toBeUndefined();
+  });
+
+  it("counts only the nearest pair, so images never compound", () => {
+    let a = ok(
+      attachPart(start(), { instance: "torso", socket: "left-hip" }, CLAWED, lookup, MIRROR),
+    );
+    a = ok(attachPart(a, { instance: "left-hip", socket: "left-claw" }, FOOT, lookup, MIRROR));
+    // The pair of claws on the left leg, not one on each leg.
+    expect(ids(a)).toEqual(["torso", "left-hip", "right-hip", "left-claw", "right-claw"]);
+    expect(byId(a, "right-claw").parent).toEqual({ instance: "left-hip", socket: "right-claw" });
+    expect(mirrorImage(a, "left-claw")?.id).toBe("right-claw");
+    a = ok(attachPart(a, { instance: "right-hip", socket: "left-claw" }, FOOT, lookup, MIRROR));
+    expect(ids(a)).toHaveLength(7);
+    expect(mirrorImage(a, "left-claw")?.id).toBe("right-claw");
+    expect(mirrorImage(a, "left-claw-2")?.id).toBe("right-claw-2");
+  });
+});
+
+describe("whole-branch mirroring", () => {
+  it("puts a hand on the left arm on the right arm too", () => {
+    let a = ok(attachPart(start(), { instance: "torso", socket: "left-hip" }, LEG, lookup, MIRROR));
+    const result = attachPart(a, { instance: "left-hip", socket: "foot" }, FOOT, lookup, MIRROR);
+    a = ok(result);
+    expect(result.ok && result.instances).toEqual(["foot", "foot-2"]);
+    expect(byId(a, "foot-2")).toEqual({
+      id: "foot-2",
+      part: "foot",
+      parent: { instance: "right-hip", socket: "foot" },
+      rotation: [0, 0, 0, 1],
+      mirrored: false,
+    });
+    expect(compatibleSockets(ok(removePart(a, "foot", MIRROR)), FOOT, lookup, MIRROR)).toEqual([
+      { instance: "left-hip", socket: "foot" },
+      { instance: "right-hip", socket: "foot" },
+    ]);
+  });
+
+  it("acts on the image in every edit", () => {
+    const a = legged();
+    expect(ids(ok(removePart(a, "foot", MIRROR)))).toEqual(["torso", "left-hip", "right-hip"]);
+    expect(ok(rotatePart(a, "foot", MIRROR)).instances.map((i) => i.rotation)).toEqual([
+      [0, 0, 0, 1],
+      [0, 0, 0, 1],
+      [0, 0, 0, 1],
+      [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+      [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+    ]);
+    const red = ok(recolorPart(a, "foot", 0, "#ff0000", MIRROR));
+    expect(Object.keys(red.parts)).toEqual(Object.keys(a.parts));
+    expect(partOf(red, "foot-2").colors[0]).toBe("#ff0000");
+    const replaced = ok(replacePart(a, "foot-2", PAD, lookup, MIRROR));
+    expect(partOf(replaced, "foot")).toBe(partOf(replaced, "foot-2"));
+    expect(byId(replaced, "foot").part).toBe("pad");
+    const stepped = ok(stepPart(a, "foot", -1, MIRROR));
+    expect(partOf(stepped, "foot-2").step).toBe(0.0125);
   });
 });
 
@@ -405,6 +493,17 @@ describe("replacePart", () => {
     expect(byId(after, "right-hip").part).toBe("legs-stump");
     expect(Object.keys(after.parts)).toEqual(["torso", "foot", "legs-stump"]);
     expect(byId(after, "foot")).toBe(byId(before, "foot"));
+  });
+
+  it("shares what it doesn't change", () => {
+    let before = legged();
+    before = ok(attachPart(before, { instance: "torso", socket: "neck" }, HEAD, lookup, MIRROR));
+    const after = ok(replacePart(before, "left-hip", STUMP, lookup, MIRROR));
+    expect(after.parts.torso).toBe(before.parts.torso);
+    expect(after.parts.head).toBe(before.parts.head);
+    for (const id of ["torso", "neck", "foot", "foot-2"]) {
+      expect(byId(after, id)).toBe(byId(before, id));
+    }
   });
 
   it("removes children the new part has no socket for", () => {
@@ -505,9 +604,17 @@ describe("removePart", () => {
     expect(Object.keys(after.parts)).toEqual(["torso", "legs-long", "foot"]);
   });
 
-  it("refuses the root", () => {
-    expect(refusal(removePart(legged(), "torso", MIRROR))).toBe("root");
-    expect(refusal(removePart(legged(), "nope", MIRROR))).toBe("unknown_instance");
+  it("lists the one asked for first", () => {
+    const result = removePart(legged(), "right-hip", MIRROR);
+    expect(result.ok && result.instances).toEqual(["right-hip", "left-hip", "foot", "foot-2"]);
+  });
+
+  it("refuses the root, children and all", () => {
+    const before = legged();
+    expect(before.instances.length).toBeGreaterThan(1);
+    expect(refusal(removePart(before, "torso", MIRROR))).toBe("root");
+    expect(refusal(removePart(before, "torso", SINGLE))).toBe("root");
+    expect(refusal(removePart(before, "nope", MIRROR))).toBe("unknown_instance");
   });
 });
 
@@ -549,6 +656,14 @@ describe("rotatePart", () => {
     expect(byId(a, "left-hip").rotation).toEqual([0, 0, 0, 1]);
   });
 
+  it("sets the twin to the turned part's rotation, bringing a pair back in step", () => {
+    let a = ok(rotatePart(legged(), "left-hip", SINGLE));
+    expect(byId(a, "right-hip").rotation).toEqual([0, 0, 0, 1]);
+    a = ok(rotatePart(a, "left-hip", MIRROR));
+    expect(byId(a, "left-hip").rotation).toEqual([0, 1, 0, 0]);
+    expect(byId(a, "right-hip").rotation).toEqual([0, 1, 0, 0]);
+  });
+
   it("refuses the root", () => {
     expect(refusal(rotatePart(legged(), "torso", MIRROR))).toBe("root");
     expect(refusal(rotatePart(legged(), "nope", MIRROR))).toBe("unknown_instance");
@@ -581,6 +696,17 @@ describe("stepPart", () => {
     expect(after.parts["legs-long"]?.step).toBe(0.0125);
     expect(after.parts["legs-long"]?.voxels).toBe(before.parts["legs-long"]?.voxels);
     expect(after.instances).toBe(before.instances);
+  });
+
+  it("shares what it doesn't change", () => {
+    const before = legged();
+    const after = ok(stepPart(before, "left-hip", 1, SINGLE));
+    expect(after.parts.torso).toBe(before.parts.torso);
+    expect(after.parts.foot).toBe(before.parts.foot);
+    expect(after.parts["legs-long"]).toBe(before.parts["legs-long"]);
+    for (const id of ["torso", "right-hip", "foot", "foot-2"]) {
+      expect(byId(after, id)).toBe(byId(before, id));
+    }
   });
 
   it("steps one side alone without mirroring, copying the shared copy", () => {
@@ -646,13 +772,19 @@ describe("recolorPart", () => {
   });
 
   it("copies a copy shared beyond the pair first", () => {
-    // Two feet of one copy: recolouring one alone copies it.
-    const before = legged();
-    const after = ok(recolorPart(before, "foot", 0, "#000000", MIRROR));
-    expect(byId(after, "foot").part).toBe("foot-2");
-    expect(byId(after, "foot-2")).toBe(byId(before, "foot-2"));
-    expect(after.parts.foot).toBe(before.parts.foot);
-    expect(after.parts["foot-2"]?.colors[0]).toBe("#000000");
+    // Four legs of one copy: recolouring a pair copies it.
+    let before = ok(
+      attachPart(start(), { instance: "torso", socket: "left-hip" }, LEG, lookup, MIRROR),
+    );
+    before = ok(
+      attachPart(before, { instance: "torso", socket: "front-left-hip" }, LEG, lookup, MIRROR),
+    );
+    const after = ok(recolorPart(before, "right-hip", 0, "#000000", MIRROR));
+    expect(byId(after, "right-hip").part).toBe("legs-long-2");
+    expect(byId(after, "left-hip").part).toBe("legs-long-2");
+    expect(byId(after, "front-left-hip")).toBe(byId(before, "front-left-hip"));
+    expect(after.parts["legs-long"]).toBe(before.parts["legs-long"]);
+    expect(after.parts["legs-long-2"]?.colors[0]).toBe("#000000");
   });
 
   it("recolours one side alone without mirroring", () => {
@@ -666,6 +798,32 @@ describe("recolorPart", () => {
     a = ok(attachPart(a, { instance: "torso", socket: "right-hip" }, STUMP, lookup, SINGLE));
     const after = ok(recolorPart(a, "left-hip", 1, "#000000", MIRROR));
     expect(partOf(after, "right-hip")).toBe(partOf(a, "right-hip"));
+  });
+
+  it("returns the assembly as it is when the colour is already that", () => {
+    const before = legged();
+    const result = recolorPart(before, "foot", 0, "#7FAE5A", MIRROR);
+    expect(ok(result)).toBe(before);
+    expect(result.ok && result.instances).toEqual(["foot", "foot-2"]);
+    const history = startHistory(before);
+    expect(recordEdit(history, ok(result))).toBe(history);
+  });
+
+  it("recolours only the side that differs", () => {
+    const one = ok(recolorPart(legged(), "left-hip", 0, "#000000", SINGLE));
+    const both = ok(recolorPart(one, "left-hip", 0, "#000000", MIRROR));
+    expect(partOf(both, "right-hip").colors[0]).toBe("#000000");
+    expect(partOf(both, "left-hip")).toBe(partOf(one, "left-hip"));
+  });
+
+  it("names a copy of a copy from the base key", () => {
+    let a = ok(attachPart(start(), { instance: "torso", socket: "left-hip" }, LEG, lookup, MIRROR));
+    a = ok(attachPart(a, { instance: "torso", socket: "front-left-hip" }, LEG, lookup, MIRROR));
+    a = ok(stepPart(a, "left-hip", 1, MIRROR));
+    expect(byId(a, "left-hip").part).toBe("legs-long-2");
+    a = ok(recolorPart(a, "left-hip", 0, "#000000", SINGLE));
+    expect(byId(a, "left-hip").part).toBe("legs-long-3");
+    expect(Object.keys(a.parts)).toEqual(["torso", "legs-long", "legs-long-2", "legs-long-3"]);
   });
 
   it("refuses an unknown colour index and an invalid colour", () => {

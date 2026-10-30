@@ -9,10 +9,7 @@ import {
 import {
   IDENTITY_QUATERNION,
   VoxelAssemblySchema,
-  claimId,
-  copyVoxelPart,
   measureAssembly,
-  partKeyOf,
   placeInstances,
   type LibraryPart,
   type PartFitLookup,
@@ -20,6 +17,7 @@ import {
   type VoxelAssembly,
   type VoxelInstance,
 } from "./voxel-assembly";
+import { claimId, copyVoxelPart, partKeyOf } from "./voxel-internal";
 
 // Editing a voxel assembly (ADR 0023 §4–§8, §12, §15, §16): pure, deterministic operations that
 // each return a new assembly that passes `VoxelAssemblySchema`, or a refusal saying why not. An
@@ -113,22 +111,53 @@ function pairedSocket(part: VoxelPart, socketId: string): string | undefined {
 }
 
 /**
- * An instance's mirror twin (ADR 0022 §16): the instance on the other socket of the mirror pair
- * it hangs from, on the same parent. None for the root, for a part on a socket without a pair,
- * and when the other socket is free.
+ * The socket a part on `at` mirrors onto (ADR 0023 §6, whole-branch mirroring): the other socket
+ * of the pair when `at` is one of a mirror pair; otherwise the socket of the same ID on the
+ * parent's mirror image (`mirrorImage`), if the parent has one and its part has that socket.
  */
-export function mirrorTwin(assembly: VoxelAssembly, id: string): VoxelInstance | undefined {
-  const instance = findInstance(assembly, id);
-  if (!instance?.parent) return undefined;
-  const parent = findInstance(assembly, instance.parent.instance);
+function mirrorSocket(assembly: VoxelAssembly, at: SocketRef): SocketRef | undefined {
+  const parent = findInstance(assembly, at.instance);
   if (!parent) return undefined;
-  const pair = pairedSocket(partOf(assembly, parent), instance.parent.socket);
-  return pair === undefined ? undefined : holderOf(assembly, { instance: parent.id, socket: pair });
+  const pair = pairedSocket(partOf(assembly, parent), at.socket);
+  if (pair !== undefined) return { instance: parent.id, socket: pair };
+  const image = mirrorImage(assembly, parent.id);
+  if (!image || !partOf(assembly, image).sockets.some((s) => s.id === at.socket)) return undefined;
+  return { instance: image.id, socket: at.socket };
 }
 
-/** `instance` and its twin when mirroring and it has one. */
+/**
+ * An instance's mirror image (ADR 0023 §6; ADR 0022 §16), its twin: found from the nearest
+ * instance on its path to the root, itself included, that hangs from a socket of a mirror pair,
+ * by following the same sockets down from the instance on that pair's other socket. A hand on the
+ * left arm has the hand on the right arm as its image. Only the nearest pair counts, so images
+ * come in twos, never fours. None for the root, for a part with no pair above it, and when the
+ * other side has no instance at the end of that path.
+ */
+export function mirrorImage(assembly: VoxelAssembly, id: string): VoxelInstance | undefined {
+  let instance = findInstance(assembly, id);
+  // The sockets from the paired ancestor down to the instance, the lowest first.
+  const path: string[] = [];
+  while (instance?.parent) {
+    const at: SocketRef = instance.parent;
+    const parent = findInstance(assembly, at.instance);
+    if (!parent) return undefined;
+    const pair = pairedSocket(partOf(assembly, parent), at.socket);
+    if (pair !== undefined) {
+      let image = holderOf(assembly, { instance: parent.id, socket: pair });
+      for (let i = path.length - 1; image && i >= 0; i--) {
+        image = holderOf(assembly, { instance: image.id, socket: path[i] ?? "" });
+      }
+      return image;
+    }
+    path.push(at.socket);
+    instance = parent;
+  }
+  return undefined;
+}
+
+/** `instance` and its mirror image when mirroring and it has one. */
 function withTwin(assembly: VoxelAssembly, instance: VoxelInstance, { mirror }: MirrorOption) {
-  const twin = mirror ? mirrorTwin(assembly, instance.id) : undefined;
+  const twin = mirror ? mirrorImage(assembly, instance.id) : undefined;
   return twin ? [instance, twin] : [instance];
 }
 
@@ -195,9 +224,10 @@ const newInstance = (
 });
 
 /**
- * Hangs a library part on a free socket (ADR 0023 §4, §6), at rest (no turn). With `mirror`, when
- * the socket is one of a mirror pair and the other socket is free, the part goes on both, the one
- * on the mirrored socket mirrored; both or neither. A taken other socket is left as it is. New
+ * Hangs a library part on a free socket (ADR 0023 §4, §6), at rest (no turn). With `mirror`, the
+ * part also goes on the socket it mirrors onto: the other socket of a mirror pair (the part there
+ * mirrored), or the same socket on the parent's mirror image (`mirrorImage`), when that socket is
+ * free and the part fits it; both or neither. A taken or unfitting other socket is left as it is. New
  * instances are named after their socket (`left-eye`, `-2`… on a clash) and go last; a library
  * part is held once while its copy is unedited (`assembleParts` keys it the same way).
  */
@@ -220,17 +250,23 @@ export function attachPart(
   if (!fits(lookup, part.part, socket.type)) {
     return refuse("does_not_fit", `Part "${part.id}" doesn't fit socket type "${socket.type}"`);
   }
-  const sockets = [socket];
-  const pair = options.mirror ? pairedSocket(parentPart, socket.id) : undefined;
-  const other = pair === undefined ? undefined : parentPart.sockets.find((s) => s.id === pair);
-  if (other && !holderOf(assembly, { instance: parent.id, socket: other.id })) sockets.push(other);
-  if (assembly.instances.length + sockets.length > MAX_ASSEMBLY_INSTANCES) {
+  const sides = [{ parent: parent.id, socket }];
+  const mirrored = options.mirror ? mirrorSocket(assembly, at) : undefined;
+  const mirrorParent = mirrored && findInstance(assembly, mirrored.instance);
+  const other =
+    mirrorParent && partOf(assembly, mirrorParent).sockets.find((s) => s.id === mirrored.socket);
+  if (other && mirrored && !holderOf(assembly, mirrored) && fits(lookup, part.part, other.type)) {
+    sides.push({ parent: mirrored.instance, socket: other });
+  }
+  if (assembly.instances.length + sides.length > MAX_ASSEMBLY_INSTANCES) {
     return refuse("too_many_parts", `An assembly has at most ${MAX_ASSEMBLY_INSTANCES} parts`);
   }
 
   const { parts, key } = withLibraryPart(assembly.parts, part);
   const ids = new Set(assembly.instances.map((instance) => instance.id));
-  const added = sockets.map((s) => newInstance(claimId(s.id, ids), key, parent.id, s));
+  const added = sides.map((side) =>
+    newInstance(claimId(side.socket.id, ids), key, side.parent, side.socket),
+  );
   return settle(
     { parts, instances: [...assembly.instances, ...added] },
     added.map((instance) => instance.id),
@@ -263,7 +299,7 @@ export function compatibleSockets(
  * twin's too, both or neither. The instances keep their IDs. Each child of a replaced instance
  * hangs again, with everything below it, from the new part's socket of the same ID, if it has
  * one, the child fits its type and the assembly stays valid; the rest are removed. The root can be
- * replaced too: it hangs from no socket, so any part may go there.
+ * replaced too: it hangs from no socket, so any part may go there for now.
  */
 export function replacePart(
   assembly: VoxelAssembly,
@@ -276,6 +312,7 @@ export function replacePart(
   if (!target) return refuse("unknown_instance", `No instance "${id}"`);
   const targets = withTwin(assembly, target, options);
   for (const { parent } of targets) {
+    // TODO(M21 PR 4): check the part type's `root` role (ADR 0023 §10) when replacing the root.
     if (!parent) continue;
     const holder = findInstance(assembly, parent.instance);
     const socket = holder && partOf(assembly, holder).sockets.find((s) => s.id === parent.socket);
@@ -339,10 +376,12 @@ export function removePart(
   const targets = withTwin(assembly, target, options).map((t) => t.id);
   const removed = subtreeOf(assembly, targets);
   const instances = assembly.instances.filter((instance) => !removed.has(instance.id));
-  return settle(
-    { parts: prune(assembly.parts, instances), instances },
-    assembly.instances.filter((i) => removed.has(i.id)).map((i) => i.id),
-  );
+  // The one asked for first, then the rest in the assembly's order.
+  const gone = [
+    id,
+    ...assembly.instances.filter((i) => removed.has(i.id) && i.id !== id).map((i) => i.id),
+  ];
+  return settle({ parts: prune(assembly.parts, instances), instances }, gone);
 }
 
 const HALF = Math.SQRT1_2;
@@ -379,8 +418,9 @@ const turnAboutY = (rotation: Quaternion) => snapQuarterTurn(multiply(QUARTER_TU
 
 /**
  * Turns an instance a quarter turn about its socket's Y axis (ADR 0023 §7): +X toward −Z, or for
- * a mirrored part, drawn reflected, the other way; with `mirror`, its twin too, by the same stored
- * turn, so a pair stays mirror images. A turn that would leave the assembly invalid (a joint, the
+ * a mirrored part, drawn reflected, the other way; with `mirror`, its twin takes the same stored
+ * rotation, so a pair stays (or becomes again) mirror images even when its sides were turned
+ * apart while mirroring was off. A turn that would leave the assembly invalid (a joint, the
  * grid snap) is skipped for the next; refused when all three other turns are. The root can't turn.
  */
 export function rotatePart(
@@ -391,11 +431,12 @@ export function rotatePart(
   const target = findInstance(assembly, id);
   if (!target) return refuse("unknown_instance", `No instance "${id}"`);
   if (!target.parent) return refuse("root", "The root hangs from no socket to turn about");
-  let targets = withTwin(assembly, target, options);
+  const targets = withTwin(assembly, target, options);
   const ids = targets.map((t) => t.id);
+  let rotation = target.rotation;
   for (let turn = 1; turn < 4; turn++) {
-    targets = targets.map((t) => ({ ...t, rotation: turnAboutY(t.rotation) }));
-    const turned = new Map(targets.map((t) => [t.id, t]));
+    rotation = turnAboutY(rotation);
+    const turned = new Map(targets.map((t) => [t.id, { ...t, rotation }]));
     const instances = assembly.instances.map((instance) => turned.get(instance.id) ?? instance);
     const result = settle({ parts: assembly.parts, instances }, ids);
     if (result.ok) return result;
@@ -406,7 +447,8 @@ export function rotatePart(
 /**
  * The assembly with `edit` applied to the part copies of `targets` (ADR 0023 §8, §12): a copy used
  * by no other instance is edited in place, under its key; one shared beyond them is copied first
- * (copy on write), under a new key (`legs-short-2`), for the targets alone.
+ * (copy on write), under a new key from the copy's base key (`legs-short-2`, never
+ * `legs-short-2-2`), for the targets alone.
  */
 function editCopies(
   assembly: VoxelAssembly,
@@ -422,7 +464,7 @@ function editCopies(
     if (!part) throw new Error(`Unknown part "${key}"`);
     const shared = assembly.instances.some((i) => i.part === key && !ids.has(i.id));
     if (shared) {
-      const copy = claimId(key, keys);
+      const copy = claimId(key.replace(/-\d+$/, ""), keys);
       parts[copy] = edit(part);
       moved.set(key, copy);
     } else {
@@ -493,7 +535,8 @@ export function stepAssembly(assembly: VoxelAssembly, direction: 1 | -1): Assemb
 /**
  * Sets one colour of an instance's part, `colors[index]` (ADR 0023 §12): of its part copy and,
  * with `mirror`, of its twin's when that part has the colour too, copied first when shared beyond
- * them.
+ * them. When the colour is already that everywhere, the assembly is returned as it is, so
+ * `recordEdit` records nothing.
  */
 export function recolorPart(
   assembly: VoxelAssembly,
@@ -513,14 +556,16 @@ export function recolorPart(
     return refuse("invalid_color", `"${color}" isn't a #rrggbb colour`);
   }
   const targets = withTwin(assembly, target, options).filter(hasColor);
-  const candidate = editCopies(assembly, targets, (part) => ({
+  const ids = targets.map((t) => t.id);
+  const differs = (instance: VoxelInstance) =>
+    partOf(assembly, instance).colors[index]?.toLowerCase() !== color.toLowerCase();
+  const changing = targets.filter(differs);
+  if (changing.length === 0) return { ok: true, assembly, instances: ids };
+  const candidate = editCopies(assembly, changing, (part) => ({
     ...part,
     colors: part.colors.with(index, color),
   }));
-  return settle(
-    candidate,
-    targets.map((t) => t.id),
-  );
+  return settle(candidate, ids);
 }
 
 /**
