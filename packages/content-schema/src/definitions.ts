@@ -203,12 +203,13 @@ export type Anchors = z.output<typeof AnchorsSchema>;
 
 /**
  * A species' body plan: how its body is built from its appearance (ADR 0011, ADR 0017 §11) and how
- * it moves (ADR 0020 §11). Where it can move is in its capabilities, not here. Every field has a
- * default, so a species without a body plan has the walk gait, default anchors and the default
- * thickness (ADR 0020 §13).
+ * it moves (ADR 0020 §11). Where it can move is in its capabilities, not here. The gait has a
+ * default, so a species without a body plan walks. The drawn-only settings have none: left out,
+ * they stay out, so the parsed species says what its pack wrote, and the renderer uses the default
+ * thickness and anchors (ADR 0020 §13).
  */
 export const BodyShapeSchema = z.strictObject({
-  /** Depth from front to back as a share of the drawn height. */
+  /** Depth from front to back as a share of the drawn height. Left out, `BODY_THICKNESS.default`. */
   thickness: z
     .number()
     .gte(BODY_THICKNESS.min, {
@@ -217,10 +218,11 @@ export const BodyShapeSchema = z.strictObject({
     .lte(BODY_THICKNESS.max, {
       error: `Thickness must be at most ${BODY_THICKNESS.max} of the height`,
     })
-    .default(BODY_THICKNESS.default),
+    .optional(),
   /** The style per medium: for now the land gait. */
   locomotion: BodyLocomotionSchema.prefault({}),
-  anchors: AnchorsSchema.default({}),
+  /** Left out, every anchor sits where `defaultAnchor` puts it. */
+  anchors: AnchorsSchema.optional(),
 });
 export type BodyShape = z.output<typeof BodyShapeSchema>;
 
@@ -231,18 +233,11 @@ export type BodyShape = z.output<typeof BodyShapeSchema>;
 export const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
 export type DrawnOnlyBodySetting = (typeof DRAWN_ONLY_BODY_SETTINGS)[number];
 
-/**
- * The drawn-only body plan settings a species sets as written, before parsing fills in their
- * defaults: what a voxel species must not have.
- */
-export function writtenDrawnOnlySettings(species: unknown): DrawnOnlyBodySetting[] {
-  const record = (value: unknown) =>
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-  const plan = record(record(species)?.body);
-  return plan ? DRAWN_ONLY_BODY_SETTINGS.filter((setting) => setting in plan) : [];
-}
+/** The drawn-only settings a body plan sets: what a voxel species must not have. */
+export const drawnOnlySettings = (body: BodyShape): DrawnOnlyBodySetting[] =>
+  DRAWN_ONLY_BODY_SETTINGS.filter((setting) => body[setting] !== undefined);
 
-/** A body plan with every default: the walk gait and default anchors (ADR 0020 §13). A fresh object. */
+/** A body plan with every default: the walk gait alone (ADR 0020 §13). A fresh object. */
 export const defaultBody = (): BodyShape => BodyShapeSchema.parse({});
 
 /** The drawn shape's bounds in drawing pixels: left and top inclusive, right and bottom exclusive. */
@@ -272,7 +267,7 @@ export const SpeciesDefinitionSchema = z.strictObject({
   ...header("species"),
   appearance: AssetRefSchema,
   sizeClass: SizeClassSchema,
-  /** The body plan. Left out, every setting takes its default: the walk gait and default anchors. */
+  /** The body plan. Left out, it is the walk gait alone. */
   body: BodyShapeSchema.prefault({}),
   /**
    * Locomotion and other capabilities → speed factor relative to `baseSpeed` (ADR 0004). Where

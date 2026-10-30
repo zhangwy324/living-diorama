@@ -15,7 +15,7 @@ import {
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
-  writtenDrawnOnlySettings,
+  drawnOnlySettings,
   type Diagnostic,
   type Result,
 } from "./index";
@@ -278,16 +278,15 @@ describe("SpeciesDefinition", () => {
     expect(parseSpeciesDefinition(species).ok).toBe(true);
   });
 
-  it("gives a body the default thickness when it says none", () => {
+  it("leaves out the drawn-only settings a species doesn't write", () => {
     expect(BODY_THICKNESS.default).toBe(0.4);
-    expect(parseSpeciesDefinition(species)).toMatchObject({
-      ok: true,
-      value: { body: { thickness: BODY_THICKNESS.default } },
-    });
-    expect(parseSpeciesDefinition({ ...species, body: {} })).toMatchObject({
-      ok: true,
-      value: { body: { thickness: BODY_THICKNESS.default } },
-    });
+    for (const input of [species, { ...species, body: {} }]) {
+      const parsed = parseSpeciesDefinition(input);
+      expect(parsed.ok && parsed.value.body).toEqual({ locomotion: { land: { gait: "walk" } } });
+      expect(parsed.ok && drawnOnlySettings(parsed.value.body)).toEqual([]);
+    }
+    const drawn = parseSpeciesDefinition({ ...species, body: { thickness: 0.4, anchors: {} } });
+    expect(drawn.ok && drawnOnlySettings(drawn.value.body)).toEqual(["thickness", "anchors"]);
   });
 
   it("keeps a thickness within its range and rejects one outside it", () => {
@@ -309,16 +308,10 @@ describe("SpeciesDefinition", () => {
     );
   });
 
-  it("reads a species without a body plan with the walk gait and default anchors", () => {
-    expect(parseSpeciesDefinition(species)).toMatchObject({
-      ok: true,
-      value: { body: defaultBody() },
-    });
-    expect(defaultBody()).toEqual({
-      thickness: BODY_THICKNESS.default,
-      locomotion: { land: { gait: "walk" } },
-      anchors: {},
-    });
+  it("reads a species without a body plan with the walk gait alone", () => {
+    const parsed = parseSpeciesDefinition(species);
+    expect(parsed.ok && parsed.value.body).toEqual(defaultBody());
+    expect(defaultBody()).toEqual({ locomotion: { land: { gait: "walk" } } });
     expect(
       parseSpeciesDefinition({ ...species, body: { locomotion: { land: {} } } }),
     ).toMatchObject({ ok: true, value: { body: { locomotion: { land: { gait: "walk" } } } } });
@@ -591,17 +584,5 @@ describe("PartDefinition", () => {
     expect(found.map((d) => [d.code, d.source])).toEqual([
       ["unsupported_schema_version", "parts/x"],
     ]);
-  });
-});
-
-describe("writtenDrawnOnlySettings", () => {
-  it("lists the drawn-only body settings a species sets as written", () => {
-    expect(writtenDrawnOnlySettings({ body: { thickness: 0.4, anchors: {} } })).toEqual([
-      "thickness",
-      "anchors",
-    ]);
-    expect(writtenDrawnOnlySettings({ body: { locomotion: {} } })).toEqual([]);
-    expect(writtenDrawnOnlySettings({})).toEqual([]);
-    expect(writtenDrawnOnlySettings(null)).toEqual([]);
   });
 });

@@ -153,15 +153,13 @@ describe("parseLibraryEntry", () => {
     expect(parseLibraryEntry(input).ok).toBe(false);
   });
 
-  it("reads a species without a body plan with the walk gait and default anchors", () => {
+  it("reads a species without a body plan with the walk gait alone", () => {
     const entry = validEntry();
     const species: Record<string, unknown> = { ...entry.species };
     delete species.body;
     const result = parseLibraryEntry({ ...entry, species });
     expect(result.ok && result.value.species.body).toEqual({
-      thickness: 0.4,
       locomotion: { land: { gait: "walk" } },
-      anchors: {},
     });
   });
 

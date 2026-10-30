@@ -78,16 +78,8 @@ const summarizeAsset = ({ kind, url, scale }: AssetEntry): AssetSummary => ({
  * A species as the main thread draws it. A voxel species' body plan is only how it moves: its
  * shape is in its assembly, which the renderer reads from the appearance asset (ADR 0022 §20).
  */
-function summarizeSpecies(
-  { appearance, sizeClass, body }: SpeciesDefinition,
-  registries: Registries,
-): SpeciesSummary {
-  const kind = registries.assets.get(appearance)?.kind;
-  return {
-    appearance,
-    sizeClass,
-    body: kind === "voxel" ? { locomotion: body.locomotion } : { ...body },
-  };
+function summarizeSpecies({ appearance, sizeClass, body }: SpeciesDefinition): SpeciesSummary {
+  return { appearance, sizeClass, body: { ...body } };
 }
 
 /** The world as the main thread draws it, as plain data so it survives `postMessage`. */
@@ -98,7 +90,7 @@ export function describeContent({ state }: Simulation): WorldContent {
     navigations: state.navigations.map((navigation) => describeNavigation(model, navigation)),
     assets: Object.fromEntries(registries.assets.values().map((a) => [a.id, summarizeAsset(a)])),
     species: Object.fromEntries(
-      registries.species.values().map((s) => [s.id, summarizeSpecies(s, registries)]),
+      registries.species.values().map((s) => [s.id, summarizeSpecies(s)]),
     ),
     props: Object.fromEntries(
       registries.props
@@ -308,7 +300,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           type: "species_registered",
           ...requestId,
           speciesId: species.id,
-          species: summarizeSpecies(species, sim.state.registries),
+          species: summarizeSpecies(species),
           asset: summarizeAsset(asset),
           limits,
         });
