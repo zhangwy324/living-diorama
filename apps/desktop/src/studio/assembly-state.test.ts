@@ -58,9 +58,9 @@ function withBackLegs(): BuildState {
 }
 
 describe("Build mode's editor state", () => {
-  it("starts from the default torso alone, the first of a root type, Mirror on, nothing to undo", () => {
+  it("starts from the default torso alone, the pack's starter, Mirror on, nothing to undo", () => {
     const state = startBuild(kit);
-    expect(layout(present(state))).toEqual(["fish-torso:hollow:fish-torso"]);
+    expect(layout(present(state))).toEqual(["four-legged-torso:hollow:four-legged-torso"]);
     expect(state.mirror).toBe(true);
     expect(canUndo(state) || canRedo(state)).toBe(false);
     expect(isStart(present(state), kit)).toBe(true);
@@ -209,14 +209,12 @@ describe("Build mode's editor state", () => {
   });
 
   it("is back at the start by content after a part is placed and removed", () => {
-    const fins = pickPart(startBuild(kit), kit, "hollow:side-fin");
-    expect(layout(present(fins)).slice(1)).toEqual([
-      "left-fin:hollow:side-fin@left-fin",
-      "right-fin:hollow:side-fin@right-fin",
-    ]);
-    expect(isStart(present(fins), kit)).toBe(false);
+    const head = pickPart(startBuild(kit), kit, "hollow:round-head");
+    expect(isStart(present(head), kit)).toBe(false);
     // So closing then loses nothing.
-    expect(isStart(present(removeSelected(fins)), kit)).toBe(true);
+    expect(isStart(present(removeSelected(head)), kit)).toBe(true);
+    // Another torso is not the start, though it has as many parts.
+    expect(isStart(present(pickPart(startBuild(kit), kit, "hollow:fish-torso")), kit)).toBe(false);
   });
 
   it("selecting drops the pick, and the image is selected only while mirroring", () => {

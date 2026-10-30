@@ -99,10 +99,11 @@ export function describeVoxelParts(
       ...(role === undefined ? {} : { role }),
     })),
     socketTypes: sortedSocketTypes(registries).map(({ id }) => id),
-    parts: sortedParts(registries).map(({ id, name, version, part }) => ({
+    parts: sortedParts(registries).map(({ id, name, version, starter, part }) => ({
       id,
       name,
       version,
+      ...(starter ? { starter: true } : {}),
       part,
     })),
     suggestedColors: suggestedColors(registries),

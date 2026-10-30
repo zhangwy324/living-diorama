@@ -53,7 +53,11 @@ export function Studio() {
   }, []);
   const [library, setLibrary] = useState<LibrarySnapshot>();
   const [celebration, setCelebration] = useState<{ text: string; happy: boolean }>();
-  const [listOpen, setListOpen] = useState(true);
+  // Each mode keeps its own: Build starts with it collapsed, so the 3D view has the room.
+  const [listOpen, setListOpen] = useState<Record<StudioMode, boolean>>({
+    build: false,
+    draw: true,
+  });
   const [busySpecies, setBusySpecies] = useState<string>();
   const [listMessage, setListMessage] = useState<string>();
   const [deleting, setDeleting] = useState<StudioSpecies>();
@@ -150,8 +154,8 @@ export function Studio() {
       <MyCreatures
         library={library}
         thumbnail={(speciesId) => thumbnails.current?.get(speciesId)}
-        open={listOpen}
-        onToggle={() => setListOpen(!listOpen)}
+        open={listOpen[mode]}
+        onToggle={() => setListOpen((open) => ({ ...open, [mode]: !open[mode] }))}
         busy={busySpecies}
         message={listMessage}
         onAdd={(speciesId) => ask(speciesId, () => channel.request("addCreature", { speciesId }))}

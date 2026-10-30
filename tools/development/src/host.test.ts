@@ -163,6 +163,10 @@ describe("simulation host", () => {
       part("test:stump-leg", "Stump leg").part,
     );
     expect(structuredClone(ready.parts)).toEqual(ready.parts);
+    // The built-in pack marks the part the Studio starts from; the others carry no mark.
+    expect(ready.parts.filter((p) => "starter" in p).map((p) => [p.id, p.starter])).toEqual([
+      ["hollow:four-legged-torso", true],
+    ]);
   });
 
   it("lists the part types with their names, fits and roles, and the socket types, by ID", () => {
@@ -1010,8 +1014,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 21, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(21);
+  it("is protocol version 22, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(22);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

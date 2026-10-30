@@ -618,6 +618,15 @@ describe("PartDefinition", () => {
     expect(found.map((d) => d.path.join("."))).toEqual(["part.source"]);
   });
 
+  it("may be marked as the part the Studio starts from", () => {
+    expect(parsePartDefinition({ ...leg, starter: true })).toEqual({
+      ok: true,
+      value: { ...leg, starter: true },
+    });
+    const found = diagnostics(parsePartDefinition({ ...leg, starter: "yes" }));
+    expect(found.map((d) => d.path.join("."))).toEqual(["starter"]);
+  });
+
   it("needs a name and allows nothing else", () => {
     const found = diagnostics(parsePartDefinition({ ...leg, name: "", mirrored: true }));
     expect(found.map((d) => d.path.join("."))).toEqual(["name", ""]);

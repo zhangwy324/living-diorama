@@ -7,10 +7,11 @@ export function builtInParts(): StudioParts {
   const content = loadContent();
   if (!content.ok) throw new Error("The built-in content doesn't load");
   return {
-    parts: sortedParts(content.value).map(({ id, name, version, part }) => ({
+    parts: sortedParts(content.value).map(({ id, name, version, starter, part }) => ({
       id,
       name,
       version,
+      ...(starter ? { starter } : {}),
       part,
     })),
     partTypes: sortedPartTypes(content.value).map(({ id, name, fits, role }) => ({

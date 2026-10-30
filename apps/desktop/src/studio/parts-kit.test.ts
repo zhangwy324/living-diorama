@@ -10,11 +10,33 @@ describe("the parts kit", () => {
     expect([...rootPartTypes(studioParts.partTypes)]).toEqual(["hollow:torso"]);
   });
 
-  it("starts from the first part of a root type", () => {
+  it("starts from the part its pack marks as the starter: the four-legged torso", () => {
     const roots = rootPartTypes(studioParts.partTypes);
-    expect(defaultRoot(studioParts.parts, roots)?.id).toBe("hollow:fish-torso");
-    expect(defaultRoot([...studioParts.parts].reverse(), roots)?.id).toBe("hollow:upright-torso");
+    expect(studioParts.parts.filter((p) => p.starter).map((p) => p.id)).toEqual([
+      "hollow:four-legged-torso",
+    ]);
+    expect(defaultRoot(studioParts.parts, roots)?.id).toBe("hollow:four-legged-torso");
     expect(defaultRoot(studioParts.parts, new Set())).toBeUndefined();
+  });
+
+  it("falls back to the first root part, and takes the first starter when several are marked", () => {
+    const roots = rootPartTypes(studioParts.partTypes);
+    const unmarked = studioParts.parts.map(({ id, name, version, part }) => ({
+      id,
+      name,
+      version,
+      part,
+    }));
+    expect(defaultRoot(unmarked, roots)?.id).toBe("hollow:fish-torso");
+    const twice = unmarked.map((p) =>
+      p.id === "hollow:mossling-torso" || p.id === "hollow:upright-torso"
+        ? { ...p, starter: true }
+        : p,
+    );
+    expect(defaultRoot(twice, roots)?.id).toBe("hollow:mossling-torso");
+    // A starter that isn't of a root type is passed over.
+    const eye = unmarked.map((p) => (p.id === "hollow:bead-eye" ? { ...p, starter: true } : p));
+    expect(defaultRoot(eye, roots)?.id).toBe("hollow:fish-torso");
   });
 
   it("lists torsos first, then what hangs from them, then theirs, each by name", () => {
@@ -54,7 +76,7 @@ describe("the parts kit", () => {
     const kit = partsKit(studioParts);
     expect(kit?.start.instances).toHaveLength(1);
     expect(Object.values(kit?.start.parts ?? {}).map((p) => p.source)).toEqual([
-      "hollow:fish-torso",
+      "hollow:four-legged-torso",
     ]);
     expect(VoxelAssemblySchema.safeParse(kit?.start).success).toBe(true);
   });

@@ -78,11 +78,18 @@ export function traySections(
     .filter((section) => section.parts.length > 0);
 }
 
-/** The part a new creature starts from: the first part of a root type. Undefined when there is none. */
-export const defaultRoot = (
+/**
+ * The part a new creature starts from (ADR 0023 §10): the first part of a root type its pack marks
+ * as the `starter`, else the first part of a root type. Parts come sorted by ID, so the choice is
+ * the same however the packs load. Undefined when there is none.
+ */
+export function defaultRoot(
   parts: readonly PartSummary[],
   roots: ReadonlySet<string>,
-): PartSummary | undefined => parts.find(({ part }) => roots.has(part.type));
+): PartSummary | undefined {
+  const rooted = parts.filter(({ part }) => roots.has(part.type));
+  return rooted.find(({ starter }) => starter) ?? rooted[0];
+}
 
 /** An assembly of `root` alone, keyed as `assembleParts` keys it. */
 export const assemblyOf = (root: PartSummary, lookup: PartFitLookup): VoxelAssembly =>

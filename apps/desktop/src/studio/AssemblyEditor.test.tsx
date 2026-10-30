@@ -131,7 +131,7 @@ it("opens on the default torso with the tray by part type, Mirror on", async () 
   const headings = [...container.querySelectorAll(".parts-tray h3")].map((h) => h.textContent);
   expect(headings.slice(0, 3)).toEqual(["Torso", "Arm", "Fin"]);
   expect(button("Mirror").getAttribute("aria-pressed")).toBe("true");
-  expect(view.assembly).toMatchObject({ instances: [{ id: "fish-torso" }] });
+  expect(view.assembly).toMatchObject({ instances: [{ id: "four-legged-torso" }] });
   expect(onUnsaved).toHaveBeenLastCalledWith(false);
   // The tray's thumbnails came from the view.
   expect(container.querySelector(".tray-part img")).not.toBeNull();
@@ -139,12 +139,11 @@ it("opens on the default torso with the tray by part type, Mirror on", async () 
 
 it("places a picked part on a clicked socket, then selects it and asks before closing", async () => {
   const { onUnsaved } = await setup();
-  // Four-legged torso first, then legs: two places, so they stay picked with four marked sockets.
-  await click(trayPart("Four-legged torso"));
+  // Legs have two places, so they stay picked with four marked sockets.
   await click(trayPart("Paw leg"));
   expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("true");
   expect(view.highlighted).toHaveLength(4);
-  view.under = { kind: "socket", instance: "fish-torso", socket: "back-left" };
+  view.under = { kind: "socket", instance: "four-legged-torso", socket: "back-left" };
   await clickStage();
   expect(view.selection).toEqual(["back-left", "back-right"]);
   expect(view.highlighted).toEqual([]);
@@ -179,20 +178,20 @@ it("keeps the release ID across retries and makes a new one after an edit", asyn
 
   // An edit to the assembly too.
   await click(button("Back"));
-  await click(trayPart("Side fin"));
+  await click(trayPart("Round head"));
   await click(button("Next"));
   releaseVoxel.mockResolvedValueOnce({ speciesId: "user:x", name: "Fin" });
   await click(button("Release"));
   const ids = sentIds(releaseVoxel);
   expect(new Set(ids).size).toBe(3);
-  expect(releaseVoxel.mock.calls[3]?.[0].assembly.instances).toHaveLength(3);
+  expect(releaseVoxel.mock.calls[3]?.[0].assembly.instances).toHaveLength(2);
 
   // Each try first clears the last release's celebration.
   expect(onReleaseStart).toHaveBeenCalledTimes(4);
   // Released: back to Build mode at the default torso.
   expect(onReleased).toHaveBeenCalledWith({ speciesId: "user:x", name: "Fin" });
   expect(button("Next")).toBeDefined();
-  expect(view.assembly).toMatchObject({ instances: [{ id: "fish-torso" }] });
+  expect(view.assembly).toMatchObject({ instances: [{ id: "four-legged-torso" }] });
 });
 
 it("blocks Release for a limit error, and says why", async () => {
@@ -211,7 +210,6 @@ it("blocks Release for a limit error, and says why", async () => {
 
 it("drops the pick and the selection on Escape", async () => {
   await setup();
-  await click(trayPart("Four-legged torso"));
   await click(trayPart("Paw leg"));
   expect(view.highlighted).toHaveLength(4);
   await key({ key: "Escape" });

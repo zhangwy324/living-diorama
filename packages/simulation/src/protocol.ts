@@ -26,7 +26,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -209,6 +209,8 @@ export interface PartSummary {
   id: string;
   name: string;
   version: string;
+  /** Set when the Studio may start a new creature from it (ADR 0023 §10). */
+  starter?: boolean;
   part: VoxelPart;
 }
 

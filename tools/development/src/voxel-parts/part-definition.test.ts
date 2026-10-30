@@ -58,6 +58,13 @@ describe("partDefinition", () => {
     expect(decodeVoxels(definition.part.voxels, definition.part.size)).toEqual(cubes.grid);
   });
 
+  it("carries the starter mark, and leaves it out when it isn't set", () => {
+    const marked = partDefinition(cubes, { ...sidecar, starter: true });
+    expect(marked.ok && marked.value.starter).toBe(true);
+    const unmarked = partDefinition(cubes, { ...sidecar, starter: false });
+    expect(unmarked.ok && "starter" in unmarked.value).toBe(false);
+  });
+
   it("defaults to no sockets", () => {
     const bare = { ...sidecar, sockets: undefined };
     const result = partDefinition(cubes, bare);
