@@ -254,9 +254,9 @@ describe("releasing", () => {
       locomotion: { land: { gait: "hop" } },
       anchors: { tail: { x: 30, y: 120 } },
     });
-    // The library entry (version 4) keeps the plan.
+    // The library entry (version 5) keeps the plan.
     expect((await store.list())[0]?.entry).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       species: { body: { anchors: { tail: { x: 30, y: 120 } } }, capabilities: { "core:swim": 1 } },
     });
   });

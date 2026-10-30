@@ -1,9 +1,12 @@
 import {
+  checkAssemblyFit,
   error,
   isContentId,
   LOCOMOTION_MEDIA,
   REGION_KINDS,
+  parsePartTypeDefinition,
   parsePropCategoryDefinition,
+  parseSocketTypeDefinition,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
@@ -15,13 +18,16 @@ import {
   type Diagnostic,
   type DiagnosticPath,
   type LocomotionMedium,
+  type PartTypeDefinition,
   type PropCategoryDefinition,
   type PropDefinition,
   type RegionKind,
   type Result,
   type Schema,
+  type SocketTypeDefinition,
   type SpeciesDefinition,
   type StructureDefinition,
+  type VoxelAssembly,
   type WorldDefinition,
 } from "@living-diorama/content-schema";
 import semver from "semver";
@@ -32,6 +38,8 @@ export const REGISTRY_NAMES = [
   "structures",
   "props",
   "propCategories",
+  "partTypes",
+  "socketTypes",
   "species",
   "surfaces",
   "actions",
@@ -207,13 +215,16 @@ export interface AssetEntry extends CodeEntry {
 
 /**
  * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
- * prop types, needs, senses and traits (ADR 0018), prop categories (ADR 0021).
+ * prop types, needs, senses and traits (ADR 0018), prop categories (ADR 0021), voxel part types
+ * and socket types (ADR 0022 §10).
  */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
   props: Registry<PropDefinition>;
   propCategories: Registry<PropCategoryDefinition>;
+  partTypes: Registry<PartTypeDefinition>;
+  socketTypes: Registry<SocketTypeDefinition>;
   species: Registry<SpeciesDefinition>;
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
@@ -701,10 +712,46 @@ const propReferences = (prop: PropDefinition): Reference[] => [
  * without a category belong to none of them; an editor lists those under "Other".
  */
 export function sortedPropCategories(registries: Registries): PropCategoryDefinition[] {
-  return registries.propCategories
-    .values()
-    .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return registries.propCategories.values().sort((a, b) => a.order - b.order || byId(a, b));
 }
+
+const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/** The registered voxel part types, by ID. */
+export const sortedPartTypes = (registries: Registries): PartTypeDefinition[] =>
+  registries.partTypes.values().sort(byId);
+
+/** The registered socket types, by ID. */
+export const sortedSocketTypes = (registries: Registries): SocketTypeDefinition[] =>
+  registries.socketTypes.values().sort(byId);
+
+/**
+ * Whether a part of type `partType` fits a socket of type `socketType` (ADR 0022 §9): the part
+ * type is registered and lists the socket type.
+ */
+export const partFitsSocket = (
+  registries: Registries,
+  partType: string,
+  socketType: string,
+): boolean => registries.partTypes.get(partType)?.fits.includes(socketType) ?? false;
+
+/**
+ * The checks a voxel assembly must pass when its creature is released, against the registered
+ * part and socket types (`checkAssemblyFit`). Loading a released creature doesn't need them.
+ */
+export const checkAssemblyTypes = (
+  registries: Registries,
+  assembly: VoxelAssembly,
+  source?: string,
+): Diagnostic[] =>
+  checkAssemblyFit(
+    assembly,
+    {
+      partType: (id) => registries.partTypes.get(id),
+      socketType: (id) => registries.socketTypes.get(id),
+    },
+    source,
+  );
 
 export function createRegistries(): Registries {
   return {
@@ -715,6 +762,12 @@ export function createRegistries(): Registries {
     }),
     props: new Registry("props", { validate: parsePropDefinition, references: propReferences }),
     propCategories: new Registry("propCategories", { validate: parsePropCategoryDefinition }),
+    partTypes: new Registry("partTypes", {
+      validate: parsePartTypeDefinition,
+      references: (partType) =>
+        partType.fits.map((id, i) => ({ registry: "socketTypes", id, path: ["fits", i] })),
+    }),
+    socketTypes: new Registry("socketTypes", { validate: parseSocketTypeDefinition }),
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,

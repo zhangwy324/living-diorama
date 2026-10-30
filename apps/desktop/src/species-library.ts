@@ -242,6 +242,7 @@ export async function openSpeciesLibrary(
       const entry = parseLibraryEntry({
         schemaVersion: LIBRARY_ENTRY_SCHEMA_VERSION,
         species,
+        body: { kind: "drawn" },
         createdAt: now().toISOString(),
       });
       if (!entry.ok) return entry;

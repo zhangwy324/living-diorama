@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseDrawing, parseLibraryEntry, type Result } from "./index";
+import { libraryAppearance, parseDrawing, parseLibraryEntry, type Result } from "./index";
 import { migrate } from "./migrate";
 
 const codes = (result: Result<unknown>) => (result.ok ? [] : result.diagnostics.map((d) => d.code));
+const messages = (result: Result<unknown>) =>
+  result.ok ? [] : result.diagnostics.map((d) => d.message);
+const paths = (result: Result<unknown>) =>
+  result.ok ? [] : result.diagnostics.map((d) => d.path.join("."));
 
 function validDrawing() {
   return {
@@ -23,7 +27,7 @@ function validDrawing() {
 
 function validEntry() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     species: {
       schemaVersion: 1,
       id: "user:3f9c2a1e-0000-4000-8000-000000000000",
@@ -42,6 +46,7 @@ function validEntry() {
       senses: { "core:vision": 8 },
       traits: {},
     },
+    body: { kind: "drawn" },
     createdAt: "2026-10-27T12:00:00.000Z",
   };
 }
@@ -160,10 +165,98 @@ describe("parseLibraryEntry", () => {
     });
   });
 
-  it.each([[1], [2], [3]])("doesn't migrate a version %i entry", (schemaVersion) => {
+  it.each([[1], [2], [3], [4]])("doesn't migrate a version %i entry", (schemaVersion) => {
     expect(codes(parseLibraryEntry({ ...validEntry(), schemaVersion }))).toEqual([
       "missing_migration",
     ]);
+  });
+
+  it("needs a body", () => {
+    const entry: Record<string, unknown> = validEntry();
+    delete entry.body;
+    expect(parseLibraryEntry(entry).ok).toBe(false);
+    expect(parseLibraryEntry({ ...validEntry(), body: { kind: "clay" } }).ok).toBe(false);
+  });
+
+  it("names a drawn species' image as its appearance", () => {
+    const entry = validEntry();
+    entry.species.appearance = `${entry.species.id}/assembly.json`;
+    expect(messages(parseLibraryEntry(entry))).toEqual([
+      `A drawn species' appearance is "${entry.species.id}/appearance.png"`,
+    ]);
+  });
+});
+
+describe("parseLibraryEntry, voxel bodies", () => {
+  /** A 10 × 15 × 5 cm block of 2.5 cm cubes: tiny. */
+  const assembly = () => ({
+    parts: {
+      body: {
+        type: "test:torso",
+        size: { x: 4, y: 6, z: 2 },
+        step: 0.025,
+        colors: ["#7fae5a"],
+        voxels: [48, 1],
+        attach: { x: 2, y: 0, z: 1 },
+      },
+    },
+    instances: [{ id: "body", part: "body" }],
+  });
+  const voxelEntry = () => {
+    const entry = validEntry();
+    const species: Record<string, unknown> = {
+      ...entry.species,
+      appearance: libraryAppearance(entry.species.id, "voxel"),
+      sizeClass: "tiny",
+      body: { locomotion: { land: { gait: "hop" } } },
+    };
+    return { ...entry, species, body: { kind: "voxel", assembly: assembly() } };
+  };
+
+  it("accepts a voxel species with its assembly inline", () => {
+    const result = parseLibraryEntry(voxelEntry());
+    expect(messages(result)).toEqual([]);
+    if (!result.ok || result.value.body.kind !== "voxel") throw new Error("not a voxel entry");
+    expect(result.value.body.assembly.instances[0]?.rotation).toEqual([0, 0, 0, 1]);
+    expect(result.value.species.body.locomotion.land.gait).toBe("hop");
+  });
+
+  it("names the assembly as a voxel species' appearance", () => {
+    expect(libraryAppearance("user:abc", "voxel")).toBe("user:abc/assembly.json");
+    expect(libraryAppearance("user:abc", "drawn")).toBe("user:abc/appearance.png");
+    const entry = voxelEntry();
+    entry.species.appearance = `${entry.species.id as string}/appearance.png`;
+    expect(paths(parseLibraryEntry(entry))).toEqual(["species.appearance"]);
+  });
+
+  it("checks the stored size class against the one the cubes give", () => {
+    const entry = voxelEntry();
+    entry.species.sizeClass = "small";
+    expect(messages(parseLibraryEntry(entry))).toEqual([
+      "The body's size class is tiny, not small",
+    ]);
+    const huge = voxelEntry();
+    huge.body.assembly.parts.body.step = 0.1;
+    huge.body.assembly.parts.body.size.y = 20;
+    huge.body.assembly.parts.body.voxels = [160, 1];
+    expect(messages(parseLibraryEntry(huge))).toEqual([
+      "The body is too large for every size class",
+    ]);
+  });
+
+  it.each([
+    ["thickness", 0.4],
+    ["anchors", {}],
+  ])("refuses a voxel species with %s", (key, value) => {
+    const entry = voxelEntry();
+    entry.species.body = { [key]: value };
+    expect(paths(parseLibraryEntry(entry))).toEqual([`species.body.${key}`]);
+  });
+
+  it("checks the assembly's structure on load", () => {
+    const entry = voxelEntry();
+    entry.body.assembly.parts.body.voxels = [47, 1];
+    expect(paths(parseLibraryEntry(entry))).toEqual(["body.assembly.parts.body.voxels"]);
   });
 });
 
