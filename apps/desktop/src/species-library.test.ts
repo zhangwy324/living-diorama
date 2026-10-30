@@ -10,7 +10,12 @@ import {
 import { createMemoryLibraryStore, type LibraryStore } from "@living-diorama/desktop-integration";
 import type { SpeciesAppearanceKind } from "@living-diorama/extension-api";
 import { describe, expect, it, vi } from "vitest";
-import { openSpeciesLibrary, type LibraryWorld } from "./species-library";
+import {
+  assemblyBytes,
+  MAX_ASSEMBLY_BYTES,
+  openSpeciesLibrary,
+  type LibraryWorld,
+} from "./species-library";
 import { userSpeciesIds } from "./user-species";
 
 const UUIDS = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"];
@@ -416,5 +421,56 @@ describe("voxel species", () => {
 
     expect(world.registerSpecies).not.toHaveBeenCalled();
     expect(await store.list()).toEqual([]);
+  });
+
+  it("refuses an assembly over the size cap before checking anything else (#208)", async () => {
+    const { library, world, store } = await open();
+    // Not even a valid assembly: the cap comes first.
+    const huge = { parts: {}, instances: [], padding: "x".repeat(MAX_ASSEMBLY_BYTES) };
+    const refused = await library.saveVoxel(huge, "Mountain", HOP);
+    expect(refused.ok ? [] : refused.diagnostics.map((d) => d.code)).toEqual(["assembly_too_big"]);
+    expect(world.checkAssembly).not.toHaveBeenCalled();
+    expect(world.registerSpecies).not.toHaveBeenCalled();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("counts an assembly's size in UTF-8 bytes of its JSON", () => {
+    expect(assemblyBytes({ a: "é" })).toBe('{"a":"é"}'.length + 1);
+    expect(assemblyBytes(sampleVoxelAssembly())).toBe(JSON.stringify(sampleVoxelAssembly()).length);
+    expect(assemblyBytes(undefined)).toBeUndefined();
+    expect(assemblyBytes({ a: 1n })).toBeUndefined();
+  });
+
+  it("gives a voxel species' saved assembly and version, also after a relaunch", async () => {
+    const first = await open();
+    const assembly = sampleVoxelAssembly();
+    const { speciesId } = value(await first.library.saveVoxel(assembly, "Pebble", HOP));
+    const drawn = value(await first.library.save(DRAWING, PNG, "Puddle", "small"));
+    const expected = { speciesId, version: "1.0.0", assembly };
+    expect(value(first.library.assembly(speciesId))).toEqual(expected);
+
+    const { library } = await open(first.store);
+    expect(value(library.assembly(speciesId))).toEqual(expected);
+    const codeOf = (result: Result<unknown>) => (result.ok ? [] : result.diagnostics)[0]?.code;
+    expect(codeOf(library.assembly(drawn.speciesId))).toBe("not_voxel");
+    expect(codeOf(library.assembly("user:missing"))).toBe("unknown_species");
+    value(await library.deleteSpecies(speciesId));
+    expect(codeOf(library.assembly(speciesId))).toBe("unknown_species");
+  });
+
+  it("gives the assembly of a voxel species the world didn't take", async () => {
+    const first = await open();
+    const assembly = sampleVoxelAssembly();
+    const { speciesId } = value(await first.library.saveVoxel(assembly, "Pebble", HOP));
+    // Renamed so the fake world rejects it at the next launch.
+    const [stored] = await first.store.list();
+    const entry = stored?.entry as { species: Record<string, unknown> };
+    const store = createMemoryLibraryStore();
+    await store.save(UUIDS[0] ?? "", { ...entry, species: { ...entry.species, name: "Rejected" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { library } = await open(store);
+    warn.mockRestore();
+    expect(library.list()).toMatchObject([{ speciesId, available: false }]);
+    expect(value(library.assembly(speciesId)).assembly).toEqual(assembly);
   });
 });

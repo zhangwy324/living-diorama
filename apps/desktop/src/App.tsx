@@ -44,6 +44,7 @@ import {
   librarySnapshot,
   studioHandlers,
   type LibrarySnapshot,
+  type StudioParts,
   type StudioRequests,
   type StudioServices,
 } from "./studio-protocol";
@@ -166,6 +167,8 @@ export function App() {
     let latest: SimulationSnapshot | undefined;
     // The Studio talks to the world here (ADR 0015 §5); it is told whenever the library changes.
     let library: SpeciesLibrary | undefined;
+    // The parts the Studio builds with, from `ready` (ADR 0023 §18).
+    let parts: StudioParts | undefined;
     // Commands sent before the world is ready would be misuse (ADR 0009 §2), so queries wait.
     let worldReady = () => {};
     const ready = new Promise<void>((resolve) => (worldReady = resolve));
@@ -173,6 +176,7 @@ export function App() {
       library: () => library,
       creatures: () => latest?.creatures ?? [],
       maxCreatures: creatureCap(STARTUP),
+      parts: () => parts,
       checkLimits: (sizeClass, capabilities) =>
         ready.then(() => client.checkLimits(sizeClass, capabilities)),
     };
@@ -235,6 +239,11 @@ export function App() {
       onReady: ({ scene, navigations, ...content }) => {
         for (const [id, asset] of Object.entries(content.assets)) assets.set(id, asset);
         for (const [id, summary] of Object.entries(content.species)) species.set(id, summary);
+        parts = {
+          parts: content.parts,
+          partTypes: content.partTypes,
+          socketTypes: content.socketTypes,
+        };
         const [navigation] = navigations;
         try {
           created = createDioramaView(element, scene, {
