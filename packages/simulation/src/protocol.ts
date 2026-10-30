@@ -26,7 +26,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -189,11 +189,12 @@ export interface PropSummary {
 }
 
 /**
- * A registered voxel part type: the socket types it fits (ADR 0022 §9) and its role if it has one
- * (§10).
+ * A registered voxel part type: its name, the socket types it fits (ADR 0022 §9) and its role if it
+ * has one (§10). The name heads the type's parts in the Studio's tray (ADR 0023 §18).
  */
 export interface PartTypeSummary {
   id: string;
+  name: string;
   fits: string[];
   role?: PartRole;
 }
@@ -233,9 +234,9 @@ export interface WorldContent {
   /** Every registered prop category, in the drawer's tab order (`sortedPropCategories`). */
   propCategories: PropCategorySummary[];
   /**
-   * Every registered voxel part type, by ID, with its fits and role, so the main thread can find a
-   * voxel creature's tail part (ADR 0022, M19 decisions) and assemble parts (M20) without the
-   * registries.
+   * Every registered voxel part type, by ID, with its name, fits and role, so the main thread can
+   * find a voxel creature's tail part (ADR 0022, M19 decisions), assemble parts (M20) and list them
+   * in the Studio (ADR 0023 §18) without the registries.
    */
   partTypes: PartTypeSummary[];
   /** The ID of every registered socket type, sorted. */

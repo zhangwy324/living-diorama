@@ -101,8 +101,9 @@ export function describeContent({ state }: Simulation): WorldContent {
         ]),
     ),
     propCategories: sortedPropCategories(registries).map(({ id, name }) => ({ id, name })),
-    partTypes: sortedPartTypes(registries).map(({ id, fits, role }) => ({
+    partTypes: sortedPartTypes(registries).map(({ id, name, fits, role }) => ({
       id,
+      name,
       fits: [...fits],
       ...(role === undefined ? {} : { role }),
     })),

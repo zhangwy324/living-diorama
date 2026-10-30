@@ -1,7 +1,24 @@
-import type { Diagnostic, Drawing, Result, SizeClass } from "@living-diorama/content-schema";
-import type { RequestHandlers } from "@living-diorama/desktop-integration";
-import type { CheckedLimits } from "@living-diorama/simulation";
-import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
+import type {
+  Diagnostic,
+  Drawing,
+  Result,
+  SizeClass,
+  VoxelAssembly,
+} from "@living-diorama/content-schema";
+import {
+  StudioRequestError,
+  type RequestHandlers,
+  type StudioChannel,
+} from "@living-diorama/desktop-integration";
+import type { CheckedLimits, PartSummary, PartTypeSummary } from "@living-diorama/simulation";
+import {
+  assemblyBytes,
+  MAX_ASSEMBLY_BYTES,
+  tooBigMessage,
+  type LibraryAssembly,
+  type LibrarySpecies,
+  type SpeciesLibrary,
+} from "./species-library";
 import {
   canMove,
   locomotionCapabilities,
@@ -46,6 +63,54 @@ export interface ReleaseParams {
   plan: BodyPlanChoice;
 }
 
+/** A voxel creature to release (ADR 0023 §17). */
+export interface ReleaseVoxelParams {
+  /** As for `ReleaseParams`: the Studio keeps it while the assembly, name and plan are unchanged. */
+  releaseId: string;
+  /** The assembly as built. Untrusted: the library checks it again. */
+  assembly: VoxelAssembly;
+  name: string;
+  /** Its ways of moving. A voxel body's size and anchors come from its cubes (ADR 0022 §20). */
+  plan: Pick<BodyPlanChoice, "locomotion">;
+}
+
+/** The parts the Studio builds with, from the strip's latest `ready` (ADR 0023 §18). */
+export interface StudioParts {
+  /** Every registered voxel part, by ID. */
+  parts: PartSummary[];
+  /** Every registered part type, by ID, with its name for the tray's headings. */
+  partTypes: PartTypeSummary[];
+  /** The ID of every registered socket type, sorted. */
+  socketTypes: string[];
+  // The suggested colours join these with protocol version 21 (ADR 0023 §11).
+}
+
+/**
+ * Why the strip refused a request, for the Studio to act on as well as show (`StudioRequestError`'s
+ * `code`). The message is in the player's words.
+ * - `not_ready`: the world or the library is still starting; asking again later may work.
+ * - `invalid_request`: no name, no way of moving or a malformed release ID. The Studio shouldn't
+ *   send these.
+ * - `world_full`: no room for another creature (ADR 0012 §6).
+ * - `assembly_too_big`: over `MAX_ASSEMBLY_BYTES` as JSON (#208).
+ * - `too_large`: larger than `large`, so no size class fits it (ADR 0023 §14).
+ * - `no_spawn_point`: a limit error, nowhere for it to appear in this world (ADR 0023 §14).
+ * - `release_failed`: anything else that kept a release from being saved.
+ * - `unknown_species`, `not_voxel`: no voxel species with that ID is in the library.
+ */
+export type StudioErrorCode =
+  | "not_ready"
+  | "invalid_request"
+  | "world_full"
+  | "assembly_too_big"
+  | "too_large"
+  | "no_spawn_point"
+  | "release_failed"
+  | "unknown_species"
+  | "not_voxel";
+
+const refuse = (code: StudioErrorCode, message: string) => new StudioRequestError(code, message);
+
 export interface Released {
   speciesId: string;
   name: string;
@@ -67,6 +132,15 @@ export type StudioRequests = {
   };
   /** Saves the drawing as a species in the library and adds one of it to the world. */
   release: { params: ReleaseParams; result: Released };
+  /** The parts, part types and socket types to build with (ADR 0023 §18). */
+  parts: { params: undefined; result: StudioParts };
+  /** A saved voxel species' assembly, for its thumbnail or to edit a copy (ADR 0023 §3, §19). */
+  assembly: { params: { speciesId: string }; result: LibraryAssembly };
+  /**
+   * Saves a voxel assembly as a species in the library and adds one of it to the world, with
+   * `release`'s retries (ADR 0023 §17).
+   */
+  releaseVoxel: { params: ReleaseVoxelParams; result: Released };
   /** Adds a creature of a library species. Resolves with its ID. */
   addCreature: { params: { speciesId: string }; result: string };
   /** Takes the newest creature of a species out of the world. Resolves with its ID. */
@@ -85,6 +159,8 @@ export interface StudioServices {
   creatures(): readonly Creature[];
   /** The world's creature cap (ADR 0012 §6). */
   maxCreatures: number;
+  /** The parts from the strip's latest `ready`, once the world has said it is ready. */
+  parts(): StudioParts | undefined;
   /** The worker's limits query, once the world is running. */
   checkLimits(
     sizeClass: SizeClass,
@@ -123,6 +199,30 @@ export function releaseFailure(
   return `${name} couldn't be released: ${describe(diagnostics)}`;
 }
 
+/** Where a voxel creature has nowhere to appear: its size comes from its parts, so change them. */
+function voxelNoSpawnPoint(name: string, locomotion: LocomotionChoice): string {
+  return locomotion.land
+    ? `${name} has nowhere to appear in this world at its size. Try adding or removing parts to change its size.`
+    : `${name} has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or change its size.`;
+}
+
+/** Said when a voxel creature is larger than `large` (ADR 0023 §14). */
+export const tooLargeMessage = (name: string) =>
+  `${name} is too big to live in the world. Make it smaller to release it.`;
+
+/** A refused voxel release, typed by the rule that blocked it (ADR 0023 §14, §17). */
+function voxelReleaseError(
+  name: string,
+  locomotion: LocomotionChoice,
+  diagnostics: readonly Diagnostic[],
+): StudioRequestError<StudioErrorCode> {
+  const has = (code: string) => diagnostics.some((d) => d.code === code);
+  if (has("assembly_too_big")) return refuse("assembly_too_big", tooBigMessage(name));
+  if (has("too_large")) return refuse("too_large", tooLargeMessage(name));
+  if (has("no_spawn_point")) return refuse("no_spawn_point", voxelNoSpawnPoint(name, locomotion));
+  return refuse("release_failed", `${name} couldn't be released: ${describe(diagnostics)}`);
+}
+
 /** How many creatures of each species are in the world. */
 export function countBySpecies(creatures: readonly Creature[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -149,42 +249,36 @@ export function librarySnapshot(services: StudioServices): LibrarySnapshot {
 export function studioHandlers(services: StudioServices): RequestHandlers<StudioRequests> {
   const open = () => {
     const library = services.library();
-    if (!library) throw new Error(NOT_OPEN);
+    if (!library) throw refuse("not_ready", NOT_OPEN);
     return library;
   };
   // Checked here too, so a full world refuses a release before anything is saved.
   const makeRoom = () => {
     if (services.creatures().length >= services.maxCreatures) {
-      throw new Error(worldFullMessage(services.maxCreatures));
+      throw refuse("world_full", worldFullMessage(services.maxCreatures));
     }
   };
 
-  const release = async ({
-    releaseId,
-    drawing,
-    image,
-    name,
-    sizeClass,
-    thickness,
-    plan,
-  }: ReleaseParams): Promise<Released> => {
+  /** The name to release under, once the release's settings are checked. */
+  const checkRelease = (releaseId: string, name: string, locomotion: LocomotionChoice) => {
     const trimmed = name.trim();
-    if (!trimmed) throw new Error("Give your creature a name first.");
-    if (!canMove(plan.locomotion)) throw new Error(NO_LOCOMOTION);
-    if (!UUID.test(releaseId)) throw new Error(`Not a release ID: ${releaseId}`);
+    if (!trimmed) throw refuse("invalid_request", "Give your creature a name first.");
+    if (!canMove(locomotion)) throw refuse("invalid_request", NO_LOCOMOTION);
+    if (!UUID.test(releaseId)) throw refuse("invalid_request", `Not a release ID: ${releaseId}`);
+    return trimmed;
+  };
+  /** Saves a species with `save` under `releaseId`, unless it is kept already, then adds one. */
+  const releaseAs = async (
+    releaseId: string,
+    save: (library: SpeciesLibrary) => Promise<LibrarySpecies>,
+  ): Promise<Released> => {
     const library = open();
     // Kept by an earlier try whose answer was lost, before the strip reloaded: add it, don't save.
     const { speciesId } = userSpeciesIds(releaseId);
     let species = library.list().find((kept) => kept.speciesId === speciesId);
     if (!species) {
       makeRoom();
-      const saved = await library.save(drawing, Uint8Array.from(image), trimmed, sizeClass, {
-        id: releaseId,
-        thickness,
-        plan,
-      });
-      if (!saved.ok) throw new Error(releaseFailure(trimmed, plan.locomotion, saved.diagnostics));
-      species = saved.value;
+      species = await save(library);
     }
     const added = await library.addCreature(species.speciesId);
     return {
@@ -193,8 +287,48 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       ...(added.ok ? {} : { notAdded: describe(added.diagnostics) }),
     };
   };
-  // A retry while the first try is still running, or after it finished, gets the same answer.
+
+  const release = (params: ReleaseParams) => {
+    const { releaseId, drawing, image, name, sizeClass, thickness, plan } = params;
+    const trimmed = checkRelease(releaseId, name, plan.locomotion);
+    return releaseAs(releaseId, async (library) => {
+      const saved = await library.save(drawing, Uint8Array.from(image), trimmed, sizeClass, {
+        id: releaseId,
+        thickness,
+        plan,
+      });
+      if (!saved.ok) throw new Error(releaseFailure(trimmed, plan.locomotion, saved.diagnostics));
+      return saved.value;
+    });
+  };
+  const releaseVoxel = ({ releaseId, assembly, name, plan }: ReleaseVoxelParams) => {
+    // Before anything else, even a species an earlier try kept, so an oversized assembly costs no
+    // more work (#208). One that isn't JSON passes here and `saveVoxel` refuses it. A retry while
+    // the first try is remembered gets its answer: the Studio sends the same assembly again.
+    if ((assemblyBytes(assembly) ?? 0) > MAX_ASSEMBLY_BYTES) {
+      throw refuse("assembly_too_big", tooBigMessage(name.trim() || "Your creature"));
+    }
+    const trimmed = checkRelease(releaseId, name, plan.locomotion);
+    return releaseAs(releaseId, async (library) => {
+      const saved = await library.saveVoxel(assembly, trimmed, plan, { id: releaseId });
+      if (!saved.ok) throw voxelReleaseError(trimmed, plan.locomotion, saved.diagnostics);
+      return saved.value;
+    });
+  };
+  // A retry while the first try is still running, or after it finished, gets the same answer,
+  // whichever kind of release it is.
   const releases = new Map<string, Promise<Released>>();
+  const once = (releaseId: string, run: () => Promise<Released>) => {
+    let pending = releases.get(releaseId);
+    if (!pending) {
+      // Run in a promise, so a refusal thrown before saving is forgotten too.
+      pending = Promise.resolve().then(run);
+      releases.set(releaseId, pending);
+      // Nothing was saved, so the same ID may try again.
+      pending.catch(() => releases.delete(releaseId));
+    }
+    return pending;
+  };
 
   return {
     snapshot: () => librarySnapshot(services),
@@ -205,15 +339,20 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       if (!checked.ok) throw new Error(describe(checked.diagnostics));
       return checked.value;
     },
-    release: (params) => {
-      let pending = releases.get(params.releaseId);
-      if (!pending) {
-        pending = release(params);
-        releases.set(params.releaseId, pending);
-        // Nothing was saved, so the same ID may try again.
-        pending.catch(() => releases.delete(params.releaseId));
-      }
-      return pending;
+    release: (params) => once(params.releaseId, () => release(params)),
+    releaseVoxel: (params) => once(params.releaseId, () => releaseVoxel(params)),
+    parts: () => {
+      const parts = services.parts();
+      if (!parts) throw refuse("not_ready", NOT_OPEN);
+      return parts;
+    },
+    assembly: ({ speciesId }) => {
+      const found = open().assembly(speciesId);
+      if (found.ok) return found.value;
+      const code = found.diagnostics.some((d) => d.code === "not_voxel")
+        ? "not_voxel"
+        : "unknown_species";
+      throw refuse(code, describe(found.diagnostics));
     },
     addCreature: async ({ speciesId }) => {
       const library = open();
@@ -236,4 +375,20 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       return null;
     },
   };
+}
+
+/** The Studio's typed requests for building voxel creatures (ADR 0023 §17–§19). */
+export function studioClient(
+  channel: Pick<StudioChannel<StudioRequests, LibrarySnapshot>, "request">,
+) {
+  return {
+    parts: () => channel.request("parts", undefined),
+    assembly: (speciesId: string) => channel.request("assembly", { speciesId }),
+    releaseVoxel: (params: ReleaseVoxelParams) => channel.request("releaseVoxel", params),
+  };
+}
+
+/** The code of the strip's refusal, or undefined for any other failure, such as a timeout. */
+export function studioErrorCode(error: unknown): StudioErrorCode | undefined {
+  return error instanceof StudioRequestError ? (error.code as StudioErrorCode) : undefined;
 }

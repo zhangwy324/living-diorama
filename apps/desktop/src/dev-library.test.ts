@@ -61,7 +61,7 @@ describe("starter creatures", () => {
   const content = loadContent();
   if (!content.ok) throw new Error("The built-in content doesn't load");
   const lookup = partFitLookup(
-    sortedPartTypes(content.value).map(({ id, fits }) => ({ id, fits: [...fits] })),
+    sortedPartTypes(content.value).map(({ id, name, fits }) => ({ id, name, fits: [...fits] })),
     sortedSocketTypes(content.value).map(({ id }) => id),
   );
   const parts: PartSummary[] = Object.entries(sampleVoxelAssembly().parts)

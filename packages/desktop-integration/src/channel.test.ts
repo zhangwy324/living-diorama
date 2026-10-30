@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createMemoryWindowBus, openStudioChannel, serveStudio } from "./index";
+import { createMemoryWindowBus, openStudioChannel, serveStudio, StudioRequestError } from "./index";
 
 const { emitTo, listen } = vi.hoisted(() => ({
   emitTo: vi.fn(() => Promise.resolve()),
@@ -11,11 +11,15 @@ vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
 type Requests = {
   echo: { params: { text: string }; result: string };
   fail: { params: undefined; result: never };
+  refuse: { params: undefined; result: never };
 };
 
 const handlers = {
   echo: ({ text }: { text: string }) => `echo ${text}`,
   fail: () => Promise.reject(new Error("no world")),
+  refuse: () => {
+    throw new StudioRequestError("too_large", "Too big to live here");
+  },
 };
 
 afterEach(() => {
@@ -47,6 +51,16 @@ it("passes the strip's errors on", async () => {
       undefined,
     ),
   ).rejects.toThrow("Unknown request toString");
+});
+
+it("passes a refusal's code on with its message, and none with a plain error", async () => {
+  const { studio } = connect();
+  const refused = await studio.request("refuse", undefined).catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(StudioRequestError);
+  expect(refused).toMatchObject({ code: "too_large", message: "Too big to live here" });
+  const failed = await studio.request("fail", undefined).catch((error: unknown) => error);
+  expect(failed).toBeInstanceOf(Error);
+  expect(failed).not.toBeInstanceOf(StudioRequestError);
 });
 
 it("pushes library snapshots to the Studio", async () => {

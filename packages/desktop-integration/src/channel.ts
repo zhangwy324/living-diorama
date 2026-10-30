@@ -24,6 +24,20 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+/**
+ * A refusal the Studio can tell apart by its `code`, not only show: why a release is blocked, say.
+ * Thrown by a handler, it reaches the Studio as one with the same code and message; any other
+ * throw reaches it as a plain `Error`.
+ */
+export class StudioRequestError<C extends string = string> extends Error {
+  readonly code: C;
+  constructor(code: C, message: string) {
+    super(message);
+    this.name = "StudioRequestError";
+    this.code = code;
+  }
+}
+
 /** Each kind of request's parameters and result. Both are JSON. */
 export type RequestMap = Record<string, { params: unknown; result: unknown }>;
 
@@ -37,7 +51,9 @@ interface RequestMessage {
   request: { kind: string; params: unknown };
 }
 
-type ResponseMessage = { requestId: string } & ({ result: unknown } | { error: string });
+type ResponseMessage = { requestId: string } & (
+  { result: unknown } | { error: string; code?: string }
+);
 
 /**
  * Carries events between windows. `emit` sends to the window labelled `target` only; `listen`
@@ -87,7 +103,10 @@ const connectTransport = (label: string) =>
 
 /** The Studio's end: requests to the strip and the library snapshots it pushes. */
 export interface StudioChannel<R extends RequestMap, S> {
-  /** Asks the strip. Rejects with the strip's error, or if no answer comes in time. */
+  /**
+   * Asks the strip. Rejects with the strip's error, a `StudioRequestError` if it had a code, or a
+   * `RequestTimeoutError` if no answer comes in time.
+   */
   request<K extends keyof R & string>(kind: K, params: R[K]["params"]): Promise<R[K]["result"]>;
   /** Calls `listener` with each library snapshot the strip pushes. Returns a function that stops. */
   onLibraryChanged(listener: (snapshot: S) => void): () => void;
@@ -129,8 +148,13 @@ export function openStudioChannel<R extends RequestMap, S>({
         const finish = (response: ResponseMessage) => {
           clearTimeout(timer);
           pending.delete(requestId);
-          if ("error" in response) reject(new Error(response.error));
-          else resolve(response.result as R[typeof kind]["result"]);
+          if ("error" in response) {
+            reject(
+              response.code === undefined
+                ? new Error(response.error)
+                : new StudioRequestError(response.code, response.error),
+            );
+          } else resolve(response.result as R[typeof kind]["result"]);
         };
         pending.set(requestId, { settle: finish });
         const message: RequestMessage = { requestId, request: { kind, params } };
@@ -173,7 +197,8 @@ export function serveStudio<R extends RequestMap, S>(
       if (!handler) throw new Error(`Unknown request ${request.kind}`);
       response = { requestId, result: await handler(request.params) };
     } catch (cause) {
-      response = { requestId, error: describeError(cause) };
+      const code = cause instanceof StudioRequestError ? { code: cause.code } : {};
+      response = { requestId, error: describeError(cause), ...code };
     }
     await transport.emit(STUDIO_WINDOW, RESPONSE, response);
   };

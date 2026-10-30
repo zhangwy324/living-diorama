@@ -8,8 +8,9 @@ import { partFitLookup, partRoleLookup } from "./part-types";
 // The part and socket types as the worker's `ready` lists them.
 const content = loadContent();
 if (!content.ok) throw new Error("The built-in content doesn't load");
-const partTypes = sortedPartTypes(content.value).map(({ id, fits, role }) => ({
+const partTypes = sortedPartTypes(content.value).map(({ id, name, fits, role }) => ({
   id,
+  name,
   fits: [...fits],
   ...(role ? { role } : {}),
 }));

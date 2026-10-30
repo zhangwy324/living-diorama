@@ -59,9 +59,38 @@ export type LibrarySpecies = LibrarySpeciesBase &
       }
   );
 
+/** A voxel species' saved assembly, with the species version it is drawn at (ADR 0023 §19). */
+export interface LibraryAssembly {
+  speciesId: string;
+  version: string;
+  assembly: VoxelAssembly;
+}
+
+/**
+ * The most bytes a voxel assembly may take as JSON (UTF-8): the store's limit on a whole library
+ * entry, which holds it (#208). An assembly over it is refused before anything else.
+ */
+export const MAX_ASSEMBLY_BYTES = 8 * 1024 * 1024;
+
+/** How many bytes `assembly` takes as JSON, or undefined if it isn't JSON. */
+export function assemblyBytes(assembly: unknown): number | undefined {
+  try {
+    const json = JSON.stringify(assembly) as string | undefined;
+    return json === undefined ? undefined : new TextEncoder().encode(json).length;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface SpeciesLibrary {
   /** Every species in the library, oldest first. */
   list(): LibrarySpecies[];
+  /**
+   * The saved assembly of a voxel species in the list, available or not, e.g. to draw its
+   * thumbnail or to edit a copy (ADR 0023 §3, §19). `unknown_species` if the list doesn't hold
+   * it, `not_voxel` for a drawn species.
+   */
+  assembly(speciesId: string): Result<LibraryAssembly>;
   /**
    * Makes a species from a drawing and its image (PNG bytes), registers it and stores it.
    * `options.id` is the lowercase UUID to keep it under, a fresh one by default; one already used
@@ -77,8 +106,9 @@ export interface SpeciesLibrary {
     options?: SaveOptions,
   ): Promise<Result<LibrarySpecies>>;
   /**
-   * Makes a voxel species from an assembly (ADR 0022), registers it and stores it. Its size class
-   * is measured from its cubes, and one too large for every class is refused. Its parts must fit
+   * Makes a voxel species from an assembly (ADR 0022), registers it and stores it. An assembly over
+   * `MAX_ASSEMBLY_BYTES` as JSON is refused first (`assembly_too_big`). Its size class is measured
+   * from its cubes, and one too large for every class is refused (`too_large`). Its parts must fit
    * the world's part and socket types, checked here, at release, and not when it loads again.
    * `plan`'s ways of moving give it its capabilities and gait; a voxel species has no placed
    * anchors. `options.id` as for `save`.
@@ -176,9 +206,19 @@ function checkEntry(id: string, input: unknown): LibraryEntry | undefined {
   return parsed.value;
 }
 
+/** Said when an assembly is over `MAX_ASSEMBLY_BYTES`. */
+export const tooBigMessage = (name: string) =>
+  `${name} has too much detail to save. Use fewer or smaller parts.`;
+
+/** A voxel entry's assembly and version, for `Kept`; nothing for a drawn one. */
+const voxelOf = ({ species, body }: LibraryEntry): Pick<Kept, "voxel"> =>
+  body.kind === "voxel" ? { voxel: { version: species.version, assembly: body.assembly } } : {};
+
 interface Kept {
   species: LibrarySpecies;
   uuid: string;
+  /** A voxel species' assembly and version, as its entry holds them. */
+  voxel?: Omit<LibraryAssembly, "speciesId">;
   /** The `blob:` URL the world draws the species from, while it is registered. */
   url?: string;
 }
@@ -213,7 +253,7 @@ export async function openSpeciesLibrary(
       available: true,
       limits: registered.value.limits,
     };
-    entries.set(species.speciesId, { uuid, species, url });
+    entries.set(species.speciesId, { uuid, species, url, ...voxelOf(entry) });
     return { ok: true as const, value: species };
   };
   const keepUnavailable = (uuid: string, entry: LibraryEntry, reasons: Diagnostic[]) => {
@@ -223,6 +263,7 @@ export async function openSpeciesLibrary(
     entries.set(entry.species.id, {
       uuid,
       species: { ...describeEntry(entry), available: false, reasons },
+      ...voxelOf(entry),
     });
   };
 
@@ -335,7 +376,17 @@ export async function openSpeciesLibrary(
       return keepNew(ids.uuid, entry, { drawing: drawing.value, image });
     },
 
+    assembly(speciesId) {
+      const found = entries.get(speciesId);
+      if (!found) return failure("unknown_species", `${speciesId} is not in the library`);
+      if (!found.voxel) return failure("not_voxel", `${found.species.name} is drawn, not built`);
+      return { ok: true, value: { speciesId, ...found.voxel } };
+    },
+
     async saveVoxel(assemblyInput, name, plan, { id = uuid() } = {}) {
+      const bytes = assemblyBytes(assemblyInput);
+      if (bytes === undefined) return failure("invalid_assembly", `${name}'s assembly isn't JSON`);
+      if (bytes > MAX_ASSEMBLY_BYTES) return failure("assembly_too_big", tooBigMessage(name));
       const assembly = validate(VoxelAssemblySchema, assemblyInput);
       if (!assembly.ok) return assembly;
       const fresh = freshIds(id);

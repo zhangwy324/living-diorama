@@ -1,29 +1,40 @@
+import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import {
   error,
+  type Diagnostic,
   type Drawing,
   type Result,
   type SizeClass,
   type SpeciesDefinition,
+  type VoxelAssembly,
 } from "@living-diorama/content-schema";
 import {
   createMemoryLibraryStore,
   createMemoryWindowBus,
   openStudioChannel,
+  RequestTimeoutError,
   serveStudio,
+  StudioRequestError,
   type LibraryStore,
 } from "@living-diorama/desktop-integration";
 import type { CheckedLimits, Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
-import { openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
+import { MAX_ASSEMBLY_BYTES, openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { defaultPlan } from "./body-plan";
 import {
   countBySpecies,
   librarySnapshot,
+  studioClient,
+  studioErrorCode,
   studioHandlers,
+  tooLargeMessage,
   worldFullMessage,
   NO_LOCOMOTION,
   type LibrarySnapshot,
   type ReleaseParams,
+  type ReleaseVoxelParams,
+  type StudioErrorCode,
+  type StudioParts,
   type StudioRequests,
   type StudioServices,
 } from "./studio-protocol";
@@ -77,6 +88,7 @@ function fakeWorld() {
       creatures.push({ id, speciesId });
       return Promise.resolve({ ok: true, value: id });
     }),
+    checkAssembly: vi.fn(() => Promise.resolve<Result<Diagnostic[]>>({ ok: true, value: [] })),
     despawn: vi.fn((creatureId: string) => {
       creatures.splice(
         creatures.findIndex((c) => c.id === creatureId),
@@ -92,11 +104,13 @@ async function setUp({
   store = createMemoryLibraryStore(),
   open = true,
   checkLimits = () => Promise.reject(new Error("unused")),
+  parts,
 }: {
   maxCreatures?: number;
   store?: LibraryStore;
   open?: boolean;
   checkLimits?: StudioServices["checkLimits"];
+  parts?: StudioParts;
 } = {}) {
   const world = fakeWorld();
   const changed = vi.fn();
@@ -107,7 +121,6 @@ async function setUp({
       {
         ...world,
         creatures: () => world.creatures,
-        checkAssembly: () => Promise.resolve({ ok: true, value: [] }),
       },
       { onChange: changed },
     );
@@ -116,6 +129,7 @@ async function setUp({
     library: () => library,
     creatures: () => world.creatures,
     maxCreatures,
+    parts: () => parts,
     checkLimits,
   };
   const bus = createMemoryWindowBus();
@@ -368,5 +382,250 @@ describe("the library snapshot", () => {
   it("lists nothing while the library is opening", async () => {
     const { services } = await setUp({ open: false });
     expect(librarySnapshot(services)).toEqual({ species: [], creatures: 1, maxCreatures: 20 });
+  });
+});
+
+describe("building voxel creatures", () => {
+  const VOXEL_ID = "00000000-0000-4000-8000-00000000000b";
+  const voxelParams = (overrides: Partial<ReleaseVoxelParams> = {}): ReleaseVoxelParams => ({
+    releaseId: VOXEL_ID,
+    assembly: sampleVoxelAssembly(),
+    name: "Pebble",
+    plan: { locomotion: { land: true, gait: "hop", swim: false } },
+    ...overrides,
+  });
+  /** One 32-cube block of 10 cm cubes: 3.2 m, larger than `large`. */
+  const BOULDER: VoxelAssembly = {
+    parts: {
+      block: {
+        type: "hollow:torso",
+        size: { x: 32, y: 32, z: 32 },
+        step: 0.1,
+        colors: ["#888888"],
+        voxels: [32 * 32 * 32, 1],
+        attach: { x: 0, y: 0, z: 0 },
+        sockets: [],
+      },
+    },
+    instances: [{ id: "block", part: "block", rotation: [0, 0, 0, 1], mirrored: false }],
+  };
+  /** Bigger than the cap as JSON, and not even a valid assembly: the cap is checked first. */
+  const HUGE = {
+    parts: {},
+    instances: [],
+    padding: "x".repeat(MAX_ASSEMBLY_BYTES),
+  } as unknown as VoxelAssembly;
+
+  /** The code and message the request was refused with. */
+  const refusal = (request: Promise<unknown>) =>
+    request.then(
+      () => expect.unreachable("the request was answered"),
+      (error: unknown) => ({
+        code: studioErrorCode(error),
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+
+  describe("parts", () => {
+    const [part] = Object.values(sampleVoxelAssembly().parts);
+    if (!part) throw new Error("The sample creature has no parts");
+    const PARTS: StudioParts = {
+      parts: [{ id: "hollow:pebble", name: "Pebble", version: "1.0.0", part }],
+      partTypes: [{ id: "hollow:torso", name: "Torso", fits: [] }],
+      socketTypes: ["hollow:hip"],
+    };
+
+    it("answers with the parts, part types and socket types from `ready`", async () => {
+      const { studio } = await setUp({ parts: PARTS });
+      await expect(studioClient(studio).parts()).resolves.toEqual(PARTS);
+    });
+
+    it("says the world is still starting before `ready`", async () => {
+      const { studio } = await setUp();
+      await expect(refusal(studio.request("parts", undefined))).resolves.toEqual({
+        code: "not_ready",
+        message: "The world is still starting. Try again in a moment.",
+      });
+    });
+  });
+
+  describe("assembly", () => {
+    it("gives a released voxel species' assembly and version", async () => {
+      const { studio } = await setUp();
+      const client = studioClient(studio);
+      const { speciesId } = await client.releaseVoxel(voxelParams());
+      await expect(client.assembly(speciesId)).resolves.toEqual({
+        speciesId,
+        version: "1.0.0",
+        assembly: sampleVoxelAssembly(),
+      });
+    });
+
+    it("refuses a drawn species, an unknown one, and while the library is opening", async () => {
+      const { studio } = await setUp();
+      const drawn = await studio.request("release", releaseParams());
+      const codeOf = async (speciesId: string, channel = studio) =>
+        (await refusal(studioClient(channel).assembly(speciesId))).code;
+      expect(await codeOf(drawn.speciesId)).toBe("not_voxel");
+      expect(await codeOf("user:missing")).toBe("unknown_species");
+      const starting = await setUp({ open: false });
+      expect(await codeOf(drawn.speciesId, starting.studio)).toBe("not_ready");
+    });
+  });
+
+  describe("releaseVoxel", () => {
+    it("saves the assembly under the Studio's ID and adds one creature", async () => {
+      const { studio, world, store, changed } = await setUp();
+      const { speciesId } = userSpeciesIds(VOXEL_ID);
+      await expect(
+        studioClient(studio).releaseVoxel(voxelParams({ name: "  Pebble " })),
+      ).resolves.toEqual({ speciesId, name: "Pebble" });
+      const [stored] = await store.list();
+      expect(stored?.id).toBe(VOXEL_ID);
+      expect(stored?.entry).toMatchObject({
+        species: { name: "Pebble", sizeClass: "medium", body: { locomotion: { land: {} } } },
+        body: { kind: "voxel", assembly: sampleVoxelAssembly() },
+      });
+      expect(world.checkAssembly).toHaveBeenCalledOnce();
+      expect(world.spawn).toHaveBeenCalledWith(speciesId, { released: true });
+      expect(changed).toHaveBeenCalledOnce();
+    });
+
+    it("saves once and adds once when the same release comes again", async () => {
+      const { studio, world, store } = await setUp();
+      const client = studioClient(studio);
+      const [first, second] = await Promise.all([
+        client.releaseVoxel(voxelParams()),
+        client.releaseVoxel(voxelParams()),
+      ]);
+      const third = await client.releaseVoxel(voxelParams());
+      expect(second).toEqual(first);
+      expect(third).toEqual(first);
+      expect(await store.list()).toHaveLength(1);
+      expect(world.registerSpecies).toHaveBeenCalledOnce();
+      expect(world.spawn).toHaveBeenCalledOnce();
+    });
+
+    it("after the strip reloads, adds a creature of a species an earlier try kept", async () => {
+      const store = createMemoryLibraryStore();
+      await studioClient((await setUp({ store })).studio).releaseVoxel(voxelParams());
+      const reloaded = await setUp({ store });
+      await studioClient(reloaded.studio).releaseVoxel(voxelParams());
+      expect(await store.list()).toHaveLength(1);
+      expect(reloaded.world.checkAssembly).not.toHaveBeenCalled();
+      expect(reloaded.world.spawn).toHaveBeenCalledOnce();
+    });
+
+    it("refuses an assembly over the size cap before anything else (#208)", async () => {
+      // A full world and a library still opening would refuse it too, but the cap comes first.
+      const { studio } = await setUp({ open: false, maxCreatures: 1 });
+      await expect(
+        refusal(studioClient(studio).releaseVoxel(voxelParams({ assembly: HUGE }))),
+      ).resolves.toEqual({
+        code: "assembly_too_big",
+        message: "Pebble has too much detail to save. Use fewer or smaller parts.",
+      });
+    });
+
+    it("refuses one larger than `large`, saving nothing (ADR 0023 §14)", async () => {
+      const { studio, world, store } = await setUp();
+      const boulder = voxelParams({ name: "Boulder", assembly: BOULDER });
+      await expect(refusal(studioClient(studio).releaseVoxel(boulder))).resolves.toEqual({
+        code: "too_large",
+        message: tooLargeMessage("Boulder"),
+      });
+      expect(world.registerSpecies).not.toHaveBeenCalled();
+      expect(await store.list()).toEqual([]);
+    });
+
+    it("refuses one with nowhere to appear, in the player's words (ADR 0023 §14)", async () => {
+      const { studio, world, store } = await setUp();
+      const noSpawn = {
+        ok: false as const,
+        diagnostics: [error("no_spawn_point", "No spawn point is walkable for user:x", [])],
+      };
+      world.registerSpecies.mockResolvedValueOnce(noSpawn);
+      await expect(refusal(studioClient(studio).releaseVoxel(voxelParams()))).resolves.toEqual({
+        code: "no_spawn_point",
+        message:
+          "Pebble has nowhere to appear in this world at its size. Try adding or removing parts to change its size.",
+      });
+      world.registerSpecies.mockResolvedValueOnce(noSpawn);
+      const swimmer = voxelParams({
+        plan: { locomotion: { land: false, gait: "walk", swim: true } },
+      });
+      await expect(refusal(studioClient(studio).releaseVoxel(swimmer))).resolves.toEqual({
+        code: "no_spawn_point",
+        message:
+          "Pebble has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or change its size.",
+      });
+      expect(await store.list()).toEqual([]);
+    });
+
+    it("refuses an assembly that isn't JSON as a failed release", async () => {
+      // The channel carries only JSON, so this reaches the handler directly.
+      const { services, store } = await setUp();
+      const notJson = { parts: {}, instances: [], count: 1n } as unknown as VoxelAssembly;
+      const refused = await refusal(
+        Promise.resolve(studioHandlers(services).releaseVoxel(voxelParams({ assembly: notJson }))),
+      );
+      expect(refused.code).toBe("release_failed");
+      expect(refused.message).toContain("Pebble's assembly isn't JSON");
+      expect(await store.list()).toEqual([]);
+    });
+
+    it("checks the size cap first even when an earlier try kept the species", async () => {
+      const store = createMemoryLibraryStore();
+      await studioClient((await setUp({ store })).studio).releaseVoxel(voxelParams());
+      // After the strip reloads, the retry map is empty: the cap comes before the kept species.
+      const reloaded = await setUp({ store });
+      const refused = await refusal(
+        studioClient(reloaded.studio).releaseVoxel(voxelParams({ assembly: HUGE })),
+      );
+      expect(refused.code).toBe("assembly_too_big");
+      expect(reloaded.world.spawn).not.toHaveBeenCalled();
+    });
+
+    it("refuses one whose parts don't fit, as a failed release", async () => {
+      const { studio, world } = await setUp();
+      world.checkAssembly.mockResolvedValueOnce({
+        ok: true,
+        value: [error("part_does_not_fit", "The leg doesn't fit the neck", [])],
+      });
+      await expect(refusal(studioClient(studio).releaseVoxel(voxelParams()))).resolves.toEqual({
+        code: "release_failed",
+        message: "Pebble couldn't be released: The leg doesn't fit the neck",
+      });
+    });
+
+    it("refuses bad settings and a full world, and the same ID may try again after", async () => {
+      const { studio, world, store } = await setUp({ maxCreatures: 1 });
+      const client = studioClient(studio);
+      const codeOf = async (params: ReleaseVoxelParams) =>
+        (await refusal(client.releaseVoxel(params))).code;
+      const still = { land: false, gait: "walk", swim: false } as const;
+      const expected: [ReleaseVoxelParams, StudioErrorCode][] = [
+        [voxelParams({ name: " " }), "invalid_request"],
+        [voxelParams({ plan: { locomotion: still } }), "invalid_request"],
+        [voxelParams({ releaseId: "not-a-uuid" }), "invalid_request"],
+        [voxelParams(), "world_full"],
+      ];
+      for (const [params, code] of expected) expect(await codeOf(params)).toBe(code);
+      expect(await store.list()).toEqual([]);
+      world.creatures.splice(0);
+      await expect(client.releaseVoxel(voxelParams())).resolves.toMatchObject({ name: "Pebble" });
+    });
+
+    it("refuses while the library is still opening", async () => {
+      const { studio } = await setUp({ open: false });
+      const refused = await refusal(studioClient(studio).releaseVoxel(voxelParams()));
+      expect(refused.code).toBe("not_ready");
+    });
+  });
+
+  it("reads no code from a failure the strip didn't refuse", () => {
+    expect(studioErrorCode(new StudioRequestError("too_large", "Big"))).toBe("too_large");
+    expect(studioErrorCode(new RequestTimeoutError("releaseVoxel"))).toBeUndefined();
+    expect(studioErrorCode(new Error("Lost"))).toBeUndefined();
   });
 });
