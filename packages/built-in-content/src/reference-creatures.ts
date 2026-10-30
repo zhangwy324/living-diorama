@@ -7,7 +7,7 @@ import {
 
 // Reference creatures built by hand from the starter parts, one per torso layout and the mossling,
 // for the starter parts' tests and screenshots. They show that the parts fit together. Only the
-// mossling's is used beyond that: `pnpm mossling` freezes it as the mossling species' assembly
+// mossling's is used beyond that: `pnpm parts` freezes it as the mossling species' assembly
 // asset. M21's Studio and the assembler make creatures of their own.
 
 /** One instance: its ID, its part's ID and the socket of an earlier instance it hangs from. */
