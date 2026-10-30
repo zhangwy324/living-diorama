@@ -110,6 +110,8 @@ export function Studio() {
     [],
   );
 
+  const onReleaseStart = useCallback(() => setCelebration(undefined), []);
+
   /** Runs a My creatures request, one species at a time, saying what went wrong if it fails. */
   const ask = (speciesId: string, request: () => Promise<unknown>) => {
     setBusySpecies(speciesId);
@@ -130,6 +132,7 @@ export function Studio() {
         modeSwitch={modeSwitch}
         askLimits={askLimits}
         client={client}
+        onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsavedBuild}
       />
@@ -140,6 +143,7 @@ export function Studio() {
         modeSwitch={modeSwitch}
         askLimits={askLimits}
         release={releaseDrawing}
+        onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsavedDraw}
       />

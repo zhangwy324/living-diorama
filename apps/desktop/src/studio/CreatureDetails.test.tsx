@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { expect, it, vi } from "vitest";
 import { BODY_THICKNESS, type SizeClass } from "@living-diorama/content-schema";
-import { CreatureDetails, DEFAULT_SIZE_CLASS, thicknessLabel } from "./CreatureDetails";
+import {
+  CreatureDetails,
+  DEFAULT_SIZE_CLASS,
+  thicknessLabel,
+  TOO_BIG_SIZE,
+} from "./CreatureDetails";
 
 it("starts a new creature at medium, the mossling's size", () => {
   expect(DEFAULT_SIZE_CLASS).toBe("medium");
@@ -107,4 +112,25 @@ it("counts picking the size already shown as a pick", () => {
 it("says the thickness in whole percent of the height", () => {
   expect(thicknessLabel(0.1)).toBe("10% of the height");
   expect(thicknessLabel(0.35000000000000003)).toBe("35% of the height");
+});
+
+it("shows a measured size as text, with no picker and no thickness", () => {
+  const readout = (sizeClass: SizeClass | undefined) =>
+    renderToStaticMarkup(
+      <CreatureDetails
+        name="Pip"
+        placeholder="Creature"
+        onName={() => {}}
+        onSuggestName={() => {}}
+        sizeClass={sizeClass}
+        measured="85 cm tall"
+        hints={[]}
+      />,
+    );
+  const large = readout("large");
+  expect(large).not.toContain('type="radio"');
+  expect(large).not.toContain('type="range"');
+  expect(large).toContain("<strong>Large</strong>");
+  expect(large).toContain("85 cm tall");
+  expect(readout(undefined)).toContain(`<strong>${TOO_BIG_SIZE}</strong>`);
 });

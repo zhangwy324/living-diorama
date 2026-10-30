@@ -1,6 +1,6 @@
 import { VoxelAssemblySchema } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
-import { builtInParts } from "./build-fixtures";
+import { builtInParts } from "./fixtures/built-in-parts";
 import { defaultRoot, partsKit, rootPartTypes, traySections } from "./parts-kit";
 
 const studioParts = builtInParts();

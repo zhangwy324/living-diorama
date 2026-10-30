@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LibrarySnapshot, ReleaseVoxelParams, Released } from "../studio-protocol";
 import { AssemblyEditor, type BuildClient } from "./AssemblyEditor";
 import { TOO_BIG_HINT } from "./assembly-state";
-import { builtInParts } from "./build-fixtures";
+import { builtInParts } from "./fixtures/built-in-parts";
 import type { AskLimits } from "./limits";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,6 +19,7 @@ const view = vi.hoisted(() => ({
   assembly: undefined as unknown,
   highlighted: [] as unknown[],
   selection: [] as string[],
+  walking: false,
 }));
 vi.mock("@living-diorama/renderer", () => ({
   createAssemblyView: (): Partial<AssemblyView> => ({
@@ -32,7 +33,9 @@ vi.mock("@living-diorama/renderer", () => ({
       view.selection = [...ids];
     },
     setGhost: () => {},
-    setTestWalk: () => {},
+    setTestWalk: (motion) => {
+      view.walking = motion !== undefined;
+    },
     pick: () => view.under,
     dispose: () => {},
     thumbnails: {
@@ -42,7 +45,11 @@ vi.mock("@living-diorama/renderer", () => ({
 }));
 
 const LIBRARY: LibrarySnapshot = { species: [], creatures: 3, maxCreatures: 20 };
-const NO_LIMITS: CheckedLimits = { limits: [], locomotion: {} };
+// The land rule, so the confirm step's preview has a motion to play.
+const NO_LIMITS: CheckedLimits = {
+  limits: [],
+  locomotion: { "core:land": { animation: "walk" } as never },
+};
 
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -73,23 +80,32 @@ async function setup(askLimits: AskLimits = () => Promise.resolve(NO_LIMITS)) {
     releaseVoxel,
   };
   const onReleased = vi.fn();
+  const onReleaseStart = vi.fn();
   const onUnsaved = vi.fn();
   root = createRoot(container);
-  await act(async () =>
+  const render = (active: boolean) =>
     root?.render(
       <AssemblyEditor
-        active
-        keysEnabled
+        active={active}
+        keysEnabled={active}
         library={LIBRARY}
         modeSwitch={null}
         askLimits={askLimits}
         client={client}
+        onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsaved}
       />,
-    ),
-  );
-  return { releaseVoxel, onReleased, onUnsaved };
+    );
+  await act(async () => render(true));
+  return {
+    releaseVoxel,
+    onReleased,
+    onReleaseStart,
+    onUnsaved,
+    /** Shows or hides Build mode, as the Studio's switch does. */
+    show: (active: boolean) => act(async () => render(active)),
+  };
 }
 
 const button = (text: string) => {
@@ -105,6 +121,8 @@ const clickStage = async () => {
   await act(async () => stage?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 };
 const click = async (target: HTMLElement) => act(async () => target.click());
+const key = (init: KeyboardEventInit) =>
+  act(async () => window.dispatchEvent(new KeyboardEvent("keydown", init)));
 const sentIds = (release: ReturnType<typeof vi.fn>) =>
   release.mock.calls.map(([params]) => (params as ReleaseVoxelParams).releaseId);
 
@@ -141,7 +159,7 @@ it("places a picked part on a clicked socket, then selects it and asks before cl
 });
 
 it("keeps the release ID across retries and makes a new one after an edit", async () => {
-  const { releaseVoxel, onReleased } = await setup();
+  const { releaseVoxel, onReleased, onReleaseStart } = await setup();
   releaseVoxel.mockRejectedValueOnce(new Error("The world didn't answer."));
   await click(button("Next"));
   await click(button("Release"));
@@ -169,6 +187,8 @@ it("keeps the release ID across retries and makes a new one after an edit", asyn
   expect(new Set(ids).size).toBe(3);
   expect(releaseVoxel.mock.calls[3]?.[0].assembly.instances).toHaveLength(3);
 
+  // Each try first clears the last release's celebration.
+  expect(onReleaseStart).toHaveBeenCalledTimes(4);
   // Released: back to Build mode at the default torso.
   expect(onReleased).toHaveBeenCalledWith({ speciesId: "user:x", name: "Fin" });
   expect(button("Next")).toBeDefined();
@@ -187,4 +207,28 @@ it("blocks Release for a limit error, and says why", async () => {
     "Has nowhere to appear in this world at this size, moving this way.",
   );
   expect(container.textContent).not.toContain(TOO_BIG_HINT);
+});
+
+it("drops the pick and the selection on Escape", async () => {
+  await setup();
+  await click(trayPart("Four-legged torso"));
+  await click(trayPart("Paw leg"));
+  expect(view.highlighted).toHaveLength(4);
+  await key({ key: "Escape" });
+  expect(view.highlighted).toEqual([]);
+  expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("false");
+  await click(trayPart("Round head"));
+  expect(view.selection).toEqual(["neck"]);
+  await key({ key: "Escape" });
+  expect(view.selection).toEqual([]);
+});
+
+it("walks the creature in the confirm step only while Build mode is shown", async () => {
+  const { show } = await setup();
+  await click(button("Next"));
+  expect(view.walking).toBe(true);
+  await show(false);
+  expect(view.walking).toBe(false);
+  await show(true);
+  expect(view.walking).toBe(true);
 });

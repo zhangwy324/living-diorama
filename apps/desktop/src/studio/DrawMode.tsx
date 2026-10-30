@@ -70,6 +70,7 @@ export function DrawMode({
   library,
   modeSwitch,
   askLimits,
+  onReleaseStart,
   onReleased,
   onUnsaved,
   release: releaseDrawing,
@@ -271,6 +272,7 @@ export function DrawMode({
     if (!current || !releasable) return;
     setReleasing(true);
     setReleaseError(undefined);
+    onReleaseStart();
     releaseId.current ??= crypto.randomUUID();
     const drawing = current.drawing;
     try {

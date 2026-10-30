@@ -9,6 +9,7 @@ import {
   canRemove,
   canUndo,
   clearNotice,
+  droppedText,
   ghostAt,
   isStart,
   measureOf,
@@ -27,7 +28,7 @@ import {
   undo,
   type BuildState,
 } from "./assembly-state";
-import { builtInParts } from "./build-fixtures";
+import { builtInParts } from "./fixtures/built-in-parts";
 import { assemblyOf, partsKit } from "./parts-kit";
 
 const made = partsKit(builtInParts());
@@ -171,9 +172,23 @@ describe("Build mode's editor state", () => {
       "neck:hollow:round-head@neck",
     ]);
     expect(swapped.picked).toBeUndefined();
+    // Nothing was dropped, so nothing is said.
+    expect(swapped.notice).toBeUndefined();
     // The same torso again changes nothing.
     expect(pickPart(swapped, kit, "hollow:mossling-torso").history).toBe(swapped.history);
     valid(swapped);
+  });
+
+  it("says how many parts a replacement dropped", () => {
+    const legs = withBackLegs();
+    const swapped = pickPart(legs, kit, "hollow:mossling-torso");
+    // The mossling torso has no back-left or back-right socket.
+    expect(layout(present(swapped))).toEqual([`${ROOT}:hollow:mossling-torso`]);
+    expect(swapped.notice).toBe("2 parts didn't fit the new mossling torso.");
+    expect(droppedText(1, "Round head")).toBe("1 part didn't fit the new round head.");
+    // A replacement that keeps everything says nothing.
+    const replaced = placeAt(pickPart(legs, kit, "hollow:stout-leg"), kit, at("back-left"));
+    expect(replaced.notice).toBeUndefined();
   });
 
   it("removes the selected part with its image while mirroring, never the torso", () => {
@@ -247,11 +262,15 @@ describe("Build mode's editor state", () => {
 
 describe("release blocking", () => {
   it("blocks a creature larger than large, and limit errors; other hints never block", () => {
-    expect(releaseBlock({ tooBig: true, limitErrors: [] })).toBe(TOO_BIG_HINT);
-    expect(releaseBlock({ tooBig: true, limitErrors: ["Nowhere to appear."] })).toBe(TOO_BIG_HINT);
-    expect(releaseBlock({ tooBig: false, limitErrors: ["Nowhere to appear."] })).toBe(
-      "Nowhere to appear.",
-    );
-    expect(releaseBlock({ tooBig: false, limitErrors: [] })).toBeUndefined();
+    expect(releaseBlock({ tooBig: true, limitErrors: [] })).toEqual([TOO_BIG_HINT]);
+    expect(releaseBlock({ tooBig: true, limitErrors: ["Nowhere to appear."] })).toEqual([
+      TOO_BIG_HINT,
+    ]);
+    // Every limit error, not just the first.
+    expect(releaseBlock({ tooBig: false, limitErrors: ["Nowhere.", "Stuck."] })).toEqual([
+      "Nowhere.",
+      "Stuck.",
+    ]);
+    expect(releaseBlock({ tooBig: false, limitErrors: [] })).toEqual([]);
   });
 });

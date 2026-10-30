@@ -22,6 +22,9 @@ const percent = (share: number) => Math.round(share * 100);
 /** "40% of the height": what the slider shows and says. */
 export const thicknessLabel = (thickness: number) => `${percent(thickness)}% of the height`;
 
+/** The size readout for a voxel creature larger than every size class. */
+export const TOO_BIG_SIZE = "Too big";
+
 const sizeLabel = (size: SizeClass) => size.charAt(0).toUpperCase() + size.slice(1);
 
 export function CreatureDetails(props: {
@@ -35,8 +38,8 @@ export function CreatureDetails(props: {
   /** The size suggested from the drawing (issue #49), marked in the picker; none while empty. */
   suggestedSize?: SizeClass | undefined;
   /**
-   * Picks a size. Left out, the sizes only show the one measured from a voxel creature's cubes
-   * (ADR 0022 §3), with `measured` beside the heading.
+   * Picks a size. Left out, the size measured from a voxel creature's cubes (ADR 0022 §3) shows
+   * as text, with `measured` beside it.
    */
   onSizeClass?(size: SizeClass): void;
   /** What the size is measured from, e.g. "32 cm tall", for a voxel creature. */
@@ -88,29 +91,37 @@ export function CreatureDetails(props: {
           </button>
         </span>
       </label>
-      <fieldset className={onSizeClass ? "field sizes" : "field sizes measured-size"}>
-        <legend>
-          Size{props.measured && <small className="measured"> · {props.measured}</small>}
-        </legend>
-        {SIZES.map((size) => (
-          <label key={size} title={`${Math.round(SIZE_CLASSES[size].height * 100)} cm tall`}>
-            <input
-              type="radio"
-              name="size"
-              value={size}
-              checked={props.sizeClass === size}
-              disabled={!onSizeClass && props.sizeClass !== size}
-              onChange={() => onSizeClass?.(size)}
-              // A click on the size already shown fires no change, but taking the suggestion
-              // is a pick too, so later drawing doesn't move it (issue #49).
-              onClick={() => onSizeClass?.(size)}
-            />
-            <span>{sizeLabel(size)}</span>
-            {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
-            <small className="suggested">{props.suggestedSize === size ? "suggested" : ""}</small>
-          </label>
-        ))}
-      </fieldset>
+      {onSizeClass ? (
+        <fieldset className="field sizes">
+          <legend>Size</legend>
+          {SIZES.map((size) => (
+            <label key={size} title={`${Math.round(SIZE_CLASSES[size].height * 100)} cm tall`}>
+              <input
+                type="radio"
+                name="size"
+                value={size}
+                checked={props.sizeClass === size}
+                onChange={() => onSizeClass(size)}
+                // A click on the size already shown fires no change, but taking the suggestion
+                // is a pick too, so later drawing doesn't move it (issue #49).
+                onClick={() => onSizeClass(size)}
+              />
+              <span>{sizeLabel(size)}</span>
+              {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
+              <small className="suggested">{props.suggestedSize === size ? "suggested" : ""}</small>
+            </label>
+          ))}
+        </fieldset>
+      ) : (
+        // Measured, not picked (ADR 0022 §3): plain text, nothing to press.
+        <p className="field size-readout" aria-live="polite">
+          <span>Size</span>
+          <span>
+            <strong>{props.sizeClass ? sizeLabel(props.sizeClass) : TOO_BIG_SIZE}</strong>
+            {props.measured && <span className="measured"> · {props.measured}</span>}
+          </span>
+        </p>
+      )}
       {thickness !== undefined && onThickness && (
         <label className="field thickness">
           <span>Thickness</span>

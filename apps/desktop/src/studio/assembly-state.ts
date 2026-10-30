@@ -116,18 +116,31 @@ function editAt(
     : attachPart(assembly, at, library, kit.lookup, { mirror });
 }
 
-/** `state` after an edit: recorded and the edited part selected, or the refusal shown. */
-function settle(state: BuildState, result: AssemblyEditResult | undefined): BuildState {
+/**
+ * `state` after an edit: recorded and the edited part selected, or the refusal shown. A
+ * replacement says how many parts hanging from it were dropped, since that isn't plain to see.
+ */
+function settle(
+  state: BuildState,
+  result: AssemblyEditResult | undefined,
+  replacedWith?: string,
+): BuildState {
   if (!result) return state;
   if (!result.ok) return { ...state, notice: refusalText(result.refusal.code) };
+  const dropped = state.history.present.instances.length - result.assembly.instances.length;
   return {
     ...state,
     history: recordEdit(state.history, result.assembly),
     picked: undefined,
     selected: result.instances[0],
-    notice: undefined,
+    notice:
+      replacedWith !== undefined && dropped > 0 ? droppedText(dropped, replacedWith) : undefined,
   };
 }
+
+/** Said when a replacement dropped parts that didn't fit the new part. */
+export const droppedText = (count: number, partName: string) =>
+  `${count} ${count === 1 ? "part" : "parts"} didn't fit the new ${partName.toLowerCase()}.`;
 
 /** A refused edit in the player's words. Codes the Studio's own checks rule out get a general line. */
 export function refusalText(code: string): string {
@@ -166,6 +179,7 @@ export function pickPart(state: BuildState, kit: PartsKit, partId: string | unde
     return settle(
       cleared,
       replacePart(assembly, root.id, library, kit.lookup, { mirror: state.mirror }),
+      library.name,
     );
   }
   const { free, occupied } = targetsFor(kit, assembly, partId, state.mirror);
@@ -196,8 +210,14 @@ function covers(result: AssemblyEditResult & { ok: true }, sockets: readonly Soc
 
 /** Puts the picked part on a marked socket: placed on a free one, replacing on a taken one. */
 export function placeAt(state: BuildState, kit: PartsKit, at: SocketRef): BuildState {
-  if (state.picked === undefined) return state;
-  return settle(state, editAt(kit, state.history.present, state.picked, at, state.mirror));
+  const { picked } = state;
+  if (picked === undefined) return state;
+  const replacing = holderOf(state.history.present, at) !== undefined;
+  return settle(
+    state,
+    editAt(kit, state.history.present, picked, at, state.mirror),
+    replacing ? kit.byId.get(picked)?.name : undefined,
+  );
 }
 
 /**
@@ -283,8 +303,17 @@ export const clearNotice = (state: BuildState): BuildState =>
  * Whether `assembly` is the default start, so closing the Studio loses nothing (ADR 0023 §21).
  * Compared by content, so a part placed and removed again leaves it the start.
  */
-export const isStart = (assembly: VoxelAssembly, kit: PartsKit): boolean =>
-  assembly === kit.start || JSON.stringify(assembly) === JSON.stringify(kit.start);
+export function isStart(assembly: VoxelAssembly, kit: PartsKit): boolean {
+  if (assembly === kit.start) return true;
+  // Cheap checks first: most edited creatures differ in their parts' count or root.
+  const [root] = assembly.instances;
+  const [startRoot] = kit.start.instances;
+  if (assembly.instances.length !== kit.start.instances.length || !root || !startRoot) {
+    return false;
+  }
+  if (assembly.parts[root.part]?.source !== kit.start.parts[startRoot.part]?.source) return false;
+  return JSON.stringify(assembly) === JSON.stringify(kit.start);
+}
 
 const measures = new WeakMap<VoxelAssembly, AssemblyMeasure>();
 
@@ -304,7 +333,7 @@ export const TOO_BIG_HINT =
 
 /**
  * Why the creature can't be released as it is (ADR 0023 §14): too big for every size class, or
- * a limit error for its size and ways of moving. Other hints never block. Undefined when nothing
+ * the limit errors for its size and ways of moving. Other hints never block. Empty when nothing
  * blocks.
  */
 export function releaseBlock({
@@ -313,7 +342,6 @@ export function releaseBlock({
 }: {
   tooBig: boolean;
   limitErrors: readonly string[];
-}): string | undefined {
-  if (tooBig) return TOO_BIG_HINT;
-  return limitErrors[0];
+}): string[] {
+  return tooBig ? [TOO_BIG_HINT] : [...limitErrors];
 }

@@ -125,6 +125,11 @@ const WATER_COLOUR = "#4f8fb0";
 const WATER_OPACITY = 0.55;
 /** A socket marker's radius, as a share of the camera's distance, so it keeps its size on screen. */
 const MARKER_SCALE = 0.009;
+/**
+ * A marker's radius for picking, as a share of the camera's distance: larger than the dot drawn,
+ * so a small dot is still easy to click.
+ */
+const MARKER_HIT_SCALE = 0.016;
 const MARKER_COLOUR = "#2fc4ff";
 const SELECTION_COLOUR = "#ffd84a";
 const SELECTION_OPACITY = 0.45;
@@ -280,8 +285,8 @@ export function createAssemblyView(
     scaleMarkers();
   };
 
-  const scaleMarkers = () => {
-    const scale = camera.position.distanceTo(controls.target) * MARKER_SCALE;
+  const scaleMarkers = (share = MARKER_SCALE) => {
+    const scale = camera.position.distanceTo(controls.target) * share;
     for (const marker of markers.children) marker.scale.setScalar(scale);
   };
 
@@ -456,9 +461,12 @@ export function createAssemblyView(
         built.mesh.computeBoundingSphere();
         built.boundsStale = false;
       }
-      scaleMarkers();
+      // Picked at their hit size, then drawn at their own again.
+      scaleMarkers(MARKER_HIT_SCALE);
       scene.updateMatrixWorld();
-      return pickAssembly(raycaster, built.mesh, built.assembly, markers);
+      const hit = pickAssembly(raycaster, built.mesh, built.assembly, markers);
+      scaleMarkers();
+      return hit;
     },
     probe(clientX, clientY) {
       if (disposed || !aim(clientX, clientY)) return undefined;

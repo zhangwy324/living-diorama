@@ -16,6 +16,8 @@ export interface ModeProps {
   /** The Build/Draw switch, for the mode's toolbar. */
   modeSwitch: ReactNode;
   askLimits: AskLimits;
+  /** A release is on its way: the Studio stops saying the last one went. */
+  onReleaseStart(): void;
   /** A creature was released: the Studio says so. */
   onReleased(released: Released): void;
   /** Whether closing now would lose something not released (ADR 0015 §10, ADR 0023 §21). */

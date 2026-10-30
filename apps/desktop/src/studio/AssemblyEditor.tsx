@@ -66,6 +66,7 @@ export function AssemblyEditor({
   modeSwitch,
   askLimits,
   client,
+  onReleaseStart,
   onReleased,
   onUnsaved,
 }: ModeProps & { client: BuildClient }) {
@@ -187,14 +188,15 @@ export function AssemblyEditor({
   const limits = useLimits(askLimits, sizeClass, locomotion);
   const block = releaseBlock({ tooBig, limitErrors: limits.errors });
   const moves = canMove(locomotion);
-  const releasable = !!assembly && name.trim() !== "" && moves && !releasing && !block;
+  const releasable = !!assembly && name.trim() !== "" && moves && !releasing && block.length === 0;
 
   // The confirm step walks the creature in place (ADR 0023 §13).
   const body = useMemo(() => planVoxelBody({ locomotion }), [locomotion]);
   const modes = previewModes(locomotion, body, limits.rules);
   const mode = chosenMode(modes, previewMode);
   const reducedMotion = useReducedMotion();
-  const motion = step === "plan" ? mode?.motion : undefined;
+  // Only while shown: a hidden Build mode draws nothing.
+  const motion = active && step === "plan" ? mode?.motion : undefined;
   const moving = motion !== undefined;
   const profile = motion?.profile;
   const submersion = motion?.submersion ?? 0;
@@ -278,6 +280,7 @@ export function AssemblyEditor({
     if (!assembly || !kit || !releasable) return;
     setReleasing(true);
     setReleaseError(undefined);
+    onReleaseStart();
     releaseId.current ??= crypto.randomUUID();
     try {
       const released = await client.releaseVoxel({
@@ -433,11 +436,7 @@ export function AssemblyEditor({
                     {NO_LOCOMOTION}
                   </p>
                 )}
-                {moves && block && (
-                  <p className="release-hint blocking" role="status">
-                    {block}
-                  </p>
-                )}
+                {moves && <BlockingHints hints={block} />}
                 {releaseError && (
                   <p className="release-error" role="alert">
                     {releaseError}
@@ -480,11 +479,7 @@ export function AssemblyEditor({
                 hints={moves ? hints : []}
               />
               <div className="release-slot">
-                {block && (
-                  <p className="release-hint blocking" role="status">
-                    {block}
-                  </p>
-                )}
+                <BlockingHints hints={block} />
                 <button
                   type="button"
                   className="release"
@@ -507,4 +502,13 @@ export function AssemblyEditor({
       </div>
     </div>
   );
+}
+
+/** What keeps the creature from being released, each on its own line (ADR 0023 §14). */
+function BlockingHints({ hints }: { hints: readonly string[] }) {
+  return hints.map((hint) => (
+    <p key={hint} className="release-hint blocking" role="status">
+      {hint}
+    </p>
+  ));
 }

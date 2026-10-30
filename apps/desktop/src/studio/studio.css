@@ -1076,30 +1076,17 @@ body,
   background: rgb(200 67 58 / 30%);
 }
 
-/* A voxel creature's size is measured, not picked (ADR 0022 §3). */
-.sizes .measured {
-  font-size: 12px;
+/* A voxel creature's size is measured, not picked (ADR 0022 §3): text, not buttons. */
+.size-readout {
+  margin: 0;
+}
+
+.size-readout strong {
+  font-size: 15px;
+}
+
+.size-readout .measured {
   color: rgb(238 243 232 / 75%);
-}
-
-.measured-size span {
-  cursor: default;
-}
-
-.measured-size label:hover span {
-  background: rgb(255 255 255 / 8%);
-}
-
-.measured-size input:disabled + span {
-  opacity: 0.45;
-}
-
-.measured-size .suggested {
-  display: none;
-}
-
-.measured-size label:hover input:checked + span {
-  background: rgb(110 160 90 / 80%);
 }
 
 .side-panel.build-panel {
