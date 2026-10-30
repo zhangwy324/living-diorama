@@ -284,7 +284,7 @@ describe("the assembly view's probe, ghost and life cycle", () => {
   const halfWidthAt = (aspect: number) =>
     Math.atan(Math.tan(THREE.MathUtils.degToRad(15)) * aspect);
 
-  it("takes its first shape from the container, and frames again on the first resize", () => {
+  it("takes its first shape from the container, frames on the first resize, then keeps the fit", () => {
     const wide = { ...container, clientWidth: 800, clientHeight: 200 } as unknown as HTMLElement;
     const shaped = createAssemblyView(wide);
     expect(halfWidth(shaped)).toBeCloseTo(halfWidthAt(4), 6);
@@ -299,9 +299,24 @@ describe("the assembly view's probe, ghost and life cycle", () => {
     expect(halfWidth(view)).toBeCloseTo(halfWidthAt(0.25), 6);
     const narrow = distance();
     expect(narrow).toBeGreaterThan(square * 1.5);
-    // Later resizes keep the camera where the player put it.
+    // Later resizes keep the body's share of the view: back to square, back to the square fit.
     resize(400, 400);
-    expect(distance()).toBeCloseTo(narrow, 9);
+    expect(distance()).toBeCloseTo(square, 9);
+    view.dispose();
+  });
+
+  it("pulls back along the camera's own line when the canvas narrows later", () => {
+    const view = createAssemblyView(container);
+    view.setAssembly(parsed());
+    resize(400, 400);
+    const before = ray(view.probe(...MIDDLE)!);
+    // A side panel opens: the canvas is half as wide.
+    resize(200, 400);
+    const after = ray(view.probe(...MIDDLE)!);
+    expect(after.origin.length()).toBeGreaterThan(before.origin.length() * 1.5);
+    // Same orbit: the camera looks the same way.
+    expect(after.direction.distanceTo(before.direction)).toBeLessThan(1e-9);
+    expect(halfWidth(view)).toBeCloseTo(halfWidthAt(0.5), 6);
     view.dispose();
   });
 
