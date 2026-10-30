@@ -105,12 +105,20 @@ describe("simulation client", () => {
   it("starts the world empty, then spawns the starting creatures when asked", async () => {
     const { client, callbacks, tick } = start();
     expect(callbacks.onReady).toHaveBeenCalledOnce();
-    // The prop types come with it, for the editor's palette.
-    expect(callbacks.onReady.mock.calls[0]?.[0].props["hollow:rock"]).toEqual({
+    // The prop types and their categories come with it, for the editor's drawer.
+    const [content] = callbacks.onReady.mock.calls[0] ?? [];
+    expect(content?.props["hollow:rock"]).toEqual({
       name: "Rock",
       model: "hollow:models/rock.glb",
       blockRadius: 0.5,
+      category: "hollow:rocks",
     });
+    expect(content?.propCategories.map((c: { name: string }) => c.name)).toEqual([
+      "Trees",
+      "Rocks",
+      "Plants",
+      "Mushrooms",
+    ]);
     tick(100);
     expect(creaturesShown(callbacks)).toHaveLength(0);
     const spawning = client.spawnStartingCreatures();

@@ -124,6 +124,61 @@ describe("simulation host", () => {
     for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
   });
 
+  it("describes the prop types with their categories, and the categories in tab order", () => {
+    // A pack's tab sorts by order among the built-in ones, and a type without a category says so
+    // by leaving it out (the drawer lists it under "Other").
+    const host = startHost((registries) => [
+      ...registerBuiltInContent(registries),
+      registries.propCategories.register({
+        schemaVersion: 1,
+        id: "test:fences",
+        version: "1.0.0",
+        name: "Fences",
+        order: 15,
+      }),
+      registries.props.register({
+        schemaVersion: 2,
+        id: "test:stump",
+        version: "1.0.0",
+        name: "Stump",
+        model: "hollow:models/rock.glb",
+        blockRadius: 0.4,
+        affordances: {},
+      }),
+    ]);
+    host.init();
+    const [ready] = host.take();
+    if (ready?.type !== "ready") throw new Error("Expected ready");
+    expect(ready.propCategories).toEqual([
+      { id: "hollow:trees", name: "Trees" },
+      { id: "test:fences", name: "Fences" },
+      { id: "hollow:rocks", name: "Rocks" },
+      { id: "hollow:plants", name: "Plants" },
+      { id: "hollow:mushrooms", name: "Mushrooms" },
+    ]);
+    expect(ready.props["hollow:rock"]).toEqual({
+      name: "Rock",
+      model: "hollow:models/rock.glb",
+      blockRadius: 0.5,
+      category: "hollow:rocks",
+    });
+    expect(ready.props["test:stump"]).toEqual({
+      name: "Stump",
+      model: "hollow:models/rock.glb",
+      blockRadius: 0.4,
+    });
+    expect(
+      Object.fromEntries(Object.entries(ready.props).map(([id, p]) => [id, p.category])),
+    ).toEqual({
+      "hollow:bush": "hollow:plants",
+      "hollow:mushroom": "hollow:mushrooms",
+      "hollow:pine": "hollow:trees",
+      "hollow:rock": "hollow:rocks",
+      "hollow:round-tree": "hollow:trees",
+      "test:stump": undefined,
+    });
+  });
+
   it("sends one snapshot per tick when it catches up", () => {
     const host = startHost();
     host.init();

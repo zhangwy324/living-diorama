@@ -14,14 +14,18 @@ body,
 }
 
 .app {
+  --drawer-width: 260px;
   position: relative;
+  display: flex;
   width: 100%;
   height: 100%;
 }
 
+/* The world view takes what the prop drawer leaves; the renderer follows its size. */
 .diorama {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 100%;
 }
 
@@ -51,6 +55,11 @@ body,
 
 .app:hover .controls {
   opacity: 1;
+}
+
+/* The controls belong to the world view, so they stay on it beside the drawer. */
+.app.with-drawer .controls {
+  right: calc(var(--drawer-width) + 10px);
 }
 
 .controls button,
@@ -111,19 +120,6 @@ body,
   pointer-events: auto;
 }
 
-.editor-palette {
-  display: flex;
-  gap: 2px;
-  margin-right: 4px;
-}
-
-.editor-toolbar .editor-chip {
-  width: auto;
-  padding: 0 8px;
-  font: inherit;
-  font-size: 12px;
-}
-
 .editor-toolbar button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -143,6 +139,152 @@ body,
 
 .editor-line.editor-error {
   background: rgb(160 50 40 / 85%);
+}
+
+/* The prop drawer (ADR 0021, PR 7b): on the right, pushing the world view narrower. */
+.prop-drawer {
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--drawer-width);
+  height: 100%;
+  overflow: hidden;
+  border-left: 1px solid rgb(255 255 255 / 10%);
+  background: #232d23;
+  animation: prop-drawer-in 160ms ease-out;
+}
+
+@keyframes prop-drawer-in {
+  from {
+    width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prop-drawer {
+    animation: none;
+  }
+}
+
+.prop-drawer button {
+  border: 0;
+  color: #f4f7ee;
+  font: inherit;
+  cursor: pointer;
+}
+
+.prop-drawer svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.prop-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 6px 12px;
+}
+
+.prop-drawer-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.prop-drawer-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.prop-drawer-close:hover {
+  background: rgb(0 0 0 / 45%);
+}
+
+.prop-drawer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 10px 8px;
+}
+
+.prop-drawer-tabs [role="tab"] {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: rgb(0 0 0 / 30%);
+}
+
+.prop-drawer-tabs [role="tab"]:hover {
+  background: rgb(0 0 0 / 55%);
+}
+
+.prop-drawer-tabs [role="tab"][aria-selected="true"] {
+  background: rgb(110 160 90 / 80%);
+}
+
+.prop-drawer-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+  padding: 2px 10px 10px;
+  overflow-y: auto;
+}
+
+.prop-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 25%);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.prop-tile:hover {
+  background: rgb(0 0 0 / 45%);
+}
+
+.prop-tile:active {
+  cursor: grabbing;
+}
+
+.prop-tile[aria-pressed="true"] {
+  background: rgb(110 160 90 / 55%);
+  box-shadow: inset 0 0 0 1.5px rgb(150 200 120 / 90%);
+}
+
+.prop-tile-picture {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+}
+
+.prop-tile-picture img {
+  width: 56px;
+  height: 56px;
+  pointer-events: none;
+}
+
+.prop-tile-name {
+  font-size: 12px;
+}
+
+.prop-drawer :focus-visible {
+  outline: 2px solid #cfe8b8;
+  outline-offset: 1px;
 }
 
 .error-screen {

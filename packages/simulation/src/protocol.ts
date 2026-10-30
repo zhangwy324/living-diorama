@@ -151,14 +151,23 @@ export interface SpeciesSummary {
 }
 
 /**
- * What the prop editor needs of a registered prop type (ADR 0021 §12): its name for the palette,
- * and its model and block radius (at scale 1) to preview a new placement.
+ * What the prop editor needs of a registered prop type (ADR 0021 §12): its name and category for
+ * the drawer, and its model and block radius (at scale 1) to preview a new placement.
  */
 export interface PropSummary {
   name: string;
   /** Asset ref of the model. */
   model: string;
   blockRadius: number;
+  /** The prop category's ID, if the type names one: the drawer's tab it is listed under. */
+  category?: string;
+}
+
+/** A registered prop category: one tab of the prop editor's drawer (ADR 0021, PR 7). */
+export interface PropCategorySummary {
+  id: string;
+  /** The tab's label. */
+  name: string;
 }
 
 /**
@@ -172,8 +181,10 @@ export interface WorldContent {
   /** Every registered asset and species, by ID. */
   assets: Record<string, AssetSummary>;
   species: Record<string, SpeciesSummary>;
-  /** Every registered prop type, by ID, for the prop editor's palette. */
+  /** Every registered prop type, by ID, for the prop editor's drawer. */
   props: Record<string, PropSummary>;
+  /** Every registered prop category, in the drawer's tab order (`sortedPropCategories`). */
+  propCategories: PropCategorySummary[];
 }
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */

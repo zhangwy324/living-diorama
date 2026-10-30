@@ -387,7 +387,7 @@ describe("PropEditor deleting, adding and undo", () => {
     ]);
   });
 
-  it("places a prop from the palette with a preview following the pointer, then selects it", async () => {
+  it("places a prop clicked in the drawer with a preview following the pointer, then selects it", async () => {
     const { editor, view, sent, click, settle, state } = setup();
     editor.choosePlacing("hollow:rock");
     expect(state()?.placing).toBe("hollow:rock");
@@ -415,7 +415,7 @@ describe("PropEditor deleting, adding and undo", () => {
     expect(view.selected).toBe("prop-1");
   });
 
-  it("stops placing with Esc or the chosen chip again", () => {
+  it("stops placing with Esc or the chosen tile again", () => {
     const { editor, view, state } = setup();
     editor.choosePlacing("hollow:rock");
     editor.pointerMove(at(4, 4));
@@ -644,5 +644,131 @@ describe("PropEditor with edits in flight", () => {
     expect(sent).toHaveLength(1);
     expect(state()).toBe(before);
     warn.mockRestore();
+  });
+});
+
+describe("PropEditor placing from the drawer", () => {
+  it("opens the drawer with Edit mode", () => {
+    const { editor, state } = setup();
+    expect(state()?.drawerOpen).toBe(true);
+    editor.setDrawerOpen(false);
+    expect(state()?.drawerOpen).toBe(false);
+    editor.setActive(false);
+    editor.setActive(true);
+    expect(state()?.drawerOpen).toBe(true);
+  });
+
+  it("places a dragged type where it is released over the ground, then selects it", async () => {
+    const { editor, view, sent, settle, state } = setup();
+    editor.startPlacingDrag("hollow:rock");
+    expect(state()).toMatchObject({ placing: "hollow:rock", placingDrag: true });
+    // Over the drawer: no preview yet.
+    editor.movePlacingDrag(at(4, 4), false);
+    expect(view.preview).toBeUndefined();
+    editor.movePlacingDrag(at(4, 4), true);
+    expect(view.preview?.transform.position).toEqual({ x: 4, y: 1, z: 4 });
+    // A turn shows at once, without waiting for the pointer to move.
+    editor.key(key("r"));
+    expect(view.preview?.transform.rotationY).toBe(ROTATE_STEP);
+    editor.movePlacingDrag(at(6, 7), true);
+    editor.endPlacingDrag(at(6, 7), true);
+    expect(state()).toMatchObject({ placing: undefined, placingDrag: false });
+    // The preview stays until the new prop is drawn.
+    expect(view.preview).toBeDefined();
+    await settle();
+    expect(sent).toEqual([
+      {
+        ops: [
+          { op: "prop.add", prop: "hollow:rock", position: { x: 6, z: 7 }, rotationY: ROTATE_STEP },
+        ],
+      },
+    ]);
+    expect(view.selected).toBe("prop-1");
+    editor.setProps([prop("rock-1", 0, 0), prop("pine-1", 10, 10), prop("prop-1", 6, 7)]);
+    expect(view.preview).toBeUndefined();
+  });
+
+  it.each([
+    ["over the drawer", at(4, 4), false],
+    ["off the ground", at(-500, 4), true],
+  ])("places nothing when released %s, and placing ends", async (_, pointer, overWorld) => {
+    const { editor, view, sent, settle, state } = setup();
+    editor.startPlacingDrag("hollow:rock");
+    editor.movePlacingDrag(at(4, 4), true);
+    editor.movePlacingDrag(pointer, overWorld);
+    editor.endPlacingDrag(pointer, overWorld);
+    await settle();
+    expect(sent).toEqual([]);
+    expect(view.preview).toBeUndefined();
+    expect(state()).toMatchObject({ placing: undefined, placingDrag: false });
+  });
+
+  it("cancels a drag with Esc, a lost pointer, closing the drawer or leaving Edit mode", async () => {
+    const { editor, view, sent, settle, state } = setup();
+    const cancels: (() => void)[] = [
+      () => editor.key(key("Escape")),
+      () => editor.cancelPlacingDrag(),
+      () => editor.setDrawerOpen(false),
+      () => editor.setActive(false),
+    ];
+    for (const cancel of cancels) {
+      editor.setActive(true);
+      editor.setDrawerOpen(true);
+      editor.startPlacingDrag("hollow:rock");
+      editor.movePlacingDrag(at(4, 4), true);
+      cancel();
+      expect(view.preview).toBeUndefined();
+      expect(state()).toMatchObject({ placing: undefined, placingDrag: false });
+      // The rest of the drag does nothing.
+      editor.movePlacingDrag(at(5, 5), true);
+      editor.endPlacingDrag(at(5, 5), true);
+      expect(view.preview).toBeUndefined();
+    }
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it("closing the drawer ends a clicked placement but keeps the selection and Edit mode", async () => {
+    const { editor, view, sent, click, settle, state } = setup();
+    editor.choosePlacing("hollow:rock");
+    editor.pointerMove(at(4, 4));
+    editor.setDrawerOpen(false);
+    expect(view.preview).toBeUndefined();
+    expect(state()).toMatchObject({ active: true, drawerOpen: false, placing: undefined });
+    click(at(6, 7));
+    click(at(0, 0));
+    editor.wheel(-100);
+    editor.setDrawerOpen(true);
+    editor.setDrawerOpen(false);
+    expect(state()).toMatchObject({ selected: "rock-1", drawerOpen: false });
+    // The scale pending when the drawer closed still commits.
+    await settle();
+    expect(sent).toEqual([]);
+    editor.select(undefined);
+    await settle();
+    expect(sent[0]?.ops).toMatchObject([{ op: "prop.scale", id: "rock-1" }]);
+    // Nothing is dragged in while the drawer is closed.
+    editor.startPlacingDrag("hollow:rock");
+    expect(state()?.placing).toBeUndefined();
+  });
+
+  it("takes a clicked placement's preview away while the pointer is off the view", () => {
+    const { editor, view } = setup();
+    editor.choosePlacing("hollow:rock");
+    editor.pointerMove(at(4, 4));
+    editor.pointerLeave();
+    expect(view.preview).toBeUndefined();
+    expect(editor.state.placing).toBe("hollow:rock");
+    editor.pointerMove(at(5, 5));
+    expect(view.preview?.transform.position).toEqual({ x: 5, y: 1, z: 5 });
+  });
+
+  it("ignores a drag of an unknown type, or outside Edit mode", () => {
+    const { editor, state } = setup();
+    editor.startPlacingDrag("hollow:unknown");
+    expect(state()?.placing).toBeUndefined();
+    editor.setActive(false);
+    editor.startPlacingDrag("hollow:rock");
+    expect(editor.state.placing).toBeUndefined();
   });
 });

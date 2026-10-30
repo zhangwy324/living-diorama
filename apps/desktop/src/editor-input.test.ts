@@ -41,6 +41,7 @@ function setup(takes: { down?: boolean; move?: boolean; up?: boolean; wheel?: bo
     pointerMove: vi.fn(() => takes.move ?? false),
     pointerUp: vi.fn(() => takes.up ?? false),
     pointerCancel: vi.fn(),
+    pointerLeave: vi.fn(),
     wheel: vi.fn<(deltaY: number) => boolean>(() => takes.wheel ?? false),
   };
   const camera = vi.fn((event: Event) => order.push(`camera ${event.type}`));
@@ -105,10 +106,15 @@ describe("attachEditorInput", () => {
   });
 
   it("passes a lost pointer on, and removes every listener when detached", () => {
-    const { canvas, editor, camera, detach } = setup({ down: true, wheel: true });
+    const { container, canvas, editor, camera, detach } = setup({ down: true, wheel: true });
     canvas.dispatchEvent(pointer("pointercancel"));
     expect(editor.pointerCancel).toHaveBeenCalledOnce();
+    // pointerleave doesn't bubble: it is the container's own.
+    container.dispatchEvent(new MouseEvent("pointerleave"));
+    expect(editor.pointerLeave).toHaveBeenCalledOnce();
     detach();
+    container.dispatchEvent(new MouseEvent("pointerleave"));
+    expect(editor.pointerLeave).toHaveBeenCalledOnce();
     canvas.dispatchEvent(pointer("pointerdown"));
     canvas.dispatchEvent(pointer("pointermove"));
     canvas.dispatchEvent(pointer("pointerup"));
