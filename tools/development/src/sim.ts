@@ -77,6 +77,9 @@ const WORLDS = {
         Object.entries(VOXEL_SPECIES).map(([plan, s]) => [`voxel-${plan}`, s.input.id]),
       ),
     } as Record<string, string>,
+    // Registered in every run, so a loaded save keeps their creatures. A navigation profile is a
+    // size class and a set of capabilities, so while they share both with the species above they
+    // add no profile to build.
     runtimeSpecies: Object.values(VOXEL_SPECIES),
     ...LIVING_BEHAVIOR_CHECKS,
   },
