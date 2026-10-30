@@ -325,6 +325,9 @@ importers:
       '@living-diorama/simulation':
         specifier: workspace:*
         version: link:../../packages/simulation
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 
