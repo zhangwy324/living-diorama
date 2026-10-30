@@ -924,8 +924,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 16, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(16);
+  it("is protocol version 17, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(17);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

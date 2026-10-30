@@ -1,11 +1,11 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import {
   error,
+  parseLibraryEntry,
   type Diagnostic,
   type Drawing,
   type Result,
   type SpeciesDefinition,
-  type VoxelAssembly,
 } from "@living-diorama/content-schema";
 import { createMemoryLibraryStore, type LibraryStore } from "@living-diorama/desktop-integration";
 import type { SpeciesAppearanceKind } from "@living-diorama/extension-api";
@@ -55,8 +55,8 @@ function fakeWorld() {
       return Promise.resolve({ ok: true as const, value: creatureId });
     }),
     creatures: () => creatures,
-    checkAssembly: vi.fn<(assembly: VoxelAssembly) => Promise<Diagnostic[]>>(() =>
-      Promise.resolve([]),
+    checkAssembly: vi.fn<(assembly: unknown) => Promise<Result<Diagnostic[]>>>(() =>
+      Promise.resolve({ ok: true, value: [] }),
     ),
   } satisfies LibraryWorld;
   return { world, creatures, registered };
@@ -370,6 +370,18 @@ describe("voxel species", () => {
     expect(relaunched.world.checkAssembly).not.toHaveBeenCalled();
   });
 
+  it("loads a voxel entry saved again as parsed, as M21's recolouring will", async () => {
+    const first = await open();
+    value(await first.library.saveVoxel(sampleVoxelAssembly(), "Pebble", HOP));
+    const [stored] = await first.store.list();
+    const parsed = value(parseLibraryEntry(stored?.entry));
+    const store = createMemoryLibraryStore();
+    await store.save(UUIDS[0] ?? "", parsed);
+
+    const { library } = await open(store);
+    expect(library.list()).toMatchObject([{ name: "Pebble", body: "voxel", available: true }]);
+  });
+
   it("skips a voxel entry that holds another ID", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = await open();
@@ -392,7 +404,10 @@ describe("voxel species", () => {
     expect(large.ok ? [] : large.diagnostics.map((d) => d.code)).toEqual(["too_large"]);
     expect(world.checkAssembly).not.toHaveBeenCalled();
 
-    world.checkAssembly.mockResolvedValueOnce([error("part_does_not_fit", "No", [])]);
+    world.checkAssembly.mockResolvedValueOnce({
+      ok: true,
+      value: [error("part_does_not_fit", "No", [])],
+    });
     const misfit = await library.saveVoxel(sampleVoxelAssembly(), "Misfit", HOP);
     expect(misfit.ok ? [] : misfit.diagnostics.map((d) => d.code)).toEqual(["part_does_not_fit"]);
 

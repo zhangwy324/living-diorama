@@ -12,7 +12,6 @@ import {
   VoxelAssemblySchema,
   type Diagnostic,
   type Drawing,
-  type LibraryBody,
   type LibraryBodyKind,
   type LibraryEntry,
   type Result,
@@ -30,7 +29,7 @@ import {
   planVoxelBody,
   type BodyPlanChoice,
 } from "./body-plan";
-import { DRAWN_SPECIES_DEFAULTS } from "./startup";
+import { USER_SPECIES_DEFAULTS } from "./startup";
 import { userSpeciesIds, type UserSpeciesIds } from "./user-species";
 
 // The species library at run time (ADR 0014): the species the player keeps, drawn or voxel
@@ -112,15 +111,10 @@ export interface SaveOptions {
 /** What the library needs of the running world. */
 export interface LibraryWorld extends Pick<
   SimulationClient,
-  "registerSpecies" | "spawn" | "despawn"
+  "registerSpecies" | "spawn" | "despawn" | "checkAssembly"
 > {
   /** The creatures in the world now, from the latest snapshot. */
   creatures(): readonly { id: string; speciesId: string }[];
-  /**
-   * What is wrong with a voxel assembly's part and socket types in this world: types that aren't
-   * registered and parts that don't fit their sockets (`checkAssemblyTypes`).
-   */
-  checkAssembly(assembly: VoxelAssembly): Promise<Diagnostic[]>;
 }
 
 export interface LibraryOptions {
@@ -146,20 +140,17 @@ const describeEntry = ({ species, createdAt, body }: LibraryEntry): LibrarySpeci
   body: body.kind,
 });
 
-/** The asset kind a library species' appearance registers as. */
-const APPEARANCE_KINDS = { drawn: "image", voxel: "voxel" } as const satisfies Record<
-  LibraryBodyKind,
-  string
->;
-
 /**
- * The file the world draws a species from: a drawn one's PNG, or a voxel one's assembly as JSON,
- * made from the entry, which holds it inline (ADR 0022 §17).
+ * What the world draws a species from, as the asset kind it registers: a drawn one's image (PNG
+ * bytes), or a voxel one's assembly, which its entry holds inline (ADR 0022 §17).
  */
-const appearanceBlob = (body: LibraryBody, image: Uint8Array | undefined): Blob =>
-  body.kind === "voxel"
-    ? new Blob([JSON.stringify(body.assembly)], { type: "application/json" })
-    : new Blob([image?.slice() ?? new Uint8Array()], { type: "image/png" });
+type Appearance = { kind: "image"; image: Uint8Array } | { kind: "voxel"; assembly: VoxelAssembly };
+
+/** The file of an appearance, for its `blob:` URL: the PNG, or the assembly as JSON. */
+const appearanceBlob = (appearance: Appearance): Blob =>
+  appearance.kind === "voxel"
+    ? new Blob([JSON.stringify(appearance.assembly)], { type: "application/json" })
+    : new Blob([appearance.image.slice()], { type: "image/png" });
 
 /**
  * The entry stored under `id` if it passes its schema and holds that ID's species, else undefined
@@ -209,17 +200,10 @@ export async function openSpeciesLibrary(
   /** Deleted, or never stored, this run but still registered: no new creatures. */
   const unseen = new Set<string>();
 
-  /**
-   * Registers `entry`'s species from its appearance, a drawn one's image or a voxel one's
-   * assembly, and keeps it in the list.
-   */
-  const register = async (uuid: string, entry: LibraryEntry, image?: Uint8Array) => {
-    const url = URL.createObjectURL(appearanceBlob(entry.body, image));
-    const registered = await world.registerSpecies(
-      entry.species,
-      url,
-      APPEARANCE_KINDS[entry.body.kind],
-    );
+  /** Registers `entry`'s species from its appearance, and keeps it in the list. */
+  const register = async (uuid: string, entry: LibraryEntry, appearance: Appearance) => {
+    const url = URL.createObjectURL(appearanceBlob(appearance));
+    const registered = await world.registerSpecies(entry.species, url, appearance.kind);
     if (!registered.ok) {
       URL.revokeObjectURL(url);
       return registered;
@@ -256,7 +240,12 @@ export async function openSpeciesLibrary(
     const parsed = parseLibraryEntry(written);
     if (!parsed.ok) return parsed;
     const entry = parsed.value;
-    const registered = await register(uuid, entry, drawn?.image);
+    const appearance: Appearance | undefined =
+      entry.body.kind === "voxel"
+        ? { kind: "voxel", assembly: entry.body.assembly }
+        : drawn && { kind: "image", image: drawn.image };
+    if (!appearance) return failure("missing_image", "A drawn species needs its image");
+    const registered = await register(uuid, entry, appearance);
     if (!registered.ok) return registered;
     const speciesId = entry.species.id;
     try {
@@ -290,16 +279,20 @@ export async function openSpeciesLibrary(
     const entry = checkEntry(id, input);
     if (!entry) continue;
     // A voxel species has no image: its entry holds its assembly.
-    let image;
-    try {
-      if (entry.body.kind === "drawn") image = await store.loadImage(id);
-    } catch (cause) {
-      keepUnavailable(id, entry, [
-        error("library_io", `Could not read the image: ${describeError(cause)}`, []),
-      ]);
-      continue;
+    let appearance: Appearance;
+    if (entry.body.kind === "voxel") {
+      appearance = { kind: "voxel", assembly: entry.body.assembly };
+    } else {
+      try {
+        appearance = { kind: "image", image: await store.loadImage(id) };
+      } catch (cause) {
+        keepUnavailable(id, entry, [
+          error("library_io", `Could not read the image: ${describeError(cause)}`, []),
+        ]);
+        continue;
+      }
     }
-    const registered = await register(id, entry, image);
+    const registered = await register(id, entry, appearance);
     if (!registered.ok) keepUnavailable(id, entry, registered.diagnostics);
   }
 
@@ -323,7 +316,7 @@ export async function openSpeciesLibrary(
       const ids = fresh.value;
       const species: SpeciesDefinitionInput = {
         // First, so the app defaults never override the plan or anything below.
-        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
+        ...structuredClone(USER_SPECIES_DEFAULTS),
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,
         version: "1.0.0",
@@ -351,12 +344,20 @@ export async function openSpeciesLibrary(
       // Measured from the cubes (ADR 0022 §3); the part type roles it can take move only the tail.
       const { sizeClass } = measureAssembly(assembly.value);
       if (!sizeClass) return failure("too_large", `${name} is too large for every size class`);
-      // Fits are checked at release only (ADR 0022, M19 decisions).
-      const misfits = await world.checkAssembly(assembly.value);
-      if (misfits.some((d) => d.severity === "error")) return { ok: false, diagnostics: misfits };
+      // Fits are checked at release only, by the world (ADR 0022, M19 decisions).
+      let checked: Result<Diagnostic[]>;
+      try {
+        checked = await world.checkAssembly(assembly.value);
+      } catch (cause) {
+        return failure("assembly_check_failed", `Could not check ${name}: ${describeError(cause)}`);
+      }
+      if (!checked.ok) return checked;
+      if (checked.value.some((d) => d.severity === "error")) {
+        return { ok: false, diagnostics: checked.value };
+      }
       const species: SpeciesDefinitionInput = {
         // First, so the app defaults never override the plan or anything below.
-        ...structuredClone(DRAWN_SPECIES_DEFAULTS),
+        ...structuredClone(USER_SPECIES_DEFAULTS),
         schemaVersion: SCHEMA_VERSIONS.species,
         id: ids.speciesId,
         version: "1.0.0",

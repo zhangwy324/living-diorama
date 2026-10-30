@@ -4,6 +4,7 @@ import {
   type Drawing,
   type Result,
   type SizeClass,
+  type VoxelAssembly,
 } from "@living-diorama/content-schema";
 import { createMemoryLibraryStore } from "@living-diorama/desktop-integration";
 import {
@@ -67,7 +68,10 @@ function headlessWorld(startMinutes: number) {
     },
     creatures: () => [...simulation.state.creatures.values()],
     checkAssembly: (assembly) =>
-      Promise.resolve(checkAssemblyTypes(simulation.state.registries, assembly)),
+      Promise.resolve({
+        ok: true as const,
+        value: checkAssemblyTypes(simulation.state.registries, assembly as VoxelAssembly),
+      }),
   };
   const run = (ticks: number, until?: () => boolean) => {
     for (let t = 0; t < ticks && !until?.(); t++) {

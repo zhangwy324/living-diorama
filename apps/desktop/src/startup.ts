@@ -24,11 +24,11 @@ export const STARTUP: StartupConfig = {
 };
 
 /**
- * What a drawn species is given besides its name, size, image and body plan (ADR 0014 §11): the
- * mossling's. Its capabilities come from the body plan the player chose (ADR 0020 §14,
- * `body-plan.ts`).
+ * What a species the player makes, drawn or voxel, is given besides its name, size, appearance and
+ * body plan (ADR 0014 §11): the mossling's. Its capabilities come from the body plan the player
+ * chose (ADR 0020 §14, `body-plan.ts`).
  */
-export const DRAWN_SPECIES_DEFAULTS = {
+export const USER_SPECIES_DEFAULTS = {
   baseSpeed: 0.6,
   behaviors: ["core:wander", "core:feed", "core:rest"],
   senses: { "core:vision": 8 },

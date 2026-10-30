@@ -1,10 +1,21 @@
-import { formatDiagnostic, type Drawing, type Result } from "@living-diorama/content-schema";
+import {
+  formatDiagnostic,
+  type Drawing,
+  type Result,
+  type VoxelAssembly,
+} from "@living-diorama/content-schema";
 import { createMemoryLibraryStore } from "@living-diorama/desktop-integration";
 import { Simulation } from "@living-diorama/simulation";
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import { checkAssemblyTypes } from "@living-diorama/extension-api";
 import { describe, expect, it } from "vitest";
-import { defaultPlan, type BodyPlanChoice } from "./body-plan";
+import {
+  defaultPlan,
+  locomotionCapabilities,
+  type BodyPlanChoice,
+  type LocomotionChoice,
+} from "./body-plan";
+import { VOXEL_SAMPLE_PLANS, type VoxelSamplePlan } from "./dev-library";
 import { loadContent } from "./content";
 import { openSpeciesLibrary, type LibraryWorld } from "./species-library";
 import { STARTUP } from "./startup";
@@ -47,7 +58,10 @@ function headlessWorld() {
     },
     creatures: () => [...simulation.state.creatures.values()],
     checkAssembly: (assembly) =>
-      Promise.resolve(checkAssemblyTypes(simulation.state.registries, assembly)),
+      Promise.resolve({
+        ok: true as const,
+        value: checkAssemblyTypes(simulation.state.registries, assembly as VoxelAssembly),
+      }),
   };
   return { simulation, world };
 }
@@ -119,24 +133,31 @@ describe("a released body plan", () => {
 });
 
 describe("a voxel creature", () => {
-  const plans = {
-    walk: { land: true, gait: "walk", swim: false },
-    hop: { land: true, gait: "hop", swim: false },
-    swim: { land: false, gait: "walk", swim: true },
-  } as const;
+  const plans = VOXEL_SAMPLE_PLANS;
+  /** How each plan's creature may move where it appears: in the water, or on land. */
+  const animations: Record<VoxelSamplePlan, string[]> = {
+    walk: ["walk"],
+    hop: ["hop"],
+    swim: ["swim"],
+    "land+swim": ["walk", "swim"],
+  };
 
   it("moves as its body plan says, with its size class measured from its cubes", async () => {
     const { simulation, world } = headlessWorld();
     const library = await openSpeciesLibrary(createMemoryLibraryStore(), world);
-    for (const [name, locomotion] of Object.entries(plans)) {
+    for (const [name, locomotion] of Object.entries(plans) as [
+      VoxelSamplePlan,
+      LocomotionChoice,
+    ][]) {
       const saved = value(await library.saveVoxel(sampleVoxelAssembly(), name, { locomotion }));
       expect(saved).toMatchObject({ body: "voxel", sizeClass: "small", available: true });
       const species = simulation.state.registries.species.get(saved.speciesId);
       expect(species?.body.locomotion.land.gait).toBe(locomotion.gait);
+      expect(species?.capabilities).toEqual(locomotionCapabilities(locomotion));
       expect(simulation.state.registries.assets.get(species?.appearance ?? "")?.kind).toBe("voxel");
       const id = value(await library.addCreature(saved.speciesId));
       const creature = simulation.snapshot().creatures.find((c) => c.id === id);
-      expect(creature?.animation).toBe(name === "swim" ? "swim" : name);
+      expect(animations[name]).toContain(creature?.animation);
     }
   });
 

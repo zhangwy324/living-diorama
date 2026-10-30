@@ -19,7 +19,7 @@ import {
   type BodyPlanChoice,
   type LocomotionChoice,
 } from "../body-plan";
-import { DRAWN_SPECIES_DEFAULTS } from "../startup";
+import { USER_SPECIES_DEFAULTS } from "../startup";
 
 // The confirm panel's words and small rules (ADR 0020 §12): what each gait and anchor is called,
 // which ways of moving the preview plays, and placing anchors by clicking the drawing.
@@ -33,7 +33,7 @@ export const GAIT_PREVIEW_LABELS: Readonly<Record<LandGait, string>> = {
 };
 
 /** The preview moves at a drawn creature's pace: its base speed times a speed factor of 1. */
-export const PREVIEW_SPEED = DRAWN_SPECIES_DEFAULTS.baseSpeed * DRAWN_SPEED_FACTOR;
+export const PREVIEW_SPEED = USER_SPECIES_DEFAULTS.baseSpeed * DRAWN_SPEED_FACTOR;
 
 export const ANCHOR_LABELS: Readonly<Record<AnchorName, { name: string; help: string }>> = {
   centerOfGravity: {

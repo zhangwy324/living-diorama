@@ -1,3 +1,4 @@
+import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import { defaultBody } from "@living-diorama/content-schema";
 import {
   envelope,
@@ -119,6 +120,9 @@ describe("simulation client", () => {
       "Plants",
       "Mushrooms",
     ]);
+    // So are the voxel part types, with their roles.
+    expect(content?.partTypes).toContainEqual({ id: "hollow:tail", role: "tail" });
+    expect(content?.partTypes).toContainEqual({ id: "hollow:leg" });
     tick(100);
     expect(creaturesShown(callbacks)).toHaveLength(0);
     const spawning = client.spawnStartingCreatures();
@@ -519,6 +523,29 @@ describe("simulation client", () => {
       "unknown_capability",
     ]);
     expect(callbacks.onSpeciesRegistered).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("checks a voxel assembly's structure and part types in the worker", async () => {
+    const { client, callbacks, tick } = start();
+    const misfit = sampleVoxelAssembly();
+    const leg = misfit.parts.leg;
+    if (!leg) throw new Error("No leg");
+    // Arms fit shoulders, not the back legs' hips.
+    leg.type = "hollow:arm";
+    const checks = [
+      client.checkAssembly(sampleVoxelAssembly()),
+      client.checkAssembly(misfit),
+      client.checkAssembly({ parts: {}, instances: [] }),
+    ];
+    tick();
+    const [fits, doesNot, broken] = await Promise.all(checks);
+    const codes = (result: Awaited<(typeof checks)[number]> | undefined) =>
+      result?.ok ? result.value.map((d) => d.code) : ["failed"];
+    expect(codes(fits)).toEqual([]);
+    expect(codes(doesNot)).toEqual(["part_does_not_fit", "part_does_not_fit"]);
+    expect(codes(broken).length).toBeGreaterThan(0);
+    expect(codes(broken)).not.toContain("failed");
     expect(callbacks.onFailure).not.toHaveBeenCalled();
   });
 });

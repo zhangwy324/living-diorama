@@ -1,5 +1,6 @@
 import {
   formatDiagnostic,
+  type Diagnostic,
   type Result,
   type SizeClass,
   type WorldEditCheck,
@@ -72,6 +73,12 @@ export interface SimulationClient {
     sizeClass: SizeClass,
     capabilities: Record<string, number>,
   ): Promise<Result<CheckedLimits>>;
+  /**
+   * What is wrong with a voxel assembly being released, against the world's part and socket types
+   * (ADR 0022, M19 decisions): its structure, then its fits. Resolves with the diagnostics, empty
+   * when nothing is wrong, or fails if the worker couldn't check it. The worker doesn't keep it.
+   */
+  checkAssembly(assembly: unknown): Promise<Result<Diagnostic[]>>;
   /**
    * Adds a creature at a random spawn point. Resolves with its ID, or why it couldn't be added.
    * `released`: it comes from the Studio, so it gets the release grace (ADR 0018 amendments, §13).
@@ -301,6 +308,9 @@ export function startSimulation(
           value: { limits: message.limits, locomotion: message.locomotion },
         });
         break;
+      case "assembly_checked":
+        answer(message.requestId, { ok: true, value: message.diagnostics });
+        break;
       case "spawned":
       case "despawned":
         answer(message.requestId, { ok: true, value: message.creatureId });
@@ -376,6 +386,7 @@ export function startSimulation(
       request({ type: "register_species", species, appearanceUrl, appearanceKind }),
     checkLimits: (sizeClass, capabilities) =>
       request({ type: "check_limits", sizeClass, capabilities }),
+    checkAssembly: (assembly) => request({ type: "check_assembly", assembly }),
     spawn: (speciesId, { released = false } = {}) =>
       request({ type: "spawn", speciesId, ...(released ? { released } : {}) }),
     despawn: (creatureId) => request({ type: "despawn", creatureId }),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SpeciesDefinitionSchema } from "./definitions";
+import { SpeciesDefinitionSchema, type BodyShape, type SpeciesDefinition } from "./definitions";
 import type { Result } from "./diagnostics";
 import { VoxelAssemblySchema, measureAssembly } from "./voxel-assembly";
 import { migrate, type Migration } from "./migrate";
@@ -122,8 +122,8 @@ export const libraryAppearance = (speciesId: string, kind: LibraryBodyKind): str
 const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
 
 /**
- * Rejects drawn-only body plan settings on a voxel species, as written: once parsed, every
- * species has them by default.
+ * Rejects drawn-only body plan settings on a voxel species, as written. Parsing the species fills
+ * in their defaults, so the parsed entry drops them again (`dropDrawnOnlySettings`).
  */
 function checkVoxelBodyPlan(input: unknown, ctx: z.RefinementCtx): void {
   const record = (value: unknown) =>
@@ -175,11 +175,36 @@ const LibraryEntryShapeSchema = z
       }
     },
     { when: ({ issues }) => issues.length === 0 },
-  );
+  )
+  .transform(dropDrawnOnlySettings);
+
+/** A voxel library species' body plan: its gait alone (ADR 0022, M19 decisions). */
+export type VoxelBodyPlan = Pick<BodyShape, "locomotion">;
+
+/**
+ * A parsed voxel entry without the drawn-only body settings the species schema filled in, so it
+ * is an entry as written: it validates again and can be stored again as it is.
+ */
+function dropDrawnOnlySettings<E extends { species: SpeciesDefinition; body: LibraryBody }>(
+  entry: E,
+):
+  | (E & { body: { kind: "drawn" } })
+  | (Omit<E, "species"> & {
+      species: Omit<SpeciesDefinition, "body"> & { body: VoxelBodyPlan };
+      body: Extract<LibraryBody, { kind: "voxel" }>;
+    }) {
+  if (entry.body.kind !== "voxel") return entry as E & { body: { kind: "drawn" } };
+  const { locomotion } = entry.species.body;
+  return {
+    ...entry,
+    species: { ...entry.species, body: { locomotion } },
+    body: entry.body,
+  };
+}
 
 /**
  * A species in the library, drawn or voxel. A drawn one's drawing and image are stored beside it;
- * a voxel one holds its assembly in `body`.
+ * a voxel one holds its assembly in `body`, and its species' body plan is its gait alone.
  */
 export const LibraryEntrySchema = z
   .unknown()
