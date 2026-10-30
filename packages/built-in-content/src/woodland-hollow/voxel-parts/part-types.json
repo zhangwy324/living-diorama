@@ -1,6 +1,6 @@
 [
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:torso",
     "version": "1.0.0",
     "name": "Torso",
@@ -8,7 +8,7 @@
     "role": "root"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:head",
     "version": "1.0.0",
     "name": "Head",
@@ -16,7 +16,7 @@
     "motion": "bob"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:leg",
     "version": "1.0.0",
     "name": "Leg",
@@ -24,7 +24,7 @@
     "motion": "swing"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:arm",
     "version": "1.0.0",
     "name": "Arm",
@@ -32,7 +32,7 @@
     "motion": "swing"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:tail",
     "version": "1.0.0",
     "name": "Tail",
@@ -41,7 +41,7 @@
     "motion": "wag"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:ear",
     "version": "1.0.0",
     "name": "Ear",
@@ -49,7 +49,7 @@
     "motion": "flop"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:eye",
     "version": "1.0.0",
     "name": "Eye",
@@ -57,21 +57,21 @@
     "motion": "blink"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:nose",
     "version": "1.0.0",
     "name": "Nose",
     "fits": ["hollow:nose-mount"]
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:mouth",
     "version": "1.0.0",
     "name": "Mouth",
     "fits": ["hollow:mouth-mount"]
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:fin",
     "version": "1.0.0",
     "name": "Fin",
@@ -79,7 +79,7 @@
     "motion": "paddle"
   },
   {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "id": "hollow:tail-fin",
     "version": "1.0.0",
     "name": "Tail fin",

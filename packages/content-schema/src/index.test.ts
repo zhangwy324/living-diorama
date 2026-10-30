@@ -13,11 +13,11 @@ import {
   parsePartDefinition,
   parsePartTypeDefinition,
   parsePropCategoryDefinition,
-  PART_MOTIONS,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
+  PART_MOTIONS,
   drawnOnlySettings,
   type Diagnostic,
   type Result,
@@ -541,7 +541,7 @@ describe("PropCategoryDefinition", () => {
 });
 
 describe("PartTypeDefinition", () => {
-  const torso = { schemaVersion: 1, id: "test:torso", version: "1.0.0", name: "Torso" };
+  const torso = { schemaVersion: 2, id: "test:torso", version: "1.0.0", name: "Torso" };
 
   it("has the tail and root roles, and fits nothing by default", () => {
     expect(parsePartTypeDefinition({ ...torso, role: "root" })).toEqual({
@@ -564,7 +564,8 @@ describe("PartTypeDefinition", () => {
       expect(parsePartTypeDefinition({ ...torso, motion }).ok).toBe(true);
     }
     const parsed = parsePartTypeDefinition(torso);
-    expect(parsed.ok && "motion" in parsed.value).toBe(false);
+    if (!parsed.ok) throw new Error("The torso doesn't parse");
+    expect("motion" in parsed.value).toBe(false);
     const found = diagnostics(parsePartTypeDefinition({ ...torso, motion: "wiggle" }));
     expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
       ["motion", "Unknown part motion (expected swing, wag, bob, paddle, flop, blink)"],

@@ -59,7 +59,7 @@ export const SCHEMA_VERSIONS = {
   prop: 2,
   propCategory: 1,
   species: 1,
-  partType: 1,
+  partType: 2,
   socketType: 1,
   part: 1,
   palette: 1,

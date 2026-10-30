@@ -749,7 +749,7 @@ describe("prop categories", () => {
 describe("part types and socket types", () => {
   const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
   const partType = (id: string, fits: string[], role?: string) => ({
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     version: "1.0.0",
     name: id,
@@ -890,7 +890,7 @@ describe("palettes", () => {
 describe("parts", () => {
   const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
   const partType = (id: string, fits: string[]) => ({
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     version: "1.0.0",
     name: id,

@@ -166,7 +166,7 @@ const SEGMENT: LibraryPart = {
 const LIBRARY = [THIN_LEG, FINE_LEG, HEAD, EYE, BIG_EYE, TAIL, WING, CLAWED_LEG];
 
 const partType = (id: string, fits: string[]): PartTypeDefinition => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   id,
   version: "1.0.0",
   name: id,
