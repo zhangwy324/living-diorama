@@ -2,16 +2,22 @@ import {
   defaultBody,
   FoodAffordanceParamsSchema,
   formatDiagnostic,
+  validate,
+  VoxelAssemblySchema,
   type Result,
 } from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
 import {
   addEntries,
   animationProfile,
+  checkAssemblyTypes,
   checkReferences,
   createRegistries,
+  partFitsSocket,
   resolveReferences,
+  sortedPartTypes,
   sortedPropCategories,
+  sortedSocketTypes,
   type Registries,
 } from "./index";
 
@@ -714,6 +720,103 @@ describe("prop categories", () => {
       "test:trees",
       "mod:shrubs",
       "test:rocks",
+    ]);
+  });
+});
+
+describe("part types and socket types", () => {
+  const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
+  const partType = (id: string, fits: string[], role?: string) => ({
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    name: id,
+    fits,
+    ...(role === undefined ? {} : { role }),
+  });
+  function registered(): Registries {
+    const registries = createRegistries();
+    for (const id of ["test:hip", "test:neck", "test:tail-root"]) {
+      expectOk(registries.socketTypes.register(socketType(id)));
+    }
+    expectOk(registries.partTypes.register(partType("test:torso", [])));
+    expectOk(registries.partTypes.register(partType("test:leg", ["test:hip"])));
+    expectOk(registries.partTypes.register(partType("test:tail", ["test:tail-root"], "tail")));
+    // Another pack's part may fit this pack's socket.
+    expectOk(registries.partTypes.register(partType("mod:fin", ["test:hip", "test:tail-root"])));
+    return registries;
+  }
+
+  it("registers part types with the socket types they fit, and their roles", () => {
+    const registries = registered();
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+    expect(registries.partTypes.get("test:tail")?.role).toBe("tail");
+    expect(registries.partTypes.get("test:leg")?.role).toBeUndefined();
+    const role = registries.partTypes.validate(partType("test:ear", [], "antenna"));
+    expect(role.ok ? [] : role.diagnostics.map((d) => d.path.join("."))).toEqual(["role"]);
+  });
+
+  it("checks that the socket types a part type fits are registered", () => {
+    const registries = registered();
+    expectOk(registries.partTypes.register(partType("test:eye", ["test:socket"])));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: partTypes/test:eye fits[0]: "test:socket" is not registered in socketTypes (unresolved_reference)',
+    ]);
+  });
+
+  it("lists part types and socket types by ID", () => {
+    const registries = registered();
+    expect(sortedPartTypes(registries).map((t) => t.id)).toEqual([
+      "mod:fin",
+      "test:leg",
+      "test:tail",
+      "test:torso",
+    ]);
+    expect(sortedSocketTypes(registries).map((t) => t.id)).toEqual([
+      "test:hip",
+      "test:neck",
+      "test:tail-root",
+    ]);
+  });
+
+  it("fits a part to a socket its type lists", () => {
+    const registries = registered();
+    expect(partFitsSocket(registries, "test:leg", "test:hip")).toBe(true);
+    expect(partFitsSocket(registries, "mod:fin", "test:tail-root")).toBe(true);
+    expect(partFitsSocket(registries, "test:leg", "test:neck")).toBe(false);
+    expect(partFitsSocket(registries, "test:wing", "test:hip")).toBe(false);
+  });
+
+  it("checks an assembly's parts against the registered types", () => {
+    const registries = registered();
+    const part = (type: string, sockets: unknown[] = []) => ({
+      type,
+      size: { x: 2, y: 2, z: 2 },
+      step: 0.025,
+      colors: ["#7fae5a"],
+      voxels: [8, 1],
+      attach: { x: 1, y: 2, z: 1 },
+      sockets,
+    });
+    const hip = { id: "hip", type: "test:hip", position: { x: 1, y: 1, z: 1 } };
+    const assembly = (child: string) => {
+      const result = validate(VoxelAssemblySchema, {
+        parts: { torso: part("test:torso", [hip]), child: part(child) },
+        instances: [
+          { id: "torso", part: "torso" },
+          { id: "child", part: "child", parent: { instance: "torso", socket: "hip" } },
+        ],
+      });
+      if (!result.ok) throw new Error("invalid assembly");
+      return result.value;
+    };
+    expect(checkAssemblyTypes(registries, assembly("test:leg"))).toEqual([]);
+    expect(checkAssemblyTypes(registries, assembly("mod:fin"))).toEqual([]);
+    expect(checkAssemblyTypes(registries, assembly("test:tail")).map((d) => d.code)).toEqual([
+      "part_does_not_fit",
+    ]);
+    expect(checkAssemblyTypes(registries, assembly("test:wing")).map((d) => d.code)).toEqual([
+      "unknown_part_type",
     ]);
   });
 });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SpeciesDefinitionSchema } from "./definitions";
 import type { Result } from "./diagnostics";
+import { VoxelAssemblySchema, measureAssembly } from "./voxel-assembly";
 import { migrate, type Migration } from "./migrate";
 import { validate } from "./parse";
 import { HexColorSchema } from "./primitives";
@@ -12,7 +13,7 @@ import { HexColorSchema } from "./primitives";
 /** Current data-format version of a drawing. */
 export const DRAWING_SCHEMA_VERSION = 2;
 /** Current data-format version of a library entry. */
-export const LIBRARY_ENTRY_SCHEMA_VERSION = 4;
+export const LIBRARY_ENTRY_SCHEMA_VERSION = 5;
 
 const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 1 held the strokes as the source of truth. Version 2 holds a record of operations
@@ -29,8 +30,8 @@ const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
 };
 
 // Version 3 adds the body plan (ADR 0020 §13); version 4 drops its template (ADR 0020, Follow-up:
-// no body templates). Older entries are not migrated: no backward compatibility is required yet
-// (AGENTS.md), so they fail to load.
+// no body templates); version 5 adds the body, drawn or voxel (ADR 0022 §17). Older entries are
+// not migrated: no backward compatibility is required yet (AGENTS.md), so they fail to load.
 const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
 
 /** Values per stroke point: x and y in canvas pixels, then pressure. */
@@ -93,13 +94,97 @@ export const DrawingSchema = z.strictObject({
 });
 export type Drawing = z.output<typeof DrawingSchema>;
 
-/** A drawn species in the library. Its drawing and image are stored beside it. */
-export const LibraryEntrySchema = z.strictObject({
-  schemaVersion: z.literal(LIBRARY_ENTRY_SCHEMA_VERSION),
-  /** The name shown to the player is the species' name. */
-  species: SpeciesDefinitionSchema,
-  createdAt: z.iso.datetime({ offset: true }),
-});
+/**
+ * What a library species' body is made of: a drawing, stored beside the entry with its image, or
+ * a voxel assembly, held inline as frozen copies of its parts (ADR 0022 §17).
+ */
+export const LibraryBodySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("drawn") }),
+  z.strictObject({ kind: z.literal("voxel"), assembly: VoxelAssemblySchema }),
+]);
+export type LibraryBody = z.output<typeof LibraryBodySchema>;
+export type LibraryBodyKind = LibraryBody["kind"];
+
+/** The file a library species' appearance names, per kind of body. */
+export const LIBRARY_APPEARANCE_FILES = {
+  drawn: "appearance.png",
+  voxel: "assembly.json",
+} as const satisfies Record<LibraryBodyKind, string>;
+
+/**
+ * The appearance a library species of `speciesId` (e.g. `user:3f9c…`) has: its image for a drawn
+ * body, `user:3f9c…/appearance.png`, or its assembly for a voxel one, `user:3f9c…/assembly.json`.
+ */
+export const libraryAppearance = (speciesId: string, kind: LibraryBodyKind): string =>
+  `${speciesId}/${LIBRARY_APPEARANCE_FILES[kind]}`;
+
+/** Body plan settings a voxel species may not have: its cubes give its shape and anchors. */
+const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
+
+/**
+ * Rejects drawn-only body plan settings on a voxel species, as written: once parsed, every
+ * species has them by default.
+ */
+function checkVoxelBodyPlan(input: unknown, ctx: z.RefinementCtx): void {
+  const record = (value: unknown) =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+  const entry = record(input);
+  if (record(entry?.body)?.kind !== "voxel") return;
+  const plan = record(record(entry?.species)?.body);
+  for (const setting of DRAWN_ONLY_BODY_SETTINGS) {
+    if (plan && setting in plan) {
+      ctx.addIssue({
+        code: "custom",
+        message: `A voxel species has no ${setting}: its cubes give it`,
+        path: ["species", "body", setting],
+      });
+    }
+  }
+}
+
+const LibraryEntryShapeSchema = z
+  .strictObject({
+    schemaVersion: z.literal(LIBRARY_ENTRY_SCHEMA_VERSION),
+    /** The name shown to the player is the species' name. */
+    species: SpeciesDefinitionSchema,
+    body: LibraryBodySchema,
+    createdAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine(
+    ({ species, body }, ctx) => {
+      const appearance = libraryAppearance(species.id, body.kind);
+      if (species.appearance !== appearance) {
+        ctx.addIssue({
+          code: "custom",
+          message: `A ${body.kind} species' appearance is "${appearance}"`,
+          path: ["species", "appearance"],
+        });
+      }
+      if (body.kind !== "voxel") return;
+      // The size class is stored, and must be the one the cubes give (ADR 0022 §3).
+      const { sizeClass } = measureAssembly(body.assembly);
+      if (sizeClass !== species.sizeClass) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            sizeClass === undefined
+              ? "The body is too large for every size class"
+              : `The body's size class is ${sizeClass}, not ${species.sizeClass}`,
+          path: ["species", "sizeClass"],
+        });
+      }
+    },
+    { when: ({ issues }) => issues.length === 0 },
+  );
+
+/**
+ * A species in the library, drawn or voxel. A drawn one's drawing and image are stored beside it;
+ * a voxel one holds its assembly in `body`.
+ */
+export const LibraryEntrySchema = z
+  .unknown()
+  .superRefine(checkVoxelBodyPlan)
+  .pipe(LibraryEntryShapeSchema);
 export type LibraryEntry = z.output<typeof LibraryEntrySchema>;
 
 function parseMigrated<T>(

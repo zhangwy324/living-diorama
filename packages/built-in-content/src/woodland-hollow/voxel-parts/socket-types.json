@@ -1,0 +1,62 @@
+[
+  {
+    "schemaVersion": 1,
+    "id": "hollow:neck",
+    "version": "1.0.0",
+    "name": "Neck"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:waist",
+    "version": "1.0.0",
+    "name": "Waist"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:hip",
+    "version": "1.0.0",
+    "name": "Hip"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:shoulder",
+    "version": "1.0.0",
+    "name": "Shoulder"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:tail-base",
+    "version": "1.0.0",
+    "name": "Tail base"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:ear-mount",
+    "version": "1.0.0",
+    "name": "Ear mount"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:eye-mount",
+    "version": "1.0.0",
+    "name": "Eye mount"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:nose-mount",
+    "version": "1.0.0",
+    "name": "Nose mount"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:mouth-mount",
+    "version": "1.0.0",
+    "name": "Mouth mount"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:fin-mount",
+    "version": "1.0.0",
+    "name": "Fin mount"
+  }
+]

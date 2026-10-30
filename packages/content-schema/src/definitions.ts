@@ -69,6 +69,31 @@ export const PropCategoryDefinitionSchema = z.strictObject({
 });
 export type PropCategoryDefinition = z.output<typeof PropCategoryDefinitionSchema>;
 
+/**
+ * What a part type does for the engine, beyond fitting sockets (ADR 0022 §10): `tail` marks a
+ * part whose attach point is the body's tail. Engine code reads roles, never part type IDs.
+ */
+export const PART_ROLES = ["tail"] as const;
+export type PartRole = (typeof PART_ROLES)[number];
+
+/**
+ * A registered voxel part type, e.g. a leg or an eye (ADR 0022 §10). A part of this type fits a
+ * socket whose type is in `fits`, which may name another pack's socket types.
+ */
+export const PartTypeDefinitionSchema = z.strictObject({
+  ...header("partType"),
+  /** The socket types a part of this type fits. Left empty, it can only be an assembly's root. */
+  fits: z.array(ContentIdSchema).default([]),
+  role: z
+    .enum(PART_ROLES, { error: `Unknown part role (expected ${PART_ROLES.join(", ")})` })
+    .optional(),
+});
+export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;
+
+/** A registered socket type, e.g. a hip or a neck (ADR 0022 §10): a kind of place parts hang from. */
+export const SocketTypeDefinitionSchema = z.strictObject({ ...header("socketType") });
+export type SocketTypeDefinition = z.output<typeof SocketTypeDefinitionSchema>;
+
 /** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */
 export const EmptyAffordanceParamsSchema = z.strictObject({});
 export type EmptyAffordanceParams = z.output<typeof EmptyAffordanceParamsSchema>;

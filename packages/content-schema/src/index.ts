@@ -10,3 +10,5 @@ export * from "./primitives";
 export * from "./region";
 export * from "./save";
 export * from "./terrain";
+export * from "./voxel";
+export * from "./voxel-assembly";
