@@ -133,6 +133,31 @@ The renderer traces the drawing's outline, with any holes in it, and extrudes it
 
 Until the image loads, or if it fails or has nothing opaque, the creature is a grey block.
 
+## Voxel parts
+
+Voxel creatures are assembled from parts ([ADR 0022](adr/0022-voxel-creatures.md)). A pack can register part types, socket types and parts, as the built-in pack's `woodland-hollow/voxel-parts` does.
+
+- **Part types** (`partTypes`) say which socket types a part of that type fits (`fits`), and may have a `role` (`tail` marks the part the swim's axis runs to). **Socket types** (`socketTypes`) are names. A part fits a socket when its type lists the socket's type, so a pack's new ear can fit the built-in `hollow:ear-mount`. The built-in types are a torso, head, leg, arm, tail, ear, eye, nose, mouth and fin, with sockets for a neck, waist, hip, shoulder, tail base and mounts for ears, eyes, noses, mouths and fins.
+- **Parts** (`parts`) are `{ schemaVersion, id, version, name, part }`, the part inline: its type, its size in cubes (at most 32 along each axis), its cube `step` (0.0125, 0.025, 0.05 or 0.1 m), its colours, its cubes run-length encoded, its `attach` point and its `sockets`. Axes: +X is the creature's front, Y up, +Z its right. Points are in the part's cubes from its corner, half cubes allowed.
+- **Sockets.** A socket lies at least one cube of the finer of the two parts' grids inside its part, and a child must land on that finer grid, or the assembly is refused. A socket with `mirrors` is the twin of another socket of the same type, and the part on it is drawn mirrored. The built-in pack makes its paired parts for the creature's left (−Z) side and mirrors them on the right-hand socket.
+- **Flush faces.** Where two parts overlap, their outer faces shouldn't lie in one plane facing the same way, or they may flicker and the Studio warns. Let a part reach into its parent with a narrow peg and keep sockets a cube away from the parent's edges.
+
+The easiest way to make a part is in [MagicaVoxel](https://ephtracy.github.io/): save a `<name>.vox` (one model, unrotated) and write a sidecar `<name>.json` beside it with the `id`, `version`, `name`, part `type`, `step`, `attach` and `sockets`:
+
+```json
+{
+  "id": "meadow:long-ear",
+  "version": "1.0.0",
+  "name": "Long ear",
+  "type": "hollow:ear",
+  "step": 0.05,
+  "attach": { "x": 0, "y": 1, "z": 3 },
+  "sockets": []
+}
+```
+
+`pnpm parts --in <your vox folder> --out <your parts folder>` turns each pair into a definition (MagicaVoxel's z is up; the importer turns it into Y up). Import the definitions and register them with `registries.parts.register`. The built-in pack's own run with `pnpm parts` and no options; see [development](development.md) for its workflow.
+
 ## Worlds
 
 A world is one definition with its terrain, regions, connections, structures, props and spawn points. The [world coordinate spec](world-coordinates.md) defines the axes, units, heightfield grid and tolerances; read it first. The small [`river-crossing` fixture](../tools/development/src/fixtures/river-crossing.ts) shows every part.

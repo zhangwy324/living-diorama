@@ -1,0 +1,13 @@
+{
+  "id": "hollow:puff-tail",
+  "version": "1.0.0",
+  "name": "Puff tail",
+  "type": "hollow:tail",
+  "step": 0.05,
+  "attach": {
+    "x": 4,
+    "y": 1,
+    "z": 1.5
+  },
+  "sockets": []
+}

@@ -1,0 +1,13 @@
+{
+  "id": "hollow:round-ear",
+  "version": "1.0.0",
+  "name": "Round ear",
+  "type": "hollow:ear",
+  "step": 0.05,
+  "attach": {
+    "x": 0,
+    "y": 1,
+    "z": 3
+  },
+  "sockets": []
+}

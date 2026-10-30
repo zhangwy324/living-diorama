@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:snout-head",
+  "version": "1.0.0",
+  "name": "Snout head",
+  "part": {
+    "type": "hollow:head",
+    "size": {
+      "x": 7,
+      "y": 6,
+      "z": 7
+    },
+    "step": 0.05,
+    "colors": [
+      "#bf7e45",
+      "#e6d5ae"
+    ],
+    "voxels": [15,0,2,1,2,2,3,0,4,1,3,0,4,1,17,0,1,1,3,2,2,0,5,1,2,0,5,1,2,0,5,1,3,0,4,1,3,0,2,1,5,0,1,1,5,2,12,1,2,0,5,1,3,0,4,1,3,0,2,1,5,0,1,1,5,2,12,1,2,0,5,1,3,0,4,1,3,0,2,1,5,0,1,1,5,2,12,1,2,0,5,1,3,0,4,1,10,0,1,1,3,2,2,0,5,1,2,0,5,1,2,0,5,1,3,0,4,1,17,0,2,1,2,2,3,0,4,1,3,0,4,1,9,0],
+    "attach": {
+      "x": 2,
+      "y": 0,
+      "z": 3.5
+    },
+    "sockets": [
+      {
+        "id": "left-ear",
+        "type": "hollow:ear-mount",
+        "position": {
+          "x": 2,
+          "y": 5,
+          "z": 3
+        }
+      },
+      {
+        "id": "right-ear",
+        "type": "hollow:ear-mount",
+        "position": {
+          "x": 2,
+          "y": 5,
+          "z": 4
+        },
+        "mirrors": "left-ear"
+      },
+      {
+        "id": "left-eye",
+        "type": "hollow:eye-mount",
+        "position": {
+          "x": 4.5,
+          "y": 4,
+          "z": 2
+        }
+      },
+      {
+        "id": "right-eye",
+        "type": "hollow:eye-mount",
+        "position": {
+          "x": 4.5,
+          "y": 4,
+          "z": 5
+        },
+        "mirrors": "left-eye"
+      },
+      {
+        "id": "nose",
+        "type": "hollow:nose-mount",
+        "position": {
+          "x": 6.5,
+          "y": 2.5,
+          "z": 3.5
+        }
+      },
+      {
+        "id": "mouth",
+        "type": "hollow:mouth-mount",
+        "position": {
+          "x": 6.5,
+          "y": 1.5,
+          "z": 3.5
+        }
+      }
+    ]
+  }
+}

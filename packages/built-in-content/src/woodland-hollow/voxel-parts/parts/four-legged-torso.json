@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:four-legged-torso",
+  "version": "1.0.0",
+  "name": "Four-legged torso",
+  "part": {
+    "type": "hollow:torso",
+    "size": {
+      "x": 9,
+      "y": 6,
+      "z": 7
+    },
+    "step": 0.05,
+    "colors": [
+      "#bf7e45",
+      "#e6d5ae",
+      "#a2693a"
+    ],
+    "voxels": [10,0,7,1,2,0,7,1,2,0,7,1,2,0,7,1,11,0,7,1,1,0,36,1,1,0,7,1,2,0,7,2,1,0,1,2,7,1,1,2,8,1,1,2,18,1,1,0,5,3,2,1,2,0,7,2,1,0,1,2,7,1,1,2,8,1,1,2,18,1,1,0,5,3,2,1,2,0,7,2,1,0,1,2,7,1,1,2,8,1,1,2,18,1,1,0,5,3,2,1,2,0,7,1,1,0,36,1,1,0,7,1,11,0,7,1,2,0,7,1,2,0,7,1,2,0,7,1,10,0],
+    "attach": {
+      "x": 4.5,
+      "y": 0,
+      "z": 3.5
+    },
+    "sockets": [
+      {
+        "id": "front-left",
+        "type": "hollow:shoulder",
+        "position": {
+          "x": 6,
+          "y": 1,
+          "z": 2.5
+        }
+      },
+      {
+        "id": "front-right",
+        "type": "hollow:shoulder",
+        "position": {
+          "x": 6,
+          "y": 1,
+          "z": 4.5
+        },
+        "mirrors": "front-left"
+      },
+      {
+        "id": "back-left",
+        "type": "hollow:hip",
+        "position": {
+          "x": 3,
+          "y": 1,
+          "z": 2.5
+        }
+      },
+      {
+        "id": "back-right",
+        "type": "hollow:hip",
+        "position": {
+          "x": 3,
+          "y": 1,
+          "z": 4.5
+        },
+        "mirrors": "back-left"
+      },
+      {
+        "id": "neck",
+        "type": "hollow:neck",
+        "position": {
+          "x": 6,
+          "y": 5,
+          "z": 3.5
+        }
+      },
+      {
+        "id": "tail-base",
+        "type": "hollow:tail-base",
+        "position": {
+          "x": 1,
+          "y": 3,
+          "z": 3.5
+        }
+      }
+    ]
+  }
+}

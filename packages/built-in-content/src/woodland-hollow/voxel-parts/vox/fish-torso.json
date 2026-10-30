@@ -1,0 +1,51 @@
+{
+  "id": "hollow:fish-torso",
+  "version": "1.0.0",
+  "name": "Fish torso",
+  "type": "hollow:torso",
+  "step": 0.05,
+  "attach": {
+    "x": 4,
+    "y": 0,
+    "z": 3.5
+  },
+  "sockets": [
+    {
+      "id": "left-fin",
+      "type": "hollow:fin-mount",
+      "position": {
+        "x": 5,
+        "y": 3,
+        "z": 1
+      }
+    },
+    {
+      "id": "right-fin",
+      "type": "hollow:fin-mount",
+      "position": {
+        "x": 5,
+        "y": 3,
+        "z": 6
+      },
+      "mirrors": "left-fin"
+    },
+    {
+      "id": "tail-base",
+      "type": "hollow:tail-base",
+      "position": {
+        "x": 1,
+        "y": 3,
+        "z": 3.5
+      }
+    },
+    {
+      "id": "neck",
+      "type": "hollow:neck",
+      "position": {
+        "x": 7,
+        "y": 3,
+        "z": 3.5
+      }
+    }
+  ]
+}

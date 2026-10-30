@@ -1,0 +1,70 @@
+{
+  "id": "hollow:snout-head",
+  "version": "1.0.0",
+  "name": "Snout head",
+  "type": "hollow:head",
+  "step": 0.05,
+  "attach": {
+    "x": 2,
+    "y": 0,
+    "z": 3.5
+  },
+  "sockets": [
+    {
+      "id": "left-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 2,
+        "y": 5,
+        "z": 3
+      }
+    },
+    {
+      "id": "right-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 2,
+        "y": 5,
+        "z": 4
+      },
+      "mirrors": "left-ear"
+    },
+    {
+      "id": "left-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 4.5,
+        "y": 4,
+        "z": 2
+      }
+    },
+    {
+      "id": "right-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 4.5,
+        "y": 4,
+        "z": 5
+      },
+      "mirrors": "left-eye"
+    },
+    {
+      "id": "nose",
+      "type": "hollow:nose-mount",
+      "position": {
+        "x": 6.5,
+        "y": 2.5,
+        "z": 3.5
+      }
+    },
+    {
+      "id": "mouth",
+      "type": "hollow:mouth-mount",
+      "position": {
+        "x": 6.5,
+        "y": 1.5,
+        "z": 3.5
+      }
+    }
+  ]
+}

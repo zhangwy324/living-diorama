@@ -1,0 +1,70 @@
+{
+  "id": "hollow:four-legged-torso",
+  "version": "1.0.0",
+  "name": "Four-legged torso",
+  "type": "hollow:torso",
+  "step": 0.05,
+  "attach": {
+    "x": 4.5,
+    "y": 0,
+    "z": 3.5
+  },
+  "sockets": [
+    {
+      "id": "front-left",
+      "type": "hollow:shoulder",
+      "position": {
+        "x": 6,
+        "y": 1,
+        "z": 2.5
+      }
+    },
+    {
+      "id": "front-right",
+      "type": "hollow:shoulder",
+      "position": {
+        "x": 6,
+        "y": 1,
+        "z": 4.5
+      },
+      "mirrors": "front-left"
+    },
+    {
+      "id": "back-left",
+      "type": "hollow:hip",
+      "position": {
+        "x": 3,
+        "y": 1,
+        "z": 2.5
+      }
+    },
+    {
+      "id": "back-right",
+      "type": "hollow:hip",
+      "position": {
+        "x": 3,
+        "y": 1,
+        "z": 4.5
+      },
+      "mirrors": "back-left"
+    },
+    {
+      "id": "neck",
+      "type": "hollow:neck",
+      "position": {
+        "x": 6,
+        "y": 5,
+        "z": 3.5
+      }
+    },
+    {
+      "id": "tail-base",
+      "type": "hollow:tail-base",
+      "position": {
+        "x": 1,
+        "y": 3,
+        "z": 3.5
+      }
+    }
+  ]
+}

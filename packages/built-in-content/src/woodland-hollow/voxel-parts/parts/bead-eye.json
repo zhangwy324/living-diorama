@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:bead-eye",
+  "version": "1.0.0",
+  "name": "Bead eye",
+  "part": {
+    "type": "hollow:eye",
+    "size": {
+      "x": 2,
+      "y": 2,
+      "z": 2
+    },
+    "step": 0.025,
+    "colors": [
+      "#1d1d1d",
+      "#f6f1e4"
+    ],
+    "voxels": [1,0,1,1,1,0,3,1,1,0,1,2],
+    "attach": {
+      "x": 0,
+      "y": 1,
+      "z": 1
+    },
+    "sockets": []
+  }
+}

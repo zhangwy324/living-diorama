@@ -1,0 +1,13 @@
+{
+  "id": "hollow:fan-fin",
+  "version": "1.0.0",
+  "name": "Fan fin",
+  "type": "hollow:fin",
+  "step": 0.05,
+  "attach": {
+    "x": 3,
+    "y": 3,
+    "z": 0.5
+  },
+  "sockets": []
+}

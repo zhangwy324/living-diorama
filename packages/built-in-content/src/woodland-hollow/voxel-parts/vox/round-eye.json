@@ -1,0 +1,13 @@
+{
+  "id": "hollow:round-eye",
+  "version": "1.0.0",
+  "name": "Round eye",
+  "type": "hollow:eye",
+  "step": 0.025,
+  "attach": {
+    "x": 0,
+    "y": 2,
+    "z": 2
+  },
+  "sockets": []
+}

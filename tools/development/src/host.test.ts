@@ -148,11 +148,20 @@ describe("simulation host", () => {
     host.init();
     const [ready] = host.take();
     if (ready?.type !== "ready") throw new Error("Expected ready");
-    expect(ready.parts.map(({ id, name, version }) => [id, name, version])).toEqual([
+    // Sorted by ID, after the built-in pack's starter parts.
+    const ids = ready.parts.map(({ id }) => id);
+    expect(ids).toEqual([...ids].sort());
+    expect(
+      ready.parts
+        .filter(({ id }) => !id.startsWith("hollow:"))
+        .map(({ id, name, version }) => [id, name, version]),
+    ).toEqual([
       ["mod:long-leg", "Long leg", "1.2.0"],
       ["test:stump-leg", "Stump leg", "1.2.0"],
     ]);
-    expect(ready.parts[1]?.part).toEqual(part("test:stump-leg", "Stump leg").part);
+    expect(ready.parts.find(({ id }) => id === "test:stump-leg")?.part).toEqual(
+      part("test:stump-leg", "Stump leg").part,
+    );
     expect(structuredClone(ready.parts)).toEqual(ready.parts);
   });
 

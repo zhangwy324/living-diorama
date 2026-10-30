@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:mitten-arm",
+  "version": "1.0.0",
+  "name": "Mitten arm",
+  "part": {
+    "type": "hollow:arm",
+    "size": {
+      "x": 3,
+      "y": 5,
+      "z": 2
+    },
+    "step": 0.05,
+    "colors": [
+      "#bf7e45",
+      "#5e4433"
+    ],
+    "voxels": [1,0,2,2,1,1,2,2,1,1,2,0,1,1,2,0,1,1,14,0,2,1,1,0],
+    "attach": {
+      "x": 1,
+      "y": 5,
+      "z": 2
+    },
+    "sockets": []
+  }
+}
