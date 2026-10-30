@@ -150,7 +150,7 @@ describe("a voxel creature", () => {
       LocomotionChoice,
     ][]) {
       const saved = value(await library.saveVoxel(sampleVoxelAssembly(), name, { locomotion }));
-      expect(saved).toMatchObject({ body: "voxel", sizeClass: "small", available: true });
+      expect(saved).toMatchObject({ body: "voxel", sizeClass: "medium", available: true });
       const species = simulation.state.registries.species.get(saved.speciesId);
       expect(species?.body.locomotion.land.gait).toBe(locomotion.gait);
       expect(species?.capabilities).toEqual(locomotionCapabilities(locomotion));
