@@ -17,4 +17,10 @@ export { SnapshotInterpolator, lerpHeading, type CreaturePose } from "./interpol
 export { LAYER_NAMES, type ClipPlane, type LayerName } from "./layers";
 export type { AssetResolver, ModelLoader, RenderAsset } from "./props";
 export type { PropPick, PropPreview } from "./prop-editing";
-export { MAX_THUMBNAIL_SIZE } from "./prop-thumbnails";
+export {
+  MAX_THUMBNAIL_SIZE,
+  canvasEncoder,
+  type ThumbnailEncoder,
+  type ThumbnailRenderer,
+} from "./prop-thumbnails";
+export { VoxelThumbnails } from "./voxel/thumbnails";
