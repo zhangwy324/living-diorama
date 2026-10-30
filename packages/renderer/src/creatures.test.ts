@@ -263,7 +263,10 @@ describe("CreatureBodies", () => {
         { id: "leg", part: "leg", parent: { instance: "torso", socket: "hip" } },
       ],
     };
-    const make = (read: (url: string) => Promise<unknown> = async () => assembly) => {
+    const make = (
+      read: (url: string) => Promise<unknown> = async () => assembly,
+      partRole?: (partType: string) => "tail" | undefined,
+    ) => {
       const readImage = vi.fn(async () => drawing);
       const readAssembly = vi.fn(read);
       const layer = new SceneLayer("creatures");
@@ -277,6 +280,7 @@ describe("CreatureBodies", () => {
         resolveAsset: (ref) => ({ kind: "voxel", url: `blob:${ref}` }),
         readImage,
         readAssembly,
+        ...(partRole ? { partRole } : {}),
       });
       return { layer, bodies, readImage, readAssembly };
     };
@@ -359,6 +363,35 @@ describe("CreatureBodies", () => {
       }
       expect(warn).toHaveBeenCalledTimes(2);
       warn.mockRestore();
+    });
+
+    it("keeps the block when building the body throws", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { layer, bodies } = make(undefined, () => {
+        throw new Error("no roles");
+      });
+      bodies.update([of("a")]);
+      await bodies.ready;
+      bodies.update([of("a")]);
+      bodies.update([of("a")]);
+      expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
+      expect(warn).toHaveBeenCalledWith(
+        "Could not build the voxel body of test:voxel",
+        expect.any(Error),
+      );
+      warn.mockRestore();
+    });
+
+    it("builds nothing from an assembly read that finishes after dispose", async () => {
+      let finish: (json: unknown) => void = () => undefined;
+      const { layer, bodies } = make(() => new Promise((resolve) => (finish = resolve)));
+      bodies.update([of("a")]);
+      bodies.dispose();
+      finish(assembly);
+      await bodies.ready;
+      // Had the read queued the assembly, this update would mesh it and skin "a".
+      bodies.update([of("a")]);
+      expect(bodyOf(layer, "a")).not.toBeInstanceOf(THREE.SkinnedMesh);
     });
 
     it("frees a departed creature's skeleton, and the species' body on dispose", async () => {

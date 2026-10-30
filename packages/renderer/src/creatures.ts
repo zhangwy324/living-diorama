@@ -213,6 +213,8 @@ export class CreatureBodies {
   readonly #voxelBodies: VoxelBody[] = [];
   /** Shared by every voxel body: one compiled program. */
   #voxelMaterial: THREE.MeshStandardMaterial | undefined;
+  /** Set by `dispose`, so a read finishing later builds nothing. */
+  #disposed = false;
   readonly #visibility: CueVisibility | undefined;
   readonly #propIcon: (placementId: string | undefined) => THREE.Texture | undefined;
   readonly #cues = new CueSprites();
@@ -393,6 +395,7 @@ export class CreatureBodies {
   }
 
   dispose(): void {
+    this.#disposed = true;
     for (const creature of this.#creatures.values()) removeMesh(creature.mesh);
     this.#creatures.clear();
     for (const body of this.#bodies) body.dispose();
@@ -546,6 +549,8 @@ export class CreatureBodies {
       this.#loads.push(
         this.#readAssembly(asset.url).then(
           (json) => {
+            // Read after `dispose`: nothing may be built any more.
+            if (this.#disposed) return;
             const parsed = validate(VoxelAssemblySchema, json, species.appearance);
             if (!parsed.ok) {
               const details = parsed.diagnostics.map((d) => d.message).join("; ");
@@ -566,6 +571,7 @@ export class CreatureBodies {
     this.#loads.push(
       this.#readImage(asset.url).then(
         (pixels) => {
+          if (this.#disposed) return;
           const body = buildBody(pixels, height, thickness);
           if (!body) {
             console.warn(`No opaque shape in ${species.appearance}`);

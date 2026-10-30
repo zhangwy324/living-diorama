@@ -57,9 +57,10 @@ const ARM_VOXELS = (() => {
 })();
 
 /**
- * A torso with a mirror pair of arms, each turned a quarter about Z, and a hand on each arm (so
- * the right hand is reflected through its arm though its own flag is false), and a tail with a
- * mirror pair of fins.
+ * A torso with a mirror pair of arms, each turned a quarter about X, and a hand on each arm (so
+ * the right hand is reflected through its arm though its own flag is false), and a tail turned a
+ * quarter about Y with a mirror pair of fins. Turns about X and Y don't commute with the
+ * reflection z → −z, so the order of the mirror and the rotation matters.
  */
 function creature(): VoxelAssemblyInput {
   return {
@@ -106,18 +107,23 @@ function creature(): VoxelAssemblyInput {
         id: "left-arm",
         part: "arm",
         parent: { instance: "torso", socket: "left" },
-        rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+        rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
       },
       {
         id: "right-arm",
         part: "arm",
         parent: { instance: "torso", socket: "right" },
-        rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+        rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
         mirrored: true,
       },
       { id: "left-hand", part: "hand", parent: { instance: "left-arm", socket: "hand" } },
       { id: "right-hand", part: "hand", parent: { instance: "right-arm", socket: "hand" } },
-      { id: "tail", part: "tail", parent: { instance: "torso", socket: "tail" } },
+      {
+        id: "tail",
+        part: "tail",
+        parent: { instance: "torso", socket: "tail" },
+        rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+      },
       { id: "fin-a", part: "fin", parent: { instance: "tail", socket: "a" } },
       { id: "fin-b", part: "fin", parent: { instance: "tail", socket: "b" }, mirrored: true },
     ],
@@ -137,7 +143,21 @@ describe("bone transforms", () => {
   it("put every mesh face of a mirrored grid exactly on a cube placeInstances places", () => {
     const assembly = parsed();
     const placements = placeInstances(assembly);
-    expect(placements.some((p) => p.mirrored)).toBe(true);
+    // The fixture reaches the cases a turn about Z alone would hide: a mirrored part turned about
+    // another axis, and a mirrored part below a turned parent.
+    const MIRROR = [1, 0, 0, 0, 1, 0, 0, 0, -1];
+    const product = (a: readonly number[], b: readonly number[]) =>
+      [0, 1, 2].flatMap((r) =>
+        [0, 1, 2].map((c) => [0, 1, 2].reduce((sum, k) => sum + a[r * 3 + k]! * b[k * 3 + c]!, 0)),
+      );
+    const commutes = (m: readonly number[]) =>
+      product(m, MIRROR).every((v, i) => v === product(MIRROR, m)[i]);
+    expect(placements.some((p) => p.mirrored && !commutes(p.linear))).toBe(true);
+    const finB = assembly.instances.findIndex((i) => i.id === "fin-b");
+    expect(commutes(placements[assembly.instances.findIndex((i) => i.id === "tail")]!.linear)).toBe(
+      false,
+    );
+    expect(placements[finB]!.mirrored).toBe(true);
     const origin = [0, 0, 0];
     const instances = assembly.instances.map((instance, i) => {
       const part = assembly.parts[instance.part]!;
@@ -308,6 +328,45 @@ describe("buildVoxelBody", () => {
       .measure.tail;
     expect(without.x).toBeCloseTo(buildVoxelBody(assembly).measure.bounds.min.x);
     expect(withRole.x).toBeGreaterThan(without.x);
+  });
+});
+
+describe("rest joints", () => {
+  it("are rigid, sit at each part's attach point, and compose with the shapes into the bones", () => {
+    const assembly = parsed();
+    const body = buildVoxelBody(assembly);
+    const placements = placeInstances(assembly);
+    const { origin } = body.measure;
+    expect(body.parents).toEqual([-1, 0, 0, 1, 2, 0, 5, 5]);
+    assembly.instances.forEach((instance, i) => {
+      const joint = body.joints[i]!;
+      const part = assembly.parts[instance.part]!;
+      const { linear, offset } = placements[i]!;
+      // A proper rotation, no scale: M22 composes them down the tree without carrying a shrink.
+      const rotation = new THREE.Matrix3().setFromMatrix4(joint);
+      expect(rotation.determinant()).toBeCloseTo(1, 12);
+      const e = rotation.elements;
+      for (let c = 0; c < 3; c++) {
+        const length = Math.hypot(e[c * 3]!, e[c * 3 + 1]!, e[c * 3 + 2]!);
+        expect(length).toBeCloseTo(1, 12);
+      }
+      // Its origin is the attach point where placeInstances puts it, in the body frame.
+      const units = stepUnits(part.step);
+      const a = [part.attach.x * units, part.attach.y * units, part.attach.z * units];
+      const expected = [0, 1, 2].map(
+        (r) =>
+          (linear[r * 3]! * a[0]! +
+            linear[r * 3 + 1]! * a[1]! +
+            linear[r * 3 + 2]! * a[2]! +
+            offset[r]! -
+            origin[r]!) *
+          VOXEL_UNIT,
+      );
+      const at = new THREE.Vector3().setFromMatrixPosition(joint).toArray();
+      at.forEach((v, k) => expect(v, `${instance.id} ${k}`).toBeCloseTo(expected[k]!, 12));
+      const composed = joint.clone().multiply(body.shapes[i]!);
+      composed.elements.forEach((v, k) => expect(v).toBeCloseTo(body.bones[i]!.elements[k]!, 12));
+    });
   });
 });
 

@@ -34,54 +34,93 @@ export interface VoxelBody {
   /**
    * Per part instance, in the assembly's order: its bone's rest transform, from a vertex of its
    * part (cube units from the part's corner, as the mesher writes them) to the body frame (metres,
-   * feet at y = 0, middle of the X and Z bounds at the origin, facing +X).
+   * feet at y = 0, middle of the X and Z bounds at the origin, facing +X). `joints[i] · shapes[i]`.
    */
   bones: readonly THREE.Matrix4[];
+  /**
+   * Per part instance: its rest joint, a rigid transform (a proper rotation and a translation in
+   * metres, no scale) whose origin is the part's attach point, its pivot, in the body frame. M22
+   * turns a part about its joint and carries the turn down to its children through these, never
+   * through the parent's `shapes`, so no step scale or shrink passes from parent to child.
+   */
+  joints: readonly THREE.Matrix4[];
+  /** Per part instance: from its mesh's cube units to its joint's frame: step, shrink, attach. */
+  shapes: readonly THREE.Matrix4[];
+  /** Per part instance: the index of the instance it hangs from, or −1 for the root. */
+  parents: readonly number[];
   /** The body measured in its rest pose, in the same frame. */
   measure: AssemblyMeasure;
   vertexCount: number;
   dispose(): void;
 }
 
+/** A part's attach point in its mesh's `VOXEL_UNIT`s, reflected as the mesher reflects it. */
+function meshAttach(part: VoxelPart, mirrored: boolean): [number, number, number] {
+  const units = stepUnits(part.step);
+  const { attach, size } = part;
+  return [attach.x * units, attach.y * units, (mirrored ? size.z - attach.z : attach.z) * units];
+}
+
 /**
- * The bone rest transform of a part placed by `placeInstances`: its mesh's cube units to the body
- * frame's metres. `boneTransform` gives the rotation and offset in `VOXEL_UNIT`s (with the
- * mesher's reflection of a mirrored part), the part's step scales its cubes to units, and the
- * body frame's `origin` and `VOXEL_UNIT` take units to metres. First the part shrinks toward its
- * own centre by `inset` metres on every side (ADR 0022 §14 as amended in M19), so its faces move
- * in by exactly that much along each axis.
+ * The rest joint of a part placed by `placeInstances`: a rigid transform in the body frame whose
+ * origin is the part's attach point and whose rotation is `boneTransform`'s, which includes the
+ * mesher's reflection of a mirrored part, so it is always proper.
  */
-export function boneMatrix(
+export function restJoint(
   part: VoxelPart,
   placement: InstancePlacement,
   origin: readonly number[],
-  inset: number = instanceInset(placement.depth),
   out: THREE.Matrix4 = new THREE.Matrix4(),
 ): THREE.Matrix4 {
   const { rotation: r, offset } = boneTransform(placement, part);
-  const units = stepUnits(part.step);
   const at = (i: number) => r[i] ?? 0;
-  const from = (i: number) => origin[i] ?? 0;
-  // Units to metres, after the part's rotation, step and offset.
-  out.set(
-    at(0) * units,
-    at(1) * units,
-    at(2) * units,
-    offset[0] - from(0),
-    at(3) * units,
-    at(4) * units,
-    at(5) * units,
-    offset[1] - from(1),
-    at(6) * units,
-    at(7) * units,
-    at(8) * units,
-    offset[2] - from(2),
+  const q = meshAttach(part, placement.mirrored);
+  const to = (row: number) =>
+    (at(row * 3) * q[0] +
+      at(row * 3 + 1) * q[1] +
+      at(row * 3 + 2) * q[2] +
+      (offset[row] ?? 0) -
+      (origin[row] ?? 0)) *
+    VOXEL_UNIT;
+  return out.set(
+    at(0),
+    at(1),
+    at(2),
+    to(0),
+    at(3),
+    at(4),
+    at(5),
+    to(1),
+    at(6),
+    at(7),
+    at(8),
+    to(2),
     0,
     0,
     0,
     1,
   );
-  out.premultiply(scaleToMetres);
+}
+
+/**
+ * A part's shape: from its mesh's cube units to its joint's frame in metres. The part first
+ * shrinks toward its own centre by `inset` metres on every side (ADR 0022 §14 as amended in M19),
+ * so its faces move in by exactly that much along each axis; then its step scales it, and its
+ * attach point moves to the joint's origin.
+ */
+export function partShape(
+  part: VoxelPart,
+  placement: InstancePlacement,
+  inset: number = instanceInset(placement.depth),
+  out: THREE.Matrix4 = new THREE.Matrix4(),
+): THREE.Matrix4 {
+  const scale = stepUnits(part.step) * VOXEL_UNIT;
+  const [ax, ay, az] = meshAttach(part, placement.mirrored).map((v) => v * VOXEL_UNIT) as [
+    number,
+    number,
+    number,
+  ];
+  out.makeScale(scale, scale, scale).setPosition(-ax, -ay, -az);
   if (inset === 0) return out;
   // The shrink, in the part's cube units about its centre. Mirroring keeps the centre in place.
   const { x, y, z } = part.size;
@@ -93,8 +132,24 @@ export function boneMatrix(
   return out.multiply(shrink);
 }
 
-const scaleToMetres = new THREE.Matrix4().makeScale(VOXEL_UNIT, VOXEL_UNIT, VOXEL_UNIT);
+/**
+ * The bone rest transform of a part placed by `placeInstances`: its mesh's cube units to the body
+ * frame's metres, `restJoint · partShape`. Equivalently: `boneTransform`'s rotation and offset in
+ * `VOXEL_UNIT`s, the step scaling cubes to units, and the body frame's `origin` and `VOXEL_UNIT`
+ * taking units to metres, after the shrink.
+ */
+export function boneMatrix(
+  part: VoxelPart,
+  placement: InstancePlacement,
+  origin: readonly number[],
+  inset: number = instanceInset(placement.depth),
+  out: THREE.Matrix4 = new THREE.Matrix4(),
+): THREE.Matrix4 {
+  return restJoint(part, placement, origin, out).multiply(partShape(part, placement, inset, shape));
+}
+
 const shrink = new THREE.Matrix4();
+const shape = new THREE.Matrix4();
 
 /** The part of an instance, in an assembly `VoxelAssemblySchema` accepted. */
 function partOf(assembly: VoxelAssembly, key: string): VoxelPart {
@@ -117,6 +172,12 @@ export function buildVoxelBody(
   const grids = new Map<string, Uint8Array>();
   const parts: VoxelPartGrid[] = [];
   const bones: THREE.Matrix4[] = [];
+  const joints: THREE.Matrix4[] = [];
+  const shapes: THREE.Matrix4[] = [];
+  const indexById = new Map(assembly.instances.map((instance, i) => [instance.id, i]));
+  const parents = assembly.instances.map((instance) =>
+    instance.parent ? (indexById.get(instance.parent.instance) ?? -1) : -1,
+  );
   assembly.instances.forEach((instance, i) => {
     const part = partOf(assembly, instance.part);
     const placement = placements[i];
@@ -130,13 +191,20 @@ export function buildVoxelBody(
       colors: part.colors,
       mirrored: placement.mirrored,
     });
-    bones.push(boneMatrix(part, placement, measure.origin));
+    const joint = restJoint(part, placement, measure.origin);
+    const shape = partShape(part, placement);
+    joints.push(joint);
+    shapes.push(shape);
+    bones.push(joint.clone().multiply(shape));
   });
   const mesh = meshVoxelParts(parts);
   const geometry = voxelGeometry(mesh);
   return {
     geometry,
     bones,
+    joints,
+    shapes,
+    parents,
     measure,
     vertexCount: mesh.vertexCount,
     dispose: () => geometry.dispose(),
