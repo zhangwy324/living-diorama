@@ -233,6 +233,17 @@ describe("PropSet", () => {
     expect(scaleAt(0)).toBe(0);
   });
 
+  it("makes loaded models non-metallic, so their shaded sides are never black", async () => {
+    const { models, props } = setup();
+    for (const material of [...resourcesOf(models.pine), ...resourcesOf(models.rock)]) {
+      if (material instanceof THREE.MeshStandardMaterial) material.metalness = 1;
+    }
+    await props.set([prop("a", "test:pine", 0), prop("b", "test:rock", 1)]);
+    for (const mesh of props.meshes) {
+      expect((mesh.material as THREE.MeshStandardMaterial).metalness).toBe(0);
+    }
+  });
+
   it("warns once per ref without a model asset", async () => {
     const { props } = setup();
     await props.set([prop("a", "test:gone", 0)]);
