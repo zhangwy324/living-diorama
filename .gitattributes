@@ -13,3 +13,4 @@
 *.icns binary
 *.glb binary
 *.raw binary
+*.vox binary

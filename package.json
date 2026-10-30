@@ -24,6 +24,7 @@
     "soak:quick": "tsx tools/development/src/soak.ts --seeds 3 --hours 24 --creatures 2",
     "sim": "tsx tools/development/src/sim.ts",
     "rebuild-time": "tsx tools/development/src/rebuild-time.ts",
+    "parts": "tsx tools/development/src/voxel-parts/cli.ts",
     "measure": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/development/measure-app.ps1"
   },
   "devDependencies": {

@@ -10,6 +10,7 @@
     "@living-diorama/content-schema": "workspace:*",
     "@living-diorama/extension-api": "workspace:*",
     "@living-diorama/simulation": "workspace:*",
-    "@living-diorama/built-in-content": "workspace:*"
+    "@living-diorama/built-in-content": "workspace:*",
+    "zod": "^4.6.7"
   }
 }
