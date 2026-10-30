@@ -138,14 +138,14 @@ describe("ladder steps", () => {
     const finest = stepSelected(stepSelected(selectInstance(withEyes(), "left-eye"), -1), -1);
     expect(finest.notice).toBe(refusalText("ladder_end", "shrink"));
     expect(finest.notice).toBe("Its cubes are as small as they go.");
-    // At 10 cm cubes the head no longer sits on the finer grid of the torso's socket, so the
-    // torso can't grow on its own.
+    // At 5 cm cubes an eye's mount would have to lie a whole 5 cm cube deep in the head (ADR 0022
+    // §12), so the eyes can't grow.
     const eyes = withEyes();
-    const torso = stepSelected(selectInstance(eyes, ROOT), 1);
-    expect(present(torso)).toBe(present(eyes));
-    expect(torso.notice).toBe("It can't grow: a part would come out of its joint or off the grid.");
-    // The bare torso grows: it is the head that would leave the grid.
-    expect(present(stepSelected(selectInstance(legged(), ROOT), 1))).not.toBe(LEGGED);
+    const bigEyes = stepSelected(selectInstance(eyes, "left-eye"), 1);
+    expect(present(bigEyes)).toBe(present(eyes));
+    expect(bigEyes.notice).toBe("It can't grow: a part would come out of its joint.");
+    // The torso grows with the head on: a joint left half a cube off the grid snaps onto it (§13).
+    expect(present(stepSelected(selectInstance(eyes, ROOT), 1))).not.toBe(present(eyes));
   });
 
   it("steps the whole creature, keeping the selection, until a part is at the ladder's end", () => {

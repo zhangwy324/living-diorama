@@ -181,8 +181,8 @@ export function refusalText(
   if (code === "root" && edit === "turn") return "The torso can't turn: everything hangs from it.";
   if (code === "invalid" && edit !== undefined) {
     return edit === "turn"
-      ? "It can't turn there: it would stick out of its joint or off the grid."
-      : `It can't ${edit.startsWith("grow") ? "grow" : "shrink"}: a part would come out of its joint or off the grid.`;
+      ? "It can't turn there: it would stick out of its joint."
+      : `It can't ${edit.startsWith("grow") ? "grow" : "shrink"}: a part would come out of its joint.`;
   }
   switch (code) {
     case "no_turn":
@@ -197,7 +197,7 @@ export function refusalText(
     case "socket_taken":
       return "That part doesn't fit there.";
     case "invalid":
-      return "That part doesn't fit there: it would stick out of the joint or off the grid.";
+      return "That part doesn't fit there: it would stick out of the joint.";
     default:
       return "That didn't work.";
   }
