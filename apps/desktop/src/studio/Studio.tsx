@@ -68,7 +68,14 @@ export function Studio() {
   const thumbnails = useRef<Thumbnails>(undefined);
   const voxelThumbnails = useRef<VoxelCreatureThumbnails>(undefined);
   // Edit a copy's latest creature for Build mode (ADR 0023 §3).
-  const editCopy = useEditCopy(client.assembly, mode, setMode);
+  // It asks first when Build mode has a creature that wasn't released.
+  const editCopy = useEditCopy({
+    fetch: client.assembly,
+    mode,
+    onMode: setMode,
+    unsaved: () => unsaved.current.build,
+    run: (species, load) => ask(species.speciesId, load),
+  });
 
   // Closing with a creature not released asks first (ADR 0015 §10, ADR 0023 §21).
   useEffect(
@@ -153,7 +160,7 @@ export function Studio() {
       .finally(() => setBusySpecies(undefined));
   };
 
-  const keysEnabled = !closing && !deleting;
+  const keysEnabled = !closing && !deleting && !editCopy.confirming;
   const modeSwitch = <ModeSwitch mode={mode} onMode={setMode} />;
   return (
     <div className="studio">
@@ -194,7 +201,7 @@ export function Studio() {
           ask(speciesId, () => channel.request("removeCreature", { speciesId }))
         }
         onDelete={setDeleting}
-        onEditCopy={(species) => ask(species.speciesId, () => editCopy.start(species))}
+        onEditCopy={editCopy.press}
       />
       {celebration && (
         <div
@@ -216,6 +223,14 @@ export function Studio() {
             ask(speciesId, () => channel.request("deleteSpecies", { speciesId }));
           }}
           onCancel={() => setDeleting(undefined)}
+        />
+      )}
+      {editCopy.confirming && (
+        <CloseDialog
+          title="Discard your creature?"
+          message={`Your creature in Build hasn't been released. Editing a copy of ${editCopy.confirming.name} replaces it.`}
+          onDiscard={editCopy.confirm}
+          onCancel={editCopy.cancel}
         />
       )}
       {closing && (

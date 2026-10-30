@@ -95,9 +95,17 @@ type EditCopy = ReturnType<typeof useEditCopy>;
 
 async function mountHook(fetch: (id: string) => Promise<{ assembly: VoxelAssembly }>) {
   const onMode = vi.fn();
+  const state = { unsaved: false };
+  const loads: Promise<void>[] = [];
   let current: EditCopy | undefined;
   function Harness({ mode }: { mode: StudioMode }) {
-    current = useEditCopy(fetch, mode, onMode);
+    current = useEditCopy({
+      fetch,
+      mode,
+      onMode,
+      unsaved: () => state.unsaved,
+      run: (_species, load) => void loads.push(load()),
+    });
     return null;
   }
   const root = createRoot(document.createElement("div"));
@@ -105,7 +113,15 @@ async function mountHook(fetch: (id: string) => Promise<{ assembly: VoxelAssembl
   await render("build");
   return {
     onMode,
+    state,
+    loads,
     render,
+    /** Presses Edit a copy; the load it started, if it didn't ask first. */
+    press: (species: { speciesId: string; name: string }) => {
+      const before = loads.length;
+      current!.press(species);
+      return loads.length > before ? loads.at(-1)! : undefined;
+    },
     get: () => current!,
     unmount: () => act(async () => root.unmount()),
   };
@@ -119,8 +135,8 @@ describe("Edit a copy in the Studio", () => {
     const hook = await mountHook(fetch);
     let first!: Promise<void>, second!: Promise<void>;
     await act(async () => {
-      first = hook.get().start({ speciesId: "user:1", name: "Pebble" });
-      second = hook.get().start({ speciesId: "user:2", name: "Twig" });
+      first = hook.press({ speciesId: "user:1", name: "Pebble" })!;
+      second = hook.press({ speciesId: "user:2", name: "Twig" })!;
     });
     await answer("user:2", OTHER);
     await answer("user:1", ASSEMBLY);
@@ -133,9 +149,9 @@ describe("Edit a copy in the Studio", () => {
   it("gives each press a new key, so the same species loads again", async () => {
     const fetch = () => Promise.resolve({ assembly: ASSEMBLY });
     const hook = await mountHook(fetch);
-    await act(async () => hook.get().start({ speciesId: "user:1", name: "Pebble" }));
+    await act(async () => hook.press({ speciesId: "user:1", name: "Pebble" }));
     const firstKey = hook.get().loadRequest?.key;
-    await act(async () => hook.get().start({ speciesId: "user:1", name: "Pebble" }));
+    await act(async () => hook.press({ speciesId: "user:1", name: "Pebble" }));
     expect(hook.get().loadRequest?.key).not.toBe(firstKey);
     await hook.unmount();
   });
@@ -146,7 +162,7 @@ describe("Edit a copy in the Studio", () => {
     await hook.render("draw");
     let pressed!: Promise<void>;
     await act(async () => {
-      pressed = hook.get().start({ speciesId: "user:1", name: "Pebble" });
+      pressed = hook.press({ speciesId: "user:1", name: "Pebble" })!;
     });
     await answer("user:1", ASSEMBLY);
     await act(() => pressed);
@@ -154,7 +170,7 @@ describe("Edit a copy in the Studio", () => {
 
     hook.onMode.mockClear();
     await act(async () => {
-      pressed = hook.get().start({ speciesId: "user:2", name: "Twig" });
+      pressed = hook.press({ speciesId: "user:2", name: "Twig" })!;
     });
     await hook.render("build");
     await answer("user:2", OTHER);
@@ -167,10 +183,37 @@ describe("Edit a copy in the Studio", () => {
   it("rejects when the fetch fails, and loads nothing", async () => {
     const hook = await mountHook(() => Promise.reject(new Error("unknown_species")));
     await act(async () => {
-      await expect(hook.get().start({ speciesId: "user:9", name: "Gone" })).rejects.toThrow();
+      await expect(hook.press({ speciesId: "user:9", name: "Gone" })!).rejects.toThrow();
     });
     expect(hook.get().loadRequest).toBeUndefined();
     expect(hook.onMode).not.toHaveBeenCalled();
+    await hook.unmount();
+  });
+
+  it("asks first when Build has a creature that wasn't released", async () => {
+    const fetch = vi.fn(() => Promise.resolve({ assembly: ASSEMBLY }));
+    const hook = await mountHook(fetch);
+    hook.state.unsaved = true;
+    await act(async () => void hook.press({ speciesId: "user:1", name: "Pebble" }));
+    expect(hook.get().confirming).toMatchObject({ speciesId: "user:1" });
+    expect(fetch).not.toHaveBeenCalled();
+    // Cancel keeps the creature.
+    await act(async () => hook.get().cancel());
+    expect(hook.get().confirming).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(hook.get().loadRequest).toBeUndefined();
+    // Discard loads the copy.
+    await act(async () => void hook.press({ speciesId: "user:1", name: "Pebble" }));
+    await act(async () => hook.get().confirm());
+    await act(() => hook.loads.at(-1)!);
+    expect(hook.get().confirming).toBeUndefined();
+    expect(hook.get().loadRequest).toMatchObject({ name: "Pebble copy" });
+    // With nothing to lose, it loads straight away.
+    hook.state.unsaved = false;
+    await act(async () => void hook.press({ speciesId: "user:2", name: "Twig" }));
+    expect(hook.get().confirming).toBeUndefined();
+    await act(() => hook.loads.at(-1)!);
+    expect(hook.get().loadRequest).toMatchObject({ name: "Twig copy" });
     await hook.unmount();
   });
 });
