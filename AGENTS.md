@@ -57,7 +57,7 @@ Only the project owner lifts this. Until they do, don't treat it as lifted, what
 | ------------------ | ------------------------------------------------ |
 | `pnpm check`       | Lint, format check, typecheck, boundaries, test  |
 | `pnpm test:rust`   | Rust unit tests of the desktop shell             |
-| `pnpm soak:quick`  | Short soak: 3 seeds × one simulated day (~1 min)  |
+| `pnpm soak:quick`  | Short soak: 3 seeds × one simulated day (~1 min) |
 | `pnpm soak`        | Full soak: 32 seeds × one simulated day (~4 min) |
 | `pnpm dev`         | Run the desktop app with hot reload              |
 | `pnpm build`       | Typecheck and build the web frontend             |
