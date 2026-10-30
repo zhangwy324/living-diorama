@@ -14,7 +14,7 @@ import {
   isBankPair,
   type Navigation,
 } from "../navigation/region-graph";
-import { CellState } from "../navigation/walkability";
+import { CellState, type RegionMask } from "../navigation/walkability";
 import { buildWorldModel, type WorldModel } from "./world-model";
 
 // Semantic and geometric world checks (ADR 0002 §7, ADR 0005 §5). They need the world's
@@ -272,6 +272,35 @@ function checkWaterExits(
 }
 
 /**
+ * The columns [i0, i1) and rows [j0, j1) of `a` whose cell centres lie within `margin` of `b`'s
+ * grid. A cell wider at each end, which costs little.
+ */
+function cellsNear(a: RegionMask, b: RegionMask, margin: number) {
+  const span = (aOrigin: number, aFirst: number, aCount: number, bMin: number, bMax: number) => {
+    const index = (x: number) => (x - aOrigin) / a.cellSize - aFirst - 0.5;
+    return [
+      Math.max(0, Math.floor(index(bMin - margin))),
+      Math.min(aCount, Math.ceil(index(bMax + margin)) + 1),
+    ] as const;
+  };
+  const [i0, i1] = span(
+    a.originX,
+    a.i0,
+    a.columns,
+    b.originX + b.i0 * b.cellSize,
+    b.originX + (b.i0 + b.columns) * b.cellSize,
+  );
+  const [j0, j1] = span(
+    a.originZ,
+    a.j0,
+    a.rows,
+    b.originZ + b.j0 * b.cellSize,
+    b.originZ + (b.j0 + b.rows) * b.cellSize,
+  );
+  return { i0, i1, j0, j1 };
+}
+
+/**
  * Regions may only be entered through portals. Where two regions' walkable cells touch away from
  * any portal joining them, a creature would meet an invisible wall (warning); where both regions
  * are walkable at the same place and height, positions would be ambiguous (error).
@@ -297,8 +326,11 @@ function checkSeams(
       let overlap: { x: number; z: number } | undefined;
       let seams = 0;
       let firstSeam: { x: number; z: number } | undefined;
-      for (let cell = 0; cell < a.states.length; cell++) {
-        if (a.states[cell] !== CellState.walkable) continue;
+      // Only cells of `a` within a step of `b`'s grid can overlap or touch it (#196).
+      const { i0, i1, j0, j1 } = cellsNear(a, b, cs);
+      for (let cell = j0 * a.columns; cell < j1 * a.columns; cell++) {
+        const i = cell % a.columns;
+        if (i < i0 || i >= i1 || a.states[cell] !== CellState.walkable) continue;
         const c = a.center(cell);
         const hA = a.height(cell);
         const bCell = b.cellAt(c.x, c.z);
