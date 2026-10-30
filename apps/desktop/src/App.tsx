@@ -6,14 +6,23 @@ import {
   serveStudio,
 } from "@living-diorama/desktop-integration";
 import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
-import type { AssetSummary, SimulationSnapshot, SpeciesSummary } from "@living-diorama/simulation";
+import type {
+  AssetSummary,
+  PropSummary,
+  SimulationSnapshot,
+  SpeciesSummary,
+} from "@living-diorama/simulation";
 import { useEffect, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
+import { EditHistory } from "./edit-history";
+import { EditToolbar } from "./EditToolbar";
 import { ErrorScreen, type Failure } from "./ErrorScreen";
 import { installLibraryDevHook } from "./dev-library";
 import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
+import { attachEditorInput } from "./editor-input";
+import { PropEditor, type EditorState } from "./prop-editor";
 import {
   COUNT_OVERRIDE,
   creatureCap,
@@ -53,6 +62,10 @@ export function App() {
   const [fullScreen, setFullScreen] = useState(false);
   const [debug, setDebug] = useState(false);
   const [failure, setFailure] = useState<Failure>();
+  // The prop editor starts with the view (ADR 0021 §12); its state drives the toolbar.
+  const editor = useRef<PropEditor>(undefined);
+  const [editorState, setEditorState] = useState<EditorState>();
+  const [propTypes, setPropTypes] = useState<Record<string, PropSummary>>({});
 
   // Every failure reaches the diagnostics log too (ADR 0009 §14).
   useEffect(() => {
@@ -83,10 +96,15 @@ export function App() {
     };
   }, []);
 
-  // The normal window takes focus, so it has keys; only these three (ADR 0016 §2).
+  // The normal window takes focus, so it has keys: these three (ADR 0016 §2), and the prop
+  // editor's while Edit mode is on, which come first (ADR 0021 §12).
   useEffect(() => {
-    if (!expanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (editor.current?.key(event)) {
+        event.preventDefault();
+        return;
+      }
+      if (!expanded) return;
       const shortcut = shortcutFor(event, fullScreen);
       if (!shortcut) return;
       event.preventDefault();
@@ -104,6 +122,8 @@ export function App() {
     let created: DioramaView | undefined;
     let uninstallTimeHook = () => {};
     let uninstallWorldHook = () => {};
+    let detachEditorInput = () => {};
+    let propEditor: PropEditor | undefined;
     // Recorded at start too, so the measuring script never reads a previous run's counts.
     const counter = new EventCounter();
     const recordCounts = () =>
@@ -171,7 +191,11 @@ export function App() {
       pushLibrary();
       if (import.meta.env.DEV) {
         installLibraryDevHook(opened);
-        uninstallWorldHook = installWorldDevHook(world);
+        uninstallWorldHook = installWorldDevHook(world, {
+          history,
+          validateEdit: client.validateEdit,
+          clear: () => propEditor?.clear(),
+        });
       }
     };
     const client = startSimulation({
@@ -190,19 +214,37 @@ export function App() {
           return;
         }
         view.current = created;
+        propEditor = new PropEditor({
+          view: created,
+          history,
+          propTypes: content.props,
+          props: scene.props,
+          onChange: setEditorState,
+        });
+        editor.current = propEditor;
+        detachEditorInput = attachEditorInput(element, propEditor);
+        setPropTypes(content.props);
+        setEditorState(propEditor.state);
         if (import.meta.env.DEV) uninstallTimeHook = installTimeDevHook(client);
         worldReady();
         void openWorld();
       },
       // The restored world's ticks may be behind the empty world's, or far ahead after catch-up,
       // as are those of a world caught up in place (issue #113).
-      onRestored: () => created?.resetSnapshots(),
+      // The restored world isn't the one the undo history and the selection were about.
+      onRestored: () => {
+        created?.resetSnapshots();
+        propEditor?.clear();
+      },
       onCaughtUp: () => created?.resetSnapshots(),
       // An applied edit, or a restored edited world (ADR 0021 §4). An edit is saved at once, so a
       // crash right after it loses no more than that edit. After the startup restore of an edited
       // world this queues a second save behind the one opening the world makes; that is harmless.
+      // The editor hears of the new props once they are drawn, so its preview goes only then.
       onWorldChanged: ({ scene, navigations: [navigation] }) => {
-        void created?.replaceProps(scene, navigation);
+        void created?.replaceProps(scene, navigation).then((placed) => {
+          if (placed) propEditor?.setProps(scene.props);
+        });
         void world.save();
       },
       onSpeciesRegistered: (id, summary, asset) => {
@@ -220,6 +262,7 @@ export function App() {
       onFailure: (summary, details) => fail({ summary, details }),
     });
     simulation.current = client;
+    const history = new EditHistory(client.edit, () => propEditor?.historyChanged());
     const world = worldSaving(client, {
       store: worldStore,
       creatures: () => latest?.creatures ?? [],
@@ -231,6 +274,8 @@ export function App() {
       stopped = true;
       view.current = undefined;
       simulation.current = undefined;
+      editor.current = undefined;
+      detachEditorInput();
       saving.current = undefined;
       world.stop();
       client.stop();
@@ -261,7 +306,25 @@ export function App() {
   }
   return (
     <div className="app">
-      <main className="diorama" ref={container} onDoubleClick={() => view.current?.resetCamera()} />
+      {/* A double click while editing is a quick reselect, not a camera reset. */}
+      <main
+        className="diorama"
+        ref={container}
+        onDoubleClick={() => {
+          if (!editorState?.active) view.current?.resetCamera();
+        }}
+      />
+      {editorState?.active && (
+        <EditToolbar
+          state={editorState}
+          propTypes={propTypes}
+          onChoose={(propType) => editor.current?.choosePlacing(propType)}
+          onRotate={(direction) => editor.current?.rotate(direction)}
+          onDelete={() => editor.current?.deleteSelected()}
+          onUndo={() => void editor.current?.undo()}
+          onRedo={() => void editor.current?.redo()}
+        />
+      )}
       {/* The shell ignores height changes while expanded (ADR 0016 §1). */}
       {!expanded && <StripResizeHandle shell={shell} />}
       <ControlsOverlay
@@ -269,6 +332,7 @@ export function App() {
         expanded={expanded}
         fullScreen={fullScreen}
         debug={debug}
+        editing={editorState?.active ?? false}
         onTogglePaused={() => void shell.setPaused(!paused)}
         onToggleExpanded={() => void shell.setExpanded(!expanded)}
         onResetCamera={() => view.current?.resetCamera()}
@@ -276,6 +340,7 @@ export function App() {
         onToggleFullScreen={() => void shell.setFullScreen(!fullScreen)}
         onHide={() => void shell.hide()}
         onOpenStudio={() => void shell.openStudio()}
+        onToggleEditing={() => editor.current?.setActive(!editor.current.state.active)}
       />
     </div>
   );

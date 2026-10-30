@@ -105,6 +105,12 @@ describe("simulation client", () => {
   it("starts the world empty, then spawns the starting creatures when asked", async () => {
     const { client, callbacks, tick } = start();
     expect(callbacks.onReady).toHaveBeenCalledOnce();
+    // The prop types come with it, for the editor's palette.
+    expect(callbacks.onReady.mock.calls[0]?.[0].props["hollow:rock"]).toEqual({
+      name: "Rock",
+      model: "hollow:models/rock.glb",
+      blockRadius: 0.5,
+    });
     tick(100);
     expect(creaturesShown(callbacks)).toHaveLength(0);
     const spawning = client.spawnStartingCreatures();
@@ -139,10 +145,11 @@ describe("simulation client", () => {
 
   it("reports the new scene after an edit and after restoring an edited world", async () => {
     const first = start();
-    // Nothing in the app sends edits yet (ADR 0021, PR 6), so this goes straight to the worker.
-    const edit = { ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }] };
-    first.worker.postMessage(envelope<SimulationCommand>({ type: "edit", edit }));
+    const editing = first.client.edit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }],
+    });
     first.tick(100);
+    expect((await editing).ok).toBe(true);
     const hasRock = (content: Pick<WorldContent, "scene"> | undefined) =>
       content?.scene.props.some((p) => p.id === "prop-1");
     expect(first.callbacks.onWorldChanged).toHaveBeenCalledOnce();
@@ -158,6 +165,57 @@ describe("simulation client", () => {
     expect((await restoring).ok).toBe(true);
     expect(second.callbacks.onWorldChanged).toHaveBeenCalledOnce();
     expect(hasRock(second.callbacks.onWorldChanged.mock.calls[0]?.[0])).toBe(true);
+  });
+
+  it("applies an edit and resolves with what it did and its inverse", async () => {
+    const { client, callbacks, tick } = start();
+    const editing = client.edit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }],
+    });
+    tick();
+    const result = await editing;
+    if (!result.ok) throw new Error("edit refused");
+    expect(result.edit.ops).toEqual([
+      {
+        op: "prop.add",
+        prop: "hollow:rock",
+        position: { x: 5, z: -5 },
+        rotationY: 0,
+        scale: 1,
+        id: "prop-1",
+      },
+    ]);
+    expect(result.inverse.ops).toEqual([{ op: "prop.remove", id: "prop-1" }]);
+    expect(result.footprints).toEqual([
+      { placementId: "prop-1", center: { x: 5, z: -5 }, radius: 0.5 },
+    ]);
+    expect(callbacks.onWorldChanged).toHaveBeenCalledOnce();
+  });
+
+  it("resolves a refused edit with the diagnostics, changing nothing", async () => {
+    const { client, callbacks, tick } = start();
+    const editing = client.edit({ ops: [{ op: "prop.remove", id: "no-such-prop" }] });
+    tick();
+    const result = await editing;
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["unknown_placement"]);
+    expect(callbacks.onWorldChanged).not.toHaveBeenCalled();
+    expect(callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("validates an edit without applying it", async () => {
+    const { client, callbacks, tick } = start();
+    const fits = client.validateEdit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 }, scale: 2 }],
+    });
+    const outside = client.validateEdit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 500, z: 0 } }],
+    });
+    tick();
+    const check = await fits;
+    expect(check.ok && check.footprints[0]?.radius).toBe(1);
+    const refused = await outside;
+    expect(refused.ok ? [] : refused.diagnostics.map((d) => d.code)).toEqual(["outside_world"]);
+    expect(callbacks.onWorldChanged).not.toHaveBeenCalled();
   });
 
   it("resolves a rejected restore with its diagnostics", async () => {
