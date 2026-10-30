@@ -307,6 +307,30 @@ describe("assembleParts", () => {
     expect(assemblyWarnings(flush)).not.toEqual([]);
   });
 
+  it("passes over a part whose two sides of a pair would be flush with each other", () => {
+    // Hips half a fat leg apart: two fat legs there overlap, their sides flush with each other's,
+    // though with no other part's; two fine legs just touch.
+    const close: LibraryPart = {
+      id: "test:close-torso",
+      part: box(8, 4, 6, {
+        attach: { x: 4, y: 2, z: 3 },
+        sockets: [
+          { id: "left", type: "test:hip", position: { x: 4, y: 1, z: 2 } },
+          { id: "right", type: "test:hip", position: { x: 4, y: 1, z: 3 }, mirrors: "left" },
+        ],
+      }),
+    };
+    for (const seed of SEEDS) {
+      const assembly = assemble(seed, [FAT_LEG, FINE_LEG], close);
+      expect(partsById(assembly).left).toBe("legs-fine");
+      expect(assemblyWarnings(assembly)).toEqual([]);
+    }
+    const fat = assemble(SEEDS[0]!, [FAT_LEG], close);
+    expect(assemblyWarnings(fat).map((found) => found.message)).toEqual([
+      'Parts "left" and "right" have faces flush in one plane',
+    ]);
+  });
+
   it("stops at the cap on parts", () => {
     const assembly = assemble(SEEDS[0]!, [THIN_LEG, HEAD, EYE, SEGMENT]);
     expectSound(assembly);
@@ -445,6 +469,41 @@ describe("assembleParts", () => {
         const assembly = assemble(seed, [FINE_LEG], start);
         expectSound(assembly);
         expect(partsById(assembly)["back-right"]).toBe("legs-fat");
+      }
+    });
+
+    it("copies a library part afresh when the copy it holds can't go where it can", () => {
+      const held = (changes: Partial<VoxelPart>): VoxelAssembly => ({
+        parts: {
+          torso: TORSO.part,
+          segment: { ...SEGMENT.part, source: "test:segment", ...changes },
+        },
+        instances: [
+          { id: "torso", part: "torso", rotation: [0, 0, 0, 1], mirrored: false },
+          {
+            id: "tail",
+            part: "segment",
+            parent: { instance: "torso", socket: "tail" },
+            rotation: [0, 0, 0, 1],
+            mirrored: false,
+          },
+        ],
+      });
+      const unregistered = {
+        sockets: [
+          ...SEGMENT.part.sockets,
+          { id: "claw", type: "test:claw", position: { x: 1, y: 1.5, z: 1 } },
+        ],
+      };
+      // A copy edited to another type, which doesn't fit a tail root, or given a socket of a
+      // type that isn't registered.
+      for (const changes of [{ type: "test:leg" }, unregistered]) {
+        const assembly = assemble(SEEDS[0]!, [SEGMENT], held(changes));
+        expect(validate(VoxelAssemblySchema, assembly).ok).toBe(true);
+        expect(assembly.parts["segment-2"]).toEqual({ ...SEGMENT.part, source: "test:segment" });
+        expect(new Set(assembly.instances.slice(2).map((instance) => instance.part))).toEqual(
+          new Set(["segment-2"]),
+        );
       }
     });
   });

@@ -522,14 +522,17 @@ interface CellFace {
 /** Outer faces by `CellFace.key`, to find the flush ones. */
 type FaceBuckets = Map<string, CellFace[]>;
 
-/** Calls `visit` with every `CellFace` of an instance of `part`, placed at `placement`. */
+/**
+ * Calls `visit` with every `CellFace` of an instance of `part`, placed at `placement`, until it
+ * returns true; returns whether it did.
+ */
 function forEachCellFace(
   part: VoxelPart,
   grid: Uint8Array,
   placement: InstancePlacement,
   instance: number,
-  visit: (face: CellFace) => void,
-): void {
+  visit: (face: CellFace) => unknown,
+): boolean {
   const { size } = part;
   const step = stepUnits(part.step);
   const { linear, offset } = placement;
@@ -565,7 +568,7 @@ function forEachCellFace(
           const [u0, u1, v0, v1] = [num(min, u), num(max, u), num(min, v), num(max, v)];
           for (let cu = Math.floor(u0 / FACE_CELL); cu * FACE_CELL < u1; cu++) {
             for (let cv = Math.floor(v0 / FACE_CELL); cv * FACE_CELL < v1; cv++) {
-              visit({
+              const stop = visit({
                 key: `${rootAxis}${rootSign}|${plane}|${cu}|${cv}`,
                 instance,
                 u0,
@@ -573,12 +576,14 @@ function forEachCellFace(
                 v0,
                 v1,
               });
+              if (stop === true) return true;
             }
           }
         }
       }
     }
   }
+  return false;
 }
 
 /** Calls `found` with the instance of each face in `bucket` flush with `face`, of another one. */
@@ -588,15 +593,18 @@ function forEachFlush(
   found: (other: number) => void,
 ): void {
   for (const other of bucket ?? []) {
-    if (
-      other.instance !== face.instance &&
-      Math.min(other.u1, face.u1) > Math.max(other.u0, face.u0) &&
-      Math.min(other.v1, face.v1) > Math.max(other.v0, face.v0)
-    ) {
-      found(other.instance);
-    }
+    if (isFlushWith([other], face)) found(other.instance);
   }
 }
+
+/** Whether a face in `bucket`, of another instance, is flush with `face`. */
+const isFlushWith = (bucket: readonly CellFace[] | undefined, face: CellFace): boolean =>
+  (bucket ?? []).some(
+    (other) =>
+      other.instance !== face.instance &&
+      Math.min(other.u1, face.u1) > Math.max(other.u0, face.u0) &&
+      Math.min(other.v1, face.v1) > Math.max(other.v0, face.v0),
+  );
 
 /** Adds a face to its bucket. */
 function addFace(buckets: FaceBuckets, face: CellFace): void {
@@ -1011,14 +1019,13 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
 
   const fits = (part: VoxelPart, socketType: string) =>
     lookup.fitsOf(part.type)?.includes(socketType) ?? false;
+  const hasRegisteredSockets = (part: VoxelPart) =>
+    part.sockets.every((socket) => lookup.isSocketType(socket.type));
   const library = [...parts]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .filter((entry, i, sorted) => {
       if (sorted[i - 1]?.id === entry.id) throw new Error(`Part "${entry.id}" is listed twice`);
-      return (
-        lookup.fitsOf(entry.part.type) !== undefined &&
-        entry.part.sockets.every((socket) => lookup.isSocketType(socket.type))
-      );
+      return lookup.fitsOf(entry.part.type) !== undefined && hasRegisteredSockets(entry.part);
     });
   // The seeded order of the library parts that fit each socket type, made when first needed.
   const orders = new Map<string, LibraryPart[]>();
@@ -1039,9 +1046,15 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
     if (!part) throw new Error(`No part "${key}"`);
     return part;
   };
-  const libraryOption = (entry: LibraryPart): Option => {
+  // A library part as an option for a socket type: the assembly's copy of it when it holds one
+  // that fits there and has only registered socket types (a frozen copy may have been edited),
+  // otherwise a fresh copy.
+  const libraryOption = (entry: LibraryPart, socketType: string): Option => {
     const key = libraryKeys.get(entry.id);
-    return key === undefined ? { part: entry.part, library: entry } : { part: heldPart(key), key };
+    const part = key === undefined ? undefined : heldPart(key);
+    return key !== undefined && part && fits(part, socketType) && hasRegisteredSockets(part)
+      ? { part, key }
+      : { part: entry.part, library: entry };
   };
 
   for (let i = 0; i < assembly.instances.length; i++) {
@@ -1079,17 +1092,17 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
       // Whether the new instances' faces would lie flush with any part's, or with each other's.
       const isFlush = (option: Option) => {
         const added: FaceBuckets = new Map();
-        let flush = false;
-        placementsOf(option).forEach((placement, k) => {
-          if (flush) return;
+        return placementsOf(option).some((placement, k) =>
           forEachCellFace(option.part, gridOf(option.part), placement, first + k, (face) => {
-            const found = () => (flush = true);
-            forEachFlush(buckets.get(face.key), face, found);
-            forEachFlush(added.get(face.key), face, found);
+            if (
+              isFlushWith(buckets.get(face.key), face) ||
+              isFlushWith(added.get(face.key), face)
+            ) {
+              return true;
+            }
             addFace(added, face);
-          });
-        });
-        return flush;
+          }),
+        );
       };
 
       // One side of the pair is taken already (only in an assembly to fill): its part, as is.
@@ -1103,7 +1116,9 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
       if (heldOption && fits(heldOption.part, socket.type) && canGo(heldOption)) {
         chosen = heldOption;
       } else {
-        const placeable = orderFor(socket.type).map(libraryOption).filter(canGo);
+        const placeable = orderFor(socket.type)
+          .map((entry) => libraryOption(entry, socket.type))
+          .filter(canGo);
         chosen = placeable.find((option) => !isFlush(option)) ?? placeable[0];
       }
       if (!chosen) continue;
