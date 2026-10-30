@@ -1,4 +1,10 @@
-import type { Quaternion, Vec3, VoxelAssembly, VoxelPart } from "@living-diorama/content-schema";
+import type {
+  Quaternion,
+  SocketProbe,
+  SocketRef,
+  VoxelAssembly,
+  VoxelPart,
+} from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PreviewMotion } from "../body/preview";
@@ -18,7 +24,6 @@ import {
   socketKey,
   socketPoints,
   type SocketPoint,
-  type SocketRef,
 } from "./assembly-points";
 import {
   buildVoxelBody,
@@ -48,17 +53,6 @@ export interface AssemblyGhost {
   sockets: readonly SocketRef[];
   /** Its rest rotation, stored as on an instance; none by default. */
   rotation?: Quaternion;
-}
-
-/**
- * Where a pointer points, in the body frame (metres, feet at y = 0, facing +X), however the test
- * walk has moved the body: a ray from the camera through the pointer. It is the shape of
- * `scoreSockets`' probe, for drag-to-socket (ADR 0023 §4).
- */
-export interface AssemblyProbe {
-  origin: Vec3;
-  /** A unit vector. */
-  direction: Vec3;
 }
 
 export interface AssemblyViewOptions {
@@ -92,10 +86,12 @@ export interface AssemblyView {
    */
   pick(clientX: number, clientY: number): AssemblyPick | undefined;
   /**
-   * The ray under a pointer at `clientX`, `clientY` in the body frame, e.g. to score sockets while
-   * a part is dragged; undefined while the canvas has no size.
+   * The ray under a pointer at `clientX`, `clientY` in the body frame (metres, feet at y = 0,
+   * facing +X), with the test walk's motion taken out: from the camera, along a unit vector. It is
+   * `scoreSockets`' probe, e.g. to score sockets while a part is dragged (ADR 0023 §4); undefined
+   * while the canvas has no size.
    */
-  probe(clientX: number, clientY: number): AssemblyProbe | undefined;
+  probe(clientX: number, clientY: number): SocketProbe | undefined;
   /**
    * Walks the creature in place with a locomotion profile (M16, ADR 0020 §8), as the body
    * preview's `setMotion` does; undefined stands it still.

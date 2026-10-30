@@ -36,4 +36,3 @@ export {
   type AssemblyView,
   type AssemblyViewOptions,
 } from "./voxel/assembly-view";
-export type { SocketRef } from "./voxel/assembly-points";

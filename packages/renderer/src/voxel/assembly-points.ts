@@ -5,6 +5,7 @@ import {
   placeInstances,
   type InstancePlacement,
   type Quaternion,
+  type SocketRef,
   type VoxelAssembly,
   type VoxelPart,
 } from "@living-diorama/content-schema";
@@ -15,12 +16,6 @@ import { meshVoxelParts } from "./mesher";
 // Where the assembly view's sockets and ghost parts go (ADR 0023 §4): points and transforms in a
 // voxel body's frame (metres, feet at y = 0, facing +X), worked out from the assembly as
 // `buildVoxelBody` places its parts. Pure apart from the three.js objects returned.
-
-/** A socket of an instance: the socket's ID on that instance's part, as `VoxelInstance.parent`. */
-export interface SocketRef {
-  instance: string;
-  socket: string;
-}
 
 /** A socket placed in the body frame. */
 export interface SocketPoint extends SocketRef {
