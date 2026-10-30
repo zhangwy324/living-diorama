@@ -548,16 +548,42 @@ describe("building voxel creatures", () => {
       await expect(refusal(studioClient(studio).releaseVoxel(voxelParams()))).resolves.toEqual({
         code: "no_spawn_point",
         message:
-          "Pebble has nowhere to appear in this world at its size. Try making it bigger or smaller.",
+          "Pebble has nowhere to appear in this world at its size. Try adding or removing parts to change its size.",
       });
       world.registerSpecies.mockResolvedValueOnce(noSpawn);
       const swimmer = voxelParams({
         plan: { locomotion: { land: false, gait: "walk", swim: true } },
       });
-      const refused = await refusal(studioClient(studio).releaseVoxel(swimmer));
-      expect(refused.code).toBe("no_spawn_point");
-      expect(refused.message).toContain("no starting spot in the water suits it");
+      await expect(refusal(studioClient(studio).releaseVoxel(swimmer))).resolves.toEqual({
+        code: "no_spawn_point",
+        message:
+          "Pebble has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or change its size.",
+      });
       expect(await store.list()).toEqual([]);
+    });
+
+    it("refuses an assembly that isn't JSON as a failed release", async () => {
+      // The channel carries only JSON, so this reaches the handler directly.
+      const { services, store } = await setUp();
+      const notJson = { parts: {}, instances: [], count: 1n } as unknown as VoxelAssembly;
+      const refused = await refusal(
+        Promise.resolve(studioHandlers(services).releaseVoxel(voxelParams({ assembly: notJson }))),
+      );
+      expect(refused.code).toBe("release_failed");
+      expect(refused.message).toContain("Pebble's assembly isn't JSON");
+      expect(await store.list()).toEqual([]);
+    });
+
+    it("checks the size cap first even when an earlier try kept the species", async () => {
+      const store = createMemoryLibraryStore();
+      await studioClient((await setUp({ store })).studio).releaseVoxel(voxelParams());
+      // After the strip reloads, the retry map is empty: the cap comes before the kept species.
+      const reloaded = await setUp({ store });
+      const refused = await refusal(
+        studioClient(reloaded.studio).releaseVoxel(voxelParams({ assembly: HUGE })),
+      );
+      expect(refused.code).toBe("assembly_too_big");
+      expect(reloaded.world.spawn).not.toHaveBeenCalled();
     });
 
     it("refuses one whose parts don't fit, as a failed release", async () => {

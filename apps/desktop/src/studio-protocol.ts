@@ -202,8 +202,8 @@ export function releaseFailure(
 /** Where a voxel creature has nowhere to appear: its size comes from its parts, so change them. */
 function voxelNoSpawnPoint(name: string, locomotion: LocomotionChoice): string {
   return locomotion.land
-    ? `${name} has nowhere to appear in this world at its size. Try making it bigger or smaller.`
-    : `${name} has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or try making it bigger or smaller.`;
+    ? `${name} has nowhere to appear in this world at its size. Try adding or removing parts to change its size.`
+    : `${name} has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or change its size.`;
 }
 
 /** Said when a voxel creature is larger than `large` (ADR 0023 §14). */
@@ -302,7 +302,9 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     });
   };
   const releaseVoxel = ({ releaseId, assembly, name, plan }: ReleaseVoxelParams) => {
-    // Before anything else, so an oversized assembly costs no more work (#208).
+    // Before anything else, even a species an earlier try kept, so an oversized assembly costs no
+    // more work (#208). One that isn't JSON passes here and `saveVoxel` refuses it. A retry while
+    // the first try is remembered gets its answer: the Studio sends the same assembly again.
     if ((assemblyBytes(assembly) ?? 0) > MAX_ASSEMBLY_BYTES) {
       throw refuse("assembly_too_big", tooBigMessage(name.trim() || "Your creature"));
     }
