@@ -8,7 +8,7 @@ import thinLimbs from "./thin-limbs.png?inline";
 import type { Pixels } from "../pixels";
 
 // The body fixtures for tests (see README.md): drawings made in the Creation Studio, and the
-// mossling as the renderer reads it.
+// drawn mossling the built-in pack had until M20, as the renderer reads it.
 
 export interface Fixture {
   name: string;
@@ -30,7 +30,7 @@ export const STUDIO_FIXTURES: Fixture[] = [
   },
 ];
 
-/** The built-in mossling's SVG, rasterised at 256 px as `readImage` reads it. */
+/** The drawn mossling of before M20, rasterised at 256 px as `readImage` reads it. */
 export const MOSSLING = mossling;
 
 /** Decodes an 8-bit RGBA, non-interlaced PNG data URL, as the Studio writes them. */

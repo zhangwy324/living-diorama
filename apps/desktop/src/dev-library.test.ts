@@ -1,6 +1,6 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import { checkAssemblyFit, formatDiagnostic, parseDrawing } from "@living-diorama/content-schema";
-import { sortedPartTypes, sortedSocketTypes } from "@living-diorama/extension-api";
+import { sortedParts, sortedPartTypes, sortedSocketTypes } from "@living-diorama/extension-api";
 import type { PartSummary } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
@@ -95,6 +95,22 @@ describe("starter creatures", () => {
     const reversed = { parts: [...headless.parts].reverse(), lookup };
     expect(starterRoots(reversed)).toEqual(starterRoots(headless));
     expect(assembleStarter(reversed, { seed: 5 })).toEqual(assembleStarter(headless, { seed: 5 }));
+  });
+
+  it("starts from the four torsos with the built-in starter parts", () => {
+    // As `ready` lists them: by ID.
+    const builtIn = sortedParts(content.value).map(({ id, name, version, part }) => ({
+      id,
+      name,
+      version,
+      part,
+    }));
+    expect(starterRoots({ parts: builtIn, lookup }).map((p) => p.id)).toEqual([
+      "hollow:fish-torso",
+      "hollow:four-legged-torso",
+      "hollow:mossling-torso",
+      "hollow:upright-torso",
+    ]);
   });
 
   it("builds the same creature for the same seed, one that fits the registered types", () => {

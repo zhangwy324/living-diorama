@@ -74,3 +74,14 @@ export function registerHollowCreatures(registries: Registries) {
     ]),
   ];
 }
+
+/**
+ * The registered mossling as the input of a test species made like it (`{ ...mosslingInput(r), id,
+ * … }`). Parsing filled in the drawn-only body settings, which a voxel species may not set, so
+ * they are left out.
+ */
+export function mosslingInput(registries: Registries) {
+  const mossling = registries.species.get("hollow:mossling");
+  if (!mossling) throw new Error("The mossling isn't registered");
+  return { ...mossling, body: { locomotion: mossling.body.locomotion } };
+}

@@ -96,7 +96,7 @@ A placement in the world's `props` names the type and says where it stands:
 }
 ```
 
-- `appearance` is an image asset the renderer builds a solid body from; see [Drawing an appearance](#drawing-an-appearance).
+- `appearance` is an image asset the renderer builds a solid body from (see [Drawing an appearance](#drawing-an-appearance)), or a `voxel` asset: an assembly of voxel parts as JSON, in the format of a library entry's, as the built-in mossling's is (`hollow:voxels/mossling.json`, see [Voxel parts](#voxel-parts)). A voxel species takes its depth and anchors from its cubes, so it may not set `body.thickness` or `body.anchors`, and its measured size should be its `sizeClass`.
 - `sizeClass` sets the creature's size, and the body's height matches it:
 
   | Size class | Radius (m) | Height (m) |
@@ -156,7 +156,7 @@ The easiest way to make a part is in [MagicaVoxel](https://ephtracy.github.io/):
 }
 ```
 
-`pnpm parts --in <your vox folder> --out <your parts folder>` turns each pair into a definition (MagicaVoxel's z is up; the importer turns it into Y up). Import the definitions and register them with `registries.parts.register`. The built-in pack's own run with `pnpm parts` and no options; see [development](development.md) for its workflow.
+`pnpm parts --in <your vox folder> --out <your parts folder>` turns each pair into a definition (MagicaVoxel's z is up; the importer turns it into Y up). Import the definitions and register them with `registries.parts.register`. The built-in pack's own run with `pnpm parts` and no options; see [development](development.md) for its workflow. The built-in mossling is such an assembly, frozen from the pack's parts with a copy of each part (its `source` the part's ID) by `pnpm mossling` and registered as an asset of kind `voxel`; a pack species uses one the same way.
 
 ## Worlds
 

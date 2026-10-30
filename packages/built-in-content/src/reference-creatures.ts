@@ -6,8 +6,9 @@ import {
 } from "@living-diorama/content-schema";
 
 // Reference creatures built by hand from the starter parts, one per torso layout and the mossling,
-// for the starter parts' tests and screenshots. They show that the parts fit together; they are not
-// registered, and M21's Studio and the assembler make creatures of their own.
+// for the starter parts' tests and screenshots. They show that the parts fit together. Only the
+// mossling's is used beyond that: `pnpm mossling` freezes it as the mossling species' assembly
+// asset. M21's Studio and the assembler make creatures of their own.
 
 /** One instance: its ID, its part's ID and the socket of an earlier instance it hangs from. */
 interface Placed {
@@ -94,13 +95,20 @@ export function referenceCreatures(
       ...pair("eye", "hollow:round-eye", "head", ["left-eye", "right-eye"]),
       { id: "mouth", part: "hollow:open-mouth", on: ["head", "mouth"] },
     ]),
-    // The mossling's own parts.
-    mossling: assemble(partOf, [
-      { id: "torso", part: "hollow:mossling-torso" },
-      ...pair("foot", "hollow:mossling-foot", "torso", ["left-hip", "right-hip"]),
-      { id: "head", part: "hollow:mossling-head", on: ["torso", "neck"] },
-      ...pair("eye", "hollow:round-eye", "head", ["left-eye", "right-eye"]),
-      { id: "mouth", part: "hollow:smile", on: ["head", "mouth"] },
-    ]),
+    mossling: mosslingAssembly(partOf),
   };
+}
+
+/**
+ * The mossling: its own torso, feet and head with the starter round eyes and smile. Placed by hand
+ * rather than by `assembleParts`, which would fill the head's ear and nose mounts too.
+ */
+export function mosslingAssembly(partOf: (id: string) => VoxelPart): VoxelAssembly {
+  return assemble(partOf, [
+    { id: "torso", part: "hollow:mossling-torso" },
+    ...pair("foot", "hollow:mossling-foot", "torso", ["left-hip", "right-hip"]),
+    { id: "head", part: "hollow:mossling-head", on: ["torso", "neck"] },
+    ...pair("eye", "hollow:round-eye", "head", ["left-eye", "right-eye"]),
+    { id: "mouth", part: "hollow:smile", on: ["head", "mouth"] },
+  ]);
 }
