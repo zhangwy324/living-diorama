@@ -154,6 +154,35 @@ describe("the reference creatures", () => {
     expect(warnings).toEqual([]);
   });
 
+  it.each(Object.keys(creatures))("%s has every part's attach point on its socket", (name) => {
+    // Every joint is on the finer grid already, so the snap (ADR 0022 §13, as amended in M21
+    // PR 7) moves nothing: the creatures, the mossling's asset among them, place as they did.
+    const assembly = creatures[name as keyof typeof creatures];
+    const placements = placeInstances(assembly);
+    const index = new Map(assembly.instances.map((instance, i) => [instance.id, i]));
+    const at = (i: number, point: { x: number; y: number; z: number }, step: number) => {
+      const { linear, offset } = placements[i]!;
+      const p = [point.x * step, point.y * step, point.z * step];
+      return [0, 1, 2].map(
+        (r) =>
+          linear[r * 3]! * p[0]! +
+          linear[r * 3 + 1]! * p[1]! +
+          linear[r * 3 + 2]! * p[2]! +
+          offset[r]!,
+      );
+    };
+    assembly.instances.forEach((instance, i) => {
+      if (!instance.parent) return;
+      const part = assembly.parts[instance.part]!;
+      const p = index.get(instance.parent.instance)!;
+      const parentPart = assembly.parts[assembly.instances[p]!.part]!;
+      const socket = parentPart.sockets.find((s) => s.id === instance.parent?.socket)!;
+      expect(at(i, part.attach, stepUnits(part.step)), instance.id).toEqual(
+        at(p, socket.position, stepUnits(parentPart.step)),
+      );
+    });
+  });
+
   it("are all medium, the mossling about 52 × 60 × 45 cm", () => {
     const sizes = Object.fromEntries(
       Object.entries(creatures).map(([name, assembly]) => {

@@ -179,14 +179,10 @@ export function refusalText(
       : `Its cubes are as ${bigger ? "big" : "small"} as they go.`;
   }
   if (code === "root" && edit === "turn") return "The torso can't turn: everything hangs from it.";
-  if (code === "invalid" && edit !== undefined) {
-    return edit === "turn"
-      ? "It can't turn there: it would stick out of its joint."
-      : `It can't ${edit.startsWith("grow") ? "grow" : "shrink"}: a part would come out of its joint.`;
+  if (code === "invalid" && edit !== undefined && edit !== "turn") {
+    return `It can't ${edit.startsWith("grow") ? "grow" : "shrink"}: a part would come out of its joint.`;
   }
   switch (code) {
-    case "no_turn":
-      return "No other way round fits there.";
     case "too_many_parts":
       return "That's as many parts as a creature can have.";
     case "not_root":
