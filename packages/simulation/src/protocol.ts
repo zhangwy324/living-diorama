@@ -163,22 +163,16 @@ export interface Limit extends Diagnostic {
   structure?: { id: string; name: string };
 }
 
-/**
- * A voxel species' body plan as the main thread sees it: only how it moves. Its cubes give its
- * shape and anchors, and they stay in its appearance asset (ADR 0022 §17, §20).
- */
-export type VoxelBodySummary = Pick<BodyShape, "locomotion">;
-
 /** What the renderer needs of a registered species. */
 export interface SpeciesSummary {
   /** Asset ref of the appearance: an image, or a voxel assembly. Its asset says which. */
   appearance: string;
   sizeClass: SizeClass;
   /**
-   * How its body is built from the appearance: the whole body plan for a drawn species, only
-   * `locomotion` for a voxel one.
+   * How its body is built from the appearance. A voxel species has only `locomotion`: its cubes
+   * give its shape and anchors, and they stay in its appearance asset (ADR 0022 §17, §20).
    */
-  body: BodyShape | VoxelBodySummary;
+  body: BodyShape;
 }
 
 /**

@@ -2,6 +2,7 @@ import {
   defaultBody,
   FoodAffordanceParamsSchema,
   formatDiagnostic,
+  parseSpeciesDefinition,
   validate,
   VoxelAssemblySchema,
   type Result,
@@ -1006,6 +1007,16 @@ describe("voxel species' body plans", () => {
     ]);
     expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["drawn_only_setting"]);
     expect(registries.species.size).toBe(0);
+  });
+
+  it("refuses them on a voxel species parsed outside the registry", () => {
+    const registries = registered();
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+    const parsed = parseSpeciesDefinition({ ...cubes, body: { thickness: 0.4 } });
+    if (!parsed.ok) throw new Error("invalid species");
+    expect(checkReferences(registries, "species", parsed.value).map((d) => d.code)).toEqual([
+      "drawn_only_setting",
+    ]);
   });
 });
 

@@ -81,7 +81,7 @@ export interface RenderSpecies {
    * How the body is built from the image: how deep it is and its anchors. A voxel species has
    * neither: its cubes give them.
    */
-  body: Pick<BodyShape, "locomotion"> & Partial<Pick<BodyShape, "thickness" | "anchors">>;
+  body: BodyShape;
 }
 
 export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;

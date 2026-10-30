@@ -13,13 +13,12 @@ import {
   parseStructureDefinition,
   parseWorldDefinition,
   validate,
-  writtenDrawnOnlySettings,
+  drawnOnlySettings,
   type Affordances,
   type BodyShape,
   type ContentId,
   type Diagnostic,
   type DiagnosticPath,
-  type DrawnOnlyBodySetting,
   type LocomotionMedium,
   type PartDefinition,
   type PartTypeDefinition,
@@ -684,16 +683,11 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
 
 /**
  * A voxel species has no drawn-only body settings (ADR 0022, M19 decisions; M20): its cubes give
- * its depth and anchors. They are checked as written, which `written` records when the species is
- * validated, since parsing fills in their defaults. Whether the species is voxel is its
- * appearance asset's kind, known only once references resolve; an unregistered asset is left to
- * reference resolution.
+ * its depth and anchors. Whether the species is voxel is its appearance asset's kind, known only
+ * once references resolve; an unregistered asset is left to reference resolution.
  */
-function checkVoxelBodyPlan(
-  species: SpeciesDefinition,
-  lookup: Lookup,
-  written: readonly DrawnOnlyBodySetting[],
-): Diagnostic[] {
+function checkVoxelBodyPlan(species: SpeciesDefinition, lookup: Lookup): Diagnostic[] {
+  const written = drawnOnlySettings(species.body);
   if (written.length === 0) return [];
   const appearance = lookup("assets", species.appearance) as AssetEntry | undefined;
   if (appearance?.kind !== "voxel") return [];
@@ -821,8 +815,6 @@ export const checkAssemblyTypes = (
   );
 
 export function createRegistries(): Registries {
-  // The drawn-only body settings each species set as written, by its parsed definition.
-  const writtenSettings = new WeakMap<SpeciesDefinition, readonly DrawnOnlyBodySetting[]>();
   return {
     worlds: new Registry("worlds", { validate: parseWorldDefinition, references: worldReferences }),
     structures: new Registry("structures", {
@@ -839,15 +831,11 @@ export function createRegistries(): Registries {
     socketTypes: new Registry("socketTypes", { validate: parseSocketTypeDefinition }),
     parts: new Registry("parts", { validate: parsePartDefinition, references: partReferences }),
     species: new Registry("species", {
-      validate: (input, source) => {
-        const result = parseSpeciesDefinition(input, source);
-        if (result.ok) writtenSettings.set(result.value, writtenDrawnOnlySettings(input));
-        return result;
-      },
+      validate: parseSpeciesDefinition,
       references: speciesReferences,
       check: (species, lookup) => [
         ...checkSpeciesLocomotion(species, lookup),
-        ...checkVoxelBodyPlan(species, lookup, writtenSettings.get(species) ?? []),
+        ...checkVoxelBodyPlan(species, lookup),
       ],
     }),
     surfaces: new Registry<SurfaceType>("surfaces", {
