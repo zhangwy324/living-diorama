@@ -8,6 +8,8 @@
 
   The checks treated any of these as an error, so a drawn species of those sizes would be rejected, and so would a pack species. Separately, navigation assumed each region is one connected piece: wander chose destinations anywhere in a reachable region, which for a split region could be somewhere the creature can't get to.
 
+**Amended by [ADR 0022](0022-voxel-creatures.md)** §3 (M18): a voxel creature's size class is derived from its measured bounds, the smallest class that contains it in both height and footprint, instead of being picked. The limits below still apply per size class.
+
 ## Decisions
 
 1. **A creature only goes where it fits, and that is a game mechanic.** A creature drawn too big for the bridge stays on its bank. The player sees why (decision 4) and can draw a smaller one. Creatures reacting to a limit, like walking up to the bridge and turning back, belongs to living behaviour later; for now wander never picks a place the creature can't reach.
