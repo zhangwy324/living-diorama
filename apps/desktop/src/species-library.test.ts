@@ -1,10 +1,14 @@
+import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import {
   error,
+  parseLibraryEntry,
+  type Diagnostic,
   type Drawing,
   type Result,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import { createMemoryLibraryStore, type LibraryStore } from "@living-diorama/desktop-integration";
+import type { SpeciesAppearanceKind } from "@living-diorama/extension-api";
 import { describe, expect, it, vi } from "vitest";
 import { openSpeciesLibrary, type LibraryWorld } from "./species-library";
 import { userSpeciesIds } from "./user-species";
@@ -25,9 +29,10 @@ function fakeWorld() {
   const registered: string[] = [];
   let next = 1;
   const world = {
-    registerSpecies: vi.fn((input: unknown, url: string) => {
+    registerSpecies: vi.fn((input: unknown, url: string, kind: SpeciesAppearanceKind) => {
       const species = input as SpeciesDefinition;
       expect(url).toMatch(/^blob:/);
+      expect(["image", "voxel"]).toContain(kind);
       if (species.name === "Rejected") {
         return Promise.resolve<Result<never>>({
           ok: false,
@@ -50,6 +55,9 @@ function fakeWorld() {
       return Promise.resolve({ ok: true as const, value: creatureId });
     }),
     creatures: () => creatures,
+    checkAssembly: vi.fn<(assembly: unknown) => Promise<Result<Diagnostic[]>>>(() =>
+      Promise.resolve({ ok: true, value: [] }),
+    ),
   } satisfies LibraryWorld;
   return { world, creatures, registered };
 }
@@ -82,6 +90,7 @@ describe("saving", () => {
       name: "Puddle",
       sizeClass: "small",
       createdAt: "2026-10-27T12:00:00.000Z",
+      body: "drawn",
       available: true,
       limits: [],
     });
@@ -270,4 +279,142 @@ it("tells when the list changes", async () => {
   expect(onChange).toHaveBeenCalledTimes(1);
   value(await library.deleteSpecies(speciesId));
   expect(onChange).toHaveBeenCalledTimes(2);
+});
+
+describe("voxel species", () => {
+  const HOP = { locomotion: { land: true, gait: "hop", swim: false } } as const;
+  /** One 32-cube block of 10 cm cubes: 3.2 m, too large for every size class. */
+  const BOULDER = {
+    parts: {
+      block: {
+        type: "hollow:torso",
+        size: { x: 32, y: 32, z: 32 },
+        step: 0.1,
+        colors: ["#888888"],
+        voxels: [32 * 32 * 32, 1],
+        attach: { x: 0, y: 0, z: 0 },
+      },
+    },
+    instances: [{ id: "block", part: "block" }],
+  };
+
+  it("registers and stores one, its size class measured from its cubes and no image", async () => {
+    const { library, world, store } = await open();
+    const assembly = sampleVoxelAssembly();
+    const createUrl = vi.spyOn(URL, "createObjectURL");
+    const saved = value(await library.saveVoxel(assembly, "Pebble", HOP));
+    const { speciesId } = userSpeciesIds(UUIDS[0]);
+    expect(saved).toEqual({
+      speciesId,
+      name: "Pebble",
+      sizeClass: "small",
+      createdAt: "2026-10-27T12:00:00.000Z",
+      body: "voxel",
+      available: true,
+      limits: [],
+    });
+    expect(world.checkAssembly).toHaveBeenCalledWith(assembly);
+
+    // Registered as a voxel asset, from the assembly as JSON.
+    const [species, url, kind] = world.registerSpecies.mock.calls[0] ?? [];
+    expect(kind).toBe("voxel");
+    expect((species as SpeciesDefinition).appearance).toBe(`${speciesId}/assembly.json`);
+    expect(url).toMatch(/^blob:/);
+    const blob = createUrl.mock.calls[0]?.[0] as Blob;
+    expect(JSON.parse(await blob.text())).toEqual(assembly);
+    createUrl.mockRestore();
+
+    const [stored] = await store.list();
+    expect(stored?.entry).toEqual({
+      schemaVersion: 5,
+      species: {
+        schemaVersion: 1,
+        id: speciesId,
+        version: "1.0.0",
+        name: "Pebble",
+        appearance: `${speciesId}/assembly.json`,
+        sizeClass: "small",
+        // Its gait only: a voxel entry holds no thickness or anchors.
+        body: { locomotion: { land: { gait: "hop" } } },
+        capabilities: { "core:land": 1 },
+        baseSpeed: 0.6,
+        behaviors: ["core:wander", "core:feed", "core:rest"],
+        senses: { "core:vision": 8 },
+        traits: {},
+      },
+      body: { kind: "voxel", assembly },
+      createdAt: "2026-10-27T12:00:00.000Z",
+    });
+    await expect(store.loadImage(UUIDS[0] ?? "")).rejects.toThrow();
+    await expect(store.loadDrawing(UUIDS[0] ?? "")).rejects.toThrow();
+  });
+
+  it("registers it again at startup from its entry, without loading an image", async () => {
+    const first = await open();
+    value(await first.library.saveVoxel(sampleVoxelAssembly(), "Pebble", HOP));
+    value(await first.library.save(DRAWING, PNG, "Puddle", "small"));
+    const loadImage = vi.spyOn(first.store, "loadImage");
+
+    const relaunched = await open(first.store);
+    expect(relaunched.library.list().map((s) => [s.name, s.body, s.available])).toEqual([
+      ["Pebble", "voxel", true],
+      ["Puddle", "drawn", true],
+    ]);
+    expect(relaunched.world.registerSpecies.mock.calls.map(([, , kind]) => kind)).toEqual([
+      "voxel",
+      "image",
+    ]);
+    // Only the drawn species' image is loaded.
+    expect(loadImage.mock.calls).toEqual([[UUIDS[1]]]);
+    // Fits are checked at release only.
+    expect(relaunched.world.checkAssembly).not.toHaveBeenCalled();
+  });
+
+  it("loads a voxel entry saved again as parsed, as M21's recolouring will", async () => {
+    const first = await open();
+    value(await first.library.saveVoxel(sampleVoxelAssembly(), "Pebble", HOP));
+    const [stored] = await first.store.list();
+    const parsed = value(parseLibraryEntry(stored?.entry));
+    const store = createMemoryLibraryStore();
+    await store.save(UUIDS[0] ?? "", parsed);
+
+    const { library } = await open(store);
+    expect(library.list()).toMatchObject([{ name: "Pebble", body: "voxel", available: true }]);
+  });
+
+  it("skips a voxel entry that holds another ID", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = await open();
+    value(await first.library.saveVoxel(sampleVoxelAssembly(), "Pebble", HOP));
+    const [stored] = await first.store.list();
+    const store = createMemoryLibraryStore();
+    await store.save(UUIDS[1] ?? "", stored?.entry);
+
+    const { library } = await open(store);
+    expect(library.list()).toEqual([]);
+    expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+      expect.stringContaining("library_id_mismatch"),
+    ]);
+    warn.mockRestore();
+  });
+
+  it("refuses one too large for every size class, one that doesn't fit, and a bad one", async () => {
+    const { library, world, store } = await open();
+    const large = await library.saveVoxel(BOULDER, "Boulder", HOP);
+    expect(large.ok ? [] : large.diagnostics.map((d) => d.code)).toEqual(["too_large"]);
+    expect(world.checkAssembly).not.toHaveBeenCalled();
+
+    world.checkAssembly.mockResolvedValueOnce({
+      ok: true,
+      value: [error("part_does_not_fit", "No", [])],
+    });
+    const misfit = await library.saveVoxel(sampleVoxelAssembly(), "Misfit", HOP);
+    expect(misfit.ok ? [] : misfit.diagnostics.map((d) => d.code)).toEqual(["part_does_not_fit"]);
+
+    const bad = await library.saveVoxel({ parts: {}, instances: [] }, "Nothing", HOP);
+    expect(bad.ok).toBe(false);
+
+    expect(world.registerSpecies).not.toHaveBeenCalled();
+    expect(await store.list()).toEqual([]);
+  });
 });

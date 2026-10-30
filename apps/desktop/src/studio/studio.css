@@ -899,3 +899,11 @@ body,
     animation: none;
   }
 }
+
+/* A voxel species' thumbnail until the Studio can draw voxel creatures (ADR 0022, M21): a block. */
+.species .thumbnail.voxel-placeholder {
+  background:
+    linear-gradient(#e0cda6, #e0cda6) 50% 30% / 18px 6px no-repeat,
+    linear-gradient(#b5814f, #b5814f) 50% 60% / 18px 16px no-repeat,
+    #ece8dc;
+}

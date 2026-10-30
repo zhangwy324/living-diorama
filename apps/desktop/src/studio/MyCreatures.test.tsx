@@ -4,7 +4,11 @@ import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 import { DeleteDialog } from "./DeleteDialog";
 import { MyCreatures, type MyCreaturesProps } from "./MyCreatures";
 
-const base = { sizeClass: "medium", createdAt: "2026-10-27T12:00:00.000Z" } as const;
+const base = {
+  sizeClass: "medium",
+  createdAt: "2026-10-27T12:00:00.000Z",
+  body: "drawn",
+} as const;
 const puddle: StudioSpecies = {
   ...base,
   speciesId: "user:1",
@@ -74,6 +78,13 @@ describe("My creatures", () => {
       },
       { text: "Ghost / Unavailable: No room anywhere.", buttons: ["Delete Ghost"] },
     ]);
+  });
+
+  it("shows a placeholder for a voxel species, which has no image yet", () => {
+    const pebble: StudioSpecies = { ...twig, speciesId: "user:4", name: "Pebble", body: "voxel" };
+    const html = render({ library: { ...LIBRARY, species: [pebble] } });
+    expect(html).toContain("thumbnail voxel-placeholder");
+    expect(html).not.toContain("<img");
   });
 
   it("disables a species' buttons while its request is on the way, and shows a failure", () => {

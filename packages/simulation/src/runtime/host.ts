@@ -2,11 +2,15 @@ import {
   error,
   parseWorldEdit,
   parseWorldSave,
+  validate,
+  VoxelAssemblySchema,
   type Diagnostic,
   type Result,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
 import {
+  checkAssemblyTypes,
+  sortedPartTypes,
   sortedPropCategories,
   type AssetEntry,
   type LocomotionRule,
@@ -103,6 +107,10 @@ export function describeContent({ state }: Simulation): WorldContent {
         ]),
     ),
     propCategories: sortedPropCategories(registries).map(({ id, name }) => ({ id, name })),
+    partTypes: sortedPartTypes(registries).map(({ id, role }) => ({
+      id,
+      ...(role === undefined ? {} : { role }),
+    })),
   };
 }
 
@@ -250,6 +258,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "spawn":
       case "despawn":
       case "check_limits":
+      case "check_assembly":
       case "save":
       case "restore":
       case "catch_up":
@@ -318,6 +327,18 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           if (rule) locomotion[id] = rule;
         }
         send({ type: "limits", ...requestId, limits: checked.value, locomotion });
+        return;
+      }
+      case "check_assembly": {
+        // Checked and dropped: the worker never keeps the cubes (ADR 0022 §20).
+        const assembly = validate(VoxelAssemblySchema, command.assembly, "assembly");
+        send({
+          type: "assembly_checked",
+          ...requestId,
+          diagnostics: assembly.ok
+            ? checkAssemblyTypes(sim.state.registries, assembly.value, "assembly")
+            : assembly.diagnostics,
+        });
         return;
       }
       case "despawn": {

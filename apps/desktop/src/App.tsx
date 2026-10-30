@@ -204,6 +204,7 @@ export function App() {
           spawn: (speciesId, options) => client.spawn(speciesId, options).then(savedAfter),
           despawn: (creatureId) => client.despawn(creatureId).then(savedAfter),
           creatures: () => latest?.creatures ?? [],
+          checkAssembly: client.checkAssembly,
         },
         { onChange: pushLibrary },
       );

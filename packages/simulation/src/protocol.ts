@@ -2,6 +2,7 @@ import type {
   AppliedWorldEdit,
   BodyShape,
   Diagnostic,
+  PartRole,
   RegionPosition,
   SizeClass,
   Vec3,
@@ -24,7 +25,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -71,6 +72,13 @@ export type RequestCommand =
       sizeClass: SizeClass;
       capabilities: Record<string, number>;
     }
+  /**
+   * What is wrong with a voxel assembly being released (ADR 0022, M19 decisions: fits are checked
+   * at release, structure on load): its structure, then its part and socket types against the
+   * registered ones (`checkAssemblyTypes`). Answered by `assembly_checked`. `assembly` is
+   * untrusted. The worker only checks it: it never keeps or simulates cubes (ADR 0022 §20).
+   */
+  | { type: "check_assembly"; requestId?: string; assembly: unknown }
   /**
    * Saves the world (ADR 0019), answered by `saved`. Applied between ticks, after the commands
    * sent before it (so a save sent after a spawn holds the new creature), and answered while
@@ -185,6 +193,12 @@ export interface PropSummary {
   category?: string;
 }
 
+/** A registered voxel part type, and its role if it has one (ADR 0022 §10). */
+export interface PartTypeSummary {
+  id: string;
+  role?: PartRole;
+}
+
 /** A registered prop category: one tab of the prop editor's drawer (ADR 0021, PR 7). */
 export interface PropCategorySummary {
   id: string;
@@ -207,6 +221,11 @@ export interface WorldContent {
   props: Record<string, PropSummary>;
   /** Every registered prop category, in the drawer's tab order (`sortedPropCategories`). */
   propCategories: PropCategorySummary[];
+  /**
+   * Every registered voxel part type, by ID, with its role, so the main thread can find a voxel
+   * creature's tail part (ADR 0022, M19 decisions) without the registries.
+   */
+  partTypes: PartTypeSummary[];
 }
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */
@@ -376,6 +395,11 @@ export type SimulationMessage =
    * asked capabilities move a creature, so the Studio's preview needn't repeat it (issue #136).
    */
   | ({ type: "limits"; requestId?: string } & CheckedLimits)
+  /**
+   * The answer to `check_assembly`: what is wrong with the assembly, structure first; empty when
+   * nothing is. Warnings (e.g. flush faces) don't keep it out.
+   */
+  | { type: "assembly_checked"; requestId?: string; diagnostics: Diagnostic[] }
   | { type: "spawned"; requestId?: string; creatureId: string }
   | { type: "despawned"; requestId?: string; creatureId: string }
   /**

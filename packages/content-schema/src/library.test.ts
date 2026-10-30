@@ -221,6 +221,23 @@ describe("parseLibraryEntry, voxel bodies", () => {
     expect(result.value.species.body.locomotion.land.gait).toBe("hop");
   });
 
+  it("parses to an entry without the drawn-only settings, which parses again unchanged", () => {
+    const first = parseLibraryEntry(voxelEntry());
+    if (!first.ok) throw new Error(messages(first).join("\n"));
+    expect(first.value.species.body).toEqual({ locomotion: { land: { gait: "hop" } } });
+    const again = parseLibraryEntry(JSON.parse(JSON.stringify(first.value)));
+    expect(messages(again)).toEqual([]);
+    expect(again.ok && again.value).toEqual(first.value);
+  });
+
+  it("keeps a drawn species' thickness and anchors", () => {
+    const drawn = parseLibraryEntry(validEntry());
+    expect(drawn.ok && drawn.value.species.body).toMatchObject({
+      thickness: 0.3,
+      anchors: { centerOfGravity: { x: 128, y: 140 } },
+    });
+  });
+
   it("names the assembly as a voxel species' appearance", () => {
     expect(libraryAppearance("user:abc", "voxel")).toBe("user:abc/assembly.json");
     expect(libraryAppearance("user:abc", "drawn")).toBe("user:abc/appearance.png");
