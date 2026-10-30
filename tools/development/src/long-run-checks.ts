@@ -240,14 +240,6 @@ export class LongRunChecks {
     this.#awakeSinceMeal.clear();
   }
 
-  /**
-   * When the meal check holds a creature again, e.g. after a world edit gave it food in reach once
-   * more: the time it spent awake with no food in reach no longer counts towards a gap.
-   */
-  mealsResumed(creatureId: string) {
-    this.#awakeSinceMeal.delete(creatureId);
-  }
-
   /** After each tick, with every creature alive. */
   tick(tick: number, dayPhase: DayPhase, creatures: Iterable<CreatureTick>) {
     const { meals } = this.options;
@@ -268,11 +260,13 @@ export class LongRunChecks {
         stats.nightTicks++;
         if (c.asleep) stats.asleepAtNightTicks++;
       }
-      // Only time awake counts towards a gap between meals: a night's sleep is no gap.
-      if (c.asleep) continue;
+      // Only time awake counts towards a gap between meals: a night's sleep is no gap. Nor does
+      // time the meal check doesn't hold the creature, e.g. while a world edit leaves it no food in
+      // reach: its clock stops, and runs on from there if food comes back in reach.
+      if (c.asleep || c.checkMeals === false) continue;
       const awake = (this.#awakeSinceMeal.get(c.id) ?? 0) + 1;
       this.#awakeSinceMeal.set(c.id, awake);
-      if (meals && c.checkMeals !== false && awake > mealTicks) {
+      if (meals && awake > mealTicks) {
         this.violation(`${c.id}: no meal for ${meals.hours ?? 3} h awake`);
         // Once per gap, not every tick after.
         this.#awakeSinceMeal.set(c.id, 0);

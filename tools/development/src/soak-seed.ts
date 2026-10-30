@@ -92,12 +92,10 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
   // Every mossling finds the bridge; the amphibian may cross by the banks instead.
   const mosslings = of(MOSSLING);
   const { cycles } = config.saveRestore;
-  const failedPaths = (counts.path_failed ?? 0) - report.edits.lostGoals;
   const problems = [
     ...report.violations,
     ...(counts.creature_stuck ? [`${counts.creature_stuck} creature_stuck events`] : []),
-    // Less the walks an edit took the goal of (`EditReport.lostGoals`).
-    ...(failedPaths ? [`${failedPaths} path_failed events`] : []),
+    ...(counts.path_failed ? [`${counts.path_failed} path_failed events`] : []),
     ...(mosslings.every((id) => structureUsers.has(id))
       ? []
       : ["not every mossling crossed the bridge"]),

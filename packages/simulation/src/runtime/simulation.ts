@@ -500,7 +500,8 @@ export class Simulation {
    * `creature_relocated`. References to removed placements are pruned as a restore prunes them,
    * and failed attempts to reach a placement the edit moved or scaled are forgotten, since they
    * were about where it stood before; other back-offs are kept. Every action that carries on
-   * plans its route again (`ActionProvider.replan`) and is interrupted if it has none.
+   * plans its route again (`ActionProvider.replan`) and is interrupted if it has none, without a
+   * `path_failed`: a goal the edit covered or cut off is no navigation fault.
    *
    * Never throws: it runs after the new world is swapped in, so every pack-supplied hook it calls
    * (`target`, `checkState`, `interrupted`, `replan`, `forgetPlacements`) is guarded, and one
@@ -561,7 +562,17 @@ export class Simulation {
       if (action && replan) {
         let replanned: boolean;
         try {
-          replanned = replan(action.state, this.#actionContext(creature, profile, action.id));
+          // An edit that covers or cuts off a walk's goal is no navigation fault: no `path_failed`,
+          // the walk is interrupted (`world_edited`).
+          const context = this.#actionContext(
+            creature,
+            profile,
+            action.id,
+            undefined,
+            false,
+            false,
+          );
+          replanned = replan(action.state, context);
         } catch {
           replanned = false;
         }
@@ -1456,7 +1467,9 @@ export class Simulation {
 
   /**
    * `activity` records whether the action walked this tick, for the watchdog and cues.
-   * `catchingUp`: the action is started by catch-up after a gap.
+   * `catchingUp`: the action is started by catch-up after a gap. `reportFailedPaths`: whether
+   * `planRoute` emits `path_failed` when it finds no route; not for the replan after a world edit,
+   * whose failures are the edit's doing and end the action through `interrupted` instead.
    */
   #actionContext(
     creature: CreatureState,
@@ -1464,6 +1477,7 @@ export class Simulation {
     actionId: string,
     activity?: { walked: boolean },
     catchingUp = false,
+    reportFailedPaths = true,
   ): ActionContext {
     const { tick } = this;
     let rng: Rng | undefined;
@@ -1487,7 +1501,7 @@ export class Simulation {
       traits: profile.traits,
       planRoute: (destination) => {
         const result = this.#pathfinder(creature).findRoute(creature.position, destination);
-        if (!result.ok) {
+        if (!result.ok && reportFailedPaths) {
           this.#emit({
             type: "path_failed",
             tick: this.tick,

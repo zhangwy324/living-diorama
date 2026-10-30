@@ -117,7 +117,7 @@ export function randomEdits(seed: number, ticks: number, options: RandomEditOpti
   let next = 0;
   return (step, simulation) => {
     const requests: EditRequest[] = [];
-    for (; next < steps.length && steps[next] === step; next++) {
+    for (; next < steps.length && (steps[next] ?? Infinity) <= step; next++) {
       requests.push(
         rng.chance(undoChance) ? { undo: true } : { edit: randomEdit(rng, simulation) },
       );
@@ -264,12 +264,6 @@ export interface EditReport {
   /** Creatures moved off a covered cell. */
   relocated: number;
   /**
-   * `path_failed` events of the step right after an edit for a goal that was walkable before it:
-   * a walk the edit covered or cut off, which replanning at once (ADR 0021 §6) found no route for.
-   * The run counts them in `eventCounts` too; they are the edit's doing, not a navigation fault.
-   */
-  lostGoals: number;
-  /**
    * Times an edit left a creature the meal check held with no food in reach (its only food
    * removed, or the creature cut off from all food), so the check stopped holding it.
    */
@@ -286,7 +280,6 @@ export function emptyEditReport(): EditReport {
     undos: 0,
     rejected: {},
     relocated: 0,
-    lostGoals: 0,
     foodCutOff: 0,
     warnings: {},
     applyMs: [],
@@ -305,7 +298,6 @@ export function addEditReports(a: EditReport, b: EditReport): EditReport {
     undos: a.undos + b.undos,
     rejected: add(a.rejected, b.rejected),
     relocated: a.relocated + b.relocated,
-    lostGoals: a.lostGoals + b.lostGoals,
     foodCutOff: a.foodCutOff + b.foodCutOff,
     warnings: add(a.warnings, b.warnings),
     applyMs: [...a.applyMs, ...b.applyMs],
@@ -324,7 +316,7 @@ export function describeEdits(report: EditReport): string {
   return (
     `${report.applied} edits applied (${report.undos} undos), ` +
     `${rejected} rejected${rejected ? ` (${codes(report.rejected)})` : ""}, ` +
-    `${report.relocated} creatures relocated, ${report.lostGoals} walks lost their goal, ` +
+    `${report.relocated} creatures relocated, ` +
     `${report.foodCutOff} times a creature was cut off from food, ` +
     `${warned} warnings${warned ? ` (${codes(report.warnings)})` : ""}, ` +
     `applyEdit ${describeTimes(report.applyMs)}`

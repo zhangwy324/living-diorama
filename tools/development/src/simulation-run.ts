@@ -24,7 +24,6 @@ import {
   type CreatureState,
   type DecisionTrace,
   type RestoreReport,
-  type Navigation,
   type SimulationEvent,
 } from "@living-diorama/simulation";
 import { emptyEditReport, type EditReport, type EditRequest, type EditSource } from "./edit-cycles";
@@ -368,8 +367,8 @@ export function runWithInvariants(options: RunOptions): RunReport {
   /**
    * After an edit, decides afresh whether the meal check holds each creature it has seen: an edit
    * may take away the only food it could reach, or cut it off from all food, which the edit's
-   * `disconnected_region` warning tells the editor. Its time without food in reach doesn't count
-   * if food comes back. `EditReport.foodCutOff` counts the creatures that lose the check.
+   * `disconnected_region` warning tells the editor. Its clock between meals stops meanwhile
+   * (`LongRunChecks.tick`). `EditReport.foodCutOff` counts the creatures that lose the check.
    */
   const refreshMealCheck = () => {
     if (!options.meals?.creatures) return;
@@ -378,18 +377,14 @@ export function runWithInvariants(options: RunOptions): RunReport {
       if (!creature) continue;
       const checkMeals = options.meals.creatures(creature, simulation);
       if (entry.checkMeals && !checkMeals) report.edits.foodCutOff++;
-      if (!entry.checkMeals && checkMeals) checks.mealsResumed(id);
       entry.checkMeals = checkMeals;
     }
   };
 
   /** Inverses of the edits applied and not undone, the last on top. */
   const undoStack: WorldEdit[] = [];
-  /**
-   * Each species' navigation from before the first edit since the last step, to tell the routes
-   * an edit took away (`EditReport.lostGoals`) from other failed paths.
-   */
-  let navigationsBeforeEdit: Map<string, Navigation | undefined> | undefined;
+  /** Edit requests held back a step (see the loop). */
+  let deferred: EditRequest[] = [];
   /**
    * Applies one edit request between steps, to the unbroken twin too while one runs, which must
    * answer the same; then checks every creature's position at once.
@@ -407,9 +402,6 @@ export function runWithInvariants(options: RunOptions): RunReport {
       options.onEdit?.({ step, request, result, ms: 0 });
       return;
     }
-    navigationsBeforeEdit ??= new Map(
-      [...simulation.state.creatures.values()].map((c) => [c.speciesId, navigationOf(c.speciesId)]),
-    );
     const started = performance.now();
     const result = simulation.applyEdit(edit);
     const ms = performance.now() - started;
@@ -436,7 +428,13 @@ export function runWithInvariants(options: RunOptions): RunReport {
   };
 
   for (let t = 0; t < options.ticks; t++) {
-    for (const request of options.edits?.(t, simulation) ?? []) applyEditRequest(t, request);
+    deferred.push(...(options.edits?.(t, simulation) ?? []));
+    // Not before the step after a restore with catch-up, which `catchUpProblems` checks as catch-up
+    // left it; they apply before the step after.
+    if (!caughtUp) {
+      for (const request of deferred) applyEditRequest(t, request);
+      deferred = [];
+    }
     const minutes = minutesAt(simulation.tick);
     simulation.setTimeOfDay(minutes);
     // Where each creature stood before the tick, to check that a bank jump starts where one of
@@ -481,19 +479,6 @@ export function runWithInvariants(options: RunOptions): RunReport {
         violation(problem);
       }
       caughtUp = undefined;
-    }
-    if (navigationsBeforeEdit) {
-      // An edit replans every walk at once (ADR 0021 §6); one whose goal the edit covered or cut
-      // off fails, with `path_failed`, and the walk is interrupted. That is the edit's doing.
-      for (const event of events) {
-        if (event.type !== "path_failed" || event.reason === "start_not_walkable") continue;
-        const speciesId = simulation.state.creatures.get(event.creatureId)?.speciesId ?? "";
-        const { regionId, x, z } = event.to;
-        if (navigationsBeforeEdit.get(speciesId)?.masks.get(regionId)?.isWalkableAt(x, z)) {
-          report.edits.lostGoals++;
-        }
-      }
-      navigationsBeforeEdit = undefined;
     }
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;
@@ -588,7 +573,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
         continue;
       }
       report.saveRestore.restores++;
-      if (report.edits.applied > 0) report.saveRestore.editedRestores++;
+      if (save.world.definition) report.saveRestore.editedRestores++;
       // The edited world and the counter, as they were saved.
       const lost = firstDifference(
         [simulation.state.model.definition, simulation.state.nextPropId],

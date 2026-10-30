@@ -14,6 +14,7 @@ import { fixtureRoundTree } from "./fixtures/far-shelter";
 import { carp, newt, otter, pondWorld, registerHollowCreatures, registerPond } from "./index";
 import {
   LIVING_BEHAVIOR_CHECKS,
+  loadContent,
   runWithInvariants,
   type EditLog,
   type RunOptions,
@@ -78,8 +79,7 @@ function runWithEdits(
 function expectClean(report: ReturnType<typeof runWithInvariants>) {
   expect(report.violations).toEqual([]);
   expect(report.eventCounts.creature_stuck ?? 0).toBe(0);
-  // Less walks an edit took the goal of (`EditReport.lostGoals`).
-  expect((report.eventCounts.path_failed ?? 0) - report.edits.lostGoals).toBe(0);
+  expect(report.eventCounts.path_failed ?? 0).toBe(0);
 }
 
 describe("a prop dropped on a creature", () => {
@@ -384,5 +384,133 @@ describe("edit scripts", () => {
     expect(() => parseEditScript([{ tick: -1, undo: true }])).toThrow(/\[0\]\.tick/);
     expect(() => parseEditScript([{ tick: 1, edit: { ops: [] } }])).toThrow(/\[0\]\.edit/);
     expect(() => parseEditScript([{ tick: 1, undo: true, extra: 1 }])).toThrow(/unknown keys/);
+  });
+});
+
+describe("the edit history of a run", () => {
+  it("keeps an undo that is refused, so a later undo tries it again", () => {
+    const add = edit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 12, z: 3 }, id: "p" }],
+    });
+    const remove = edit({ ops: [{ op: "prop.remove", id: "p" }] });
+    const addAgain = edit({
+      ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 14, z: 3 }, id: "p" }],
+    });
+    const logs: EditLog[] = [];
+    // Behind the history's back, the rock goes before the first undo and comes back before the
+    // second.
+    const source = (step: number, simulation: Simulation): EditRequest[] => {
+      if (step === 1) return [{ edit: add }];
+      const outside = step === 2 ? remove : step === 3 ? addAgain : undefined;
+      if (!outside) return [];
+      expect(simulation.applyEdit(outside).ok).toBe(true);
+      return [{ undo: true }];
+    };
+    const report = runWithInvariants({
+      ...hollow,
+      speciesId: MOSSLING,
+      seed: 1,
+      creatures: 1,
+      tickRateHz: HZ,
+      ticks: 10,
+      edits: source,
+      onEdit: (log) => logs.push(log),
+    });
+    expect(report.violations).toEqual([]);
+    const outcomes = logs.map((l) => (l.result.ok ? "applied" : l.result.diagnostics[0]?.code));
+    expect(outcomes).toEqual(["applied", "unknown_placement", "applied"]);
+    // Both undos tried the add's inverse.
+    expect(logs[1]?.edit).toEqual(logs[2]?.edit);
+    expect(logs[2]?.edit?.ops).toEqual([{ op: "prop.remove", id: "p" }]);
+    expect(report.edits).toMatchObject({
+      applied: 2,
+      undos: 1,
+      rejected: { unknown_placement: 1 },
+    });
+  });
+});
+
+describe("the meal check after edits", () => {
+  const food = () => {
+    const content = loadContent(registerBuiltInContent);
+    if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
+    const world = content.value.worlds.get(hollow.worldId)!;
+    const registries = content.value;
+    return world.props
+      .filter((p) => Object.hasOwn(registries.props.get(p.prop)?.affordances ?? {}, "core:food"))
+      .map((p) => p.id);
+  };
+  const run = (removed: readonly string[]) =>
+    runWithEdits(
+      {
+        ...hollow,
+        speciesId: MOSSLING,
+        seed: 2,
+        creatures: 2,
+        ticks: minutes(6 * 60),
+        ...LIVING_BEHAVIOR_CHECKS,
+      },
+      [
+        (_simulation, step) =>
+          step === 10
+            ? edit({ ops: removed.map((id) => ({ op: "prop.remove" as const, id })) })
+            : undefined,
+      ],
+    );
+
+  it("still holds creatures that can reach other food", slow, () => {
+    const { report, logs } = run(food().slice(0, 1));
+    expect(logs[0]?.result.ok).toBe(true);
+    expect(report.edits.foodCutOff).toBe(0);
+    expectClean(report);
+    // They went on eating, and were held to it.
+    for (const c of Object.values(report.creatures)) expect(c.meals).toBeGreaterThan(0);
+  });
+
+  it("lets go of creatures only when no food is left in reach", slow, () => {
+    const { report, logs } = run(food());
+    expect(logs[0]?.result.ok).toBe(true);
+    expect(report.edits.foodCutOff).toBe(2);
+    expectClean(report);
+    for (const c of Object.values(report.creatures)) expect(c.meals).toBe(0);
+  });
+});
+
+describe("blocking the bridge", () => {
+  it("leaves every creature where it may be, with no failed paths or stuck creatures", slow, () => {
+    // Rocks over the bridge's west end (its portal runs from z = 0.3 to 1.7 at x = -5).
+    const rocks = edit({
+      ops: [0.4, 1, 1.6].map((z) => ({
+        op: "prop.add" as const,
+        prop: "hollow:rock",
+        position: { x: -5.6, z },
+        scale: 1.5,
+      })),
+    });
+    const { report, logs, events } = runWithEdits(
+      {
+        ...hollow,
+        speciesId: MOSSLING,
+        seed: 1,
+        creatures: 3,
+        ticks: minutes(3 * 60),
+        ...LIVING_BEHAVIOR_CHECKS,
+      },
+      [(_simulation, step) => (step === 600 ? rocks : undefined)],
+    );
+    const result = logs[0]?.result;
+    if (!result?.ok) throw new Error(`The edit was refused: ${JSON.stringify(result)}`);
+    // The portal is closed to mosslings: the edit warns that it is unusable.
+    expect(result.warnings.map((w) => w.code)).toContain("portal_unusable");
+    expect(result.warnings.find((w) => w.code === "portal_unusable")?.message).toContain(
+      "bridge-west-end",
+    );
+    expectClean(report);
+    // Nobody crosses the bridge after it.
+    const edited = events.findIndex((e) => e.type === "world_edited");
+    const crossings = events
+      .slice(edited)
+      .filter((e) => e.type === "entered_region" && e.connectionId === "bridge-west-end");
+    expect(crossings).toEqual([]);
   });
 });
