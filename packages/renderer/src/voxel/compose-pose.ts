@@ -48,18 +48,13 @@ export function composePose(
       continue;
     }
     bone.multiplyMatrices(turnMatrix, joint);
-    bone.multiply(squashAbout(part.centre, part.up, s, squashMatrix));
+    bone.multiply(squashAlong(part.up, s, squashMatrix));
     bone.multiply(shape);
   }
 }
 
-/** A scale by `s` along the unit `axis` about `centre`: I + (s − 1) · a · aᵀ, keeping `centre`. */
-function squashAbout(
-  centre: THREE.Vector3,
-  axis: THREE.Vector3,
-  s: number,
-  out: THREE.Matrix4,
-): THREE.Matrix4 {
+/** A scale by `s` along the unit `axis` about the joint's origin, the attach point: I + (s − 1) · a · aᵀ. */
+function squashAlong(axis: THREE.Vector3, s: number, out: THREE.Matrix4): THREE.Matrix4 {
   const k = s - 1;
   const { x: a, y: b, z: c } = axis;
   const m00 = 1 + k * a * a;
@@ -68,23 +63,5 @@ function squashAbout(
   const m11 = 1 + k * b * b;
   const m12 = k * b * c;
   const m22 = 1 + k * c * c;
-  const { x, y, z } = centre;
-  return out.set(
-    m00,
-    m01,
-    m02,
-    x - (m00 * x + m01 * y + m02 * z),
-    m01,
-    m11,
-    m12,
-    y - (m01 * x + m11 * y + m12 * z),
-    m02,
-    m12,
-    m22,
-    z - (m02 * x + m12 * y + m22 * z),
-    0,
-    0,
-    0,
-    1,
-  );
+  return out.set(m00, m01, m02, 0, m01, m11, m12, 0, m02, m12, m22, 0, 0, 0, 0, 1);
 }

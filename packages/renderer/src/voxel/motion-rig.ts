@@ -1,3 +1,4 @@
+import { VOXEL_UNIT } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import type { VoxelBody } from "./body";
 
@@ -17,8 +18,11 @@ export type MotionName = (typeof MOTION_NAMES)[number];
 /** Gives a part instance's motion by its index in the assembly, or undefined for none. */
 export type MotionLookup = (partIndex: number) => MotionName | undefined;
 
-/** Which side of the body's middle plane a part hangs on: left (−Z), middle, right (+Z). */
-export type RigSide = -1 | 0 | 1;
+/**
+ * Which side of the body's middle plane a part hangs on: left (−Z) or right (+Z). A part on the
+ * plane counts as right when it is drawn reflected (the mirrored half of a pair), else as left.
+ */
+export type RigSide = -1 | 1;
 
 /** A part that swings with the gait (motion `swing`): a leg or an arm. */
 export interface RigLeg {
@@ -45,8 +49,6 @@ export interface RigPart {
   origin: THREE.Vector3;
   /** How far its farthest cube corner lies from its attach point, in metres. */
   length: number;
-  /** The middle of its cubes' bounds in its joint's frame, which a squash keeps in place. */
-  centre: THREE.Vector3;
   /** The body's vertical in its joint's frame: the axis a squash (blink) shortens. */
   up: THREE.Vector3;
   /** Set for a `swing` part. */
@@ -77,8 +79,11 @@ export const STRIDE_PER_LEG = 1.5;
 export const STRIDE_RANGE = { min: 0.06, max: 0.6 } as const;
 /** No motion turns a part further than this from its rest, in radians (35°). */
 export const MAX_SWING = (35 * Math.PI) / 180;
-/** A part whose lowest cube is within this many metres of the ground is grounded. */
-const GROUNDED_WITHIN = 0.01;
+/**
+ * A part whose lowest cube is within this many metres of the ground contact (y = 0, ADR 0022 §21)
+ * is grounded: half the finest cube, more than any part's shrink (`instanceInset`) lifts it.
+ */
+const GROUNDED_WITHIN = VOXEL_UNIT;
 /** A point this close to the middle plane, in metres, is on it. */
 const MIDDLE_PLANE = 1e-6;
 
@@ -101,11 +106,6 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
   const count = body.joints.length;
   const lengths = new Array<number>(count).fill(0);
   const lowest = new Array<number>(count).fill(Infinity);
-  const min = Array.from({ length: count }, () => new THREE.Vector3(Infinity, Infinity, Infinity));
-  const max = Array.from(
-    { length: count },
-    () => new THREE.Vector3(-Infinity, -Infinity, -Infinity),
-  );
   // Every cube corner on a visible face is a vertex, and the farthest corner of a part, or its
   // lowest, is always on its surface.
   const positions = body.geometry.getAttribute("position");
@@ -118,8 +118,6 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
     vertex.fromBufferAttribute(positions, v);
     point.copy(vertex).applyMatrix4(shape);
     lengths[i] = Math.max(lengths[i] ?? 0, point.length());
-    min[i]?.min(point);
-    max[i]?.max(point);
     lowest[i] = Math.min(lowest[i] ?? Infinity, vertex.applyMatrix4(bone).y);
   }
 
@@ -127,15 +125,12 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
     const parent = body.parents[i] ?? -1;
     const motion = parent < 0 ? undefined : motionOf(i);
     const e = joint.elements;
-    const lo = min[i] ?? new THREE.Vector3();
-    const hi = max[i] ?? new THREE.Vector3();
     return {
       parent,
       motion: isMotion(motion) ? motion : undefined,
       mirrored: body.mirrored[i] ?? false,
       origin: new THREE.Vector3().setFromMatrixPosition(joint),
       length: lengths[i] ?? 0,
-      centre: Number.isFinite(lo.x) ? lo.clone().add(hi).multiplyScalar(0.5) : new THREE.Vector3(),
       // The joint's rotation R is proper, so Rᵀ · (0, 1, 0) is its second row.
       up: new THREE.Vector3(e[1], e[5], e[9]).normalize(),
       leg: undefined,
@@ -144,7 +139,8 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
 
   const legs = parts.flatMap((part, i) => (part.motion === "swing" ? [i] : []));
   const centre = body.measure.centerOfGravity;
-  const sideOf = (z: number): RigSide => (z > MIDDLE_PLANE ? 1 : z < -MIDDLE_PLANE ? -1 : 0);
+  const sideOf = (part: RigPart): RigSide =>
+    part.origin.z > MIDDLE_PLANE ? 1 : part.origin.z < -MIDDLE_PLANE || !part.mirrored ? -1 : 1;
   // Front to back, then top to bottom, then in the body's order, so ties stay stable.
   const at = (i: number) => parts[i]?.origin ?? new THREE.Vector3();
   legs.sort((a, b) => at(b).x - at(a).x || at(b).y - at(a).y || a - b);
@@ -166,7 +162,7 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
   for (const i of [...grounded, ...legs.filter((i) => !isGrounded(i))]) {
     const part = parts[i];
     if (!part) continue;
-    const side = sideOf(part.origin.z);
+    const side = sideOf(part);
     const lead = leading.get(side);
     let offset: number;
     if (!isGrounded(i) && lead !== undefined) offset = (lead + 0.5) % 1;

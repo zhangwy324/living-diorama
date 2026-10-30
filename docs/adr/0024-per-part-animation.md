@@ -81,7 +81,48 @@ Built in #243. Motion names are a closed enum, `PART_MOTIONS` / `PartMotion` in 
 
 ### PR 2: Motion module
 
-_Not built yet._
+In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compose-pose.ts`, tested in `part-motion.test.ts`. Not wired in yet (PR 3).
+
+- **Pipeline (§16).** `buildMotionRig(body, motionOf)` builds the rig once per species. `motionOf` gives a part's motion by its instance index. `writeMotion(rig, input, pose)` fills a `MotionPose` allocated once per creature (`createMotionPose`): per part a quaternion (`rotations`, four numbers per part) and a vertical `squash`. A later IK pass goes between the two steps and may override or blend `pose.rotations` per chain. Chains are the `RigPart.parent` links and the pivots are `RigPart.origin`. `composePose(rig, pose, bones)` writes the bone matrices and leaves each part's turn from rest in `pose.turns`. The frame path allocates nothing.
+- **Composition order (§10).**
+  - A part's turn is `D_i = D_parent · T(o_i) · R_i · T(−o_i)`, where `o_i` is its attach point in the rest body frame and `R_i` is its motion's rotation. The root's parent turn is the identity, and parents are composed first.
+  - Its bone is `D_i · joint_i · shape_i`, which is `D_i · rest bone_i`. While blinking it is `D_i · joint_i · S_i · shape_i`. `S_i` scales along the body's vertical, expressed in the joint's frame, about the attach point (§2).
+  - Children inherit `D` alone, never `S`.
+  - Axes: +Z swings a part forward, +Y turns its top to the left, +X tilts its top towards +Z.
+  - A part drawn reflected (`VoxelBody.mirrored`, the parity down the tree) takes `[x, y, z, w]` → `[−x, −y, z, w]`.
+- **Limbs (§4, §11, §12).**
+  - All `swing` parts join the gait.
+  - Side comes from the sign of the attach point's Z. A point within 1e-6 m of the middle plane counts as right when the part is drawn reflected, else as left. Front or back comes from X against the centre of gravity.
+  - A limb is grounded when its lowest rest cube is within `VOXEL_UNIT` (half the finest cube, more than any shrink lifts it) of the ground contact, y = 0.
+  - Grounded limbs are taken front to back, then top to bottom, then by index. They alternate per side, and the right side starts half a cycle later. This gives: two legs alternate, four trot in diagonal pairs, six walk in tripods, and odd counts alternate in X order.
+  - A limb off the ground swings against the frontmost grounded limb on its side, so with the opposite leg. A side with no grounded limb falls back to X order.
+- **Stride and amplitude (§6, §12).**
+  - The stride, in metres per full cycle (two footfalls of a trot), is `STRIDE_PER_LEG` (1.5) × the longest grounded limb. It falls back to the longest limb, then to half the body's height. It is clamped to `STRIDE_RANGE` (0.06–0.6 m).
+  - A limb's walk swing is `asin(¼ stride ÷ its length)`, capped at `MAX_SWING` (35°). The longest leg swings about 22°, and shorter limbs swing further, so every foot sweeps a quarter stride.
+  - The walk profile's cycle is metres per step, so PR 3 passes it `stride / 2`.
+- **Motions.** Gait motion is weighted by `ease(speed / FULL_MOTION_SPEED)`, so limbs are still at rest. Cue weights are eased as `bodyMotion` eases them. The start values are named constants.
+  - `swing`:
+    - Walk: a sine at the limb's offset.
+    - Swim: a slow paddle, 0.35 rad, one stroke per two strides.
+    - Hop: all limbs together, timed by `locomotion.ts`'s `hopProgress`. They reach out 0.3 rad at landing and take-off and tuck 0.5 rad mid-air.
+    - Bank leap: replaces the gait and tucks 0.55 rad.
+  - `wag`:
+    - A flick, twice side to side, about every 7 s.
+    - A 0.25 rad wag with the walk or swim.
+    - Curled 0.45 rad about Y asleep.
+  - `bob`:
+    - A 0.06 rad nod on each footfall.
+    - A 0.35 rad dip with each peck, using `cues.ts`'s `eatingPeck`, the same bob as `bodyMotion`.
+    - A 0.3 rad droop asleep.
+  - `flop`:
+    - A 0.3 rad twitch outward about every 5.5 s.
+    - A bounce with the walk and a trail in a hop.
+    - Dropped back 0.5 rad and out 0.25 rad asleep.
+  - `blink`: about every 4 s for 0.16 s, squashed to 0.15. Shut asleep.
+  - `paddle` (fins): scull only in water, 0.35 rad over 1.6 s, at 40% at rest.
+- **Purity (§1, §14).** Idle events come from a hash of the period's index and the creature's phase, with a stream per motion, at a jittered point within the first 60% of each period. Nothing reads a clock or a random number. A motion that is unknown or absent leaves the part at identity, and so does the root, which the whole-body profiles move.
+- **Motion names.** `MotionName` is a local union in `motion-rig.ts` mirroring the content-schema enum until PR 1 lands. PR 3 swaps it for `PartMotion`.
+- **Cost (§15).** Headless under Node, `pnpm tsx packages/renderer/src/voxel/part-motion.timing.ts` gives about 22–25 µs per frame (median) for 20 creatures of 15 bones. That covers motion and composing, on the reference machine. PR 3 measures the in-app cost.
 
 ### PR 3: World wiring
 

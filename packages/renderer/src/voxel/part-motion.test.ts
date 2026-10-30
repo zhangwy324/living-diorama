@@ -253,6 +253,28 @@ describe("motion rig", () => {
     expect(Math.abs(swingOf(pose, index("arm-l")))).toBeGreaterThan(0.1);
   });
 
+  it("puts a leg on the middle plane on a side by its parity, and alternates odd counts in X order", () => {
+    // Three legs: a front pair and one unpaired leg at the back, on the middle plane.
+    const input = animal({ legsAt: [6] });
+    const torso = input.parts["torso"]!;
+    torso.sockets = [
+      ...(torso.sockets ?? []),
+      { id: "leg-back", type: "test:hip", position: { x: 2, y: 1, z: 3 } },
+    ];
+    input.instances.push({
+      id: "leg-back",
+      part: "front-leg",
+      parent: { instance: "torso", socket: "leg-back" },
+    });
+    const { rig, index } = build(input);
+    const back = rig.parts[index("leg-back")]!.leg!;
+    expect(rig.parts[index("leg-back")]!.origin.z).toBeCloseTo(0, 9);
+    expect(back.side).toBe(-1);
+    expect(back.grounded).toBe(true);
+    expect(back.offset).toBe(rig.parts[index("leg-0-r")]!.leg!.offset);
+    expect(back.offset).not.toBe(rig.parts[index("leg-0-l")]!.leg!.offset);
+  });
+
   it("alternates six legs in X order, the sides opposite: two tripods", () => {
     const { rig, index } = build(animal({ legsAt: [10, 6, 2], length: 12 }));
     const offset = (id: string) => rig.parts[index(id)]!.leg!.offset;
@@ -490,20 +512,15 @@ describe("pose composer", () => {
     const expected = turn.clone().multiply(body.bones[head]!);
     bones[head]!.elements.forEach((v, k) => expect(v).toBeCloseTo(expected.elements[k]!, 12));
     expect(pose.turns[eye]!.elements).toEqual(turn.elements);
-    // The squash keeps the eye's middle where the head's turn puts it.
-    const middle = (points: THREE.Vector3[]) =>
-      points.reduce((sum, p) => sum.add(p), new THREE.Vector3()).divideScalar(points.length);
-    const posed = middle(vertices(body, eye, bones[eye]!));
-    const carried = middle(vertices(body, eye, body.bones[eye]!)).applyMatrix4(turn);
-    expect(posed.distanceTo(carried)).toBeLessThan(1e-9);
-    // And it is shorter along the body's vertical.
-    const span = (points: THREE.Vector3[], axis: THREE.Vector3) => {
-      const d = points.map((p) => p.dot(axis));
-      return Math.max(...d) - Math.min(...d);
-    };
-    const up = new THREE.Vector3(0, 1, 0).transformDirection(turn);
-    expect(span(vertices(body, eye, bones[eye]!), up)).toBeLessThan(
-      span(vertices(body, eye, body.bones[eye]!), new THREE.Vector3(0, 1, 0)),
+    // The squash shortens the eye along the body's vertical about its attach point, and the
+    // head's turn then carries it.
+    const s = pose.squash[eye]!;
+    const o = rig.parts[eye]!.origin;
+    const posed = vertices(body, eye, bones[eye]!);
+    const squashed = vertices(body, eye, body.bones[eye]!).map((p) =>
+      p.setY(o.y + s * (p.y - o.y)).applyMatrix4(turn),
     );
+    expect(posed.length).toBe(squashed.length);
+    posed.forEach((p, k) => expect(p.distanceTo(squashed[k]!)).toBeLessThan(1e-9));
   });
 });
