@@ -7,7 +7,7 @@ import {
   type WorldDefinition,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
-import { profileForSpecies, type NavProfile } from "../navigation/profile";
+import { profileForSpecies, profileLabel, type NavProfile } from "../navigation/profile";
 import {
   buildNavigation,
   distanceToPortal,
@@ -153,7 +153,7 @@ function navigate(
   { err, warn, regionPath, connectionPath }: Reporter,
 ): { navigation: Navigation; limits: Diagnostic[] } {
   const nav = buildNavigation(model, profile);
-  const label = `size class ${nav.profile.sizeClass}`;
+  const label = profileLabel(nav.profile);
   const limits: Diagnostic[] = [];
   const limit = (code: string, message: string, path: DiagnosticPath) =>
     limits.push(warn(code, message, path));
