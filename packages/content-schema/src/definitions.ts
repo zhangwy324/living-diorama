@@ -130,6 +130,12 @@ export type PaletteDefinition = z.output<typeof PaletteDefinitionSchema>;
 export const PartDefinitionSchema = z
   .strictObject({
     ...header("part"),
+    /**
+     * Whether the Studio starts a new creature from this part (ADR 0023 §10). Meant for a part of
+     * a `root` type; the Studio ignores it on any other. When several parts say so, the first by
+     * ID wins, so the choice never depends on the order packs load in.
+     */
+    starter: z.boolean().optional(),
     part: VoxelPartSchema,
   })
   .superRefine(({ part }, ctx) => {

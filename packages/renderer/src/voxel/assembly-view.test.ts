@@ -204,6 +204,27 @@ describe("the assembly view", () => {
     expect(view.pick(RECT.left + 1, RECT.top + 1)).toBeUndefined();
   });
 
+  it("picks sockets by a larger sphere than the dot it draws", () => {
+    view.setAssembly(parsed());
+    view.setHighlightedSockets([{ instance: "torso", socket: "left" }]);
+    runFrames(1);
+    const [marker] = drawn().markers;
+    const shown = marker!.scale.x;
+    const picked: number[] = [];
+    const intersect = vi
+      .spyOn(THREE.Raycaster.prototype, "intersectObjects")
+      .mockImplementation((objects) => {
+        picked.push(...objects.map((o) => o.scale.x));
+        return [];
+      });
+    view.pick(...MIDDLE);
+    intersect.mockRestore();
+    expect(picked).toHaveLength(1);
+    expect(picked[0]! / shown).toBeCloseTo(0.016 / 0.009);
+    // Drawn at its own size again.
+    expect(marker!.scale.x).toBe(shown);
+  });
+
   it("walks in place while asked to, and stands still after", () => {
     view.setAssembly(parsed());
     view.setTestWalk({ profile: "walk", submersion: 0, speed: 0.6 });

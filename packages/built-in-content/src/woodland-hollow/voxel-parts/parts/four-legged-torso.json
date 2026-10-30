@@ -3,6 +3,7 @@
   "id": "hollow:four-legged-torso",
   "version": "1.0.0",
   "name": "Four-legged torso",
+  "starter": true,
   "part": {
     "type": "hollow:torso",
     "size": {

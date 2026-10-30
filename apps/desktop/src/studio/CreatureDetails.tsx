@@ -22,6 +22,9 @@ const percent = (share: number) => Math.round(share * 100);
 /** "40% of the height": what the slider shows and says. */
 export const thicknessLabel = (thickness: number) => `${percent(thickness)}% of the height`;
 
+/** The size readout for a voxel creature larger than every size class. */
+export const TOO_BIG_SIZE = "Too big";
+
 const sizeLabel = (size: SizeClass) => size.charAt(0).toUpperCase() + size.slice(1);
 
 export function CreatureDetails(props: {
@@ -30,15 +33,23 @@ export function CreatureDetails(props: {
   onName(name: string): void;
   /** Replaces the name, typed or suggested, with a new suggestion. */
   onSuggestName(): void;
-  sizeClass: SizeClass;
+  /** The size shown; none for a voxel creature too large for every size class. */
+  sizeClass: SizeClass | undefined;
   /** The size suggested from the drawing (issue #49), marked in the picker; none while empty. */
   suggestedSize?: SizeClass | undefined;
-  onSizeClass(size: SizeClass): void;
-  /** Depth as a share of the height. */
-  thickness: number;
-  onThickness(thickness: number): void;
+  /**
+   * Picks a size. Left out, the size measured from a voxel creature's cubes (ADR 0022 §3) shows
+   * as text, with `measured` beside it.
+   */
+  onSizeClass?(size: SizeClass): void;
+  /** What the size is measured from, e.g. "32 cm tall", for a voxel creature. */
+  measured?: string | undefined;
+  /** Depth as a share of the height; only a drawn body has one (ADR 0023 §2). */
+  thickness?: number;
+  onThickness?(thickness: number): void;
   hints: readonly string[];
 }) {
+  const { onSizeClass, thickness, onThickness } = props;
   return (
     <div className="creature-details">
       <label className="field">
@@ -80,42 +91,55 @@ export function CreatureDetails(props: {
           </button>
         </span>
       </label>
-      <fieldset className="field sizes">
-        <legend>Size</legend>
-        {SIZES.map((size) => (
-          <label key={size} title={`${Math.round(SIZE_CLASSES[size].height * 100)} cm tall`}>
+      {onSizeClass ? (
+        <fieldset className="field sizes">
+          <legend>Size</legend>
+          {SIZES.map((size) => (
+            <label key={size} title={`${Math.round(SIZE_CLASSES[size].height * 100)} cm tall`}>
+              <input
+                type="radio"
+                name="size"
+                value={size}
+                checked={props.sizeClass === size}
+                onChange={() => onSizeClass(size)}
+                // A click on the size already shown fires no change, but taking the suggestion
+                // is a pick too, so later drawing doesn't move it (issue #49).
+                onClick={() => onSizeClass(size)}
+              />
+              <span>{sizeLabel(size)}</span>
+              {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
+              <small className="suggested">{props.suggestedSize === size ? "suggested" : ""}</small>
+            </label>
+          ))}
+        </fieldset>
+      ) : (
+        // Measured, not picked (ADR 0022 §3): plain text, nothing to press.
+        <p className="field size-readout" aria-live="polite">
+          <span>Size</span>
+          <span>
+            <strong>{props.sizeClass ? sizeLabel(props.sizeClass) : TOO_BIG_SIZE}</strong>
+            {props.measured && <span className="measured"> · {props.measured}</span>}
+          </span>
+        </p>
+      )}
+      {thickness !== undefined && onThickness && (
+        <label className="field thickness">
+          <span>Thickness</span>
+          <span className="thickness-row">
             <input
-              type="radio"
-              name="size"
-              value={size}
-              checked={props.sizeClass === size}
-              onChange={() => props.onSizeClass(size)}
-              // A click on the size already shown fires no change, but taking the suggestion
-              // is a pick too, so later drawing doesn't move it (issue #49).
-              onClick={() => props.onSizeClass(size)}
+              type="range"
+              min={percent(BODY_THICKNESS.min)}
+              max={percent(BODY_THICKNESS.max)}
+              step={THICKNESS_STEP_PERCENT}
+              value={percent(thickness)}
+              aria-label="Thickness"
+              aria-valuetext={thicknessLabel(thickness)}
+              onChange={(event) => onThickness(Number(event.target.value) / 100)}
             />
-            <span>{sizeLabel(size)}</span>
-            {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
-            <small className="suggested">{props.suggestedSize === size ? "suggested" : ""}</small>
-          </label>
-        ))}
-      </fieldset>
-      <label className="field thickness">
-        <span>Thickness</span>
-        <span className="thickness-row">
-          <input
-            type="range"
-            min={percent(BODY_THICKNESS.min)}
-            max={percent(BODY_THICKNESS.max)}
-            step={THICKNESS_STEP_PERCENT}
-            value={percent(props.thickness)}
-            aria-label="Thickness"
-            aria-valuetext={thicknessLabel(props.thickness)}
-            onChange={(event) => props.onThickness(Number(event.target.value) / 100)}
-          />
-          <output>{percent(props.thickness)}%</output>
-        </span>
-      </label>
+            <output>{percent(thickness)}%</output>
+          </span>
+        </label>
+      )}
       {props.hints.length > 0 && (
         <ul className="hints" aria-label="Hints" aria-live="polite">
           {props.hints.map((hint) => (

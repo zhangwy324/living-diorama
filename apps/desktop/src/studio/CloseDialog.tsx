@@ -6,7 +6,7 @@ export interface CloseDialogProps {
 }
 
 /**
- * Asked when the Studio is closed with a drawing that wasn't released (ADR 0015 §10). Saving
+ * Asked when the Studio is closed with a creature that wasn't released (ADR 0015 §10). Saving
  * drafts comes later, so its button is shown but disabled. Escape cancels.
  */
 export function CloseDialog({ onDiscard, onCancel }: CloseDialogProps) {
@@ -28,7 +28,7 @@ export function CloseDialog({ onDiscard, onCancel }: CloseDialogProps) {
       }}
     >
       <h2 id="close-dialog-title">Close the Studio?</h2>
-      <p>Your drawing hasn't been released. Closing now loses it.</p>
+      <p>Your creature hasn't been released. Closing now loses it.</p>
       <div className="close-dialog-buttons">
         <button type="button" onClick={onDiscard}>
           Discard

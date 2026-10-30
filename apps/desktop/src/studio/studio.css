@@ -15,8 +15,19 @@ body,
 
 .studio {
   display: flex;
-  flex-direction: column;
   height: 100%;
+}
+
+/* Build mode and Draw mode, one shown at a time (ADR 0023 §1). */
+.studio-mode {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.studio-mode[hidden] {
+  display: none;
 }
 
 .toolbar {
@@ -26,6 +37,13 @@ body,
   align-items: center;
   padding: 8px 12px;
   background: #263026;
+}
+
+.tool-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
 }
 
 .tool-group {
@@ -672,7 +690,7 @@ body,
 }
 
 /* The confirm step (ADR 0020 §12): the body plan, revealed beside a locked drawing. */
-.toolbar.locked {
+.tool-groups.locked {
   opacity: 0.4;
 }
 .body-plan {
@@ -906,4 +924,172 @@ body,
     linear-gradient(#e0cda6, #e0cda6) 50% 30% / 18px 6px no-repeat,
     linear-gradient(#b5814f, #b5814f) 50% 60% / 18px 16px no-repeat,
     #ece8dc;
+}
+
+/* The Build/Draw switch and the toolbar's buttons with words. */
+.mode-switch {
+  padding-right: 12px;
+  border-right: 1px solid rgb(255 255 255 / 14%);
+}
+
+.toolbar .mode-switch button,
+.toolbar button.text-button {
+  display: flex;
+  gap: 6px;
+  width: auto;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+}
+
+/* Build mode (ADR 0023): the parts tray, the assembly view and the creature's panel. */
+.parts-tray {
+  flex: none;
+  width: 164px;
+  padding: 8px 10px 16px;
+  overflow-y: auto;
+  background: #263026;
+}
+
+.parts-tray.locked {
+  opacity: 0.4;
+}
+
+.parts-tray h3 {
+  margin: 10px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(238 243 232 / 75%);
+}
+
+.tray-parts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.tray-part {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  color: inherit;
+  background: rgb(255 255 255 / 6%);
+  cursor: pointer;
+}
+
+.tray-part:hover {
+  background: rgb(255 255 255 / 14%);
+}
+
+.tray-part[aria-pressed="true"] {
+  background: rgb(110 160 90 / 80%);
+}
+
+.tray-part:focus-visible {
+  outline: 2px solid #eef3e8;
+  outline-offset: 1px;
+}
+
+.tray-part img,
+.tray-placeholder {
+  display: block;
+  width: 52px;
+  height: 52px;
+}
+
+.tray-placeholder {
+  border-radius: 4px;
+  background: rgb(255 255 255 / 6%);
+}
+
+.tray-name {
+  text-align: center;
+}
+
+.stage-area {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+}
+
+.assembly-stage {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #cfe3ea;
+  touch-action: none;
+}
+
+.assembly-stage.placing {
+  cursor: crosshair;
+}
+
+.stage-area.releasing .assembly-stage {
+  pointer-events: none;
+}
+
+.stage-hint,
+.stage-notice,
+.stage-message {
+  position: absolute;
+  left: 50%;
+  max-width: calc(100% - 64px);
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.stage-hint {
+  bottom: 28px;
+  background: rgb(38 48 38 / 78%);
+}
+
+.stage-message {
+  top: 45%;
+  color: #263026;
+}
+
+/* A refused edit, briefly: it fades as it goes (NOTICE_MS). */
+.stage-notice {
+  top: 28px;
+  background: rgb(160 60 50 / 90%);
+  animation: fade-out 3s ease-in forwards;
+}
+
+.release-hint.blocking {
+  background: rgb(200 67 58 / 30%);
+}
+
+/* A voxel creature's size is measured, not picked (ADR 0022 §3): text, not buttons. */
+.size-readout {
+  margin: 0;
+}
+
+.size-readout strong {
+  font-size: 15px;
+}
+
+.size-readout .measured {
+  color: rgb(238 243 232 / 75%);
+}
+
+.side-panel.build-panel {
+  width: 200px;
+  padding-top: 12px;
 }

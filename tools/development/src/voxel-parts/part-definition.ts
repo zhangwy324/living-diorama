@@ -24,6 +24,8 @@ export const PartSidecarSchema = z.strictObject({
   id: ContentIdSchema,
   version: SemverSchema,
   name: z.string().min(1),
+  /** Whether the Studio starts a new creature from this part (ADR 0023 §10). */
+  starter: z.boolean().optional(),
   /** The part type, e.g. `hollow:leg`. */
   type: ContentIdSchema,
   /** Edge of one cube in metres, one of `VOXEL_STEPS`. */
@@ -47,13 +49,14 @@ export function partDefinition(
 ): Result<PartDefinition> {
   const side = validate(PartSidecarSchema, sidecar, sidecarSource);
   if (!side.ok) return side;
-  const { id, version, name, type, step, attach, sockets } = side.value;
+  const { id, version, name, starter, type, step, attach, sockets } = side.value;
   return parsePartDefinition(
     {
       schemaVersion: SCHEMA_VERSIONS.part,
       id,
       version,
       name,
+      ...(starter ? { starter: true } : {}),
       part: {
         type,
         size: cubes.size,
