@@ -1,6 +1,11 @@
-import { decodeVoxels, formatDiagnostic } from "@living-diorama/content-schema";
+import {
+  decodeVoxels,
+  formatDiagnostic,
+  parsePartDefinition,
+  type PartDefinition,
+} from "@living-diorama/content-schema";
 import { describe, expect, it } from "vitest";
-import { formatPartDefinition, partDefinition, type PartDefinition } from "./part-definition";
+import { formatPartDefinition, partDefinition } from "./part-definition";
 import type { VoxCubes } from "./vox-parser";
 
 // A 2 × 2 × 2 head with its corner cube missing, of two colours.
@@ -103,6 +108,7 @@ describe("formatPartDefinition", () => {
     const definition = (result as { value: PartDefinition }).value;
     const text = formatPartDefinition(definition);
     expect(JSON.parse(text)).toEqual(definition);
+    expect(parsePartDefinition(JSON.parse(text))).toEqual({ ok: true, value: definition });
     expect(text).toContain(`"voxels": ${JSON.stringify(definition.part.voxels)},\n`);
     expect(text.endsWith("}\n")).toBe(true);
   });

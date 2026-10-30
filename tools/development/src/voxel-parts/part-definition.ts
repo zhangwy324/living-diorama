@@ -1,27 +1,23 @@
 import {
   ContentIdSchema,
   encodeVoxels,
+  parsePartDefinition,
+  SCHEMA_VERSIONS,
   SemverSchema,
   validate,
   VOXEL_STEPS,
-  VoxelPartSchema,
   VoxelPointSchema,
   VoxelSocketSchema,
+  type PartDefinition,
   type Result,
 } from "@living-diorama/content-schema";
 import { z } from "zod";
 import type { VoxCubes } from "./vox-parser";
 
-// A starter part's definition (ADR 0022, M20 decisions "A `parts` registry",
-// "A sidecar per `.vox`" and "The importer is a development tool"): the cubes of its `.vox` file merged with its
-// sidecar JSON, which holds what a `.vox` can't: the part's ID, version and name, its part type,
-// its cube step, its attach point and its sockets.
-//
-// The definition's shape is defined here until content-schema has the part definition schema of
-// M20 PR 1; then this module uses that schema and its parser instead.
-
-/** The part definition's schema version (local until content-schema defines it). */
-export const PART_DEFINITION_SCHEMA_VERSION = 1;
+// A starter part's definition (ADR 0022, M20 decisions "A sidecar per `.vox`" and "The importer
+// is a development tool"): the cubes of its `.vox` file merged with its sidecar JSON, which holds
+// what a `.vox` can't: the part's ID, version and name, its part type, its cube step, its attach
+// point and its sockets. The result is checked as content-schema's part definition.
 
 /** The sidecar JSON beside a `.vox` file. Points are in the part's cubes, as ADR 0022 §16 axes. */
 export const PartSidecarSchema = z.strictObject({
@@ -39,16 +35,6 @@ export const PartSidecarSchema = z.strictObject({
 });
 export type PartSidecar = z.output<typeof PartSidecarSchema>;
 
-/** A registered voxel part with the part inline: `{ schemaVersion, id, version, name, part }`. */
-export const PartDefinitionSchema = z.strictObject({
-  schemaVersion: z.literal(PART_DEFINITION_SCHEMA_VERSION),
-  id: ContentIdSchema,
-  version: SemverSchema,
-  name: z.string().min(1),
-  part: VoxelPartSchema,
-});
-export type PartDefinition = z.output<typeof PartDefinitionSchema>;
-
 /**
  * Merges a part's cubes with its sidecar and checks the result as a part definition. Sidecar
  * errors name `sidecarSource`; errors in the merged part (an attach point outside the cubes, a
@@ -62,10 +48,9 @@ export function partDefinition(
   const side = validate(PartSidecarSchema, sidecar, sidecarSource);
   if (!side.ok) return side;
   const { id, version, name, type, step, attach, sockets } = side.value;
-  return validate(
-    PartDefinitionSchema,
+  return parsePartDefinition(
     {
-      schemaVersion: PART_DEFINITION_SCHEMA_VERSION,
+      schemaVersion: SCHEMA_VERSIONS.part,
       id,
       version,
       name,
