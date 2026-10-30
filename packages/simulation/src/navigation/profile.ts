@@ -18,6 +18,15 @@ export interface NavProfile {
   maxSlopeByKind: ReadonlyMap<RegionKind, number>;
 }
 
+/**
+ * How messages name a profile: its size class and the region kinds it moves in, so profiles that
+ * share a size class but move differently (land and amphibious, say) are told apart (#194).
+ */
+export function profileLabel(profile: NavProfile): string {
+  const kinds = [...profile.maxSlopeByKind.keys()].sort();
+  return `size class ${profile.sizeClass}${kinds.length > 0 ? ` (${kinds.join(", ")})` : ""}`;
+}
+
 /** Derives the profile from the species' capabilities and their locomotion rules (ADR 0005 §3). */
 export function profileForSpecies(species: SpeciesDefinition, registries: Registries): NavProfile {
   return navProfile(species.sizeClass, Object.keys(species.capabilities), registries);

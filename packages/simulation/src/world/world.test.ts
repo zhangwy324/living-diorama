@@ -4,6 +4,7 @@ import {
   buildRegionMask,
   buildWorldModel,
   CellState,
+  checkWorld,
   coreSurfaces,
   insideAt,
   pointInPolygon,
@@ -244,5 +245,23 @@ describe("walkability", () => {
     expect(profile.maxSlopeByKind.get("land")).toBe(Infinity);
     expect(profile.maxSlopeByKind.get("cave")).toBeCloseTo((35 * Math.PI) / 180);
     expect(profile.maxSlopeByKind.has("water")).toBe(false);
+  });
+
+  it("names the profile in each limit, so profiles of one size class are told apart", () => {
+    const { registries, model } = setup();
+    registries.species.register({
+      ...registries.species.get("test:walker")!,
+      id: "test:wader",
+      capabilities: { "core:land": 1, "core:swim": 1 },
+    });
+    const { limits } = checkWorld(model.definition, registries);
+    const splits = [...limits.values()]
+      .flat()
+      .filter((d) => d.code === "disconnected_region")
+      .map((d) => d.message);
+    expect(splits).toEqual([
+      expect.stringContaining("for size class medium (cave, land) "),
+      expect.stringContaining("for size class medium (cave, land, water) "),
+    ]);
   });
 });

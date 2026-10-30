@@ -13,7 +13,7 @@ import {
   type WorldEditOutcome,
 } from "@living-diorama/content-schema";
 import type { Pathfinder } from "../navigation/pathfinder";
-import { profileForSpecies } from "../navigation/profile";
+import { profileForSpecies, profileLabel } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
 import type { RegionMask } from "../navigation/walkability";
 import { applyWorldEdit, assignPlacementIds } from "../world/edit";
@@ -101,11 +101,14 @@ export function planWorldEdit(state: WorldState, edit: WorldEdit): Result<Planne
   }
 
   const blockedExits = blockedWaterExits(model, state.navigations, derived.value);
+  const labels = new Map(state.navigations.map((n) => [n.profile.key, profileLabel(n.profile)]));
   const warnings = [
     ...blockedExits.map(({ exit, profiles }) =>
       warning(
         "water_exit_blocked",
-        `The edit blocks ${describeExit(exit)} out of the water for ${profiles.join(", ")}`,
+        `The edit blocks ${describeExit(exit)} out of the water for ${[
+          ...new Set(profiles.map((key) => labels.get(key) ?? key)),
+        ].join(", ")}`,
         [],
         "world edit",
       ),
@@ -230,14 +233,17 @@ function describeExit(exit: WaterExit): string {
 /**
  * Where a profile's creatures newly don't fit after the edit (ADR 0013), e.g. a region that now
  * splits: the rebuilt world's limits that the world before had no limit of the same code at the
- * same place for. Messages count cells, so they are not compared.
+ * same place for. Messages count cells, so they are not compared. Profiles that differ only in
+ * capabilities that don't move them get the same message; it is given once.
  */
 function newLimits(state: WorldState, after: DerivedWorld): Diagnostic[] {
   const found: Diagnostic[] = [];
+  const given = new Set<string>();
   for (const [key, limits] of after.limits) {
     const old = new Set((state.limits.get(key) ?? []).map((d) => `${d.code}|${d.path.join(".")}`));
     for (const d of limits) {
-      if (old.has(`${d.code}|${d.path.join(".")}`)) continue;
+      if (old.has(`${d.code}|${d.path.join(".")}`) || given.has(d.message)) continue;
+      given.add(d.message);
       found.push(warning(d.code, d.message, [], "world edit"));
     }
   }
