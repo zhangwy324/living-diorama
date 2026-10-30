@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-30
-- **Context:** Roadmap §3.2, M21: the first user story of voxel creatures, end to end. The player opens the Studio, picks parts from the built-in library, assembles a new creature and releases it into the world. M19 and M20 ([ADR 0022](0022-voxel-creatures.md)) built everything below the editor: the part and assembly format, the validator and measurement (`measureAssembly`, `checkAssemblyFit`, `assemblyWarnings`, `placeInstances`), the seeded assembler (`assembleParts`), the assembled body (`buildVoxelBody`), part and assembly thumbnails (`VoxelThumbnails`), the starter parts with their part and socket types in `ready` (protocol version 19), and the library's `saveVoxel`. Until now voxel creatures are made only from the development console. The Studio ([ADR 0015](0015-creation-studio.md), with ADR 0020 §12's confirm step) draws creatures only. M21 ships as PRs: **0** this ADR; **1** pure assembly edit operations and undo history in `content-schema`; **2** the renderer's assembly view and asynchronous voxel thumbnails; **3** the plumbing: part-type names in `ready` and the Studio channel requests; **4** content: tighter part-type fits, a `root` role and suggested colours; **5a** the Studio's Build mode; **5b** recolouring, steps, rotation, Randomize and drag-to-socket; **6** voxel thumbnails in My creatures, the manual checklist entry and the developer docs. The decisions below were agreed with the owner on 2026-10-30.
+- **Context:** Roadmap §3.2, M21: user story 1 (roadmap §3.2), end to end. M19 and M20 ([ADR 0022](0022-voxel-creatures.md)) built everything below the editor: the part and assembly format, the validator and measurement (`measureAssembly`, `checkAssemblyFit`, `assemblyWarnings`, `placeInstances`), the seeded assembler (`assembleParts`), the assembled body (`buildVoxelBody`), part and assembly thumbnails (`VoxelThumbnails`), the starter parts with their part and socket types in `ready` (protocol version 19), and the library's `saveVoxel`. Until now voxel creatures are made only from the development console. The Studio ([ADR 0015](0015-creation-studio.md), with ADR 0020 §12's confirm step) draws creatures only. M21 ships as PRs: **0** this ADR; **1** pure assembly edit operations and undo history in `content-schema`; **2** the renderer's assembly view and asynchronous voxel thumbnails; **3** the plumbing: part-type names in `ready` and the Studio channel requests (protocol version 20); **4** content: tighter part-type fits, a `root` role and suggested colours end to end (protocol version 21, after PR 3); **5a** the Studio's Build mode; **5b** recolouring, steps, rotation, Randomize and drag-to-socket; **6** voxel thumbnails in My creatures, the manual checklist entry and the developer docs. The decisions below were agreed with the owner on 2026-10-30.
 
 This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build mode beside drawing), and refines ADR 0022 §4, §9 and its M19 and M20 decisions on recolouring, mirroring, thumbnails and the `root` role. See "Departures".
 
@@ -12,7 +12,7 @@ This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build 
 
 1. **One Studio, two modes.** A Build/Draw switch in the one Studio window chooses between assembling a voxel creature and drawing one. Draw mode is today's Studio, unchanged; it is removed at M23, when drawn bodies go (ADR 0022 §22). There is no second window.
 
-2. **The confirm step is shared.** Build mode ends with Next, which shows `BodyPlanPanel` (ADR 0020 §12) without the drawn-only settings: no thickness and no anchors, since a voxel body's anchors are derived (ADR 0022 §20). The flow is Next → body plan → Release, as for a drawing.
+2. **The confirm step is shared.** Build mode ends with Next, which shows the confirm step (ADR 0020 §12) without the drawn-only settings: no thickness (in `CreatureDetails`) and no anchors (in `BodyPlanPanel`), since a voxel body's anchors are derived (ADR 0022 §20). The flow is Next → body plan → Release, as for a drawing.
 
 3. **Edit a copy, never in place.** A released creature can be loaded into Build mode with "Edit a copy". Its saved assembly becomes the starting point, and a release makes a new species. A released species is never changed.
 
@@ -34,7 +34,7 @@ This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build 
 
 ### Colour
 
-11. **Suggested colours are pack content.** A pack registers its suggested colours, and `ready` lists them (a protocol bump), so themes and worlds can supply their own later (ADR 0022 §4). If that proves expensive in PR 4, the colours fall back to an app constant, and PR 4's "As built" says so.
+11. **Suggested colours are pack content.** A pack registers its suggested colours, and `ready` lists them, so themes and worlds can supply their own later (ADR 0022 §4). PR 4 owns them end to end: the schema, the built-in content, `extension-api`, and listing them in `ready` and the `parts` request (protocol version 21). It lands after PR 3. If that proves expensive in PR 4, the colours fall back to an app constant, and PR 4's "As built" says so.
 
 12. **Recolouring changes one colour slot** of the selected instance's part copy, and of its mirror pair's. When the copy is shared beyond that pair (four legs of one copy, say), the edited instances get a copy of their own first (copy on write).
 
@@ -48,11 +48,11 @@ This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build 
 
 16. **Undo and redo keep immutable snapshots.** Each step is a whole assembly, sharing every unchanged part and instance with the step before (structural sharing), rather than a command with its inverse. Assemblies are small trees of at most 32 parts, so a snapshot costs little, and undo can't drift from what an edit did. This departs from the research plan's "command-based" undo (roadmap §3.2, M21 plan). Draw mode keeps its pixel patches (ADR 0017).
 
-17. **Release through the Studio channel.** A `releaseVoxel` request carries `{ releaseId, assembly, name, plan }`. It reuses ADR 0015 §12's retry map, so a timed-out release sent again with the same `releaseId` never saves twice, and saves with `SpeciesLibrary.saveVoxel` (ADR 0022, M19 PR 4b). An assembly whose serialized JSON is over 8 MB, the library entry limit, is refused before anything else (#208).
+17. **Release through the Studio channel.** A `releaseVoxel` request carries `{ releaseId, assembly, name, plan }`. It reuses ADR 0015 §12's retry map, so a timed-out release sent again with the same `releaseId` never saves twice; the Studio keeps the `releaseId` while the assembly, name and plan are unchanged, and saves with `SpeciesLibrary.saveVoxel` (ADR 0022, M19 PR 4b). An assembly whose serialized JSON is over 8 MB, the library entry limit, is refused before anything else (#208).
 
 ### Plumbing
 
-18. **Parts reach the Studio by request.** A `parts` channel request returns the registered parts, part types, socket types and suggested colours from the strip's latest `ready`. `PartTypeSummary` gains the type's `name` (protocol version 20), for the tray's headings. Parts registered while the app runs still don't reach the main thread (#226, deferred).
+18. **Parts reach the Studio by request.** A `parts` channel request returns the registered parts, part types, socket types and suggested colours from the strip's latest `ready`. `PartTypeSummary` gains the type's `name`, for the tray's headings. PR 3 owns protocol version 20: the part-type `name` and the Studio channel requests (`parts`, `assembly`, `releaseVoxel`). The suggested colours join the `parts` answer with PR 4 (§11). Parts registered while the app runs still don't reach the main thread (#226, deferred).
 
 19. **Assemblies for My creatures by request.** An `assembly` channel request returns one saved species' assembly on demand, and the Studio draws its thumbnail with `VoxelThumbnails`, replacing the placeholder block (ADR 0022, M19 PR 4b).
 
