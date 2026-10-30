@@ -3,7 +3,14 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildParts, DEFAULT_OUTPUT_DIR, DEFAULT_SOURCE_DIR, readParts, writeParts } from "./build";
+import {
+  buildParts,
+  DEFAULT_OUTPUT_DIR,
+  DEFAULT_SOURCE_DIR,
+  pairSources,
+  readParts,
+  writeParts,
+} from "./build";
 import { writeVox } from "./vox-writer";
 
 const dirs: string[] = [];
@@ -61,15 +68,50 @@ describe("buildParts", () => {
     expect(outputs.size).toBe(0);
     expect(diagnostics.map((d) => `${d.source} ${d.code}`)).toEqual([
       "d.json orphan_sidecar",
-      "b.json duplicate_id",
       "c.vox missing_sidecar",
+      "b.json duplicate_id",
       "e.vox vox_not_vox",
       "f.json invalid_json",
     ]);
   });
 
+  it("reads a sidecar with an upper-case extension and a byte order mark", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "Eye.VOX"), eye);
+    writeFileSync(
+      join(dir, "eye.JSON"),
+      `${String.fromCharCode(0xfeff)}${sidecar("hollow:dot-eye")}`,
+    );
+    const { outputs, diagnostics } = buildParts(dir);
+    expect(diagnostics).toEqual([]);
+    expect([...outputs.keys()]).toEqual(["Eye.json"]);
+  });
+
   it("reads a missing source folder as no parts", () => {
     expect(buildParts(join(tempDir(), "none"))).toEqual({ outputs: new Map(), diagnostics: [] });
+  });
+});
+
+describe("pairSources", () => {
+  // Names that differ only by case can't share a folder on Windows, so this runs on a listing.
+  it("pairs names ignoring case and refuses names that differ only by case", () => {
+    const { sources, diagnostics } = pairSources([
+      "Eye.vox",
+      "eye.vox",
+      "eye.Json",
+      "ear.vox",
+      "ear.json",
+      "EAR.json",
+      "notes.txt",
+    ]);
+    expect(sources).toEqual([
+      { name: "Eye", vox: "Eye.vox", sidecar: "eye.Json" },
+      { name: "ear", vox: "ear.vox", sidecar: "EAR.json" },
+    ]);
+    expect(diagnostics.map((d) => `${d.source} ${d.code}`)).toEqual([
+      "eye.vox duplicate_name",
+      "ear.json duplicate_name",
+    ]);
   });
 });
 

@@ -85,7 +85,7 @@ describe("parseVox", () => {
     rgba({ 10: RED, 20: GREEN, 30: BLUE }),
   ];
 
-  it("maps vox axes to the part's: X = x, Y = z, Z = size.y − 1 − y (E4)", () => {
+  it("maps vox axes to the part's: X = x, Y = z, Z = size.y − 1 − y", () => {
     const cubes = ok(parseVox(vox([...asymmetric, ...scene()])));
     expect(cubes.size).toEqual({ x: 2, y: 4, z: 3 });
     expect(cube(cubes, 1, 0, 2)).toBe(1); // vox (1, 0, 0)
@@ -100,7 +100,7 @@ describe("parseVox", () => {
     expect(cube(cubes, 0, 3, 0)).toBe(2);
   });
 
-  it("compacts the palette to the colours used, in palette order, merging duplicates (E5)", () => {
+  it("compacts the palette to the colours used, in palette order, merging duplicates", () => {
     const cubes = ok(
       parseVox(
         vox([
@@ -146,6 +146,19 @@ describe("parseVox", () => {
       ["vox_malformed", vox([size(1, 1, 1), palette])],
       ["vox_many_models", vox([...one, ...one, palette])],
       ["vox_many_models", vox([...one, palette, transform(0, 1), shape(1, [0, 0])])],
+      ["vox_malformed", vox([...one, palette, transform(0, 1), shape(1, [])])],
+      // A count far past the chunk is refused before anything is allocated for it.
+      ["vox_truncated", vox([size(1, 1, 1), chunk("XYZI", i32(0x7fffffff)), palette])],
+      // A chunk after MAIN's children isn't one of them.
+      [
+        "vox_malformed",
+        new Uint8Array([
+          ...ascii("VOX "),
+          ...i32(150),
+          ...chunk("MAIN", [], [...one.flat(), ...palette]),
+          ...chunk("SIZE", [...i32(1), ...i32(1), ...i32(1)]),
+        ]),
+      ],
       [
         "vox_many_models",
         vox([...one, palette, transform(0, 1), group(1, [2, 4]), shape(3, [0]), shape(5, [0])]),

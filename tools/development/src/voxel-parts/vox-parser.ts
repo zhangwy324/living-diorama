@@ -6,7 +6,8 @@ import {
   type VoxelSize,
 } from "@living-diorama/content-schema";
 
-// Reads a MagicaVoxel `.vox` file into a voxel part's cubes (ADR 0022, M20 decisions E3–E5).
+// Reads a MagicaVoxel `.vox` file into a voxel part's cubes (ADR 0022, M20 decisions "Axes" and
+// "What a `.vox` may hold").
 // Pure over bytes, with no Node or DOM APIs, so it can move to content-schema for player imports
 // (M28).
 //
@@ -103,6 +104,8 @@ interface Chunk {
   id: string;
   /** The content, read on its own so a short chunk can't read into the next one. */
   content: Reader;
+  /** Where its children end; they start at `content.end`. */
+  childrenEnd: number;
 }
 
 /** The chunks between `at` and `end`, each with its content; children are skipped. */
@@ -117,7 +120,11 @@ function chunks(bytes: Uint8Array, at: number, end: number): Chunk[] {
       fail("vox_malformed", `Chunk ${id} has a negative size`);
     const contentEnd = reader.at + contentBytes;
     if (contentEnd + childBytes > end) fail("vox_truncated", `Chunk ${id} runs past its parent`);
-    out.push({ id, content: new Reader(bytes, reader.at, contentEnd) });
+    out.push({
+      id,
+      content: new Reader(bytes, reader.at, contentEnd),
+      childrenEnd: contentEnd + childBytes,
+    });
     reader.at = contentEnd + childBytes;
   }
   return out;
@@ -127,9 +134,9 @@ const hex = (byte: number) => byte.toString(16).padStart(2, "0");
 
 /**
  * Reads a `.vox` file's one model as a part's cubes. Part X is vox x, part Y (up) vox z, and part
- * Z (to the creature's right) runs against vox y: Z = size.y − 1 − y (E4), a proper rotation, so
+ * Z (to the creature's right) runs against vox y: Z = size.y − 1 − y ("Axes"), a proper rotation, so
  * the model isn't mirrored. Colour index 0 is empty; the colours the model uses are listed in the
- * order of their palette indices, with duplicates merged, and the cubes renumbered to them (E5).
+ * order of their palette indices, with duplicates merged, and the cubes renumbered to them.
  * Refuses a file with more than one model, a rotated model, more than `MAX_PART_CUBES` along an
  * axis, or no palette (RGBA chunk). A model's translation is ignored: the part's own corner is its
  * origin. Materials are ignored.
@@ -158,8 +165,8 @@ function read(bytes: Uint8Array): VoxCubes {
   const [main, ...rest] = chunks(bytes, 8, bytes.length);
   if (main?.id !== "MAIN") fail("vox_malformed", "The file's first chunk isn't MAIN");
   if (rest.length > 0) fail("vox_malformed", "There are chunks after MAIN");
-  // MAIN's children follow its (normally empty) content, up to the end of the file.
-  const children = chunks(bytes, main.content.end, bytes.length);
+  // MAIN's children follow its (normally empty) content.
+  const children = chunks(bytes, main.content.end, main.childrenEnd);
 
   const sizes: VoxelSize[] = [];
   const models: Uint8Array[] = [];
@@ -173,6 +180,10 @@ function read(bytes: Uint8Array): VoxCubes {
       case "XYZI": {
         const count = content.int();
         if (count < 0) fail("vox_malformed", "XYZI has a negative voxel count");
+        // Checked before allocating, so a huge count fails here and not as a RangeError.
+        if (count * 4 > content.end - content.at) {
+          fail("vox_truncated", `XYZI lists ${count} voxels but holds fewer`);
+        }
         const voxels = new Uint8Array(count * 4);
         for (let i = 0; i < voxels.length; i++) voxels[i] = content.byte();
         models.push(voxels);
@@ -205,7 +216,8 @@ function read(bytes: Uint8Array): VoxCubes {
         content.int(); // node ID
         content.dict(); // attributes
         const count = content.int();
-        if (count !== 1) fail("vox_many_models", "A shape node holds more than one model");
+        if (count === 0) fail("vox_malformed", "A shape node holds no model");
+        if (count > 1) fail("vox_many_models", "A shape node holds more than one model");
         shapes++;
         break;
       }

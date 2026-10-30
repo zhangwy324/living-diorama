@@ -24,6 +24,59 @@ const filesIn = (dir: string, extension: string): string[] =>
         .sort()
     : [];
 
+/** A `.vox` file and its sidecar's file name. */
+export interface PartSource {
+  /** The output's name without `.json`: the `.vox` file's name without its extension. */
+  name: string;
+  vox: string;
+  sidecar: string;
+}
+
+/**
+ * Pairs each `.vox` in a folder's listing with its sidecar, matching names and extensions
+ * ignoring case, as Windows does, so a folder builds the same on every system. Two files of one
+ * kind whose names differ only by case, a `.vox` with no sidecar and a sidecar with no `.vox` are
+ * errors. Other files are ignored.
+ */
+export function pairSources(files: readonly string[]): {
+  sources: PartSource[];
+  diagnostics: Diagnostic[];
+} {
+  const diagnostics: Diagnostic[] = [];
+  const key = (file: string) => basename(file, extname(file)).toLowerCase();
+  const byName = (extension: string) => {
+    const out = new Map<string, string>();
+    for (const file of files.filter((f) => extname(f).toLowerCase() === extension).sort()) {
+      const other = out.get(key(file));
+      if (other === undefined) out.set(key(file), file);
+      else {
+        diagnostics.push(
+          error("duplicate_name", `Its name differs from ${other}'s only by case`, [], file),
+        );
+      }
+    }
+    return out;
+  };
+  const voxFiles = byName(".vox");
+  const sidecars = byName(".json");
+  for (const [name, file] of sidecars) {
+    if (!voxFiles.has(name)) {
+      diagnostics.push(error("orphan_sidecar", "A sidecar with no .vox file beside it", [], file));
+    }
+  }
+  const sources: PartSource[] = [];
+  for (const [name, vox] of voxFiles) {
+    const sidecar = sidecars.get(name);
+    const base = basename(vox, extname(vox));
+    if (sidecar === undefined) {
+      diagnostics.push(error("missing_sidecar", `No sidecar ${base}.json beside it`, [], vox));
+    } else {
+      sources.push({ name: base, vox, sidecar });
+    }
+  }
+  return { sources, diagnostics };
+}
+
 export interface BuiltParts {
   /** Output file name → its text. Empty when there are errors. */
   outputs: Map<string, string>;
@@ -33,37 +86,25 @@ export interface BuiltParts {
 /** Reads every `.vox` in `sourceDir` with its sidecar. All or nothing: any error, no outputs. */
 export function buildParts(sourceDir: string): BuiltParts {
   const outputs = new Map<string, string>();
-  const diagnostics: Diagnostic[] = [];
-  const voxFiles = filesIn(sourceDir, ".vox");
-  const names = new Set(voxFiles.map((file) => basename(file, extname(file))));
-  for (const file of filesIn(sourceDir, ".json")) {
-    if (!names.has(basename(file, ".json"))) {
-      diagnostics.push(error("orphan_sidecar", "A sidecar with no .vox file beside it", [], file));
-    }
-  }
+  const { sources, diagnostics } = pairSources(existsSync(sourceDir) ? readdirSync(sourceDir) : []);
   const ids = new Map<string, string>();
-  for (const file of voxFiles) {
-    const name = basename(file, extname(file));
-    const sidecarFile = `${name}.json`;
-    const sidecarPath = join(sourceDir, sidecarFile);
-    if (!existsSync(sidecarPath)) {
-      diagnostics.push(error("missing_sidecar", `No sidecar ${sidecarFile} beside it`, [], file));
-      continue;
-    }
-    const cubes = parseVox(new Uint8Array(readFileSync(join(sourceDir, file))), file);
+  for (const { name, vox, sidecar: sidecarFile } of sources) {
+    const cubes = parseVox(new Uint8Array(readFileSync(join(sourceDir, vox))), vox);
     if (!cubes.ok) {
       diagnostics.push(...cubes.diagnostics);
       continue;
     }
     let sidecar: unknown;
     try {
-      sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
+      // Some Windows editors start UTF-8 files with a byte order mark, which JSON.parse refuses.
+      const text = readFileSync(join(sourceDir, sidecarFile), "utf8");
+      sidecar = JSON.parse(text.startsWith(BOM) ? text.slice(1) : text);
     } catch (e) {
       diagnostics.push(error("invalid_json", String(e), [], sidecarFile));
       continue;
     }
     const definition = partDefinition(cubes.value, sidecar, {
-      source: file,
+      source: vox,
       sidecarSource: sidecarFile,
     });
     if (!definition.ok) {
@@ -83,6 +124,8 @@ export function buildParts(sourceDir: string): BuiltParts {
   }
   return { outputs: diagnostics.length > 0 ? new Map() : outputs, diagnostics };
 }
+
+const BOM = String.fromCharCode(0xfeff);
 
 /** The `.json` files in an output folder, name → text. */
 export function readParts(outputDir: string): Map<string, string> {

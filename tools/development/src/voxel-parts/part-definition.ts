@@ -12,7 +12,8 @@ import {
 import { z } from "zod";
 import type { VoxCubes } from "./vox-parser";
 
-// A starter part's definition (M20 decisions E1–E3): the cubes of its `.vox` file merged with its
+// A starter part's definition (ADR 0022, M20 decisions "A `parts` registry",
+// "A sidecar per `.vox`" and "The importer is a development tool"): the cubes of its `.vox` file merged with its
 // sidecar JSON, which holds what a `.vox` can't: the part's ID, version and name, its part type,
 // its cube step, its attach point and its sockets.
 //
