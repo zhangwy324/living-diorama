@@ -97,9 +97,11 @@ export interface DioramaView {
   /**
    * A thumbnail of a prop model, e.g. for a tile of the editor's prop drawer: a PNG data URL of
    * the model with this asset ref (as in `SceneProp`), seen from above in a three-quarter view in
-   * plain daylight on a transparent background, `size` device pixels square (pass the tile's CSS
-   * size × `devicePixelRatio` for a sharp one). Drawn on first request and kept per model and size;
-   * a ref with no model gets the fallback block. Undefined once the view is disposed.
+   * plain daylight on a transparent background, `size` device pixels square (rounded and capped
+   * at `MAX_THUMBNAIL_SIZE`, 1024; pass the tile's CSS size × `devicePixelRatio` for a sharp one).
+   * Drawn on first request and kept per model and size until `dispose`, so the cache grows only
+   * with the refs and sizes asked for; a ref with no model gets the fallback block, drawn once per
+   * size. Undefined once the view is disposed.
    */
   propThumbnail(model: string, size: number): Promise<string | undefined>;
   dispose(): void;

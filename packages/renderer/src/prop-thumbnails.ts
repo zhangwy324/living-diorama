@@ -76,8 +76,12 @@ export function thumbnailPixels(raw: Uint8Array, size: number): Uint8ClampedArra
  * Thumbnails of prop models by asset ref and size, drawn with the view's renderer when first
  * asked for and kept as image URLs, so each model is drawn once per size. The models come from the
  * view's `PropSet`, so a model already loaded for the world is not loaded again. A ref with no
- * model, or whose model failed to load, gets a thumbnail of the fallback block, which is not kept,
- * so a later call draws the model if it has arrived since.
+ * model, or whose model failed to load, gets the fallback block's thumbnail, drawn once per size
+ * and kept like any other. (A model that loads only after `PropSet`'s load timeout keeps the
+ * block's thumbnail.)
+ *
+ * The cache is bounded only by the refs and sizes asked for: one image URL per pair, a few KB
+ * each, until `dispose`. An editor asks for each registered prop type at one or two sizes.
  *
  * GPU resources: each thumbnail's render target is freed as soon as it is read back; the models
  * belong to the `PropSet`. `dispose` forgets the thumbnails, and thumbnails still being drawn
@@ -88,6 +92,8 @@ export class PropThumbnails {
   readonly #model: (ref: string) => Promise<PropModel>;
   readonly #encode: ThumbnailEncoder;
   readonly #cache = new Map<string, Promise<string | undefined>>();
+  /** The fallback block's thumbnail by size, shared by every ref without a model. */
+  readonly #fallbacks = new Map<number, string>();
   #disposed = false;
 
   constructor(
@@ -125,21 +131,32 @@ export class PropThumbnails {
       throw cause;
     }
     if (this.#disposed) return undefined;
-    // The fallback block stands in for now; a later call tries the model again.
-    if (!model.loaded) this.#cache.delete(key);
+    try {
+      if (model.loaded) return this.#picture(model.model, size);
+      let fallback = this.#fallbacks.get(size);
+      if (fallback === undefined) {
+        fallback = this.#picture(model.model, size);
+        this.#fallbacks.set(size, fallback);
+      }
+      return fallback;
+    } catch (cause) {
+      this.#cache.delete(key);
+      throw cause;
+    }
+  }
+
+  /** Draws `model` `size` pixels square and reads it back as an image URL. */
+  #picture(model: THREE.Object3D, size: number): string {
     const target = new THREE.WebGLRenderTarget(size, size, {
       samples: 4,
       // Stored in sRGB, so the picture reads back as an image's bytes without banding.
       colorSpace: THREE.SRGBColorSpace,
     });
     try {
-      drawIcon(this.#renderer, model.model, target);
+      drawIcon(this.#renderer, model, target);
       const raw = new Uint8Array(size * size * 4);
       this.#renderer.readRenderTargetPixels(target, 0, 0, size, size, raw);
       return this.#encode(thumbnailPixels(raw, size), size);
-    } catch (cause) {
-      this.#cache.delete(key);
-      throw cause;
     } finally {
       target.dispose();
     }
@@ -148,5 +165,6 @@ export class PropThumbnails {
   dispose(): void {
     this.#disposed = true;
     this.#cache.clear();
+    this.#fallbacks.clear();
   }
 }

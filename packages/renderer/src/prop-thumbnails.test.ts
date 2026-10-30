@@ -113,11 +113,14 @@ describe("prop thumbnails", () => {
     await expect(thumbnails.thumbnail("test:bush", NaN)).rejects.toThrow(RangeError);
   });
 
-  it("draws the fallback block for a ref with no model, without keeping it", async () => {
+  it("draws the fallback block once per size for every ref with no model", async () => {
     const { renderer, drawn } = fakeRenderer();
     const thumbnails = new PropThumbnails(renderer, models({}), encoder());
     expect(await thumbnails.thumbnail("test:gone", 48)).toBe("png:48:128");
-    await thumbnails.thumbnail("test:gone", 48);
+    expect(await thumbnails.thumbnail("test:gone", 48)).toBe("png:48:128");
+    expect(await thumbnails.thumbnail("test:lost", 48)).toBe("png:48:128");
+    expect(drawn).toHaveLength(1);
+    expect(await thumbnails.thumbnail("test:lost", 96)).toBe("png:96:128");
     expect(drawn).toHaveLength(2);
   });
 
