@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:fan-fin",
+  "version": "1.0.0",
+  "name": "Fan fin",
+  "part": {
+    "type": "hollow:fin",
+    "size": {
+      "x": 3,
+      "y": 5,
+      "z": 1
+    },
+    "step": 0.05,
+    "colors": [
+      "#8bbcab",
+      "#6c9f8f"
+    ],
+    "voxels": [1,2,2,0,1,2,1,1,2,0,2,1,1,2,1,1,1,0,1,2,2,0],
+    "attach": {
+      "x": 3,
+      "y": 3,
+      "z": 0.5
+    },
+    "sockets": []
+  }
+}

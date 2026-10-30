@@ -1,0 +1,70 @@
+{
+  "id": "hollow:wide-head",
+  "version": "1.0.0",
+  "name": "Wide head",
+  "type": "hollow:head",
+  "step": 0.05,
+  "attach": {
+    "x": 0,
+    "y": 2,
+    "z": 4.5
+  },
+  "sockets": [
+    {
+      "id": "left-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 2,
+        "y": 3,
+        "z": 4
+      }
+    },
+    {
+      "id": "right-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 2,
+        "y": 3,
+        "z": 5
+      },
+      "mirrors": "left-ear"
+    },
+    {
+      "id": "left-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 3.5,
+        "y": 3,
+        "z": 2.5
+      }
+    },
+    {
+      "id": "right-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 3.5,
+        "y": 3,
+        "z": 6.5
+      },
+      "mirrors": "left-eye"
+    },
+    {
+      "id": "nose",
+      "type": "hollow:nose-mount",
+      "position": {
+        "x": 3.5,
+        "y": 2.5,
+        "z": 4.5
+      }
+    },
+    {
+      "id": "mouth",
+      "type": "hollow:mouth-mount",
+      "position": {
+        "x": 3.5,
+        "y": 1.5,
+        "z": 4.5
+      }
+    }
+  ]
+}

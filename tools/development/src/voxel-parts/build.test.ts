@@ -127,7 +127,6 @@ describe("writeParts", () => {
 
 describe("the built-in pack's voxel parts", () => {
   // Like world.json and `pnpm worldgen`: the committed definitions must be what the sources give.
-  // With no sources yet both sides are empty.
   it("match their .vox sources (run `pnpm parts` after changing a part)", () => {
     const { outputs, diagnostics } = buildParts(DEFAULT_SOURCE_DIR);
     expect(diagnostics.map(formatDiagnostic)).toEqual([]);

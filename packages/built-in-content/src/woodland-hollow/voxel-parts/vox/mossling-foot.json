@@ -1,0 +1,13 @@
+{
+  "id": "hollow:mossling-foot",
+  "version": "1.0.0",
+  "name": "Mossling foot",
+  "type": "hollow:leg",
+  "step": 0.05,
+  "attach": {
+    "x": 2,
+    "y": 2,
+    "z": 2
+  },
+  "sockets": []
+}

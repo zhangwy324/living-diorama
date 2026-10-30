@@ -1,0 +1,70 @@
+{
+  "id": "hollow:upright-torso",
+  "version": "1.0.0",
+  "name": "Upright torso",
+  "type": "hollow:torso",
+  "step": 0.05,
+  "attach": {
+    "x": 3.5,
+    "y": 0,
+    "z": 3.5
+  },
+  "sockets": [
+    {
+      "id": "left-hip",
+      "type": "hollow:hip",
+      "position": {
+        "x": 3,
+        "y": 1,
+        "z": 2.5
+      }
+    },
+    {
+      "id": "right-hip",
+      "type": "hollow:hip",
+      "position": {
+        "x": 3,
+        "y": 1,
+        "z": 4.5
+      },
+      "mirrors": "left-hip"
+    },
+    {
+      "id": "left-arm",
+      "type": "hollow:shoulder",
+      "position": {
+        "x": 3,
+        "y": 5,
+        "z": 1
+      }
+    },
+    {
+      "id": "right-arm",
+      "type": "hollow:shoulder",
+      "position": {
+        "x": 3,
+        "y": 5,
+        "z": 6
+      },
+      "mirrors": "left-arm"
+    },
+    {
+      "id": "neck",
+      "type": "hollow:neck",
+      "position": {
+        "x": 4,
+        "y": 6,
+        "z": 3.5
+      }
+    },
+    {
+      "id": "tail-base",
+      "type": "hollow:tail-base",
+      "position": {
+        "x": 1,
+        "y": 2,
+        "z": 3.5
+      }
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:fish-torso",
+  "version": "1.0.0",
+  "name": "Fish torso",
+  "part": {
+    "type": "hollow:torso",
+    "size": {
+      "x": 7,
+      "y": 6,
+      "z": 7
+    },
+    "step": 0.05,
+    "colors": [
+      "#5d939a",
+      "#c3d3b8",
+      "#4b7c83"
+    ],
+    "voxels": [8,0,5,2,2,0,5,1,2,0,5,1,2,0,5,3,9,0,5,2,1,0,7,2,21,1,1,0,5,3,2,0,5,2,1,0,7,2,21,1,1,0,5,3,2,0,5,2,1,0,7,2,21,1,1,0,5,3,2,0,5,2,1,0,7,2,21,1,1,0,5,3,2,0,5,2,1,0,7,2,21,1,1,0,5,3,9,0,5,2,2,0,5,1,2,0,5,1,2,0,5,3,8,0],
+    "attach": {
+      "x": 3.5,
+      "y": 0,
+      "z": 3.5
+    },
+    "sockets": [
+      {
+        "id": "left-fin",
+        "type": "hollow:fin-mount",
+        "position": {
+          "x": 4,
+          "y": 3,
+          "z": 1
+        }
+      },
+      {
+        "id": "right-fin",
+        "type": "hollow:fin-mount",
+        "position": {
+          "x": 4,
+          "y": 3,
+          "z": 6
+        },
+        "mirrors": "left-fin"
+      },
+      {
+        "id": "tail-base",
+        "type": "hollow:tail-base",
+        "position": {
+          "x": 1,
+          "y": 3,
+          "z": 3.5
+        }
+      },
+      {
+        "id": "neck",
+        "type": "hollow:neck",
+        "position": {
+          "x": 6,
+          "y": 3,
+          "z": 3.5
+        }
+      }
+    ]
+  }
+}

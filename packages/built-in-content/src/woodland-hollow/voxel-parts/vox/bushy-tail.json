@@ -1,0 +1,13 @@
+{
+  "id": "hollow:bushy-tail",
+  "version": "1.0.0",
+  "name": "Bushy tail",
+  "type": "hollow:tail",
+  "step": 0.05,
+  "attach": {
+    "x": 5,
+    "y": 1,
+    "z": 1.5
+  },
+  "sockets": []
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:paw-arm",
+  "version": "1.0.0",
+  "name": "Paw arm",
+  "part": {
+    "type": "hollow:arm",
+    "size": {
+      "x": 2,
+      "y": 4,
+      "z": 2
+    },
+    "step": 0.05,
+    "colors": [
+      "#977250",
+      "#d9c49c"
+    ],
+    "voxels": [2,2,6,1,6,0,2,1],
+    "attach": {
+      "x": 1,
+      "y": 4,
+      "z": 2
+    },
+    "sockets": []
+  }
+}

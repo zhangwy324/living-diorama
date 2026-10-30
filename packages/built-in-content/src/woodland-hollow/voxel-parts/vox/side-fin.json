@@ -1,0 +1,13 @@
+{
+  "id": "hollow:side-fin",
+  "version": "1.0.0",
+  "name": "Side fin",
+  "type": "hollow:fin",
+  "step": 0.05,
+  "attach": {
+    "x": 3,
+    "y": 1,
+    "z": 2
+  },
+  "sockets": []
+}

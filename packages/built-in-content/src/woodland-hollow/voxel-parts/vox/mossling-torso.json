@@ -1,0 +1,42 @@
+{
+  "id": "hollow:mossling-torso",
+  "version": "1.0.0",
+  "name": "Mossling torso",
+  "type": "hollow:torso",
+  "step": 0.05,
+  "attach": {
+    "x": 5,
+    "y": 0,
+    "z": 4.5
+  },
+  "sockets": [
+    {
+      "id": "left-hip",
+      "type": "hollow:hip",
+      "position": {
+        "x": 6,
+        "y": 1,
+        "z": 3
+      }
+    },
+    {
+      "id": "right-hip",
+      "type": "hollow:hip",
+      "position": {
+        "x": 6,
+        "y": 1,
+        "z": 6
+      },
+      "mirrors": "left-hip"
+    },
+    {
+      "id": "neck",
+      "type": "hollow:neck",
+      "position": {
+        "x": 5,
+        "y": 2,
+        "z": 4.5
+      }
+    }
+  ]
+}

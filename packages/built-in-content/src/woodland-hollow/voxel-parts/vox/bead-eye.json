@@ -1,0 +1,13 @@
+{
+  "id": "hollow:bead-eye",
+  "version": "1.0.0",
+  "name": "Bead eye",
+  "type": "hollow:eye",
+  "step": 0.025,
+  "attach": {
+    "x": 0,
+    "y": 1,
+    "z": 1
+  },
+  "sockets": []
+}

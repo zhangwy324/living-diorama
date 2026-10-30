@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "hollow:round-ear",
+  "version": "1.0.0",
+  "name": "Round ear",
+  "part": {
+    "type": "hollow:ear",
+    "size": {
+      "x": 2,
+      "y": 4,
+      "z": 3
+    },
+    "step": 0.05,
+    "colors": [
+      "#977250",
+      "#d69a8b"
+    ],
+    "voxels": [4,0,4,1,4,0,1,1,1,2,3,1,1,0,1,1,1,0,4,1],
+    "attach": {
+      "x": 0,
+      "y": 1,
+      "z": 3
+    },
+    "sockets": []
+  }
+}

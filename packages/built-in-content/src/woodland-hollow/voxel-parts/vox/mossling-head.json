@@ -1,0 +1,70 @@
+{
+  "id": "hollow:mossling-head",
+  "version": "1.0.0",
+  "name": "Mossling head",
+  "type": "hollow:head",
+  "step": 0.05,
+  "attach": {
+    "x": 5,
+    "y": 0,
+    "z": 4.5
+  },
+  "sockets": [
+    {
+      "id": "left-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 9.5,
+        "y": 4.5,
+        "z": 3
+      }
+    },
+    {
+      "id": "right-eye",
+      "type": "hollow:eye-mount",
+      "position": {
+        "x": 9.5,
+        "y": 4.5,
+        "z": 6
+      },
+      "mirrors": "left-eye"
+    },
+    {
+      "id": "nose",
+      "type": "hollow:nose-mount",
+      "position": {
+        "x": 9.5,
+        "y": 3.5,
+        "z": 4.5
+      }
+    },
+    {
+      "id": "mouth",
+      "type": "hollow:mouth-mount",
+      "position": {
+        "x": 9.5,
+        "y": 2.5,
+        "z": 4.5
+      }
+    },
+    {
+      "id": "left-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 4,
+        "y": 8,
+        "z": 4
+      }
+    },
+    {
+      "id": "right-ear",
+      "type": "hollow:ear-mount",
+      "position": {
+        "x": 4,
+        "y": 8,
+        "z": 5
+      },
+      "mirrors": "left-ear"
+    }
+  ]
+}

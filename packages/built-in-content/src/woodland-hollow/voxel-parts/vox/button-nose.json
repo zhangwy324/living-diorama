@@ -1,0 +1,13 @@
+{
+  "id": "hollow:button-nose",
+  "version": "1.0.0",
+  "name": "Button nose",
+  "type": "hollow:nose",
+  "step": 0.025,
+  "attach": {
+    "x": 0,
+    "y": 1,
+    "z": 2
+  },
+  "sockets": []
+}
