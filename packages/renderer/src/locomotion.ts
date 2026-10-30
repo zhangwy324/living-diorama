@@ -148,15 +148,23 @@ const walk: Profile = (input, w, out) => {
 // nose up then nose down. About the center of gravity.
 const HOP_LENGTH = { base: 0.3, perHeight: 0.6 };
 /** Share of each hop spent on the ground. */
-const HOP_GROUND = 0.3;
+export const HOP_GROUND = 0.3;
 const HOP_HEIGHT = 0.35;
 const HOP_SQUASH = 0.16;
 const HOP_STRETCH = 0.08;
 const HOP_PITCH = 0.12;
 
+/**
+ * How far through its current hop (0–1) a body `height` tall is after `travelled` metres: on the
+ * ground below `HOP_GROUND`, then in the air. Per-part motion tucks the legs to the same hop.
+ */
+export function hopProgress(travelled: number, height: number): number {
+  const hops = travelled / cycle(HOP_LENGTH.base, HOP_LENGTH.perHeight, height);
+  return hops - Math.floor(hops);
+}
+
 const hop: Profile = (input, w, out) => {
-  const hops = input.travelled / cycle(HOP_LENGTH.base, HOP_LENGTH.perHeight, input.height);
-  const u = hops - Math.floor(hops);
+  const u = hopProgress(input.travelled, input.height);
   out.roll = 0;
   out.pivot = "centerOfGravity";
   if (u < HOP_GROUND) {
