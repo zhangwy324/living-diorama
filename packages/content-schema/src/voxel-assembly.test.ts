@@ -12,6 +12,7 @@ import {
   VoxelAssemblySchema,
   VoxelPartSchema,
   type LibraryPart,
+  type PartFitLookup,
   type PartTypeDefinition,
   type VoxelAssembly,
   type VoxelPart,
@@ -132,6 +133,36 @@ const CLAWED_LEG: LibraryPart = {
   }),
 };
 
+/**
+ * A torso with back hips a cube in from its corners: the fat leg is on the grid there, but
+ * flush with the torso's back and sides; the fine leg isn't.
+ */
+const CORNER: LibraryPart = {
+  id: "test:corner-torso",
+  part: box(8, 4, 4, {
+    attach: { x: 4, y: 2, z: 2 },
+    sockets: [
+      { id: "back-left", type: "test:hip", position: { x: 1, y: 1, z: 1 } },
+      {
+        id: "back-right",
+        type: "test:hip",
+        position: { x: 1, y: 1, z: 3 },
+        mirrors: "back-left",
+      },
+    ],
+  }),
+};
+
+/** A tail segment with a tail root of its own: segments would hang from segments forever. */
+const SEGMENT: LibraryPart = {
+  id: "test:segment",
+  part: box(2, 3, 2, {
+    type: "test:tail",
+    attach: { x: 2, y: 1.5, z: 1 },
+    sockets: [{ id: "tail", type: "test:tail-root", position: { x: 1, y: 1.5, z: 1 } }],
+  }),
+};
+
 const LIBRARY = [THIN_LEG, FINE_LEG, FAT_LEG, HEAD, EYE, BIG_EYE, TAIL, WING, CLAWED_LEG];
 
 const partType = (id: string, fits: string[]): PartTypeDefinition => ({
@@ -157,8 +188,14 @@ const lookup = (parts = PART_TYPES) => ({
       : undefined,
 });
 
+/** The registered types as the assembler sees them. */
+const fitLookup = (parts = PART_TYPES): PartFitLookup => ({
+  fitsOf: (id) => parts.get(id)?.fits,
+  isSocketType: (id) => SOCKET_TYPES.has(id),
+});
+
 const assemble = (seed: number, parts = LIBRARY, start: LibraryPart | VoxelAssembly = TORSO) =>
-  assembleParts({ start, parts, lookup: lookup(), seed });
+  assembleParts({ start, parts, lookup: fitLookup(), seed });
 
 const SEEDS = Array.from({ length: 20 }, (_, i) => i * 7919 + 1);
 
@@ -187,13 +224,13 @@ describe("assembleParts", () => {
         "back-right",
         "neck",
         "tail",
-        "neck-left-eye",
-        "neck-right-eye",
+        "left-eye",
+        "right-eye",
       ]);
       const parts = partsById(assembly);
       expect(parts.neck).toBe("head");
       expect(parts.tail).toBe("tail");
-      expect(parts["neck-left-eye"]).toBe("eye");
+      expect(parts["left-eye"]).toBe("eye");
       expect(["legs-thin", "legs-fine"]).toContain(parts["front-left"]);
     }
   });
@@ -222,7 +259,7 @@ describe("assembleParts", () => {
     for (const [left, right] of [
       ["front-left", "front-right"],
       ["back-left", "back-right"],
-      ["neck-left-eye", "neck-right-eye"],
+      ["left-eye", "right-eye"],
     ] as const) {
       expect(byId.get(right)?.part).toBe(byId.get(left)?.part);
       expect(byId.get(left)?.mirrored).toBe(false);
@@ -259,45 +296,19 @@ describe("assembleParts", () => {
   });
 
   it("passes over a part that would make faces flush, unless every part would", () => {
-    // Back hips a cube in from the torso's corners: the fat leg is on the grid there, but flush
-    // with the torso's back and sides; the fine leg isn't.
-    const corner: LibraryPart = {
-      id: "test:corner-torso",
-      part: box(8, 4, 4, {
-        attach: { x: 4, y: 2, z: 2 },
-        sockets: [
-          { id: "back-left", type: "test:hip", position: { x: 1, y: 1, z: 1 } },
-          {
-            id: "back-right",
-            type: "test:hip",
-            position: { x: 1, y: 1, z: 3 },
-            mirrors: "back-left",
-          },
-        ],
-      }),
-    };
     for (const seed of SEEDS) {
-      const assembly = assemble(seed, [FAT_LEG, FINE_LEG], corner);
+      const assembly = assemble(seed, [FAT_LEG, FINE_LEG], CORNER);
       expect(partsById(assembly)["back-left"]).toBe("legs-fine");
       expect(assemblyWarnings(assembly)).toEqual([]);
     }
-    const flush = assemble(SEEDS[0]!, [FAT_LEG], corner);
+    const flush = assemble(SEEDS[0]!, [FAT_LEG], CORNER);
     expectSound(flush);
     expect(partsById(flush)["back-left"]).toBe("legs-fat");
     expect(assemblyWarnings(flush)).not.toEqual([]);
   });
 
   it("stops at the cap on parts", () => {
-    // A tail segment with a tail root of its own: segments would hang from segments forever.
-    const segment: LibraryPart = {
-      id: "test:segment",
-      part: box(2, 3, 2, {
-        type: "test:tail",
-        attach: { x: 2, y: 1.5, z: 1 },
-        sockets: [{ id: "tail", type: "test:tail-root", position: { x: 1, y: 1.5, z: 1 } }],
-      }),
-    };
-    const assembly = assemble(SEEDS[0]!, [THIN_LEG, HEAD, EYE, segment]);
+    const assembly = assemble(SEEDS[0]!, [THIN_LEG, HEAD, EYE, SEGMENT]);
     expectSound(assembly);
     expect(assembly.instances).toHaveLength(MAX_ASSEMBLY_INSTANCES);
     expect(assembly.instances.at(-1)?.part).toBe("segment");
@@ -330,11 +341,31 @@ describe("assembleParts", () => {
     const assembly = assembleParts({
       start: TORSO,
       parts: [{ id: "test:noisy", part: noisy }],
-      lookup: lookup(types),
+      lookup: fitLookup(types),
       seed: 1,
     });
     expect(validate(VoxelAssemblySchema, assembly).ok).toBe(true);
     expect(assembly.instances.map((instance) => instance.id)).toEqual(["torso", "tail"]);
+  });
+
+  it("takes a whole-number seed from 0 to 2³² − 1 and refuses others", () => {
+    expect(assemble(0xffffffff).instances.length).toBeGreaterThan(1);
+    for (const seed of [0.5, Math.random() / 2 + 0.25, -1, 2 ** 32, Number.NaN]) {
+      expect(() => assemble(seed), String(seed)).toThrow(RangeError);
+    }
+  });
+
+  it("refuses a library that lists a part twice", () => {
+    expect(() => assemble(1, [THIN_LEG, { ...THIN_LEG }])).toThrow(
+      'Part "test:legs/thin" is listed twice',
+    );
+  });
+
+  it("holds a root that is also in the library once", () => {
+    const assembly = assemble(SEEDS[0]!, [SEGMENT], SEGMENT);
+    expectSound(assembly);
+    expect(Object.keys(assembly.parts)).toEqual(["segment"]);
+    expect(assembly.instances).toHaveLength(MAX_ASSEMBLY_INSTANCES);
   });
 
   describe("filling an assembly", () => {
@@ -372,7 +403,7 @@ describe("assembleParts", () => {
         const parts = partsById(assembly);
         // The other side of the pair gets the leg already there.
         expect(parts["front-right"]).toBe("dark-leg");
-        expect(parts["head-left-eye"]).toBe("eye");
+        expect(parts["left-eye"]).toBe("eye");
         expect(parts.tail).toBe("tail");
         expect(Object.keys(assembly.parts)).not.toContain("head-2");
       }
@@ -386,6 +417,35 @@ describe("assembleParts", () => {
       assembly.instances[0]!.rotation[0] = 1;
       assembly.parts.torso!.sockets[0]!.position.x = 0;
       expect(start).toEqual(before);
+    });
+
+    it("uses a library part it holds already rather than copying it again", () => {
+      for (const seed of SEEDS) {
+        const whole = assemble(seed);
+        // Without its back legs and its eyes.
+        const kept = new Set(["torso", "front-left", "front-right", "neck", "tail"]);
+        const partial: VoxelAssembly = {
+          parts: Object.fromEntries(Object.entries(whole.parts).filter(([key]) => key !== "eye")),
+          instances: whole.instances.filter((instance) => kept.has(instance.id)),
+        };
+        const refilled = assemble(seed, LIBRARY, partial);
+        expectSound(refilled);
+        expect(Object.keys(refilled.parts).sort()).toEqual(Object.keys(whole.parts).sort());
+        expect(partsById(refilled)["back-left"]).toBe(partsById(whole)["front-left"]);
+      }
+    });
+
+    it("gives a pair's free side the part on its other side, flush faces or not", () => {
+      const fat = assemble(SEEDS[0]!, [FAT_LEG], CORNER);
+      const start: VoxelAssembly = {
+        parts: fat.parts,
+        instances: fat.instances.filter((instance) => instance.id !== "back-right"),
+      };
+      for (const seed of SEEDS) {
+        const assembly = assemble(seed, [FINE_LEG], start);
+        expectSound(assembly);
+        expect(partsById(assembly)["back-right"]).toBe("legs-fat");
+      }
     });
   });
 });

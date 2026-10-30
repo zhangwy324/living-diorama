@@ -406,15 +406,8 @@ export function placeInstances(assembly: VoxelAssembly): InstancePlacement[] {
     const part = assembly.parts[instance.part];
     const turn = quarterTurnMatrix(instance.rotation);
     if (!part || !turn) throw new Error(`Instance "${instance.id}" is not valid`);
-    const local = instance.mirrored ? multiply(MIRROR, turn) : turn;
-    const attach = apply(local, units(part.attach, stepUnits(part.step)));
     if (!instance.parent) {
-      placed.push({
-        linear: local,
-        offset: [-attach[0], -attach[1], -attach[2]],
-        mirrored: determinant(local) < 0,
-        depth: 0,
-      });
+      placed.push(placeInstance(undefined, part, turn, instance.mirrored));
       continue;
     }
     const { parent } = instance;
@@ -423,21 +416,46 @@ export function placeInstances(assembly: VoxelAssembly): InstancePlacement[] {
     const parentPart = parentInstance && assembly.parts[parentInstance.part];
     const socket = parentPart?.sockets.find((s) => s.id === parent.socket);
     if (!above || !parentPart || !socket) throw new Error(`Instance "${instance.id}" is not valid`);
-    const at = units(socket.position, stepUnits(parentPart.step));
-    const inParent = apply(above.linear, [at[0] - attach[0], at[1] - attach[1], at[2] - attach[2]]);
-    const linear = multiply(above.linear, local);
-    placed.push({
-      linear,
-      offset: [
-        inParent[0] + above.offset[0],
-        inParent[1] + above.offset[1],
-        inParent[2] + above.offset[2],
-      ],
-      mirrored: determinant(linear) < 0,
-      depth: above.depth + 1,
-    });
+    placed.push(placeInstance({ above, part: parentPart, socket }, part, turn, instance.mirrored));
   }
   return placed;
+}
+
+/**
+ * Places one instance of `part` with the rest rotation `turn` (a `quarterTurnMatrix`), mirrored
+ * or not: the root without `parent`, otherwise on `parent.socket` of the parent's `part`, placed
+ * at `parent.above`.
+ */
+function placeInstance(
+  parent: { above: InstancePlacement; part: VoxelPart; socket: VoxelSocket } | undefined,
+  part: VoxelPart,
+  turn: Matrix,
+  mirrored: boolean,
+): InstancePlacement {
+  const local = mirrored ? multiply(MIRROR, turn) : turn;
+  const attach = apply(local, units(part.attach, stepUnits(part.step)));
+  if (!parent) {
+    return {
+      linear: local,
+      offset: [-attach[0], -attach[1], -attach[2]],
+      mirrored: determinant(local) < 0,
+      depth: 0,
+    };
+  }
+  const { above } = parent;
+  const at = units(parent.socket.position, stepUnits(parent.part.step));
+  const inParent = apply(above.linear, [at[0] - attach[0], at[1] - attach[1], at[2] - attach[2]]);
+  const linear = multiply(above.linear, local);
+  return {
+    linear,
+    offset: [
+      inParent[0] + above.offset[0],
+      inParent[1] + above.offset[1],
+      inParent[2] + above.offset[2],
+    ],
+    mirrored: determinant(linear) < 0,
+    depth: above.depth + 1,
+  };
 }
 
 /**
@@ -489,6 +507,105 @@ const SIDES = [0, 1, 2].flatMap((axis) => [-1, 1].map((sign) => ({ axis, sign })
 const FACE_CELL = 16;
 
 /**
+ * The part of one outer cube face that lies in one cell, in the root's frame: `key` names the
+ * face's axis, direction, plane and cell, and `u0`–`v1` its extent across the plane.
+ */
+interface CellFace {
+  key: string;
+  instance: number;
+  u0: number;
+  u1: number;
+  v0: number;
+  v1: number;
+}
+
+/** Outer faces by `CellFace.key`, to find the flush ones. */
+type FaceBuckets = Map<string, CellFace[]>;
+
+/** Calls `visit` with every `CellFace` of an instance of `part`, placed at `placement`. */
+function forEachCellFace(
+  part: VoxelPart,
+  grid: Uint8Array,
+  placement: InstancePlacement,
+  instance: number,
+  visit: (face: CellFace) => void,
+): void {
+  const { size } = part;
+  const step = stepUnits(part.step);
+  const { linear, offset } = placement;
+  const filled = (x: number, y: number, z: number) =>
+    x >= 0 &&
+    y >= 0 &&
+    z >= 0 &&
+    x < size.x &&
+    y < size.y &&
+    z < size.z &&
+    grid[voxelIndex(size, x, y, z)] !== 0;
+  for (let z = 0; z < size.z; z++) {
+    for (let y = 0; y < size.y; y++) {
+      for (let x = 0; x < size.x; x++) {
+        if (!filled(x, y, z)) continue;
+        let min: Triple | undefined;
+        let max: Triple | undefined;
+        for (const { axis, sign } of SIDES) {
+          const next: Triple = [x, y, z];
+          next[axis] = num(next, axis) + sign;
+          if (filled(...next)) continue;
+          if (!min || !max) {
+            const a = apply(linear, [x * step, y * step, z * step]);
+            const b = apply(linear, [(x + 1) * step, (y + 1) * step, (z + 1) * step]);
+            min = [0, 1, 2].map((k) => Math.min(num(a, k), num(b, k)) + num(offset, k)) as Triple;
+            max = [0, 1, 2].map((k) => Math.max(num(a, k), num(b, k)) + num(offset, k)) as Triple;
+          }
+          // The face's axis and direction in the root's frame.
+          const rootAxis = [0, 1, 2].find((r) => linear[r * 3 + axis] !== 0) ?? 0;
+          const rootSign = sign * num(linear, rootAxis * 3 + axis);
+          const plane = rootSign > 0 ? max[rootAxis] : min[rootAxis];
+          const [u, v] = [0, 1, 2].filter((k) => k !== rootAxis) as [number, number];
+          const [u0, u1, v0, v1] = [num(min, u), num(max, u), num(min, v), num(max, v)];
+          for (let cu = Math.floor(u0 / FACE_CELL); cu * FACE_CELL < u1; cu++) {
+            for (let cv = Math.floor(v0 / FACE_CELL); cv * FACE_CELL < v1; cv++) {
+              visit({
+                key: `${rootAxis}${rootSign}|${plane}|${cu}|${cv}`,
+                instance,
+                u0,
+                u1,
+                v0,
+                v1,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/** Calls `found` with the instance of each face in `bucket` flush with `face`, of another one. */
+function forEachFlush(
+  bucket: readonly CellFace[] | undefined,
+  face: CellFace,
+  found: (other: number) => void,
+): void {
+  for (const other of bucket ?? []) {
+    if (
+      other.instance !== face.instance &&
+      Math.min(other.u1, face.u1) > Math.max(other.u0, face.u0) &&
+      Math.min(other.v1, face.v1) > Math.max(other.v0, face.v0)
+    ) {
+      found(other.instance);
+    }
+  }
+}
+
+/** Adds a face to its bucket. */
+function addFace(buckets: FaceBuckets, face: CellFace): void {
+  let bucket = buckets.get(face.key);
+  if (!bucket) buckets.set(face.key, (bucket = []));
+  bucket.push(face);
+}
+
+/**
  * Warnings about a valid assembly (ADR 0022 §14, as amended in M19): two parts whose outer faces
  * lie flush in one plane, facing the same way. A renderer shrinks every part but the root a
  * little toward its centre so they never flicker (`CHILD_PART_INSET`), but the shape may not be
@@ -496,10 +613,7 @@ const FACE_CELL = 16;
  */
 export function assemblyWarnings(assembly: VoxelAssembly, source?: string): Diagnostic[] {
   const placements = placeInstances(assembly);
-  const buckets = new Map<
-    string,
-    { instance: number; u0: number; u1: number; v0: number; v1: number }[]
-  >();
+  const buckets: FaceBuckets = new Map();
   const pairs = new Set<string>();
   const grids = new Map<string, Uint8Array>();
 
@@ -507,67 +621,10 @@ export function assemblyWarnings(assembly: VoxelAssembly, source?: string): Diag
     const part = partOf(assembly, instance);
     let grid = grids.get(instance.part);
     if (!grid) grids.set(instance.part, (grid = decodeVoxels(part.voxels, part.size)));
-    const { size } = part;
-    const step = stepUnits(part.step);
-    const { linear, offset } = item(placements, i);
-    const filled = (x: number, y: number, z: number) =>
-      x >= 0 &&
-      y >= 0 &&
-      z >= 0 &&
-      x < size.x &&
-      y < size.y &&
-      z < size.z &&
-      grid[voxelIndex(size, x, y, z)] !== 0;
-    for (let z = 0; z < size.z; z++) {
-      for (let y = 0; y < size.y; y++) {
-        for (let x = 0; x < size.x; x++) {
-          if (!filled(x, y, z)) continue;
-          const cube: Triple = [x, y, z];
-          let min: Triple | undefined;
-          let max: Triple | undefined;
-          for (const { axis, sign } of SIDES) {
-            const next: Triple = [x, y, z];
-            next[axis] = num(next, axis) + sign;
-            if (filled(...next)) continue;
-            if (!min || !max) {
-              const a = apply(linear, [cube[0] * step, cube[1] * step, cube[2] * step]);
-              const b = apply(linear, [(x + 1) * step, (y + 1) * step, (z + 1) * step]);
-              min = [0, 1, 2].map((k) => Math.min(num(a, k), num(b, k)) + num(offset, k)) as Triple;
-              max = [0, 1, 2].map((k) => Math.max(num(a, k), num(b, k)) + num(offset, k)) as Triple;
-            }
-            // The face's axis and direction in the root's frame.
-            const rootAxis = [0, 1, 2].find((r) => linear[r * 3 + axis] !== 0) ?? 0;
-            const rootSign = sign * num(linear, rootAxis * 3 + axis);
-            const plane = rootSign > 0 ? max[rootAxis] : min[rootAxis];
-            const [u, v] = [0, 1, 2].filter((k) => k !== rootAxis) as [number, number];
-            const face = {
-              instance: i,
-              u0: num(min, u),
-              u1: num(max, u),
-              v0: num(min, v),
-              v1: num(max, v),
-            };
-            for (let cu = Math.floor(face.u0 / FACE_CELL); cu * FACE_CELL < face.u1; cu++) {
-              for (let cv = Math.floor(face.v0 / FACE_CELL); cv * FACE_CELL < face.v1; cv++) {
-                const key = `${rootAxis}${rootSign}|${plane}|${cu}|${cv}`;
-                let bucket = buckets.get(key);
-                if (!bucket) buckets.set(key, (bucket = []));
-                for (const other of bucket) {
-                  if (
-                    other.instance !== i &&
-                    Math.min(other.u1, face.u1) > Math.max(other.u0, face.u0) &&
-                    Math.min(other.v1, face.v1) > Math.max(other.v0, face.v0)
-                  ) {
-                    pairs.add(`${other.instance} ${i}`);
-                  }
-                }
-                bucket.push(face);
-              }
-            }
-          }
-        }
-      }
-    }
+    forEachCellFace(part, grid, item(placements, i), i, (face) => {
+      forEachFlush(buckets.get(face.key), face, (other) => pairs.add(`${other} ${i}`));
+      addFace(buckets, face);
+    });
   });
 
   return [...pairs]
@@ -785,6 +842,14 @@ export interface LibraryPart {
   readonly part: VoxelPart;
 }
 
+/** What `assembleParts` needs to know of the registered part and socket types. */
+export interface PartFitLookup {
+  /** The socket types a part type fits, or undefined for a type that isn't registered. */
+  fitsOf(partType: string): readonly string[] | undefined;
+  /** Whether a socket type is registered. */
+  isSocketType(socketType: string): boolean;
+}
+
 /** What `assembleParts` builds from. */
 export interface AssembleOptions {
   /**
@@ -794,9 +859,8 @@ export interface AssembleOptions {
   start: LibraryPart | VoxelAssembly;
   /** The parts to fill sockets with, in any order. Each ID once. */
   parts: readonly LibraryPart[];
-  /** The registered part and socket types, for what fits where. */
-  lookup: VoxelTypeLookup;
-  /** The same seed and inputs give the same assembly. */
+  lookup: PartFitLookup;
+  /** A whole number from 0 to 2³² − 1. The same seed and inputs give the same assembly. */
   seed: number;
 }
 
@@ -842,12 +906,11 @@ function claim(base: string, taken: Set<string>): string {
   return id;
 }
 
-/** A part that may go on a socket: a library part, or one the assembly already holds. */
-interface Option {
-  part: VoxelPart;
-  library?: LibraryPart;
-  key?: string;
-}
+/**
+ * A part that may go on a socket: one the assembly holds already (`key`), or a library part it
+ * doesn't hold yet (`library`).
+ */
+type Option = { part: VoxelPart } & ({ key: string } | { library: LibraryPart });
 
 /** One socket of a pair (or a socket without a pair), and whether a part on it is mirrored. */
 interface Side {
@@ -859,7 +922,8 @@ interface Side {
  * Fills every free socket of an assembly with library parts that fit it (ADR 0022 §9, M20
  * decisions: a pure assembler), the same way for the same seed and inputs. M21's Randomize uses
  * it. Pure: it changes none of its inputs and shares no objects with them. The result passes
- * `VoxelAssemblySchema` and `checkAssemblyFit` (given a valid start).
+ * `VoxelAssemblySchema` and `checkAssemblyFit` (given a valid start). Throws on a seed that isn't
+ * a whole number from 0 to 2³² − 1 and on a library that lists an ID twice.
  *
  * - Sockets are filled in the order of the instances, then of each part's sockets, so the root's
  *   first; each new part's own sockets after those of the parts listed before it, until no
@@ -875,20 +939,33 @@ interface Side {
  *   (`assemblyWarnings`) is passed over for the next one; when every part would, the first is
  *   used.
  * - Both sockets of a mirror pair get the same part, the one on the mirrored socket mirrored.
- *   When one is taken already, the other gets the part that's there first, if it fits.
- * - A library part used several times is held once, keyed by its ID's name (`legs-short` for
- *   `hollow:legs/short`), with its ID as `source`. A new instance is named after its socket, and
- *   below the root after its parent and its socket (`head-left-eye`).
+ *   When one is taken already, the other gets the part that's there if it can go there, flush
+ *   faces or not, so the pair stays alike.
+ * - A library part is held once however often it is used, keyed by its ID's name (`legs-short`
+ *   for `hollow:legs/short`), with its ID as `source`. A part the start holds already, by its
+ *   `source`, is used as held rather than copied again. A new instance is named after its socket
+ *   (`left-eye`), `-2`, `-3`… on a clash.
  */
 export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): VoxelAssembly {
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
+    throw new RangeError(`The seed must be a whole number from 0 to 2³² − 1, not ${seed}`);
+  }
   const random = seededRandom(seed);
   const assembly: VoxelAssembly = { parts: {}, instances: [] };
+  // The key of each library part the assembly holds, by its ID.
+  const libraryKeys = new Map<string, string>();
   if ("instances" in start) {
-    for (const [key, part] of Object.entries(start.parts)) assembly.parts[key] = copyPart(part);
+    for (const [key, part] of Object.entries(start.parts)) {
+      assembly.parts[key] = copyPart(part);
+      if (part.source !== undefined && !libraryKeys.has(part.source)) {
+        libraryKeys.set(part.source, key);
+      }
+    }
     assembly.instances = start.instances.map(copyInstance);
   } else {
     const key = localName(start.id);
     assembly.parts[key] = copyPart(start.part, start.id);
+    libraryKeys.set(start.id, key);
     assembly.instances.push({
       id: key,
       part: key,
@@ -913,8 +990,17 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
     }
     return count;
   };
+
+  // Where each instance is, and its outer faces, kept up to date as parts are added, so a new
+  // part's faces are checked against them alone.
+  const placements = placeInstances(assembly);
+  const buckets: FaceBuckets = new Map();
   let faces = 0;
-  for (const instance of assembly.instances) faces += facesOf(partOf(assembly, instance));
+  assembly.instances.forEach((instance, i) => {
+    const part = partOf(assembly, instance);
+    faces += facesOf(part);
+    forEachCellFace(part, gridOf(part), item(placements, i), i, (face) => addFace(buckets, face));
+  });
 
   // Who holds each taken socket: `instance/socket` to the instance hanging there.
   const holders = new Map<string, VoxelInstance>();
@@ -924,14 +1010,14 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
   }
 
   const fits = (part: VoxelPart, socketType: string) =>
-    lookup.partType(part.type)?.fits.includes(socketType) ?? false;
+    lookup.fitsOf(part.type)?.includes(socketType) ?? false;
   const library = [...parts]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .filter((entry, i, sorted) => {
       if (sorted[i - 1]?.id === entry.id) throw new Error(`Part "${entry.id}" is listed twice`);
       return (
-        lookup.partType(entry.part.type) !== undefined &&
-        entry.part.sockets.every((socket) => lookup.socketType(socket.type) !== undefined)
+        lookup.fitsOf(entry.part.type) !== undefined &&
+        entry.part.sockets.every((socket) => lookup.isSocketType(socket.type))
       );
     });
   // The seeded order of the library parts that fit each socket type, made when first needed.
@@ -948,12 +1034,20 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
     }
     return order;
   };
-  // The key of each library part the assembly holds.
-  const libraryKeys = new Map<string, string>();
+  const heldPart = (key: string) => {
+    const part = assembly.parts[key];
+    if (!part) throw new Error(`No part "${key}"`);
+    return part;
+  };
+  const libraryOption = (entry: LibraryPart): Option => {
+    const key = libraryKeys.get(entry.id);
+    return key === undefined ? { part: entry.part, library: entry } : { part: heldPart(key), key };
+  };
 
   for (let i = 0; i < assembly.instances.length; i++) {
     const parent = item(assembly.instances, i);
     const parentPart = partOf(assembly, parent);
+    const above = item(placements, i);
     const slot = (side: Side) => `${parent.id}/${side.socket.id}`;
     for (const socket of parentPart.sockets) {
       // The mirrored socket of a pair is filled with its pair.
@@ -965,69 +1059,82 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
       if (free.length === 0) continue;
       if (assembly.instances.length + free.length > MAX_ASSEMBLY_INSTANCES) continue;
 
-      const options: Option[] = [];
-      // One side of the pair is taken already (only in an assembly to fill): its part first.
+      const canGo = ({ part }: Option) =>
+        faces + facesOf(part) * free.length <= MAX_ASSEMBLY_FACES &&
+        free.every(
+          (side) =>
+            isSocketBuried(parentPart, gridOf(parentPart), side.socket, part) &&
+            isOnFinerGrid(parentPart, side.socket, part, IDENTITY_MATRIX, side.mirrored),
+        );
+      const placementsOf = ({ part }: Option) =>
+        free.map((side) =>
+          placeInstance(
+            { above, part: parentPart, socket: side.socket },
+            part,
+            IDENTITY_MATRIX,
+            side.mirrored,
+          ),
+        );
+      const first = assembly.instances.length;
+      // Whether the new instances' faces would lie flush with any part's, or with each other's.
+      const isFlush = (option: Option) => {
+        const added: FaceBuckets = new Map();
+        let flush = false;
+        placementsOf(option).forEach((placement, k) => {
+          if (flush) return;
+          forEachCellFace(option.part, gridOf(option.part), placement, first + k, (face) => {
+            const found = () => (flush = true);
+            forEachFlush(buckets.get(face.key), face, found);
+            forEachFlush(added.get(face.key), face, found);
+            addFace(added, face);
+          });
+        });
+        return flush;
+      };
+
+      // One side of the pair is taken already (only in an assembly to fill): its part, as is.
       const takenSide = pair.find((side) => holders.has(slot(side)));
       const held = takenSide && holders.get(slot(takenSide));
-      if (held) {
-        const part = partOf(assembly, held);
-        if (fits(part, socket.type)) options.push({ part, key: held.part });
-      }
-      for (const entry of orderFor(socket.type)) options.push({ part: entry.part, library: entry });
-
-      const placeable = options.filter(
-        ({ part }) =>
-          faces + facesOf(part) * free.length <= MAX_ASSEMBLY_FACES &&
-          free.every(
-            (side) =>
-              isSocketBuried(parentPart, gridOf(parentPart), side.socket, part) &&
-              isOnFinerGrid(parentPart, side.socket, part, IDENTITY_MATRIX, side.mirrored),
-          ),
-      );
-      if (placeable.length === 0) continue;
-
-      const keyFor = (option: Option): string => {
-        if (option.key !== undefined) return option.key;
-        const id = option.library?.id ?? "";
-        return libraryKeys.get(id) ?? claim(localName(id), new Set(keys));
+      const heldOption: Option | undefined = held && {
+        part: heldPart(held.part),
+        key: held.part,
       };
-      const instancesFor = (option: Option) => {
-        const taken = new Set(ids);
-        const part = keyFor(option);
-        return free.map((side) => ({
-          id: claim(i === 0 ? side.socket.id : `${parent.id}-${side.socket.id}`, taken),
-          part,
+      let chosen: Option | undefined;
+      if (heldOption && fits(heldOption.part, socket.type) && canGo(heldOption)) {
+        chosen = heldOption;
+      } else {
+        const placeable = orderFor(socket.type).map(libraryOption).filter(canGo);
+        chosen = placeable.find((option) => !isFlush(option)) ?? placeable[0];
+      }
+      if (!chosen) continue;
+      const { part } = chosen;
+
+      let key: string;
+      if ("key" in chosen) {
+        key = chosen.key;
+      } else {
+        key = claim(localName(chosen.library.id), keys);
+        libraryKeys.set(chosen.library.id, key);
+        const copy = copyPart(part, chosen.library.id);
+        assembly.parts[key] = copy;
+        grids.set(copy, gridOf(part));
+        faceCounts.set(copy, facesOf(part));
+      }
+      placementsOf(chosen).forEach((placement, k) => {
+        const side = item(free, k);
+        const instance = {
+          id: claim(side.socket.id, ids),
+          part: key,
           parent: { instance: parent.id, socket: side.socket.id },
           rotation: [...IDENTITY_QUATERNION] as Quaternion,
           mirrored: side.mirrored,
-        }));
-      };
-      const first = assembly.instances.length;
-      const clean = placeable.find((option) => {
-        const trial: VoxelAssembly = {
-          parts: { ...assembly.parts, [keyFor(option)]: option.part },
-          instances: [...assembly.instances, ...instancesFor(option)],
         };
-        // A warning names the later of its two parts.
-        return !assemblyWarnings(trial).some((found) => Number(found.path[1]) >= first);
-      });
-      const chosen = clean ?? item(placeable, 0);
-
-      const key = keyFor(chosen);
-      if (chosen.library && !libraryKeys.has(chosen.library.id)) {
-        keys.add(key);
-        libraryKeys.set(chosen.library.id, key);
-        const copy = copyPart(chosen.part, chosen.library.id);
-        assembly.parts[key] = copy;
-        grids.set(copy, gridOf(chosen.part));
-        faceCounts.set(copy, facesOf(chosen.part));
-      }
-      for (const instance of instancesFor(chosen)) {
-        ids.add(instance.id);
-        holders.set(`${parent.id}/${instance.parent.socket}`, instance);
+        holders.set(slot(side), instance);
         assembly.instances.push(instance);
-        faces += facesOf(chosen.part);
-      }
+        placements.push(placement);
+        faces += facesOf(part);
+        forEachCellFace(part, gridOf(part), placement, first + k, (face) => addFace(buckets, face));
+      });
     }
   }
   return assembly;
