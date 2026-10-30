@@ -162,7 +162,7 @@ describe("the reference creatures", () => {
 
 describe("assembled at random from each torso", () => {
   // The assembler fills every free socket with a part that fits; the starter parts should go
-  // together without flush faces whichever it picks.
+  // together without flush faces whichever it picks, and stay medium, as the mossling is.
   const registries = registered();
   const library = sortedParts(registries).map(({ id, part }) => ({ id, part }));
   const lookup = {
@@ -172,17 +172,69 @@ describe("assembled at random from each torso", () => {
   const torsos = library.filter(({ part }) => part.type === "hollow:torso");
 
   it.each(torsos.map((t) => t.id))(
-    "%s gives valid, fitting creatures with no flush faces",
+    "%s gives valid, fitting, medium creatures with no flush faces",
     (id) => {
       const start = torsos.find((t) => t.id === id);
       if (!start) throw new Error(id);
-      for (let seed = 0; seed < 16; seed++) {
+      for (let seed = 0; seed < 32; seed++) {
         const assembly = assembleParts({ start, parts: library, lookup, seed });
         const { warnings, fit, measure } = check(registries, assembly, `${id} seed ${seed}`);
         expect(fit).toEqual([]);
         expect(warnings).toEqual([]);
-        expect(measure.sizeClass).toBeDefined();
+        expect(measure.sizeClass).toBe("medium");
       }
     },
   );
+});
+
+describe("each pair of a starter part and a socket", () => {
+  // A part on one socket of another part, alone, the way a creature is built up: every socket
+  // takes some starter part cleanly (valid, fitting, no flush faces), and every part but a torso
+  // goes cleanly on some socket.
+  const registries = registered();
+  const parts = sortedParts(registries);
+  const fits = (type: string, socket: string) =>
+    registries.partTypes.get(type)?.fits.includes(socket) ?? false;
+
+  /** Whether `child` goes cleanly on `parent`'s socket `socketId`. */
+  function clean(parent: (typeof parts)[number], socketId: string, child: (typeof parts)[number]) {
+    const socket = parent.part.sockets.find((s) => s.id === socketId);
+    if (!socket || !fits(child.part.type, socket.type)) return false;
+    const assembly = {
+      parts: { parent: parent.part, child: child.part },
+      instances: [
+        { id: "parent", part: "parent", rotation: [0, 0, 0, 1], mirrored: false },
+        {
+          id: "child",
+          part: parent.id === child.id ? "parent" : "child",
+          parent: { instance: "parent", socket: socketId },
+          rotation: [0, 0, 0, 1],
+          mirrored: socket.mirrors !== undefined,
+        },
+      ],
+    };
+    if (parent.id === child.id) delete (assembly.parts as Record<string, unknown>).child;
+    const parsed = validate(VoxelAssemblySchema, assembly);
+    return parsed.ok && assemblyWarnings(parsed.value).length === 0;
+  }
+
+  it("every socket takes some starter part cleanly", () => {
+    const empty = parts.flatMap((parent) =>
+      parent.part.sockets
+        .filter((socket) => !parts.some((child) => clean(parent, socket.id, child)))
+        .map((socket) => `${parent.id} ${socket.id}`),
+    );
+    expect(empty).toEqual([]);
+  });
+
+  it("every starter part but a torso goes cleanly on some socket", () => {
+    const homeless = parts
+      .filter(({ part }) => part.type !== "hollow:torso")
+      .filter(
+        (child) =>
+          !parts.some((parent) => parent.part.sockets.some((s) => clean(parent, s.id, child))),
+      )
+      .map(({ id }) => id);
+    expect(homeless).toEqual([]);
+  });
 });

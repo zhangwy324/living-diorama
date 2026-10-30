@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { bootstrapParts } from "./bootstrap";
+import { bootstrapParts, selectParts } from "./bootstrap";
 import { buildParts, DEFAULT_OUTPUT_DIR, DEFAULT_SOURCE_DIR, readParts } from "./build";
 import { STARTER_PARTS } from "./starter-parts";
 
@@ -44,6 +44,17 @@ describe("bootstrapParts", () => {
       "round-eye.json",
     ]);
     expect(readFileSync(join(dir, "round-eye.vox"), "utf8")).not.toBe("edited");
+  });
+});
+
+describe("selectParts", () => {
+  it("picks parts by file name, all of them with none named, and refuses unknown names", () => {
+    expect(selectParts(STARTER_PARTS, [])).toHaveLength(STARTER_PARTS.length);
+    expect(selectParts(STARTER_PARTS, ["round-eye", "smile"]).map((p) => p.file)).toEqual([
+      "round-eye",
+      "smile",
+    ]);
+    expect(() => selectParts(STARTER_PARTS, ["round-eyes"])).toThrow(/No starter part round-eyes/);
   });
 });
 

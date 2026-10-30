@@ -179,23 +179,23 @@ const uprightTorso = part(
       .cubes(),
 );
 
-/** A fish or blob body, 40 × 30 × 35 cm: side fins, a tail base and a neck. */
+/** A fish or blob body, 35 × 30 × 35 cm: side fins, a tail base and a neck. */
 const fishTorso = part(
   "fish-torso",
   "Fish torso",
   "torso",
   LARGE,
-  at(4, 0, 3.5),
+  at(3.5, 0, 3.5),
   [
-    ...sockets("left-fin", "fin-mount", at(5, 3, 1), { id: "right-fin", z: 6 }),
+    ...sockets("left-fin", "fin-mount", at(4, 3, 1), { id: "right-fin", z: 6 }),
     ...sockets("tail-base", "tail-base", at(1, 3, 3.5)),
-    ...sockets("neck", "neck", at(7, 3, 3.5)),
+    ...sockets("neck", "neck", at(6, 3, 3.5)),
   ],
   () =>
-    new Sketch({ x: 8, y: 6, z: 7 }, [TEAL, TEAL_BELLY, TEAL_SHADE])
-      .fill(superellipsoid(p(4, 3, 3.5), p(4.2, 3.2, 3.7), 2.6))
+    new Sketch({ x: 7, y: 6, z: 7 }, [TEAL, TEAL_BELLY, TEAL_SHADE])
+      .fill(superellipsoid(p(3.5, 3, 3.5), p(3.7, 3.2, 3.7), 2.6))
       .paint(below(2), 2)
-      .paintFacing(UP, 3, (q) => q.x > 1 && q.x < 7)
+      .paintFacing(UP, 3, (q) => q.x > 1 && q.x < 6)
       .cubes(),
 );
 
@@ -256,7 +256,7 @@ const wideHead = part(
   LARGE,
   at(0, 2, 4.5),
   [
-    ...sockets("left-ear", "ear-mount", at(2, 4, 3), { id: "right-ear", z: 6 }),
+    ...sockets("left-ear", "ear-mount", at(2, 3, 4), { id: "right-ear", z: 5 }),
     ...sockets("left-eye", "eye-mount", at(3.5, 3, 2.5), { id: "right-eye", z: 6.5 }),
     ...sockets("nose", "nose-mount", at(3.5, 2.5, 4.5)),
     ...sockets("mouth", "mouth-mount", at(3.5, 1.5, 4.5)),
@@ -265,6 +265,9 @@ const wideHead = part(
     new Sketch({ x: 4, y: 4, z: 9 }, [TEAL, TEAL_BELLY, TEAL_SHADE])
       .fill(box(p(0, 1, 3), p(1, 3, 6)))
       .fill(intersect(roundedBox(p(-1, 0, 0), p(6, 4, 9), 1.6), behind(1), before(4)))
+      // Rounder front corners, which also keep the creature's footprint small.
+      .carve(box(p(3, 0, 0), p(4, 4, 1)))
+      .carve(box(p(3, 0, 8), p(4, 4, 9)))
       .paint(below(1), 2)
       .paintFacing(UP, 3, (q) => q.x < 3)
       .cubes(),
@@ -273,11 +276,11 @@ const wideHead = part(
 // Limbs -------------------------------------------------------------------------------------------
 // A leg or arm reaches into its torso with a peg at its inner top.
 
-/** A slim leg, 15 cm below the body, with a dark paw stepping forward. */
-const pawLeg = part("paw-leg", "Paw leg", "leg", LARGE, at(1, 4, 1.5), [], () =>
-  new Sketch({ x: 3, y: 4, z: 2 }, [FOX, PAW])
-    .fill(box(p(0, 0, 0), p(2, 3, 2)))
-    .fill(box(p(0, 3, 1), p(2, 4, 2)))
+/** A slim leg, 10 cm below the body, with a dark paw stepping forward. */
+const pawLeg = part("paw-leg", "Paw leg", "leg", LARGE, at(1, 3, 1.5), [], () =>
+  new Sketch({ x: 3, y: 3, z: 2 }, [FOX, PAW])
+    .fill(box(p(0, 0, 0), p(2, 2, 2)))
+    .fill(box(p(0, 2, 1), p(2, 3, 2)))
     .fill(box(p(2, 0, 0), p(3, 1, 2)), 2)
     .paint(below(1), 2)
     .cubes(),
@@ -305,7 +308,7 @@ const pawArm = part("paw-arm", "Paw arm", "arm", LARGE, at(1, 4, 2), [], () =>
 const mittenArm = part("mitten-arm", "Mitten arm", "arm", LARGE, at(1, 5, 2), [], () =>
   new Sketch({ x: 3, y: 5, z: 2 }, [FOX, PAW])
     .fill(box(p(0, 1, 0), p(1, 5, 1)))
-    .fill(box(p(0, 4, 1), p(2, 5, 2)))
+    .fill(box(p(0, 4, 1), p(1, 5, 2)))
     .fill(box(p(1, 0, 0), p(3, 2, 1)), 2)
     .cubes(),
 );
@@ -359,11 +362,11 @@ const roundEar = part("round-ear", "Round ear", "ear", LARGE, at(0, 1, 3), [], (
 );
 
 /** A flat paddle of a side fin, swept back. Its peg is at its inner front. */
-const sideFin = part("side-fin", "Side fin", "fin", LARGE, at(3, 1, 3), [], () =>
-  new Sketch({ x: 4, y: 1, z: 3 }, [FIN, FIN_SHADE])
-    .fill(box(p(2, 0, 2), p(4, 1, 3)))
-    .fill(box(p(1, 0, 1), p(4, 1, 2)))
-    .fill(box(p(0, 0, 0), p(3, 1, 1)), 2)
+const sideFin = part("side-fin", "Side fin", "fin", LARGE, at(3, 1, 2), [], () =>
+  new Sketch({ x: 4, y: 1, z: 2 }, [FIN, FIN_SHADE])
+    .fill(box(p(2, 0, 1), p(4, 1, 2)))
+    .fill(box(p(0, 0, 0), p(4, 1, 1)))
+    .paint(box(p(0, 0, 0), p(2, 1, 1)), 2)
     .cubes(),
 );
 

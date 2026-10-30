@@ -15,8 +15,8 @@
       "type": "hollow:ear-mount",
       "position": {
         "x": 2,
-        "y": 4,
-        "z": 3
+        "y": 3,
+        "z": 4
       }
     },
     {
@@ -24,8 +24,8 @@
       "type": "hollow:ear-mount",
       "position": {
         "x": 2,
-        "y": 4,
-        "z": 6
+        "y": 3,
+        "z": 5
       },
       "mirrors": "left-ear"
     },

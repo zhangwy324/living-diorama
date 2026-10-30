@@ -43,3 +43,18 @@ export function bootstrapParts(
   }
   return result;
 }
+
+/** The parts named by file (`round-eye`), or all of them when none are named. */
+export function selectParts(
+  parts: readonly StarterPart[],
+  names: readonly string[],
+): StarterPart[] {
+  if (names.length === 0) return [...parts];
+  const unknown = names.filter((name) => !parts.some((p) => p.file === name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `No starter part ${unknown.join(", ")}; the parts are ${parts.map((p) => p.file).join(", ")}`,
+    );
+  }
+  return parts.filter((p) => names.includes(p.file));
+}
