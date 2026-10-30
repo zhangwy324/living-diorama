@@ -1,4 +1,4 @@
-import type { PartFitLookup, PartRole } from "@living-diorama/content-schema";
+import type { PartFitLookup, PartMotion, PartRole } from "@living-diorama/content-schema";
 import type { PartTypeSummary } from "@living-diorama/simulation";
 
 /**
@@ -11,6 +11,18 @@ export function partRoleLookup(
 ): (partType: string) => PartRole | undefined {
   const roles = new Map(partTypes.map(({ id, role }) => [id, role]));
   return (partType) => roles.get(partType);
+}
+
+/**
+ * Looks up part types' motions from the worker's content summary, so the renderer can animate a
+ * voxel creature's parts (M22) without the registries. A type the summary doesn't list, or one
+ * without a motion, doesn't move.
+ */
+export function partMotionLookup(
+  partTypes: readonly PartTypeSummary[],
+): (partType: string) => PartMotion | undefined {
+  const motions = new Map(partTypes.map(({ id, motion }) => [id, motion]));
+  return (partType) => motions.get(partType);
 }
 
 /**

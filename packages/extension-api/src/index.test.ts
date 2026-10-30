@@ -779,6 +779,15 @@ describe("part types and socket types", () => {
     expect(role.ok ? [] : role.diagnostics.map((d) => d.path.join("."))).toEqual(["role"]);
   });
 
+  it("registers a part type's motion and refuses one it doesn't know", () => {
+    const registries = registered();
+    expectOk(registries.partTypes.register({ ...partType("test:ear", []), motion: "flop" }));
+    expect(registries.partTypes.get("test:ear")?.motion).toBe("flop");
+    expect(registries.partTypes.get("test:leg")?.motion).toBeUndefined();
+    const motion = registries.partTypes.validate({ ...partType("test:eye", []), motion: "spin" });
+    expect(motion.ok ? [] : motion.diagnostics.map((d) => d.path.join("."))).toEqual(["motion"]);
+  });
+
   it("checks that the socket types a part type fits are registered", () => {
     const registries = registered();
     expectOk(registries.partTypes.register(partType("test:eye", ["test:socket"])));

@@ -13,6 +13,7 @@ import {
   parsePartDefinition,
   parsePartTypeDefinition,
   parsePropCategoryDefinition,
+  PART_MOTIONS,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
@@ -551,6 +552,22 @@ describe("PartTypeDefinition", () => {
     const found = diagnostics(parsePartTypeDefinition({ ...torso, role: "torso" }));
     expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
       ["role", "Unknown part role (expected tail, root)"],
+    ]);
+  });
+
+  it("takes a motion from the closed list, and none by default", () => {
+    expect(parsePartTypeDefinition({ ...torso, motion: "swing" })).toEqual({
+      ok: true,
+      value: { ...torso, fits: [], motion: "swing" },
+    });
+    for (const motion of PART_MOTIONS) {
+      expect(parsePartTypeDefinition({ ...torso, motion }).ok).toBe(true);
+    }
+    const parsed = parsePartTypeDefinition(torso);
+    expect(parsed.ok && "motion" in parsed.value).toBe(false);
+    const found = diagnostics(parsePartTypeDefinition({ ...torso, motion: "wiggle" }));
+    expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
+      ["motion", "Unknown part motion (expected swing, wag, bob, paddle, flop, blink)"],
     ]);
   });
 });
