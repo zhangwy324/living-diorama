@@ -10,6 +10,7 @@ import {
   createRegistries,
   resolveReferences,
   type Registries,
+  type SpeciesAppearanceKind,
 } from "@living-diorama/extension-api";
 import {
   formatClockTime,
@@ -51,8 +52,21 @@ const FOOD = "core:food";
 // living-behavior checks of ADR 0018 §20 (long-run-checks.ts). Shared by the Vitest suite (a few
 // seeds), `pnpm soak` (many) and `pnpm sim`.
 
+/** A species registered while the world runs, as the app registers its library's (ADR 0012). */
+export interface RuntimeSpecies {
+  input: { id: string } & Record<string, unknown>;
+  url: string;
+  kind: SpeciesAppearanceKind;
+}
+
 export interface RunOptions extends LongRunCheckOptions {
   register: (registries: Registries) => unknown;
+  /**
+   * Species registered while the world runs, as the app registers its library's (ADR 0012): with
+   * `Simulation.registerSpecies`, in every fresh world, the run's own and each one a save is
+   * restored into, before the restore. E.g. the voxel species of `fixtures/voxel-creatures.ts`.
+   */
+  runtimeSpecies?: readonly RuntimeSpecies[];
   worldId: string;
   speciesId: string;
   seed: number;
@@ -210,6 +224,12 @@ export function createSimulation(
     ...(options.onTrace ? { onTrace: options.onTrace } : {}),
   });
   if (!created.ok) throw new Error(created.diagnostics.map(formatDiagnostic).join("\n"));
+  for (const { input, url, kind } of options.runtimeSpecies ?? []) {
+    const registered = created.value.registerSpecies(input, url, kind);
+    if (!registered.ok) {
+      throw new Error(registered.diagnostics.map(formatDiagnostic).join("\n"));
+    }
+  }
   return created.value;
 }
 

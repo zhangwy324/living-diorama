@@ -16,7 +16,10 @@ import {
 // checks on. Defaults: 32 seeds × one simulated day from noon at the app's 10 Hz, 3 mosslings each,
 // plus two amphibians, one with no preference between land and water and one that prefers the
 // water (#163), and one water-only swimmer (the test species of `fixtures/hollow-creatures.ts`), so
-// the per-capability invariants of ADR 0020 run on banks and in the river too. Each amphibian
+// the per-capability invariants of ADR 0020 run on banks and in the river too, and two voxel
+// creatures, the sample voxel creature as an amphibian and as a hopper (`SOAK_VOXEL_SPECIES`),
+// registered while the world runs and again before every restore, as the app registers library
+// species (ADR 0022). Each amphibian
 // species' bank jumps and share of time in water are reported per seed and over all seeds. Each
 // run also saves and restores at random ticks drawn from its seed, through JSON text and the
 // schema (ADR 0019): a restore without a gap must carry on exactly as the unbroken run, compared
@@ -43,7 +46,7 @@ const { values } = parseArgs({
     hz: { type: "string", default: "10" },
     // Mosslings per run.
     creatures: { type: "string", default: "3" },
-    // Leave out the amphibians and the swimmer.
+    // Leave out the amphibians, the swimmer and the voxel creatures.
     "mosslings-only": { type: "boolean", default: false },
     // Saves and restores per run; one of them after a long gap unless --no-long-gap.
     restores: { type: "string", default: "4" },
