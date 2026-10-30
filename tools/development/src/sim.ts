@@ -17,11 +17,17 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { describeEdits, parseEditScript, scriptedEdits } from "./edit-cycles";
 import { beaver, carp, otter, registerHollowCreatures, toad } from "./fixtures/hollow-creatures";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
 import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
 import { saveThroughText } from "./save-cycles";
-import { LIVING_BEHAVIOR_CHECKS, runWithInvariants, type RunReport } from "./simulation-run";
+import {
+  LIVING_BEHAVIOR_CHECKS,
+  runWithInvariants,
+  type EditLog,
+  type RunReport,
+} from "./simulation-run";
 import { spread } from "./time-spread";
 import { renderDebugMap } from "./worldgen/debug-map";
 
@@ -41,6 +47,13 @@ import { renderDebugMap } from "./worldgen/debug-map";
 // table, `--creatures` of each. Woodland Hollow has `mossling` (the default), `amphibian`,
 // `water-amphibian` (one that prefers the water, #163), `swimmer` and `hopper`, all but the
 // mossling the test species of `fixtures/hollow-creatures.ts` (ADR 0020).
+//
+// `--edits <file>` applies world edits during the run (ADR 0021): a JSON array of
+// `{ "tick": n, "edit": { "ops": [...] } }`, the edit as the app's worker takes it, or
+// `{ "tick": n, "undo": true }`, which applies the inverse of the last edit applied and not yet
+// undone. `tick` counts steps from the run's start (also with --load), and the edit applies before
+// that step. Each result is printed, with its warnings, relocated creatures and time, and written to
+// the NDJSON; the map shows the world as the run leaves it.
 
 /** The app's tick rate, the only one saves are made and loaded at. */
 const APP_TICK_RATE_HZ = 10;
@@ -86,6 +99,8 @@ const { values } = parseArgs({
     gap: { type: "string", default: "0" },
     // Comma-separated names from the world's species table; default its first.
     species: { type: "string" },
+    // An edit script (see above).
+    edits: { type: "string" },
     "no-map": { type: "boolean", default: false },
   },
 });
@@ -128,6 +143,8 @@ const restore = loaded && {
   // The save's time of day is that of its last tick; the next is one tick on, then the gap.
   minutes: minutesAfter(loaded.minutes, 1000 / TICK_RATE_HZ + gapMs),
 };
+
+const editScript = values.edits === undefined ? undefined : readEditScript(values.edits);
 
 const outDir = resolve(dirname(fileURLToPath(import.meta.url)), "../out");
 const base = resolve(outDir, `sim-${worldName}-${seed}`);
@@ -179,7 +196,16 @@ const report = runWithInvariants({
   startMinutes,
   tickRateHz: TICK_RATE_HZ,
   ...(restore ? { restore } : {}),
+  ...(editScript ? { edits: scriptedEdits(editScript) } : {}),
+  onEdit: (log) => {
+    const { ms, ...logged } = log;
+    lines.push(JSON.stringify({ kind: "edit", ...logged }));
+    console.log(`${time(log.step)}  edit  ${describeEdit(log)}, ${ms.toFixed(1)} ms`);
+  },
   onEnd: (simulation) => {
+    const { model } = simulation.state;
+    const navigation = simulation.state.pathfinderFor(speciesId)?.navigation;
+    if (navigation) mapInputs = [model.definition, model, navigation];
     if (values.save === undefined) return;
     const saved = saveThroughText(simulation, Date.now());
     if (!saved.ok) throw new Error(saved.problem);
@@ -198,12 +224,6 @@ const report = runWithInvariants({
       let points = trajectories.get(c.id);
       if (!points) trajectories.set(c.id, (points = []));
       points.push({ x: c.position.x, z: c.position.z });
-    }
-    if (!mapInputs) {
-      const { model, registries } = simulation.state;
-      const world = registries.worlds.get(preset.worldId) as WorldDefinition | undefined;
-      const navigation = simulation.state.pathfinderFor(speciesId)?.navigation;
-      if (world && navigation) mapInputs = [world, model, navigation];
     }
   },
 });
@@ -225,6 +245,7 @@ console.log(
 );
 if (report.restore) console.log(`  restore: ${describeRestore(report.restore)}`);
 console.log(`  decisions: ${report.decisions}`);
+if (editScript) console.log(`  edits: ${describeEdits(report.edits)}`);
 console.log(
   `  events: ${Object.entries(report.eventCounts)
     .map(([type, n]) => `${type} ${n}`)
@@ -293,4 +314,46 @@ function describeRestore({ gapMs, catchUp, ...dropped }: RestoreReport): string 
     .filter(([, list]) => list.length > 0)
     .map(([name, list]) => `${name} ${JSON.stringify(list)}`);
   return [away, caught, ...lists].join(", ");
+}
+
+/** An edit script, read and checked; throws with the reason otherwise. */
+function readEditScript(file: string) {
+  let json: unknown;
+  try {
+    json = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`--edits ${file}: not a readable JSON file (${String(error)})`, {
+      cause: error,
+    });
+  }
+  try {
+    return parseEditScript(json);
+  } catch (error) {
+    throw new Error(
+      `--edits ${file}:
+${error instanceof Error ? error.message : String(error)}`,
+      {
+        cause: error,
+      },
+    );
+  }
+}
+
+/** An edit request's outcome: what it did and warned of, or why it was refused. */
+function describeEdit({ request, edit, result }: EditLog): string {
+  const what = "undo" in request ? "undo" : "edit";
+  const ops = (edit?.ops ?? [])
+    .map((op) => `${op.op} ${op.id ?? ("prop" in op ? op.prop : "")}`)
+    .join(", ");
+  if (!result.ok) {
+    return `${what} rejected${ops ? ` (${ops})` : ""}: ${result.diagnostics.map(formatDiagnostic).join("; ")}`;
+  }
+  const relocated = result.relocated.map(
+    (r) => `${r.creatureId} to ${r.to.regionId} (${r.to.x.toFixed(1)}, ${r.to.z.toFixed(1)})`,
+  );
+  return [
+    `${what} applied: ${result.edit.ops.map((op) => `${op.op} ${op.id}`).join(", ")}`,
+    ...(relocated.length > 0 ? [`relocated ${relocated.join(", ")}`] : []),
+    ...result.warnings.map((w) => `warning ${w.code}: ${w.message}`),
+  ].join(", ");
 }

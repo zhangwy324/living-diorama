@@ -389,6 +389,43 @@ describe("Simulation edits", () => {
     expect((creature.action?.state as { placementId?: string }).placementId).not.toBe(target);
   });
 
+  it("interrupts a walk whose goal the edit covers, without a path_failed", () => {
+    const simulation = hollowSim(3);
+    const creature = spawn(simulation, MOSSLING, "meadow");
+    let path: PathState | undefined;
+    for (let n = 0; n < 400 && !path; n++) {
+      simulation.step();
+      const state = creature.action?.state as Partial<PathState> | undefined;
+      const goal = state?.points?.at(-1);
+      if (
+        creature.action?.id === "core:follow_path" &&
+        goal &&
+        Math.hypot(goal.x - creature.position.x, goal.z - creature.position.z) > 4
+      ) {
+        path = state as PathState;
+      }
+    }
+    if (!path) throw new Error("The mossling never walked far");
+    const goal = path.points.at(-1)!;
+    const result = simulation.applyEdit(
+      edit({
+        ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: goal.x, z: goal.z } }],
+      }),
+    );
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    expect(result.relocated).toEqual([]);
+    const { masks } = simulation.state.pathfinderFor(MOSSLING)!.navigation;
+    expect(masks.get(goal.regionId)!.isWalkableAt(goal.x, goal.z)).toBe(false);
+    expect(creature.action).toBeUndefined();
+    expect(creature.lastResult).toEqual({
+      action: "core:follow_path",
+      outcome: "interrupted",
+      reason: "world_edited",
+    });
+    const events = simulation.step();
+    expect(events.map((e) => e.type)).not.toContain("path_failed");
+  });
+
   it("replans the route of an action that carries on", () => {
     const simulation = hollowSim(3);
     const creature = spawn(simulation, MOSSLING, "meadow");

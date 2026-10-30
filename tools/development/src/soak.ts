@@ -1,6 +1,7 @@
 import { availableParallelism } from "node:os";
 import { parseArgs } from "node:util";
 import { Worker } from "node:worker_threads";
+import { addEditReports, describeEdits, emptyEditReport } from "./edit-cycles";
 import {
   AMPHIBIANS,
   crashedSeed,
@@ -21,6 +22,10 @@ import {
 // schema (ADR 0019): a restore without a gap must carry on exactly as the unbroken run, compared
 // tick by tick for 10 simulated minutes, and one restore after a long gap per run is checked
 // against the catch-up rules (ADR 0018 §19).
+//
+// Each run also makes `--edits` random prop edits at steps drawn from its seed, some of them undos
+// (ADR 0021, `edit-cycles.ts`), with every check held after each; the summary counts them by outcome
+// and gives the `applyEdit` times.
 //
 // Each seed's line also gives the spread of bedtimes and wake times across the creatures the sleep
 // check holds to (issue #159), and the summary the narrowest and widest of those spreads. A run is
@@ -44,6 +49,8 @@ const { values } = parseArgs({
     restores: { type: "string", default: "4" },
     "compare-minutes": { type: "string", default: "10" },
     "no-long-gap": { type: "boolean", default: false },
+    // Random prop edits per run, about one in five an undo; 0 for none.
+    edits: { type: "string", default: "24" },
     // Seeds run at once, by default one per logical core: the fastest measured (docs/development.md).
     jobs: { type: "string", default: String(availableParallelism()) },
   },
@@ -63,7 +70,11 @@ const config: SoakConfig = {
     compareTicks: Math.round(Number(values["compare-minutes"]) * 60 * tickRateHz),
     longGap: !values["no-long-gap"],
   },
+  edits: Number(values.edits),
 };
+if (!Number.isInteger(config.edits) || config.edits < 0) {
+  throw new Error(`--edits must be a whole number ≥ 0`);
+}
 
 const started = performance.now();
 /** Results by seed, printed as soon as every seed before them is in. */
@@ -93,11 +104,16 @@ if (jobs === 1) {
 const sum = (of: (r: SeedResult) => number) => results.reduce((n, r) => n + of(r), 0);
 const failed = results.filter((r) => r.failed).length;
 console.log(
-  `${sum((r) => r.restores)} saves restored, ` +
+  `${sum((r) => r.restores)} saves restored (${sum((r) => r.editedRestores)} of an edited world), ` +
     `${sum((r) => r.comparedTicks)} ticks compared with unbroken runs, ` +
     `largest save ${(Math.max(0, ...results.map((r) => r.largestSaveBytes)) / 1024).toFixed(0)} KiB of JSON, ` +
     `${sum((r) => r.fullHomes)} sleepers caught up away from a full home`,
 );
+if (config.edits > 0) {
+  console.log(
+    describeEdits(results.reduce((sum, r) => addEditReports(sum, r.edits), emptyEditReport())),
+  );
+}
 if (!config.mosslingsOnly) {
   AMPHIBIANS.forEach(({ name }, i) => {
     const per = results.flatMap((r) => r.amphibians[i] ?? []);

@@ -153,6 +153,16 @@ describe("long-run checks", () => {
     const filtered = checker({ meals: { hours: 1 } });
     filtered.live(0, 2 * HOUR, "day", { checkMeals: false });
     expect(filtered.violations).toEqual([]);
+
+    // While the filter leaves a creature out (a world edit took its food out of reach), its clock
+    // stops, and runs on from there, not from 0, once it holds the creature again.
+    const paused = checker({ meals: {} });
+    paused.live(0, 2 * HOUR, "day");
+    paused.live(2 * HOUR, 5 * HOUR, "day", { checkMeals: false });
+    paused.live(7 * HOUR, HOUR, "day");
+    expect(paused.violations).toEqual([]);
+    paused.live(8 * HOUR, 1, "day");
+    expect(paused.violations).toEqual(["c1: no meal for 3 h awake"]);
   });
 
   it("checks that creatures sleep most of the night only when asked", () => {

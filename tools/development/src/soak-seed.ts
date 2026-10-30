@@ -1,3 +1,4 @@
+import { emptyEditReport, randomEdits, type EditReport } from "./edit-cycles";
 import { beaver, carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
 import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 import { spread } from "./time-spread";
@@ -22,6 +23,8 @@ export interface SoakConfig {
   /** Leave out the amphibians and the swimmer. */
   mosslingsOnly: boolean;
   saveRestore: { cycles: number; compareTicks: number; longGap: boolean };
+  /** Random prop edits per run, some of them undos (ADR 0021). */
+  edits: number;
 }
 
 /** One seed's outcome: what to print for it and what the summary adds up. */
@@ -31,6 +34,8 @@ export interface SeedResult {
   lines: string[];
   failed: boolean;
   restores: number;
+  /** Restores of a world edited earlier in the run. */
+  editedRestores: number;
   comparedTicks: number;
   largestSaveBytes: number;
   /** Creatures put to bed by catch-up away from a full home (issue #158). */
@@ -40,6 +45,8 @@ export interface SeedResult {
    * over its creatures, and the share of time in water. Empty when the run never finished.
    */
   amphibians: { jumps: number; water: number; land: number; share: number }[];
+  /** The random edits: counts by outcome and `applyEdit` times. */
+  edits: EditReport;
   /** How many minutes apart the earliest and latest bedtimes, and wake times; none if no times. */
   bedSpread?: number;
   wakeSpread?: number;
@@ -62,6 +69,7 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
     alsoSpawn: config.mosslingsOnly ? {} : { [otter.id]: 1, [beaver.id]: 1, [carp.id]: 1 },
     ...LIVING_BEHAVIOR_CHECKS,
     saveRestore: config.saveRestore,
+    edits: randomEdits(seed, config.ticks, { count: config.edits }),
     onTick: (simulation, events) => {
       for (const e of events) {
         if (e.type === "first_use_of_structure") structureUsers.add(e.creatureId);
@@ -113,16 +121,19 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
     `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
     `bed ${spread(bedtimes, "n/a")}, woke ${spread(wakeTimes, "n/a")} across ${sleepers.length} ` +
-    `sleepers, ${report.saveRestore.restores} restores${describeLongGap(report.saveRestore.longGap)}, ` +
+    `sleepers, ${report.saveRestore.restores} restores (${report.saveRestore.editedRestores} of an edited world)${describeLongGap(report.saveRestore.longGap)}, ` +
+    `${describeSeedEdits(report.edits)}` +
     `${Math.round(report.elapsedMs)} ms`;
   return {
     seed,
     lines: [line, ...problems.map((problem) => `  ${problem}`)],
     failed: problems.length > 0,
     restores: report.saveRestore.restores,
+    editedRestores: report.saveRestore.editedRestores,
     comparedTicks: report.saveRestore.comparedTicks,
     largestSaveBytes: report.saveRestore.largestSaveBytes,
     fullHomes: report.saveRestore.fullHomes,
+    edits: report.edits,
     amphibians,
     ...(bedtimes.length > 0 ? { bedSpread: Math.max(...bedtimes) - Math.min(...bedtimes) } : {}),
     ...(wakeTimes.length > 0
@@ -139,9 +150,11 @@ export function crashedSeed(seed: number, error: unknown): SeedResult {
     lines: [`seed ${seed}: FAILED, the run crashed`, ...message.split("\n").map((l) => `  ${l}`)],
     failed: true,
     restores: 0,
+    editedRestores: 0,
     comparedTicks: 0,
     largestSaveBytes: 0,
     fullHomes: 0,
+    edits: emptyEditReport(),
     amphibians: [],
   };
 }
@@ -154,4 +167,13 @@ function describeLongGap(longGap: { gapMs: number; at: string } | undefined): st
   return longGap
     ? ` (one after ${(longGap.gapMs / 3_600_000).toFixed(1)} h away, back at ${longGap.at})`
     : "";
+}
+
+/** A seed's edits in brief: applied (undos), rejected and creatures relocated. */
+function describeSeedEdits(edits: EditReport): string {
+  const rejected = Object.values(edits.rejected).reduce((a, b) => a + b, 0);
+  return (
+    `${edits.applied} edits (${edits.undos} undos, ${rejected} rejected, ` +
+    `${edits.relocated} relocated), `
+  );
 }
