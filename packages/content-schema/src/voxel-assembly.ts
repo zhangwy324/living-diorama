@@ -886,8 +886,8 @@ function seededRandom(seed: number): () => number {
 
 const IDENTITY_MATRIX: Matrix = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
-/** A deep copy of a part, with `source` when given. */
-const copyPart = (part: VoxelPart, source?: string): VoxelPart => ({
+/** A deep copy of a part, with `source` when given: it shares no objects with `part`. */
+export const copyVoxelPart = (part: VoxelPart, source?: string): VoxelPart => ({
   ...part,
   ...(source === undefined ? {} : { source }),
   size: { ...part.size },
@@ -903,11 +903,15 @@ const copyInstance = ({ parent, rotation, ...rest }: VoxelInstance): VoxelInstan
   rotation: [...rotation],
 });
 
-/** A local ID from a content ID's name: `hollow:legs/short` becomes `legs-short`. */
-const localName = (id: string): string => parseContentId(id)?.name.replace(/[./]/g, "-") ?? "part";
+/**
+ * The key an assembly holds a library part under, from its content ID's name:
+ * `hollow:legs/short` becomes `legs-short` (`claimId` adds `-2`, `-3`… on a clash).
+ */
+export const partKeyOf = (id: string): string =>
+  parseContentId(id)?.name.replace(/[./]/g, "-") ?? "part";
 
 /** `base`, or `base-2`, `base-3`… when that is taken; marks the one it returns taken. */
-function claim(base: string, taken: Set<string>): string {
+export function claimId(base: string, taken: Set<string>): string {
   let id = base;
   for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
   taken.add(id);
@@ -964,15 +968,15 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
   const libraryKeys = new Map<string, string>();
   if ("instances" in start) {
     for (const [key, part] of Object.entries(start.parts)) {
-      assembly.parts[key] = copyPart(part);
+      assembly.parts[key] = copyVoxelPart(part);
       if (part.source !== undefined && !libraryKeys.has(part.source)) {
         libraryKeys.set(part.source, key);
       }
     }
     assembly.instances = start.instances.map(copyInstance);
   } else {
-    const key = localName(start.id);
-    assembly.parts[key] = copyPart(start.part, start.id);
+    const key = partKeyOf(start.id);
+    assembly.parts[key] = copyVoxelPart(start.part, start.id);
     libraryKeys.set(start.id, key);
     assembly.instances.push({
       id: key,
@@ -1128,9 +1132,9 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
       if ("key" in chosen) {
         key = chosen.key;
       } else {
-        key = claim(localName(chosen.library.id), keys);
+        key = claimId(partKeyOf(chosen.library.id), keys);
         libraryKeys.set(chosen.library.id, key);
-        const copy = copyPart(part, chosen.library.id);
+        const copy = copyVoxelPart(part, chosen.library.id);
         assembly.parts[key] = copy;
         grids.set(copy, gridOf(part));
         faceCounts.set(copy, facesOf(part));
@@ -1138,7 +1142,7 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
       placementsOf(chosen).forEach((placement, k) => {
         const side = item(free, k);
         const instance = {
-          id: claim(side.socket.id, ids),
+          id: claimId(side.socket.id, ids),
           part: key,
           parent: { instance: parent.id, socket: side.socket.id },
           rotation: [...IDENTITY_QUATERNION] as Quaternion,
