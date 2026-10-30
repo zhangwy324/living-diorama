@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
-import type { AssemblyPick, AssemblyView } from "@living-diorama/renderer";
+import { scoreSockets, type VoxelAssembly } from "@living-diorama/content-schema";
+import type { AssemblyGhost, AssemblyPick, AssemblyView } from "@living-diorama/renderer";
 import type { CheckedLimits } from "@living-diorama/simulation";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LibrarySnapshot, ReleaseVoxelParams, Released } from "../studio-protocol";
-import { AssemblyEditor, type BuildClient } from "./AssemblyEditor";
-import { TOO_BIG_HINT } from "./assembly-state";
+import { AssemblyEditor, type BuildClient, type LoadRequest } from "./AssemblyEditor";
+import {
+  NOTHING_TO_FILL,
+  randomize,
+  startBuild,
+  STEP_SPREAD_HINT,
+  TOO_BIG_HINT,
+} from "./assembly-state";
 import { builtInParts } from "./fixtures/built-in-parts";
 import type { AskLimits } from "./limits";
+import { partsKit } from "./parts-kit";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,7 +27,9 @@ const view = vi.hoisted(() => ({
   assembly: undefined as unknown,
   highlighted: [] as unknown[],
   selection: [] as string[],
+  ghost: undefined as AssemblyGhost | undefined,
   walking: false,
+  probe: undefined as AssemblyView["probe"] | undefined,
 }));
 vi.mock("@living-diorama/renderer", () => ({
   createAssemblyView: (): Partial<AssemblyView> => ({
@@ -32,11 +42,14 @@ vi.mock("@living-diorama/renderer", () => ({
     setSelection: (ids) => {
       view.selection = [...ids];
     },
-    setGhost: () => {},
+    setGhost: (ghost) => {
+      view.ghost = ghost;
+    },
     setTestWalk: (motion) => {
       view.walking = motion !== undefined;
     },
     pick: () => view.under,
+    probe: (x, y) => view.probe?.(x, y),
     dispose: () => {},
     thumbnails: {
       part: () => Promise.resolve("data:image/png;base64,"),
@@ -56,6 +69,8 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   view.under = undefined;
+  view.ghost = undefined;
+  view.probe = undefined;
   window.matchMedia = (query: string) =>
     ({
       matches: false,
@@ -73,7 +88,10 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-async function setup(askLimits: AskLimits = () => Promise.resolve(NO_LIMITS)) {
+async function setup(
+  askLimits: AskLimits = () => Promise.resolve(NO_LIMITS),
+  firstLoad?: LoadRequest,
+) {
   const releaseVoxel = vi.fn<(params: ReleaseVoxelParams) => Promise<Released>>();
   const client: BuildClient = {
     parts: () => Promise.resolve(builtInParts()),
@@ -83,30 +101,53 @@ async function setup(askLimits: AskLimits = () => Promise.resolve(NO_LIMITS)) {
   const onReleaseStart = vi.fn();
   const onUnsaved = vi.fn();
   root = createRoot(container);
-  const render = (active: boolean) =>
+  let loadRequest = firstLoad;
+  let shown = true;
+  const render = () =>
     root?.render(
       <AssemblyEditor
-        active={active}
-        keysEnabled={active}
+        active={shown}
+        keysEnabled={shown}
         library={LIBRARY}
         modeSwitch={null}
         askLimits={askLimits}
         client={client}
+        loadRequest={loadRequest}
         onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsaved}
       />,
     );
-  await act(async () => render(true));
+  await act(async () => render());
   return {
     releaseVoxel,
     onReleased,
     onReleaseStart,
     onUnsaved,
     /** Shows or hides Build mode, as the Studio's switch does. */
-    show: (active: boolean) => act(async () => render(active)),
+    show: (active: boolean) => {
+      shown = active;
+      return act(async () => render());
+    },
+    /** Asks the editor to load a creature, as Edit a copy will. */
+    load: (request: LoadRequest) => {
+      loadRequest = request;
+      return act(async () => render());
+    },
   };
 }
+
+const shown = () => view.assembly as VoxelAssembly;
+const nameField = () => {
+  const input = container.querySelector<HTMLInputElement>('input[type="text"]');
+  if (!input) throw new Error("No name field");
+  return input;
+};
+const labelled = (label: string) => {
+  const found = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  if (!found) throw new Error(`No button "${label}"`);
+  return found;
+};
 
 const button = (text: string) => {
   const found = [...container.querySelectorAll("button")].find((b) =>
@@ -229,4 +270,356 @@ it("walks the creature in the confirm step only while Build mode is shown", asyn
   expect(view.walking).toBe(false);
   await show(true);
   expect(view.walking).toBe(true);
+});
+
+it("recolours the selected part from the suggested colours, as one undo step", async () => {
+  await setup();
+  await click(trayPart("Round head"));
+  expect(container.querySelector(".part-colours")).not.toBeNull();
+  const neckColor = () => {
+    const neck = shown().instances.find((instance) => instance.id === "neck");
+    return neck && shown().parts[neck.part]?.colors[1];
+  };
+  const before = neckColor();
+  // The second colour slot, then a suggested colour.
+  await click(labelled(`Colour 2, ${before ?? ""}`));
+  const suggested = container.querySelectorAll<HTMLButtonElement>(".suggested-colours .swatch");
+  expect(suggested.length).toBe(partsKit(builtInParts())?.suggestedColors.length);
+  const swatch = [...suggested].find((b) => b.title !== before);
+  if (!swatch) throw new Error("No other colour");
+  await click(swatch);
+  expect(neckColor()).toBe(swatch.title);
+  expect(swatch.getAttribute("aria-pressed")).toBe("true");
+  await key({ key: "z", ctrlKey: true });
+  expect(neckColor()).toBe(before);
+  // No part selected: no colours.
+  await key({ key: "Escape" });
+  expect(container.querySelector(".part-colours")).toBeNull();
+});
+
+it("turns with R, steps a part with − and hints at a spread of steps", async () => {
+  await setup();
+  await click(trayPart("Paw leg"));
+  view.under = { kind: "socket", instance: "four-legged-torso", socket: "back-left" };
+  await clickStage();
+  await key({ key: "r" });
+  const leg = () => shown().instances.find((instance) => instance.id === "back-left");
+  expect(leg()?.rotation).not.toEqual([0, 0, 0, 1]);
+  // Eyes on a head, then one step finer: two steps from the torso's.
+  await click(trayPart("Round head"));
+  await click(trayPart("Bead eye"));
+  expect(container.textContent).not.toContain(STEP_SPREAD_HINT);
+  await key({ key: "-" });
+  expect(container.querySelector(".hints")?.textContent).toContain(STEP_SPREAD_HINT);
+  // As small as they go: said over the view.
+  await key({ key: "-" });
+  expect(container.querySelector(".stage-notice")?.textContent).toBe(
+    "Its cubes are as small as they go.",
+  );
+  // Never while typing.
+  const turned = leg()?.rotation;
+  await act(async () =>
+    nameField().dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true })),
+  );
+  expect(leg()?.rotation).toEqual(turned);
+});
+
+it("grows the whole creature, and says when it can't grow more", async () => {
+  await setup();
+  const height = () => container.querySelector(".size-readout .measured")?.textContent;
+  const before = height();
+  await click(labelled("Bigger creature"));
+  expect(height()).not.toBe(before);
+  await click(labelled("Bigger creature"));
+  expect(container.querySelector(".stage-notice")?.textContent).toContain("can't grow any more");
+  await click(labelled("Smaller creature"));
+  expect(height()).toBe(before);
+});
+
+it("randomizes, fills empty places and resets, each one undo step", async () => {
+  const { onUnsaved } = await setup();
+  expect(button("Reset").disabled).toBe(true);
+  await click(button("Randomize"));
+  const random = shown();
+  expect(random.instances.length).toBeGreaterThan(1);
+  expect(onUnsaved).toHaveBeenLastCalledWith(true);
+  await click(button("Fill empty"));
+  expect(shown()).toBe(random);
+  expect(container.querySelector(".stage-notice")?.textContent).toBe(NOTHING_TO_FILL);
+  await click(button("Reset"));
+  expect(shown()).toMatchObject({ instances: [{ id: "four-legged-torso" }] });
+  expect(onUnsaved).toHaveBeenLastCalledWith(false);
+  await key({ key: "z", ctrlKey: true });
+  expect(shown()).toBe(random);
+  // Fill empty keeps what is there.
+  await click(button("Reset"));
+  await click(trayPart("Round head"));
+  await click(button("Fill empty"));
+  expect(
+    shown()
+      .instances.map((i) => i.id)
+      .slice(0, 2),
+  ).toEqual(["four-legged-torso", "neck"]);
+  expect(shown().instances.length).toBeGreaterThan(2);
+});
+
+it("loads a creature to edit afresh, and Reset and closing compare against it", async () => {
+  const kit = partsKit(builtInParts());
+  if (!kit) throw new Error("No kit");
+  const loaded = randomize(startBuild(kit), kit, 2).history.present;
+  const { onUnsaved, load } = await setup(undefined, {
+    key: 1,
+    assembly: loaded,
+    name: "Bramble copy",
+  });
+  expect(shown()).toBe(loaded);
+  expect(nameField().value).toBe("Bramble copy");
+  expect(onUnsaved).toHaveBeenLastCalledWith(false);
+  expect(labelled("Undo (Ctrl+Z)").disabled).toBe(true);
+  expect(button("Reset").disabled).toBe(true);
+
+  await click(labelled("Bigger creature"));
+  expect(onUnsaved).toHaveBeenLastCalledWith(true);
+  await click(button("Reset"));
+  expect(shown()).toBe(loaded);
+  expect(onUnsaved).toHaveBeenLastCalledWith(false);
+
+  // The same key again loads nothing anew; a new key does, from the confirm step too.
+  await click(labelled("Bigger creature"));
+  await load({ key: 1, assembly: loaded, name: "Bramble copy" });
+  expect(shown()).not.toBe(loaded);
+  await click(button("Next"));
+  const other = randomize(startBuild(kit), kit, 3).history.present;
+  await load({ key: 2, assembly: other, name: "Moss copy" });
+  expect(shown()).toBe(other);
+  expect(nameField().value).toBe("Moss copy");
+  expect(button("Next")).toBeDefined();
+  expect(labelled("Undo (Ctrl+Z)").disabled).toBe(true);
+});
+
+describe("drag-to-socket", () => {
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
+      setTimeout(() => run(0), 0),
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  /**
+   * Build mode with a 400 px view whose pointer at (100, 100) points straight at the back-left
+   * hip; each pixel turns it a little.
+   */
+  async function dragSetup() {
+    const editor = await setup();
+    const stage = container.querySelector<HTMLDivElement>(".assembly-stage");
+    if (!stage) throw new Error("No stage");
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 400 }) as DOMRect;
+    const [backLeft] = scoreSockets(
+      shown(),
+      [{ instance: "four-legged-torso", socket: "back-left" }],
+      { origin: { x: 0, y: 0, z: 0 }, direction: { x: 1, y: 0, z: 0 } },
+    );
+    if (!backLeft) throw new Error("No back-left");
+    const from = { x: 0, y: 2, z: 2 };
+    view.probe = (x, y) => ({
+      origin: from,
+      direction: {
+        x: backLeft.position.x - from.x + (x - 100) * 0.002,
+        y: backLeft.position.y - from.y - (y - 100) * 0.002,
+        z: backLeft.position.z - from.z,
+      },
+    });
+    return editor;
+  }
+
+  /** A pointer event at (x, y), the button held for a press or a move. */
+  const pointer = (type: string, x: number, y: number, target: EventTarget = window) =>
+    act(async () => {
+      const held = type === "pointerdown" || type === "pointermove";
+      target.dispatchEvent(
+        // jsdom has no PointerEvent; a mouse event carries what the drag reads.
+        new MouseEvent(type, {
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: held ? 1 : 0,
+          bubbles: true,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
+  /** Presses a tray part and drags it to (x, y), not yet released. */
+  async function dragTo(part: string, x: number, y: number) {
+    await pointer("pointerdown", 20, 300, trayPart(part));
+    await pointer("pointermove", x, y);
+  }
+
+  /** Releases over a tray part, and the click the browser sends straight after it. */
+  const releaseOn = (part: string) =>
+    act(async () => {
+      const target = trayPart(part);
+      target.dispatchEvent(
+        new MouseEvent("pointerup", { clientX: 20, clientY: 300, bubbles: true }),
+      );
+      target.click();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
+  it("drops a tray part on the socket it points at, showing the ghost there first", async () => {
+    await dragSetup();
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    // Not yet a drag: nothing marked.
+    await pointer("pointermove", 22, 300);
+    expect(view.highlighted).toEqual([]);
+    await pointer("pointermove", 100, 101);
+    expect(view.highlighted).toHaveLength(4);
+    const token = container.querySelector<HTMLElement>(".drag-token");
+    expect(token?.textContent).toBe("Paw leg");
+    expect(token?.style.left).toBe("100px");
+    expect(view.ghost?.sockets).toEqual([
+      { instance: "four-legged-torso", socket: "back-left" },
+      { instance: "four-legged-torso", socket: "back-right" },
+    ]);
+    // The token follows the pointer.
+    await pointer("pointermove", 101, 100);
+    expect(token?.style.left).toBe("101px");
+    await pointer("pointerup", 101, 100);
+    expect(shown().instances.map((i) => i.id)).toEqual([
+      "four-legged-torso",
+      "back-left",
+      "back-right",
+    ]);
+    expect(view.ghost).toBeUndefined();
+    expect(container.querySelector(".drag-token")).toBeNull();
+
+    // Dropped away from every socket: nothing placed.
+    await dragTo("Round head", 380, 20);
+    await pointer("pointerup", 380, 20);
+    expect(shown().instances).toHaveLength(3);
+  });
+
+  it("swaps the torso for one dropped anywhere on the view", async () => {
+    await dragSetup();
+    await dragTo("Upright torso", 300, 300);
+    expect(container.querySelector(".stage-hint")?.textContent).toContain("swap the torso");
+    await pointer("pointerup", 300, 300);
+    const root = shown().instances[0];
+    expect(root && shown().parts[root.part]?.source).toBe("hollow:upright-torso");
+  });
+
+  it("cancels with Escape, and the release over the part it began on doesn't pick it", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    await key({ key: "Escape" });
+    expect(container.querySelector(".drag-token")).toBeNull();
+    expect(view.ghost).toBeUndefined();
+    // Moving on and letting go does nothing.
+    await pointer("pointermove", 100, 100);
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("false");
+    expect(shown().instances).toHaveLength(1);
+    // The next plain click picks as usual.
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("doesn't pick the part a drag ends on, but a later click does", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    await pointer("pointermove", 20, 300);
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("false");
+    expect(view.highlighted).toEqual([]);
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("drops a press whose release was missed, and a drag when the window loses focus", async () => {
+    await dragSetup();
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    // A move with no button down: the release happened elsewhere.
+    await act(async () =>
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 100, clientY: 101 })),
+    );
+    await pointer("pointermove", 100, 101);
+    expect(container.querySelector(".drag-token")).toBeNull();
+
+    await dragTo("Paw leg", 100, 101);
+    expect(container.querySelector(".drag-token")).not.toBeNull();
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(container.querySelector(".drag-token")).toBeNull();
+    await pointer("pointerup", 100, 101);
+    expect(shown().instances).toHaveLength(1);
+  });
+
+  it("stops listening when unmounted mid-drag", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    act(() => root?.unmount());
+    root = undefined;
+    await pointer("pointermove", 120, 120);
+    await pointer("pointerup", 120, 120);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+});
+
+it("ends a run of picker colours on change, focus and another slot", async () => {
+  await setup();
+  await click(trayPart("Round head"));
+  const picker = container.querySelector<HTMLInputElement>('.colour-picker input[type="color"]');
+  if (!picker) throw new Error("No picker");
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  /** The picker moves to `color`, as React hears it. */
+  const move = (color: string) =>
+    act(async () => {
+      setValue?.call(picker, color);
+      picker.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const fire = (type: string) => act(async () => picker.dispatchEvent(new Event(type)));
+  const undoSteps = async () => {
+    let steps = 0;
+    while (!labelled("Undo (Ctrl+Z)").disabled && steps < 20) {
+      await click(labelled("Undo (Ctrl+Z)"));
+      steps++;
+    }
+    return steps;
+  };
+  // One opening, many moves: one step, then the change as it closes ends it.
+  await move("#111111");
+  await move("#222222");
+  await fire("change");
+  await move("#333333");
+  // A cancelled dialog sends no change, but the next opening focuses the picker.
+  await act(async () => picker.focus());
+  await move("#444444");
+  await move("#555555");
+  // Another slot ends a run too.
+  await click(container.querySelectorAll<HTMLButtonElement>(".colour-slots .swatch")[1] ?? picker);
+  await move("#666666");
+  // Placing the head, then four runs.
+  expect(await undoSteps()).toBe(5);
+});
+
+it("loads a creature that arrives during a release once the release is done", async () => {
+  const kit = partsKit(builtInParts());
+  if (!kit) throw new Error("No kit");
+  const { releaseVoxel, load } = await setup();
+  let finish: (released: Released) => void = () => {};
+  releaseVoxel.mockReturnValueOnce(new Promise<Released>((resolve) => (finish = resolve)));
+  await click(button("Next"));
+  await click(button("Release"));
+  const loaded = randomize(startBuild(kit), kit, 5).history.present;
+  await load({ key: 7, assembly: loaded, name: "Fern copy" });
+  // Not while the release is on its way.
+  expect(shown()).not.toBe(loaded);
+  await act(async () => finish({ speciesId: "user:x", name: "Fern" }));
+  expect(shown()).toBe(loaded);
+  expect(nameField().value).toBe("Fern copy");
+  expect(button("Reset").disabled).toBe(true);
 });

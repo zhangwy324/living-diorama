@@ -11,7 +11,7 @@ import {
   clearNotice,
   droppedText,
   ghostAt,
-  isStart,
+  sameAssembly,
   measureOf,
   pickPart,
   placeAt,
@@ -63,7 +63,7 @@ describe("Build mode's editor state", () => {
     expect(layout(present(state))).toEqual(["four-legged-torso:hollow:four-legged-torso"]);
     expect(state.mirror).toBe(true);
     expect(canUndo(state) || canRedo(state)).toBe(false);
-    expect(isStart(present(state), kit)).toBe(true);
+    expect(sameAssembly(present(state), kit.start)).toBe(true);
   });
 
   it("keeps a part picked while it has more than one place, marking its sockets", () => {
@@ -99,7 +99,7 @@ describe("Build mode's editor state", () => {
     expect(state.selected).toBe("back-left");
     expect(selectionOf(state)).toEqual(["back-left", "back-right"]);
     expect(canUndo(state)).toBe(true);
-    expect(isStart(present(state), kit)).toBe(false);
+    expect(sameAssembly(present(state), kit.start)).toBe(false);
     valid(state);
   });
 
@@ -210,11 +210,13 @@ describe("Build mode's editor state", () => {
 
   it("is back at the start by content after a part is placed and removed", () => {
     const head = pickPart(startBuild(kit), kit, "hollow:round-head");
-    expect(isStart(present(head), kit)).toBe(false);
+    expect(sameAssembly(present(head), kit.start)).toBe(false);
     // So closing then loses nothing.
-    expect(isStart(present(removeSelected(head)), kit)).toBe(true);
+    expect(sameAssembly(present(removeSelected(head)), kit.start)).toBe(true);
     // Another torso is not the start, though it has as many parts.
-    expect(isStart(present(pickPart(startBuild(kit), kit, "hollow:fish-torso")), kit)).toBe(false);
+    expect(
+      sameAssembly(present(pickPart(startBuild(kit), kit, "hollow:fish-torso")), kit.start),
+    ).toBe(false);
   });
 
   it("selecting drops the pick, and the image is selected only while mirroring", () => {

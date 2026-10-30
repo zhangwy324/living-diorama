@@ -1,9 +1,10 @@
 import type { VoxelThumbnails } from "@living-diorama/renderer";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import type { TraySection } from "./parts-kit";
 
 // Build mode's parts tray (ADR 0023 §4, §18): the parts to build with, in a section per part
-// type, each with a voxel thumbnail. Picking one marks where it can go.
+// type, each with a voxel thumbnail. Picking one marks where it can go; dragging one onto the view
+// places it.
 
 /** A tray thumbnail's size in image pixels: twice its size on screen, for sharp high-DPI screens. */
 export const TRAY_THUMBNAIL_SIZE = 112;
@@ -13,6 +14,8 @@ export function PartsTray(props: {
   /** The picked part's ID. */
   picked: string | undefined;
   onPick(partId: string): void;
+  /** A press on a part, which may become a drag onto the view (ADR 0023 §4). */
+  onPress?(partId: string, event: PointerEvent<HTMLButtonElement>): void;
   /** Draws the thumbnails; undefined until the assembly view runs. */
   thumbnails: Pick<VoxelThumbnails, "part"> | undefined;
   /** No picking in the confirm step. */
@@ -59,6 +62,7 @@ export function PartsTray(props: {
                   aria-pressed={props.picked === part.id}
                   title={part.name}
                   onClick={() => props.onPick(part.id)}
+                  onPointerDown={(event) => props.onPress?.(part.id, event)}
                 >
                   {image ? (
                     <img src={image} alt="" draggable={false} />

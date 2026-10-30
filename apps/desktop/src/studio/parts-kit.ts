@@ -22,6 +22,12 @@ export interface PartsKit {
   roots: ReadonlySet<string>;
   /** What a new creature starts from: the default torso alone. */
   start: VoxelAssembly;
+  /** Every part of a root type, by ID: what Randomize builds on (ADR 0023 §9). */
+  rootParts: readonly PartSummary[];
+  /** Every part, by ID: what Randomize and Fill empty fill sockets from. */
+  parts: readonly PartSummary[];
+  /** The packs' suggested colours, lower-case `#rrggbb` (ADR 0023 §11). */
+  suggestedColors: readonly string[];
 }
 
 export interface TraySection {
@@ -96,7 +102,12 @@ export const assemblyOf = (root: PartSummary, lookup: PartFitLookup): VoxelAssem
   assembleParts({ start: root, parts: [], lookup, seed: 0 });
 
 /** The kit for the strip's parts, or undefined when no part can be a root. */
-export function partsKit({ parts, partTypes, socketTypes }: StudioParts): PartsKit | undefined {
+export function partsKit({
+  parts,
+  partTypes,
+  socketTypes,
+  suggestedColors,
+}: StudioParts): PartsKit | undefined {
   const lookup = partFitLookup(partTypes, socketTypes);
   const roots = rootPartTypes(partTypes);
   const root = defaultRoot(parts, roots);
@@ -107,5 +118,8 @@ export function partsKit({ parts, partTypes, socketTypes }: StudioParts): PartsK
     lookup,
     roots,
     start: assemblyOf(root, lookup),
+    rootParts: parts.filter(({ part }) => roots.has(part.type)),
+    parts,
+    suggestedColors,
   };
 }

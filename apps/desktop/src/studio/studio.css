@@ -1093,3 +1093,78 @@ body,
   width: 200px;
   padding-top: 12px;
 }
+
+/* Build mode's tools beyond placing (M21 PR 5b): recolouring the selected part and dragging a
+   part from the tray. */
+.part-colours {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.part-colours h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+  color: rgb(238 243 232 / 70%);
+}
+
+.part-colours .palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.part-colours .swatch {
+  padding: 0;
+  cursor: pointer;
+}
+
+.colour-slots {
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgb(255 255 255 / 14%);
+}
+
+.colour-slots .swatch {
+  width: 26px;
+  height: 26px;
+}
+
+.colour-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.colour-picker input {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.tray-part {
+  touch-action: none;
+  user-select: none;
+}
+
+.studio-mode.dragging,
+.studio-mode.dragging * {
+  cursor: grabbing;
+}
+
+/* The dragged part's name beside the pointer. */
+.drag-token {
+  position: fixed;
+  z-index: 10;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgb(110 160 90 / 90%);
+  transform: translate(12px, 12px);
+  pointer-events: none;
+}
