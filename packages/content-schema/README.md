@@ -1,6 +1,6 @@
 # @living-diorama/content-schema
 
-Versioned data contracts for worlds, terrain, regions, connections, structures, prop types, prop categories, species, voxel part types and socket types, voxel parts and assemblies, the files of the species library, and the world save.
+Versioned data contracts for worlds, terrain, regions, connections, structures, prop types, prop categories, species, voxel part types and socket types, voxel parts and assemblies, part definitions (a voxel part registered by a pack), the files of the species library, and the world save.
 
 ## Owns
 

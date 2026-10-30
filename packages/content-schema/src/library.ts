@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { SpeciesDefinitionSchema, type BodyShape, type SpeciesDefinition } from "./definitions";
+import {
+  SpeciesDefinitionSchema,
+  writtenDrawnOnlySettings,
+  type BodyShape,
+  type SpeciesDefinition,
+} from "./definitions";
 import type { Result } from "./diagnostics";
 import { VoxelAssemblySchema, measureAssembly } from "./voxel-assembly";
 import { migrate, type Migration } from "./migrate";
@@ -118,27 +123,20 @@ export const LIBRARY_APPEARANCE_FILES = {
 export const libraryAppearance = (speciesId: string, kind: LibraryBodyKind): string =>
   `${speciesId}/${LIBRARY_APPEARANCE_FILES[kind]}`;
 
-/** Body plan settings a voxel species may not have: its cubes give its shape and anchors. */
-const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
-
 /**
  * Rejects drawn-only body plan settings on a voxel species, as written. Parsing the species fills
  * in their defaults, so the parsed entry drops them again (`dropDrawnOnlySettings`).
  */
 function checkVoxelBodyPlan(input: unknown, ctx: z.RefinementCtx): void {
-  const record = (value: unknown) =>
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-  const entry = record(input);
-  if (record(entry?.body)?.kind !== "voxel") return;
-  const plan = record(record(entry?.species)?.body);
-  for (const setting of DRAWN_ONLY_BODY_SETTINGS) {
-    if (plan && setting in plan) {
-      ctx.addIssue({
-        code: "custom",
-        message: `A voxel species has no ${setting}: its cubes give it`,
-        path: ["species", "body", setting],
-      });
-    }
+  if (typeof input !== "object" || input === null) return;
+  const entry = input as { body?: { kind?: unknown }; species?: unknown };
+  if (entry.body?.kind !== "voxel") return;
+  for (const setting of writtenDrawnOnlySettings(entry.species)) {
+    ctx.addIssue({
+      code: "custom",
+      message: `A voxel species has no ${setting}: its cubes give it`,
+      path: ["species", "body", setting],
+    });
   }
 }
 

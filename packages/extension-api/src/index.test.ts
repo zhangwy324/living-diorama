@@ -15,6 +15,7 @@ import {
   createRegistries,
   partFitsSocket,
   resolveReferences,
+  sortedParts,
   sortedPartTypes,
   sortedPropCategories,
   sortedSocketTypes,
@@ -836,6 +837,150 @@ describe("part types and socket types", () => {
     expect(checkAssemblyTypes(registries, assembly("test:wing")).map((d) => d.code)).toEqual([
       "unknown_part_type",
     ]);
+  });
+});
+
+describe("parts", () => {
+  const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
+  const partType = (id: string, fits: string[]) => ({
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    name: id,
+    fits,
+  });
+  const hip = { id: "hip", type: "test:hip", position: { x: 1, y: 0, z: 1 } };
+  const torso = (id: string, sockets: unknown[] = [hip], type = "test:torso") => ({
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    name: "Box torso",
+    part: {
+      type,
+      size: { x: 2, y: 2, z: 2 },
+      step: 0.05,
+      colors: ["#7fae5a"],
+      voxels: [8, 1],
+      attach: { x: 1, y: 0, z: 1 },
+      sockets,
+    },
+  });
+  function registered(): Registries {
+    const registries = createRegistries();
+    expectOk(registries.socketTypes.register(socketType("test:hip")));
+    expectOk(registries.partTypes.register(partType("test:torso", [])));
+    return registries;
+  }
+
+  it("registers a part whose type and socket types are registered, and lists parts by ID", () => {
+    const registries = registered();
+    expectOk(registries.parts.register(torso("test:torso-b")));
+    // Another pack's part may use this pack's types.
+    expectOk(registries.parts.register(torso("mod:torso-a")));
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+    expect(registries.parts.get("test:torso-b")?.part.sockets).toEqual([hip]);
+    expect(sortedParts(registries).map((p) => p.id)).toEqual(["mod:torso-a", "test:torso-b"]);
+  });
+
+  it("refuses a part that isn't a valid voxel part, naming it", () => {
+    const registries = registered();
+    const bad = torso("test:bad");
+    const result = registries.parts.register({
+      ...bad,
+      part: { ...bad.part, step: 0.2, voxels: [7, 1] },
+    });
+    expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([
+      "error: parts/test:bad part.step: A part's step must be one of 0.0125, 0.025, 0.05, 0.1 m (invalid_value)",
+    ]);
+    const runs = registries.parts.register({ ...bad, part: { ...bad.part, voxels: [7, 1] } });
+    expect(runs.ok ? [] : runs.diagnostics.map(formatDiagnostic)).toEqual([
+      "error: parts/test:bad part.voxels: The runs add up to 7 cubes, not the part's 8 (custom)",
+    ]);
+    expect(registries.parts.size).toBe(0);
+  });
+
+  it("refuses a part whose type or a socket's type isn't registered, naming the part", () => {
+    const registries = registered();
+    const ear = { id: "ear", type: "test:ear-mount", position: { x: 1, y: 2, z: 1 } };
+    expectOk(registries.parts.register(torso("test:wing", [hip, ear], "test:wing")));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: parts/test:wing part.type: "test:wing" is not registered in partTypes (unresolved_reference)',
+      'error: parts/test:wing part.sockets[1].type: "test:ear-mount" is not registered in socketTypes (unresolved_reference)',
+    ]);
+  });
+
+  it("refuses a part added at runtime whose types aren't registered, and adds nothing", () => {
+    const registries = registered();
+    const result = addEntries(registries, [
+      { registry: "parts", input: torso("test:wing", [hip], "test:wing") },
+    ]);
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual([
+      "unresolved_reference",
+    ]);
+    expect(registries.parts.size).toBe(0);
+    expectOk(addEntries(registries, [{ registry: "parts", input: torso("test:torso-a") }]));
+  });
+
+  it("refuses a second part with the same ID", () => {
+    const registries = registered();
+    expectOk(registries.parts.register(torso("test:torso-a")));
+    const again = registries.parts.register(torso("test:torso-a"));
+    expect(again.ok ? [] : again.diagnostics.map((d) => d.code)).toEqual(["duplicate_id"]);
+  });
+});
+
+describe("voxel species' body plans", () => {
+  const assembly = {
+    id: "test:sprites/cubes.json",
+    version: "1.0.0",
+    kind: "voxel",
+    url: "https://example.test/cubes.json",
+  };
+  const cubes = { ...species, id: "test:cubes", appearance: assembly.id };
+  function registered(): Registries {
+    const registries = createRegistries();
+    withActions(registries);
+    expectOk(registries.assets.register(assembly));
+    expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+    return registries;
+  }
+
+  it("accepts a voxel species with its gait alone, and drawn ones with any setting", () => {
+    const registries = registered();
+    expectOk(registries.species.register(cubes));
+    expectOk(
+      registries.species.register({
+        ...cubes,
+        id: "test:hopper",
+        body: { locomotion: { land: { gait: "hop" } } },
+      }),
+    );
+    expectOk(registries.species.register({ ...species, body: { thickness: 0.6, anchors: {} } }));
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+  });
+
+  it("refuses thickness and anchors on a species whose appearance is a voxel asset", () => {
+    const registries = registered();
+    expectOk(
+      registries.species.register({
+        ...cubes,
+        body: { thickness: 0.4, anchors: { tail: { x: 0, y: 0 } } },
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: species/test:cubes body.thickness: "test:cubes" is a voxel species, which has no thickness: its cubes give it (drawn_only_setting)',
+      'error: species/test:cubes body.anchors: "test:cubes" is a voxel species, which has no anchors: its cubes give it (drawn_only_setting)',
+    ]);
+  });
+
+  it("refuses them on a voxel species added at runtime, and adds nothing", () => {
+    const registries = registered();
+    expect(resolveReferences(registries).diagnostics).toEqual([]);
+    const result = addEntries(registries, [
+      { registry: "species", input: { ...cubes, body: { anchors: {} } } },
+    ]);
+    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["drawn_only_setting"]);
+    expect(registries.species.size).toBe(0);
   });
 });
 

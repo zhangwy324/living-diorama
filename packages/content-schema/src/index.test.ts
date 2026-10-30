@@ -9,11 +9,13 @@ import {
   DRAWING_SIZE,
   formatDiagnostic,
   parseContentId,
+  parsePartDefinition,
   parsePropCategoryDefinition,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
+  writtenDrawnOnlySettings,
   type Diagnostic,
   type Result,
 } from "./index";
@@ -539,5 +541,60 @@ describe("PropCategoryDefinition", () => {
       parsePropCategoryDefinition({ ...trees, name: "", order: Infinity, icon: "tree.png" }),
     );
     expect(found.map((d) => d.path.join("."))).toEqual(["name", "order", ""]);
+  });
+});
+
+describe("PartDefinition", () => {
+  const leg = {
+    schemaVersion: 1,
+    id: "test:stubby-leg",
+    version: "1.0.0",
+    name: "Stubby leg",
+    part: {
+      type: "test:leg",
+      size: { x: 1, y: 2, z: 1 },
+      step: 0.05,
+      colors: ["#7fae5a"],
+      voxels: [2, 1],
+      attach: { x: 0.5, y: 2, z: 0.5 },
+      sockets: [{ id: "foot", type: "test:foot", position: { x: 0.5, y: 0, z: 0.5 } }],
+    },
+  };
+
+  it("accepts a part inline under a header", () => {
+    expect(parsePartDefinition(leg)).toEqual({ ok: true, value: leg });
+  });
+
+  it("checks the part as a voxel part: its step on the ladder and its cubes", () => {
+    const step = diagnostics(parsePartDefinition({ ...leg, part: { ...leg.part, step: 0.03 } }));
+    expect(step.map((d) => d.path.join("."))).toEqual(["part.step"]);
+    const runs = diagnostics(
+      parsePartDefinition({ ...leg, part: { ...leg.part, voxels: [1, 1] } }),
+    );
+    expect(runs.map((d) => d.path.join("."))).toEqual(["part.voxels"]);
+  });
+
+  it("needs a name and allows nothing else", () => {
+    const found = diagnostics(parsePartDefinition({ ...leg, name: "", mirrored: true }));
+    expect(found.map((d) => d.path.join("."))).toEqual(["name", ""]);
+  });
+
+  it("names an unsupported schema version", () => {
+    const found = diagnostics(parsePartDefinition({ ...leg, schemaVersion: 2 }, "parts/x"));
+    expect(found.map((d) => [d.code, d.source])).toEqual([
+      ["unsupported_schema_version", "parts/x"],
+    ]);
+  });
+});
+
+describe("writtenDrawnOnlySettings", () => {
+  it("lists the drawn-only body settings a species sets as written", () => {
+    expect(writtenDrawnOnlySettings({ body: { thickness: 0.4, anchors: {} } })).toEqual([
+      "thickness",
+      "anchors",
+    ]);
+    expect(writtenDrawnOnlySettings({ body: { locomotion: {} } })).toEqual([]);
+    expect(writtenDrawnOnlySettings({})).toEqual([]);
+    expect(writtenDrawnOnlySettings(null)).toEqual([]);
   });
 });
