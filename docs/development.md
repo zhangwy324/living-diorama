@@ -278,6 +278,10 @@ Voxel creatures (once, in the dev app at any scale; ADR 0022, M19). The Studio c
 - [ ] Open the Creation Studio: My creatures lists each voxel species with a placeholder block for its picture, its name and its count. + and − add and take out creatures of it, and Delete removes the species and its creatures.
 - [ ] Quit from the tray and relaunch: the voxel species are listed again, and every voxel creature is back where it was, moving its own way. The app log has no warning about the library.
 
+Starter creatures (in the dev app; ADR 0022, M20). The starter parts are reached only from the console. `livingDiorama.library.starterParts()` lists the registered parts (`id`, `name`, `type`) as a table. `await livingDiorama.library.saveStarterCreature({ root, seed, plan, name })` assembles a creature from them with the assembler (`assembleParts`), saves it to My creatures and adds one of it to the world, as `saveVoxelSample` does; every option may be left out. `root` is the ID of the part to build on; by default the seed picks one of the parts no other part has a socket for (the torsos). `seed` is a whole number from 0 to 2³² − 1, random by default; `plan` is as for `saveVoxelSample` (default `"walk"`) and the name defaults to `Starter <seed>`. It logs and returns the species, the creature's ID, the root and the seed: the same root, seed and parts build the same creature again. With no parts registered it answers `no_root`.
+
+- [ ] Add a few starter creatures with random seeds: each stands on the ground with its parts joined, pairs alike on both sides, and moves its plan's way. Adding one again with a logged seed gives the same creature.
+
 ## Releasing
 
 1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`. Add the player-facing notes as `docs/release-notes/<version>.md` (for example `0.2.0.md`), and merge it. Every version needs its notes file before it is tagged: the workflow publishes it and fails without it. A release candidate tag such as `v0.2.0-rc.1` publishes `0.2.0.md`.

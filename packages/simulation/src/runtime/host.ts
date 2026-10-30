@@ -13,6 +13,7 @@ import {
   sortedParts,
   sortedPartTypes,
   sortedPropCategories,
+  sortedSocketTypes,
   type AssetEntry,
   type LocomotionRule,
   type Registries,
@@ -108,10 +109,12 @@ export function describeContent({ state }: Simulation): WorldContent {
         ]),
     ),
     propCategories: sortedPropCategories(registries).map(({ id, name }) => ({ id, name })),
-    partTypes: sortedPartTypes(registries).map(({ id, role }) => ({
+    partTypes: sortedPartTypes(registries).map(({ id, fits, role }) => ({
       id,
+      fits: [...fits],
       ...(role === undefined ? {} : { role }),
     })),
+    socketTypes: sortedSocketTypes(registries).map(({ id }) => id),
     parts: sortedParts(registries).map(({ id, name, version, part }) => ({
       id,
       name,

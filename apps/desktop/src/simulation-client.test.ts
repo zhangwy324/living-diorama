@@ -120,9 +120,17 @@ describe("simulation client", () => {
       "Plants",
       "Mushrooms",
     ]);
-    // So are the voxel part types, with their roles.
-    expect(content?.partTypes).toContainEqual({ id: "hollow:tail", role: "tail" });
-    expect(content?.partTypes).toContainEqual({ id: "hollow:leg" });
+    // So are the voxel part types, with their fits and roles, and the socket types.
+    expect(content?.partTypes).toContainEqual({
+      id: "hollow:tail",
+      fits: ["hollow:tail-base"],
+      role: "tail",
+    });
+    expect(content?.partTypes).toContainEqual({
+      id: "hollow:leg",
+      fits: ["hollow:hip", "hollow:shoulder"],
+    });
+    expect(content?.socketTypes).toContain("hollow:waist");
     tick(100);
     expect(creaturesShown(callbacks)).toHaveLength(0);
     const spawning = client.spawnStartingCreatures();
