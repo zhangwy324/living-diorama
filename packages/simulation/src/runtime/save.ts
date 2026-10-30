@@ -4,9 +4,10 @@ import {
   type Diagnostic,
   type Result,
   type RngStateSave,
+  type WorldDefinition,
   type WorldSave,
 } from "@living-diorama/content-schema";
-import type { Registries } from "@living-diorama/extension-api";
+import { checkReferences, type Registries } from "@living-diorama/extension-api";
 import type { ActionProvider, BehaviorProvider } from "../creatures/contracts";
 import type { CatchUpSkip } from "./catch-up";
 import type { WorldModel } from "../world/world-model";
@@ -15,11 +16,11 @@ import type { RngState } from "./rng";
 import type { CreatureState } from "./world-state";
 
 // Checking a parsed world save against the running world before it is restored (ADR 0019 §7).
-// The schema checks each field; this checks what it can't: that the save belongs to this world,
-// that its fields agree with each other, and that its creatures' species and placements are still
-// there. A save that doesn't belong is discarded whole; within one that does, creatures and
-// placement references that no longer fit are dropped and reported. Nothing here throws on
-// content.
+// The schema checks each field; this checks what it can't: that the save belongs to this world
+// (or holds its own edited world whose content is registered, ADR 0021 §4), that its fields agree
+// with each other, and that its creatures' species and placements are still there. A save that
+// doesn't belong is discarded whole; within one that does, creatures and placement references
+// that no longer fit are dropped and reported. Nothing here throws on content.
 
 // The save schema repeats the simulation's state types by shape, since `content-schema` can't
 // import the simulation. These fail to compile if the two drift apart. The types must be identical,
@@ -131,14 +132,66 @@ const CREATURE_NUMBER = /^creature-(\d+)$/;
 const major = (version: string) => version.split(".")[0];
 
 /**
- * Checks `save` (already parsed by `parseWorldSave`) against the running world. Fails, so the
- * caller starts a fresh world, when the save is of another world or world version, or when its
- * fields disagree: a creature whose species isn't in `species` at its exact version, or a creature
- * number at or above `nextCreature`. Otherwise returns copies of the creatures that still fit,
- * each at its species' registered version, with placement references the world no longer has
- * pruned. A behavior whose `forgetPlacements` throws loses that memory. A running action whose
- * action isn't registered, or whose state fails the action's `checkState` (or it throws), is
- * dropped, and the creature decides afresh on its next tick. Doesn't change `save`.
+ * The world a save restores into (ADR 0019 §7, ADR 0021 §4), given the world running now. A save
+ * of an edited world holds its own definition, which must resolve against what is registered (its
+ * prop and structure types, surfaces and capabilities) like pack content; its world ID and
+ * version need not be registered then. Any other save must name the registered world the running
+ * one is (or was edited from), at its version, and restores into that registered world, unedited;
+ * if the running world's ID isn't registered (it was built from a definition), no such save
+ * fits, since that world's own saves always hold it. Fails, so the caller starts a fresh world,
+ * otherwise. The definition returned is the save's own, not a copy. Doesn't change `save`.
+ */
+export function worldOfSave(
+  save: WorldSave,
+  running: WorldDefinition,
+  registries: Registries,
+): Result<WorldDefinition> {
+  const { definition } = save.world;
+  if (definition) {
+    const unresolved = checkReferences(registries, "worlds", definition, "world save").filter(
+      (d) => d.severity === "error",
+    );
+    if (unresolved.length === 0) return { ok: true, value: definition };
+    return invalidWorld(
+      `The saved world "${definition.id}" uses content that isn't registered`,
+      unresolved,
+    );
+  }
+  const registered = registries.worlds.get(running.id);
+  if (registered?.id !== save.world.id || registered.version !== save.world.version) {
+    const expected = registered ? `"${registered.id}" ${registered.version}` : "a registered world";
+    return discard(
+      "save_world_mismatch",
+      `The save is of world "${save.world.id}" ${save.world.version}, not ${expected}`,
+      ["world"],
+    );
+  }
+  return { ok: true, value: registered };
+}
+
+/**
+ * Fails a save whose own world can't be built (`save_world_invalid`), followed by why, with paths
+ * into the save.
+ */
+export function invalidWorld(message: string, why: readonly Diagnostic[]): Result<never> {
+  return {
+    ok: false,
+    diagnostics: [
+      error("save_world_invalid", message, ["world", "definition"], "world save"),
+      ...why.map((d) => ({ ...d, path: ["world", "definition", ...d.path], source: "world save" })),
+    ],
+  };
+}
+
+/**
+ * Checks `save` (already parsed by `parseWorldSave`) against the world it is restored into,
+ * `model`, which `worldOfSave` chose. Fails, so the caller starts a fresh world, when the save's
+ * fields disagree: a creature whose species isn't in `species` at its exact version, or a
+ * creature number at or above `nextCreature`. Otherwise returns copies of the creatures that
+ * still fit, each at its species' registered version, with placement references the world no
+ * longer has pruned. A behavior whose `forgetPlacements` throws loses that memory. A running
+ * action whose action isn't registered, or whose state fails the action's `checkState` (or it
+ * throws), is dropped, and the creature decides afresh on its next tick. Doesn't change `save`.
  */
 export function checkSave(
   save: WorldSave,
@@ -147,14 +200,6 @@ export function checkSave(
   behaviors: ReadonlyMap<string, BehaviorProvider>,
   actions: ReadonlyMap<string, ActionProvider>,
 ): Result<CheckedSave> {
-  const { id, version } = model.definition;
-  if (save.world.id !== id || save.world.version !== version) {
-    return discard(
-      "save_world_mismatch",
-      `The save is of world "${save.world.id}" ${save.world.version}, not "${id}" ${version}`,
-      ["world"],
-    );
-  }
   for (const [index, creature] of save.creatures.entries()) {
     const path = ["creatures", index];
     if (save.species[creature.speciesId] !== creature.speciesVersion) {

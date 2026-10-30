@@ -117,6 +117,11 @@ export interface SimulationCallbacks {
    * before that snapshot.
    */
   onCaughtUp?(report: CatchUpReport): void;
+  /**
+   * The world's content changed: an edit was applied (ADR 0021), or a restored save held an edited
+   * world (§4). `scene` and `navigations` are what to draw now.
+   */
+  onWorldChanged?(content: Pick<WorldContent, "scene" | "navigations">): void;
   /** A species was registered while the world runs; the renderer may now meet its creatures. */
   onSpeciesRegistered?(speciesId: string, species: SpeciesSummary, asset: AssetSummary): void;
   onSnapshot(snapshot: SimulationSnapshot, events: SimulationEvent[]): void;
@@ -160,6 +165,7 @@ export function startSimulation(
     onSpeciesRegistered,
     onRestored,
     onCaughtUp,
+    onWorldChanged,
     onSnapshot,
     onFailure,
   }: SimulationCallbacks,
@@ -295,7 +301,7 @@ export function startSimulation(
         answer(message.requestId, { ok: true, value: message.check });
         break;
       case "world_changed":
-        // Nothing sends edits yet; the in-strip editor (ADR 0021, PR 6) redraws props from it.
+        onWorldChanged?.({ scene: message.scene, navigations: message.navigations });
         break;
       case "rejected":
         if (message.command === "restore") restoring = Math.max(0, restoring - 1);

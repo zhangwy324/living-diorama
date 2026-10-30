@@ -109,6 +109,8 @@ export interface LoadedWorld {
   seed: number;
   rng: RngState;
   nextCreature: number;
+  /** The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). */
+  nextPropId: number;
   introducedSpecies: readonly string[];
   tick: number;
   minutes: number;
@@ -175,10 +177,7 @@ export class WorldState {
   /** The world's own stream, e.g. for picking spawn points. */
   #rng: Rng;
   #nextCreature = 1;
-  /**
-   * The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). Not saved yet
-   * (M17 PR 4), so a restored or relaunched world counts from 1 again, skipping IDs in use.
-   */
+  /** The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). Saved. */
   #nextPropId = 1;
 
   private constructor(
@@ -299,9 +298,9 @@ export class WorldState {
 
   /**
    * Replaces everything that changes as the world runs with `loaded`, e.g. a restored save: the
-   * seed (the root stream is rebuilt from it), the world stream, the creature ID counter, the
-   * introduced species, the tick, the time of day and day phase, and the creatures. Takes
-   * ownership of the creatures and of `rng`. Expects `loaded` to have been checked against this
+   * seed (the root stream is rebuilt from it), the world stream, the creature and placement ID
+   * counters, the introduced species, the tick, the time of day and day phase, and the
+   * creatures. Takes ownership of the creatures and of `rng`. Expects `loaded` to have been checked against this
    * world (`checkSave`): every creature's species registered, `nextCreature` above every
    * creature's number.
    */
@@ -310,6 +309,7 @@ export class WorldState {
     this.#root = Rng.fromSeed(loaded.seed);
     this.#rng = new Rng(loaded.rng);
     this.#nextCreature = loaded.nextCreature;
+    this.nextPropId = loaded.nextPropId;
     this.introducedSpecies.clear();
     for (const id of loaded.introducedSpecies) this.introducedSpecies.add(id);
     this.tick = loaded.tick;

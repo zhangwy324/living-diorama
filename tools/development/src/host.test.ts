@@ -671,6 +671,36 @@ describe("saving and restoring in the host", () => {
     expect(snapshots[0]?.snapshot.creatures).toHaveLength(3);
   });
 
+  it("sends what to draw after restoring an edited world, and only then", () => {
+    const edited = running(7, 1000);
+    const ops = [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }];
+    edited.send({ type: "edit", requestId: "e", edit: { ops } });
+    edited.advance(100);
+    edited.take();
+    const { json: editedJson } = save(edited);
+    const { json: plainJson } = save(running(7, 1000));
+    const host = startHost();
+    host.init(99);
+    host.advance(100);
+    host.take();
+    const restore = (json: string) => {
+      host.send({ type: "restore", json, nowMs: SAVED_AT, minutes: NOON });
+      host.advance(100);
+      return host.take().filter((m) => m.type !== "snapshot");
+    };
+    // The registered world is already running: nothing new to draw.
+    expect(restore(plainJson).map((m) => m.type)).toEqual(["restored"]);
+    const [restored, changed, ...rest] = restore(editedJson);
+    expect(rest).toEqual([]);
+    expect(restored?.type).toBe("restored");
+    if (changed?.type !== "world_changed") throw new Error("Expected world_changed");
+    expect(changed.scene.props.some((p) => p.id === "prop-1")).toBe(true);
+    // Back to a save of the registered world: the added rock goes again.
+    const [, back] = restore(plainJson);
+    if (back?.type !== "world_changed") throw new Error("Expected world_changed");
+    expect(back.scene.props.some((p) => p.id === "prop-1")).toBe(false);
+  });
+
   it("rejects a wall-clock time, time of day or save time it can't use", () => {
     const host = running(7, 1000);
     const { json } = save(host);
@@ -791,8 +821,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 14, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(14);
+  it("is protocol version 15, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(15);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

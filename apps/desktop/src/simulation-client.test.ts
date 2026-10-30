@@ -7,6 +7,7 @@ import {
   type SimulationCommand,
   type SimulationMessage,
   type SimulationSnapshot,
+  type WorldContent,
 } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
@@ -89,11 +90,12 @@ function start(countOverride?: number, time = { now: 12 * 60 }) {
     onSpeciesRegistered: vi.fn(),
     onRestored: vi.fn(),
     onCaughtUp: vi.fn<(report: CatchUpReport) => void>(),
+    onWorldChanged: vi.fn<(content: Pick<WorldContent, "scene" | "navigations">) => void>(),
     onSnapshot: vi.fn<(snapshot: SimulationSnapshot) => void>(),
     onFailure: vi.fn(),
   };
   const client = startSimulation(callbacks, STARTUP, worker, countOverride, stillClock(time));
-  return { client, callbacks, tick };
+  return { client, callbacks, tick, worker };
 }
 
 describe("simulation client", () => {
@@ -133,6 +135,29 @@ describe("simulation client", () => {
     second.tick(100);
     expect(creaturesShown(second.callbacks).map((c) => c.id)).toEqual(ids);
     expect(second.callbacks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("reports the new scene after an edit and after restoring an edited world", async () => {
+    const first = start();
+    // Nothing in the app sends edits yet (ADR 0021, PR 6), so this goes straight to the worker.
+    const edit = { ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }] };
+    first.worker.postMessage(envelope<SimulationCommand>({ type: "edit", edit }));
+    first.tick(100);
+    const hasRock = (content: Pick<WorldContent, "scene"> | undefined) =>
+      content?.scene.props.some((p) => p.id === "prop-1");
+    expect(first.callbacks.onWorldChanged).toHaveBeenCalledOnce();
+    expect(hasRock(first.callbacks.onWorldChanged.mock.calls[0]?.[0])).toBe(true);
+    const saving = first.client.save();
+    first.tick(100);
+    const saved = await saving;
+    if (!saved.ok) throw new Error("save failed");
+
+    const second = start();
+    const restoring = second.client.restore(saved.value);
+    second.tick(100);
+    expect((await restoring).ok).toBe(true);
+    expect(second.callbacks.onWorldChanged).toHaveBeenCalledOnce();
+    expect(hasRock(second.callbacks.onWorldChanged.mock.calls[0]?.[0])).toBe(true);
   });
 
   it("resolves a rejected restore with its diagnostics", async () => {

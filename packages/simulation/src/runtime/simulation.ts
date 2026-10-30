@@ -8,6 +8,7 @@ import {
   type Result,
   type SizeClass,
   type SpeciesDefinition,
+  type WorldDefinition,
   type WorldEdit,
   type WorldEditCheck,
   type WorldEditResult,
@@ -59,7 +60,9 @@ import { settleDay } from "./creature-day";
 import {
   checkSave,
   forgetMissingPlacements,
+  invalidWorld,
   placementExists,
+  worldOfSave,
   type CatchUpFailure,
   type CatchUpReport,
   type RestoreReport,
@@ -71,6 +74,7 @@ import {
   turnHeading,
   WorldState,
   type CreatureState,
+  type DerivedWorld,
   type WorldStateOptions,
 } from "./world-state";
 
@@ -480,10 +484,8 @@ export class Simulation {
     const planned = planWorldEdit(this.state, edit);
     if (!planned.ok) return planned;
     const plan = planned.value;
-    this.state.replaceWorld(plan.derived);
+    this.#replaceWorld(plan.derived);
     this.state.nextPropId = plan.nextPropId;
-    this.#connections = new Map(this.state.model.connections.map((c) => [c.id, c]));
-    this.#pathfinders.clear();
     this.#emit({ type: "world_edited", tick: this.tick, edit: plan.edit });
     this.#reconcile(plan);
     return { ok: true, edit: plan.edit, inverse: plan.inverse, ...plan.outcome };
@@ -573,22 +575,28 @@ export class Simulation {
   /**
    * The world as a save (ADR 0019): plain data that passes `parseWorldSave` and survives a JSON
    * round trip. Copies everything, so later ticks don't change it. Best taken between steps.
+   * A world that isn't the registered one, because it was edited (ADR 0021 §4), is saved whole:
+   * its definition, which nothing changes (an edit makes a new one), is shared, not copied.
    * `savedAt` is the wall-clock time, in milliseconds since the epoch, which the simulation never
    * reads itself (ADR 0006 §1).
    */
   save(savedAt: number): WorldSave {
     const { state } = this;
     const creatures = [...state.creatures.values()].map((c) => clonePlain(c));
+    const { definition } = state.model;
+    const { id, version } = definition;
+    const edited = state.registries.worlds.get(id) !== definition;
     return {
       schemaVersion: WORLD_SAVE_SCHEMA_VERSION,
       savedAt,
-      world: { id: state.model.definition.id, version: state.model.definition.version },
+      world: { id, version, ...(edited ? { definition } : {}) },
       seed: state.seed,
       tick: state.tick,
       minutes: state.minutes,
       dayPhase: state.dayPhase,
       rng: state.rngState,
       nextCreature: state.nextCreature,
+      nextPropId: state.nextPropId,
       introducedSpecies: [...state.introducedSpecies],
       species: Object.fromEntries(creatures.map((c) => [c.speciesId, c.speciesVersion])),
       creatures,
@@ -597,13 +605,16 @@ export class Simulation {
 
   /**
    * Replaces this world with a save that `parseWorldSave` accepted (ADR 0019 §3, §7), keeping the
-   * registered content, including species registered since the world was created. Fails, leaving
-   * the world as it was, when the save is of another world or world version or its fields
-   * disagree; the caller then carries on with a fresh world. Otherwise creatures whose species is
-   * missing or of another major version are dropped, references to placements the world no
-   * longer has are pruned, and running actions that are unknown or whose state fails their check
-   * are dropped; the report lists all three. Whatever the world held before is gone, including
-   * events not yet returned by `step`.
+   * registered content, including species registered since the world was created. The world is
+   * rebuilt from the save's own definition when it holds an edited one (ADR 0021 §4), or else is
+   * the registered world the running one is or was edited from (`worldOfSave`), and the
+   * generated placement ID counter is restored. Fails, leaving the world as it was, when the save
+   * is of another world or world version, its own world uses content that isn't registered or
+   * can't be built (`save_world_invalid`), or its fields disagree; the caller then carries on
+   * with a fresh world. Otherwise creatures whose species is missing or of another major version
+   * are dropped, references to placements the world no longer has are pruned, and running actions
+   * that are unknown or whose state fails their check are dropped; the report lists all three.
+   * Whatever the world held before is gone, including events not yet returned by `step`.
    *
    * The world resumes at the saved tick, time of day and day phase; then the time of day is set
    * to `options.minutes` as `setTimeOfDay` does. After a gap of 2 minutes or more in real time
@@ -618,14 +629,26 @@ export class Simulation {
     if (!Number.isFinite(minutes)) {
       throw new RangeError(`The time of day must be a finite number, got ${minutes}`);
     }
-    const { model, registries } = this.state;
+    const { registries } = this.state;
+    const world = worldOfSave(save, this.state.model.definition, registries);
+    if (!world.ok) return world;
+    // The save's own world is copied, so a later change to the save can't reach the running one.
+    const own = save.world.definition && clonePlain(save.world.definition);
+    const derived =
+      world.value === this.state.model.definition
+        ? undefined
+        : this.#deriveSaved(own ?? world.value);
+    if (derived && !derived.ok) return derived;
+    const model = derived?.value.model ?? this.state.model;
     const checked = checkSave(save, model, registries, this.#behaviors, this.#actions);
     if (!checked.ok) return checked;
     const { creatures, droppedCreatures, prunedPlacements, droppedActions } = checked.value;
+    if (derived) this.#replaceWorld(derived.value);
     this.state.load({
       seed: save.seed,
       rng: { words: [...save.rng.words], key: save.rng.key },
       nextCreature: save.nextCreature,
+      nextPropId: save.nextPropId,
       introducedSpecies: save.introducedSpecies,
       tick: save.tick,
       minutes: save.minutes,
@@ -641,6 +664,31 @@ export class Simulation {
       ok: true,
       value: { gapMs, droppedCreatures, prunedPlacements, droppedActions, catchUp },
     };
+  }
+
+  /**
+   * Builds the world a save restores into (ADR 0021 §4), or why it can't be built
+   * (`save_world_invalid`). The save's own world is untrusted, so a throw while building it is a
+   * failure too.
+   */
+  #deriveSaved(definition: WorldDefinition): Result<DerivedWorld> {
+    let derived: Result<DerivedWorld>;
+    try {
+      derived = this.state.derive(definition);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return invalidWorld(`The saved world could not be built: ${message}`, []);
+    }
+    return derived.ok
+      ? derived
+      : invalidWorld(`The saved world "${definition.id}" can't be built`, derived.diagnostics);
+  }
+
+  /** Swaps in a rebuilt world (ADR 0021 §1) and drops what was derived from the old one. */
+  #replaceWorld(derived: DerivedWorld) {
+    this.state.replaceWorld(derived);
+    this.#connections = new Map(this.state.model.connections.map((c) => [c.id, c]));
+    this.#pathfinders.clear();
   }
 
   /**

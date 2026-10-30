@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { WORLD_SAVE_SCHEMA_VERSION } from "./constants";
+import { WorldDefinitionSchema } from "./definitions";
 import { ContentIdSchema, LocalIdSchema, RegionPositionSchema, SemverSchema } from "./primitives";
 
 // The world save (ADR 0019): the simulation's state as plain data, written on quit and every so
@@ -127,8 +128,15 @@ export const WorldSaveSchema = z
     schemaVersion: z.literal(WORLD_SAVE_SCHEMA_VERSION),
     /** When it was saved, in milliseconds since the Unix epoch. */
     savedAt: z.int().nonnegative(),
-    /** The world definition it was saved in. */
-    world: z.strictObject({ id: ContentIdSchema, version: SemverSchema }),
+    /**
+     * The world definition it was saved in, by ID and version. An edited world (ADR 0021 §4) is
+     * also saved whole, as `definition`, and restored from it rather than from the registry.
+     */
+    world: z.strictObject({
+      id: ContentIdSchema,
+      version: SemverSchema,
+      definition: WorldDefinitionSchema.optional(),
+    }),
     seed: z.int(),
     /** Ticks simulated so far. */
     tick,
@@ -143,6 +151,8 @@ export const WorldSaveSchema = z
     rng: RngStateSchema,
     /** The number the next creature ID takes (`creature-<n>`). */
     nextCreature: z.int().positive(),
+    /** The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). */
+    nextPropId: z.int().positive(),
     /** Species that have had a creature in this world. */
     introducedSpecies: z.array(ContentIdSchema),
     /** Species ID → exact version, of every species the save depends on. */
@@ -150,6 +160,14 @@ export const WorldSaveSchema = z
     creatures: z.array(CreatureSaveSchema),
   })
   .superRefine((save, ctx) => {
+    const { id, version, definition } = save.world;
+    if (definition && (definition.id !== id || definition.version !== version)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `The saved world is "${definition.id}" ${definition.version}, not "${id}" ${version}`,
+        path: ["world", "definition"],
+      });
+    }
     const unique = (ids: readonly string[], what: string, path: string) => {
       const seen = new Set<string>();
       ids.forEach((id, i) => {

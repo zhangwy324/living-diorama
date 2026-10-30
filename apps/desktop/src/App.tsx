@@ -198,6 +198,13 @@ export function App() {
       // as are those of a world caught up in place (issue #113).
       onRestored: () => created?.resetSnapshots(),
       onCaughtUp: () => created?.resetSnapshots(),
+      // An applied edit, or a restored edited world (ADR 0021 §4). An edit is saved at once, so a
+      // crash right after it loses no more than that edit. After the startup restore of an edited
+      // world this queues a second save behind the one opening the world makes; that is harmless.
+      onWorldChanged: ({ scene, navigations: [navigation] }) => {
+        void created?.replaceProps(scene, navigation);
+        void world.save();
+      },
       onSpeciesRegistered: (id, summary, asset) => {
         species.set(id, summary);
         assets.set(summary.appearance, asset);
