@@ -134,7 +134,7 @@ const BACK = { axis: "x", sign: -1 } as const;
 
 // Torsos ------------------------------------------------------------------------------------------
 
-/** A four-legged body, 45 × 30 × 35 cm: shoulders and hips below, a neck and a tail base. */
+/** A four-legged body, 45 × 30 × 35 cm: four hips (legs go on hips), a neck and a tail base. */
 const fourLeggedTorso = part(
   "four-legged-torso",
   "Four-legged torso",
@@ -142,7 +142,7 @@ const fourLeggedTorso = part(
   LARGE,
   at(4.5, 0, 3.5),
   [
-    ...sockets("front-left", "shoulder", at(6, 1, 2.5), { id: "front-right", z: 4.5 }),
+    ...sockets("front-left", "hip", at(6, 1, 2.5), { id: "front-right", z: 4.5 }),
     ...sockets("back-left", "hip", at(3, 1, 2.5), { id: "back-right", z: 4.5 }),
     ...sockets("neck", "neck", at(6, 5, 3.5)),
     ...sockets("tail-base", "tail-base", at(1, 3, 3.5)),
@@ -179,7 +179,7 @@ const uprightTorso = part(
       .cubes(),
 );
 
-/** A fish or blob body, 35 × 30 × 35 cm: side fins, a tail base and a neck. */
+/** A fish or blob body, 35 × 30 × 35 cm: side fins, a mount for a tail fin and a neck. */
 const fishTorso = part(
   "fish-torso",
   "Fish torso",
@@ -188,7 +188,7 @@ const fishTorso = part(
   at(3.5, 0, 3.5),
   [
     ...sockets("left-fin", "fin-mount", at(4, 3, 1), { id: "right-fin", z: 6 }),
-    ...sockets("tail-base", "tail-base", at(1, 3, 3.5)),
+    ...sockets("tail-base", "tail-fin-mount", at(1, 3, 3.5)),
     ...sockets("neck", "neck", at(6, 3, 3.5)),
   ],
   () =>
@@ -371,7 +371,7 @@ const sideFin = part("side-fin", "Side fin", "fin", LARGE, at(3, 1, 2), [], () =
 );
 
 /** A fan of a fin spreading backward with a notch, for a fish's tail. */
-const fanFin = part("fan-fin", "Fan fin", "fin", LARGE, at(3, 3, 0.5), [], () =>
+const fanFin = part("fan-fin", "Fan fin", "tail-fin", LARGE, at(3, 3, 0.5), [], () =>
   new Sketch({ x: 3, y: 5, z: 1 }, [FIN, FIN_SHADE])
     .fill(box(p(2, 2, 0), p(3, 3, 1)))
     .fill(box(p(1, 1, 0), p(2, 4, 1)))

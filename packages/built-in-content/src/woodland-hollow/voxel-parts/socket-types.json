@@ -7,12 +7,6 @@
   },
   {
     "schemaVersion": 1,
-    "id": "hollow:waist",
-    "version": "1.0.0",
-    "name": "Waist"
-  },
-  {
-    "schemaVersion": 1,
     "id": "hollow:hip",
     "version": "1.0.0",
     "name": "Hip"
@@ -58,5 +52,11 @@
     "id": "hollow:fin-mount",
     "version": "1.0.0",
     "name": "Fin mount"
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:tail-fin-mount",
+    "version": "1.0.0",
+    "name": "Tail fin mount"
   }
 ]

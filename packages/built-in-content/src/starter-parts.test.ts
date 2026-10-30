@@ -64,7 +64,7 @@ describe("the starter parts", () => {
       "hollow:arm": ["hollow:mitten-arm", "hollow:paw-arm"],
       "hollow:ear": ["hollow:pointed-ear", "hollow:round-ear"],
       "hollow:eye": ["hollow:bead-eye", "hollow:round-eye"],
-      "hollow:fin": ["hollow:fan-fin", "hollow:side-fin"],
+      "hollow:fin": ["hollow:side-fin"],
       "hollow:head": [
         "hollow:mossling-head",
         "hollow:round-head",
@@ -75,6 +75,7 @@ describe("the starter parts", () => {
       "hollow:mouth": ["hollow:open-mouth", "hollow:smile"],
       "hollow:nose": ["hollow:button-nose", "hollow:pink-nose"],
       "hollow:tail": ["hollow:bushy-tail", "hollow:puff-tail"],
+      "hollow:tail-fin": ["hollow:fan-fin"],
       "hollow:torso": [
         "hollow:fish-torso",
         "hollow:four-legged-torso",
@@ -84,19 +85,22 @@ describe("the starter parts", () => {
     });
   });
 
-  it("have torsos as roots only, and a socket for every other part type", () => {
-    // A torso fits no socket any starter part offers, so it can only be a root (the development
-    // console's spawn hook picks roots this way); every other part type fits one that some
-    // starter part offers, so none is left with nowhere to go.
+  it("have the torsos as roots, and a socket for every other part", () => {
+    // The torsos' type has the `root` role and fits no socket, so a torso is only ever a root;
+    // every other part's type fits a socket that some starter part offers, so none is left with
+    // nowhere to go.
     const registries = registered();
     const offered = new Set(
       sortedParts(registries).flatMap(({ part }) => part.sockets.map((s) => s.type)),
     );
-    const types = new Set(sortedParts(registries).map(({ part }) => part.type));
-    for (const type of types) {
-      const fits = registries.partTypes.get(type)?.fits ?? [];
-      const canHang = fits.some((socket) => offered.has(socket));
-      expect([type, canHang]).toEqual([type, type !== "hollow:torso"]);
+    for (const { id, part } of sortedParts(registries)) {
+      const type = registries.partTypes.get(part.type);
+      const canHang = (type?.fits ?? []).some((socket) => offered.has(socket));
+      expect([id, type?.role === "root", canHang]).toEqual([
+        id,
+        id.endsWith("-torso"),
+        !id.endsWith("-torso"),
+      ]);
     }
   });
 
@@ -169,7 +173,7 @@ describe("assembled at random from each torso", () => {
     fitsOf: (type: string) => registries.partTypes.get(type)?.fits,
     isSocketType: (type: string) => registries.socketTypes.get(type) !== undefined,
   };
-  const torsos = library.filter(({ part }) => part.type === "hollow:torso");
+  const torsos = library.filter(({ part }) => registries.partTypes.get(part.type)?.role === "root");
 
   it.each(torsos.map((t) => t.id))(
     "%s gives valid, fitting, medium creatures with no flush faces",
@@ -185,6 +189,55 @@ describe("assembled at random from each torso", () => {
       }
     },
   );
+
+  it("puts only plausible parts on each torso's sockets (#225)", () => {
+    // Over fixed seeds, the part types each torso's sockets get: legs on hips, arms on an upright
+    // torso's shoulders, fins on a fish's sides and a tail fin behind it, never side fins as arms
+    // or a bushy tail on a fish.
+    const used = (id: string) => {
+      const start = torsos.find((t) => t.id === id);
+      if (!start) throw new Error(id);
+      const bySocket = new Map<string, Set<string>>();
+      for (let seed = 0; seed < 32; seed++) {
+        const assembly = assembleParts({ start, parts: library, lookup, seed });
+        const [root, ...rest] = assembly.instances;
+        for (const { parent, part } of rest) {
+          if (!parent || parent.instance !== root?.id) continue;
+          const type = assembly.parts[part]?.type ?? "?";
+          const { socket } = parent;
+          bySocket.set(socket, (bySocket.get(socket) ?? new Set()).add(type));
+        }
+      }
+      return Object.fromEntries([...bySocket].map(([socket, types]) => [socket, [...types]]));
+    };
+    expect(used("hollow:fish-torso")).toEqual({
+      "left-fin": ["hollow:fin"],
+      "right-fin": ["hollow:fin"],
+      "tail-base": ["hollow:tail-fin"],
+      neck: ["hollow:head"],
+    });
+    expect(used("hollow:four-legged-torso")).toEqual({
+      "front-left": ["hollow:leg"],
+      "front-right": ["hollow:leg"],
+      "back-left": ["hollow:leg"],
+      "back-right": ["hollow:leg"],
+      neck: ["hollow:head"],
+      "tail-base": ["hollow:tail"],
+    });
+    expect(used("hollow:upright-torso")).toEqual({
+      "left-hip": ["hollow:leg"],
+      "right-hip": ["hollow:leg"],
+      "left-arm": ["hollow:arm"],
+      "right-arm": ["hollow:arm"],
+      neck: ["hollow:head"],
+      "tail-base": ["hollow:tail"],
+    });
+    expect(used("hollow:mossling-torso")).toEqual({
+      "left-hip": ["hollow:leg"],
+      "right-hip": ["hollow:leg"],
+      neck: ["hollow:head"],
+    });
+  });
 });
 
 describe("each pair of a starter part and a socket", () => {

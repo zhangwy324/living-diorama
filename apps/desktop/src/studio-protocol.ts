@@ -82,8 +82,17 @@ export interface StudioParts {
   partTypes: PartTypeSummary[];
   /** The ID of every registered socket type, sorted. */
   socketTypes: string[];
-  // The suggested colours join these with protocol version 21 (ADR 0023 §11).
+  /** The colours to suggest for recolouring, as `#rrggbb`, from the packs' palettes (§11). */
+  suggestedColors: string[];
 }
+
+/** The parts the Studio builds with, picked from a `ready`'s content (ADR 0023 §18). */
+export const studioParts = ({
+  parts,
+  partTypes,
+  socketTypes,
+  suggestedColors,
+}: StudioParts): StudioParts => ({ parts, partTypes, socketTypes, suggestedColors });
 
 /**
  * Why the strip refused a request, for the Studio to act on as well as show (`StudioRequestError`'s

@@ -12,7 +12,7 @@
   "sockets": [
     {
       "id": "front-left",
-      "type": "hollow:shoulder",
+      "type": "hollow:hip",
       "position": {
         "x": 6,
         "y": 1,
@@ -21,7 +21,7 @@
     },
     {
       "id": "front-right",
-      "type": "hollow:shoulder",
+      "type": "hollow:hip",
       "position": {
         "x": 6,
         "y": 1,

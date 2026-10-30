@@ -43,6 +43,7 @@ import {
   countBySpecies,
   librarySnapshot,
   studioHandlers,
+  studioParts,
   type LibrarySnapshot,
   type StudioParts,
   type StudioRequests,
@@ -227,6 +228,7 @@ export function App() {
         installLibraryDevHook(opened, {
           parts,
           lookup: partFitLookup(partTypes, socketTypes),
+          roleOf: partRoleLookup(partTypes),
         });
         uninstallWorldHook = installWorldDevHook(world, {
           history,
@@ -239,11 +241,7 @@ export function App() {
       onReady: ({ scene, navigations, ...content }) => {
         for (const [id, asset] of Object.entries(content.assets)) assets.set(id, asset);
         for (const [id, summary] of Object.entries(content.species)) species.set(id, summary);
-        parts = {
-          parts: content.parts,
-          partTypes: content.partTypes,
-          socketTypes: content.socketTypes,
-        };
+        parts = studioParts(content);
         const [navigation] = navigations;
         try {
           created = createDioramaView(element, scene, {

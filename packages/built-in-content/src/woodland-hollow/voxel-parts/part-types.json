@@ -4,7 +4,8 @@
     "id": "hollow:torso",
     "version": "1.0.0",
     "name": "Torso",
-    "fits": ["hollow:waist"]
+    "fits": [],
+    "role": "root"
   },
   {
     "schemaVersion": 1,
@@ -18,7 +19,7 @@
     "id": "hollow:leg",
     "version": "1.0.0",
     "name": "Leg",
-    "fits": ["hollow:hip", "hollow:shoulder"]
+    "fits": ["hollow:hip"]
   },
   {
     "schemaVersion": 1,
@@ -68,6 +69,14 @@
     "id": "hollow:fin",
     "version": "1.0.0",
     "name": "Fin",
-    "fits": ["hollow:fin-mount", "hollow:hip", "hollow:shoulder", "hollow:tail-base"]
+    "fits": ["hollow:fin-mount"]
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hollow:tail-fin",
+    "version": "1.0.0",
+    "name": "Tail fin",
+    "fits": ["hollow:tail-fin-mount"],
+    "role": "tail"
   }
 ]

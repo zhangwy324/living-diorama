@@ -128,11 +128,14 @@ describe("simulation client", () => {
       role: "tail",
     });
     expect(content?.partTypes).toContainEqual({
-      id: "hollow:leg",
-      name: "Leg",
-      fits: ["hollow:hip", "hollow:shoulder"],
+      id: "hollow:torso",
+      name: "Torso",
+      fits: [],
+      role: "root",
     });
-    expect(content?.socketTypes).toContain("hollow:waist");
+    expect(content?.socketTypes).toContain("hollow:tail-fin-mount");
+    // And the suggested colours.
+    expect(content?.suggestedColors).toContain("#479571");
     tick(100);
     expect(creaturesShown(callbacks)).toHaveLength(0);
     const spawning = client.spawnStartingCreatures();
@@ -541,7 +544,7 @@ describe("simulation client", () => {
     const misfit = sampleVoxelAssembly();
     const leg = misfit.parts.leg;
     if (!leg) throw new Error("No leg");
-    // Arms fit shoulders, not the back legs' hips.
+    // Arms fit shoulders, not the four legs' hips.
     leg.type = "hollow:arm";
     const checks = [
       client.checkAssembly(sampleVoxelAssembly()),
@@ -553,7 +556,7 @@ describe("simulation client", () => {
     const codes = (result: Awaited<(typeof checks)[number]> | undefined) =>
       result?.ok ? result.value.map((d) => d.code) : ["failed"];
     expect(codes(fits)).toEqual([]);
-    expect(codes(doesNot)).toEqual(["part_does_not_fit", "part_does_not_fit"]);
+    expect(codes(doesNot)).toEqual(Array<string>(4).fill("part_does_not_fit"));
     expect(codes(broken).length).toBeGreaterThan(0);
     expect(codes(broken)).not.toContain("failed");
     expect(callbacks.onFailure).not.toHaveBeenCalled();

@@ -14,6 +14,7 @@ import {
   sortedPartTypes,
   sortedPropCategories,
   sortedSocketTypes,
+  suggestedColors,
   type AssetEntry,
   type LocomotionRule,
   type Registries,
@@ -82,6 +83,32 @@ function summarizeSpecies({ appearance, sizeClass, body }: SpeciesDefinition): S
   return { appearance, sizeClass, body: { ...body } };
 }
 
+/**
+ * What voxel creatures are built from, as `ready` lists it: the part types, socket types and parts
+ * (ADR 0022, M20) and the suggested colours (ADR 0023 §11). Tests build their `ready` lists with it
+ * too.
+ */
+export function describeVoxelParts(
+  registries: Registries,
+): Pick<WorldContent, "partTypes" | "socketTypes" | "parts" | "suggestedColors"> {
+  return {
+    partTypes: sortedPartTypes(registries).map(({ id, name, fits, role }) => ({
+      id,
+      name,
+      fits: [...fits],
+      ...(role === undefined ? {} : { role }),
+    })),
+    socketTypes: sortedSocketTypes(registries).map(({ id }) => id),
+    parts: sortedParts(registries).map(({ id, name, version, part }) => ({
+      id,
+      name,
+      version,
+      part,
+    })),
+    suggestedColors: suggestedColors(registries),
+  };
+}
+
 /** The world as the main thread draws it, as plain data so it survives `postMessage`. */
 export function describeContent({ state }: Simulation): WorldContent {
   const { model, registries } = state;
@@ -101,19 +128,7 @@ export function describeContent({ state }: Simulation): WorldContent {
         ]),
     ),
     propCategories: sortedPropCategories(registries).map(({ id, name }) => ({ id, name })),
-    partTypes: sortedPartTypes(registries).map(({ id, name, fits, role }) => ({
-      id,
-      name,
-      fits: [...fits],
-      ...(role === undefined ? {} : { role }),
-    })),
-    socketTypes: sortedSocketTypes(registries).map(({ id }) => id),
-    parts: sortedParts(registries).map(({ id, name, version, part }) => ({
-      id,
-      name,
-      version,
-      part,
-    })),
+    ...describeVoxelParts(registries),
   };
 }
 

@@ -17,16 +17,18 @@ import {
   StudioRequestError,
   type LibraryStore,
 } from "@living-diorama/desktop-integration";
-import type { CheckedLimits, Limit } from "@living-diorama/simulation";
+import { describeVoxelParts, type CheckedLimits, type Limit } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_ASSEMBLY_BYTES, openSpeciesLibrary, type SpeciesLibrary } from "./species-library";
 import { defaultPlan } from "./body-plan";
+import { loadContent } from "./content";
 import {
   countBySpecies,
   librarySnapshot,
   studioClient,
   studioErrorCode,
   studioHandlers,
+  studioParts,
   tooLargeMessage,
   worldFullMessage,
   NO_LOCOMOTION,
@@ -433,11 +435,28 @@ describe("building voxel creatures", () => {
       parts: [{ id: "hollow:pebble", name: "Pebble", version: "1.0.0", part }],
       partTypes: [{ id: "hollow:torso", name: "Torso", fits: [] }],
       socketTypes: ["hollow:hip"],
+      suggestedColors: ["#479571"],
     };
 
-    it("answers with the parts, part types and socket types from `ready`", async () => {
+    it("answers with the parts, part types, socket types and suggested colours from `ready`", async () => {
       const { studio } = await setUp({ parts: PARTS });
       await expect(studioClient(studio).parts()).resolves.toEqual(PARTS);
+    });
+
+    it("keeps the built-in parts, part types, socket types and palette from `ready`", () => {
+      const content = loadContent();
+      if (!content.ok) throw new Error("The built-in content doesn't load");
+      const ready = { ...describeVoxelParts(content.value), propCategories: [] };
+      const kept = studioParts(ready);
+      expect(Object.keys(kept).sort()).toEqual([
+        "partTypes",
+        "parts",
+        "socketTypes",
+        "suggestedColors",
+      ]);
+      expect(kept.suggestedColors).toEqual(content.value.palettes.get("hollow:woodland")?.colors);
+      expect(kept.partTypes.find((t) => t.role === "root")?.id).toBe("hollow:torso");
+      expect(kept.parts).toHaveLength(25);
     });
 
     it("says the world is still starting before `ready`", async () => {

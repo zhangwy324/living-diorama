@@ -1,7 +1,6 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import { checkAssemblyFit, formatDiagnostic, parseDrawing } from "@living-diorama/content-schema";
-import { sortedParts, sortedPartTypes, sortedSocketTypes } from "@living-diorama/extension-api";
-import type { PartSummary } from "@living-diorama/simulation";
+import { describeVoxelParts, type PartSummary } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
 import {
@@ -14,7 +13,7 @@ import {
   starterRoots,
   type StarterParts,
 } from "./dev-library";
-import { partFitLookup } from "./part-types";
+import { partFitLookup, partRoleLookup } from "./part-types";
 import type { SpeciesLibrary } from "./species-library";
 
 it("ships a valid sample drawing", () => {
@@ -57,13 +56,12 @@ describe("the voxel sample", () => {
 });
 
 describe("starter creatures", () => {
-  // The sample creature's parts as `ready` would list them, and the built-in types' lookup.
+  // The sample creature's parts as `ready` would list them, and the built-in types' lookups.
   const content = loadContent();
   if (!content.ok) throw new Error("The built-in content doesn't load");
-  const lookup = partFitLookup(
-    sortedPartTypes(content.value).map(({ id, name, fits }) => ({ id, name, fits: [...fits] })),
-    sortedSocketTypes(content.value).map(({ id }) => id),
-  );
+  const ready = describeVoxelParts(content.value);
+  const lookup = partFitLookup(ready.partTypes, ready.socketTypes);
+  const roleOf = partRoleLookup(ready.partTypes);
   const parts: PartSummary[] = Object.entries(sampleVoxelAssembly().parts)
     .map(([key, part]) => ({
       id: `test:${key}`,
@@ -72,7 +70,7 @@ describe("starter creatures", () => {
       part,
     }))
     .sort((a, b) => (a.id < b.id ? -1 : 1)); // By ID, as `ready` lists them.
-  const starter: StarterParts = { parts, lookup };
+  const starter: StarterParts = { parts, lookup, roleOf };
 
   const library = () =>
     ({
@@ -85,27 +83,29 @@ describe("starter creatures", () => {
       addCreature: ReturnType<typeof vi.fn>;
     };
 
-  it("starts from the parts no part has a socket for", () => {
+  it("starts from the parts whose type has the root role", () => {
     expect(starterRoots(starter).map((p) => p.id)).toEqual(["test:torso"]);
-    // Without the torso, nothing offers a neck, a hip or a tail base, so the head, the leg and
-    // the tail are roots.
-    const headless = { parts: parts.filter((p) => p.id !== "test:torso"), lookup };
-    expect(starterRoots(headless).map((p) => p.id)).toEqual(["test:head", "test:leg", "test:tail"]);
+    // A second torso is a root too, and the head, which nothing hangs it from here, is not.
+    const torso = parts.find((p) => p.id === "test:torso");
+    if (!torso) throw new Error("No torso");
+    const two = [...parts.filter((p) => p.id !== "test:head"), { ...torso, id: "test:a-torso" }];
+    expect(starterRoots({ ...starter, parts: two }).map((p) => p.id)).toEqual([
+      "test:a-torso",
+      "test:torso",
+    ]);
     // In any order, by ID, so a seed picks the same root.
-    const reversed = { parts: [...headless.parts].reverse(), lookup };
-    expect(starterRoots(reversed)).toEqual(starterRoots(headless));
-    expect(assembleStarter(reversed, { seed: 5 })).toEqual(assembleStarter(headless, { seed: 5 }));
+    const reversed = { ...starter, parts: [...two].reverse() };
+    expect(starterRoots(reversed)).toEqual(starterRoots({ ...starter, parts: two }));
+    expect(assembleStarter(reversed, { seed: 5 })).toEqual(
+      assembleStarter({ ...starter, parts: two }, { seed: 5 }),
+    );
+    // Without the torso, none is a root.
+    const headless = { ...starter, parts: parts.filter((p) => p.id !== "test:torso") };
+    expect(starterRoots(headless)).toEqual([]);
   });
 
   it("starts from the four torsos with the built-in starter parts", () => {
-    // As `ready` lists them: by ID.
-    const builtIn = sortedParts(content.value).map(({ id, name, version, part }) => ({
-      id,
-      name,
-      version,
-      part,
-    }));
-    expect(starterRoots({ parts: builtIn, lookup }).map((p) => p.id)).toEqual([
+    expect(starterRoots({ ...starter, parts: ready.parts }).map((p) => p.id)).toEqual([
       "hollow:fish-torso",
       "hollow:four-legged-torso",
       "hollow:mossling-torso",
@@ -155,9 +155,16 @@ describe("starter creatures", () => {
     expect(codes(assembleStarter(starter, { root: "test:wing", seed: 1 }))).toEqual([
       "unknown_part",
     ]);
-    const none = assembleStarter({ parts: [], lookup }, { seed: 1 });
+    const none = assembleStarter({ ...starter, parts: [] }, { seed: 1 });
     expect(none.ok ? [] : none.diagnostics.map((d) => [d.code, d.message])).toEqual([
       ["no_root", "No voxel parts are registered"],
+    ]);
+    const rootless = assembleStarter(
+      { ...starter, parts: parts.filter((p) => p.id !== "test:torso") },
+      { seed: 1 },
+    );
+    expect(rootless.ok ? [] : rootless.diagnostics.map((d) => [d.code, d.message])).toEqual([
+      ["no_root", "None of the 4 registered voxel parts is a root"],
     ]);
   });
 
@@ -182,7 +189,7 @@ describe("starter creatures", () => {
 
   it("saves nothing when the creature can't be assembled", async () => {
     const lib = library();
-    const saved = await saveStarterCreature(lib, { parts: [], lookup });
+    const saved = await saveStarterCreature(lib, { ...starter, parts: [] });
     expect(saved.ok).toBe(false);
     expect(lib.saveVoxel).not.toHaveBeenCalled();
   });

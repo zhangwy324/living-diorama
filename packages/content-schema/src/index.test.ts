@@ -9,7 +9,9 @@ import {
   DRAWING_SIZE,
   formatDiagnostic,
   parseContentId,
+  parsePaletteDefinition,
   parsePartDefinition,
+  parsePartTypeDefinition,
   parsePropCategoryDefinition,
   parsePropDefinition,
   parseSpeciesDefinition,
@@ -534,6 +536,48 @@ describe("PropCategoryDefinition", () => {
       parsePropCategoryDefinition({ ...trees, name: "", order: Infinity, icon: "tree.png" }),
     );
     expect(found.map((d) => d.path.join("."))).toEqual(["name", "order", ""]);
+  });
+});
+
+describe("PartTypeDefinition", () => {
+  const torso = { schemaVersion: 1, id: "test:torso", version: "1.0.0", name: "Torso" };
+
+  it("has the tail and root roles, and fits nothing by default", () => {
+    expect(parsePartTypeDefinition({ ...torso, role: "root" })).toEqual({
+      ok: true,
+      value: { ...torso, fits: [], role: "root" },
+    });
+    expect(parsePartTypeDefinition({ ...torso, role: "tail" }).ok).toBe(true);
+    const found = diagnostics(parsePartTypeDefinition({ ...torso, role: "torso" }));
+    expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
+      ["role", "Unknown part role (expected tail, root)"],
+    ]);
+  });
+});
+
+describe("PaletteDefinition", () => {
+  const woods = {
+    schemaVersion: 1,
+    id: "test:woods",
+    version: "1.0.0",
+    name: "Woods",
+    colors: ["#479571", "#BF7E45"],
+  };
+
+  it("accepts plain sRGB colours in either case", () => {
+    expect(parsePaletteDefinition(woods)).toEqual({ ok: true, value: woods });
+  });
+
+  it("needs a colour, takes each once ignoring case, and allows nothing else", () => {
+    const paths = (input: unknown) =>
+      diagnostics(parsePaletteDefinition(input)).map((d) => d.path.join("."));
+    expect(paths({ ...woods, colors: [] })).toEqual(["colors"]);
+    expect(paths({ ...woods, colors: ["#479571", "rgb(1,2,3)"] })).toEqual(["colors.1"]);
+    expect(paths({ ...woods, colors: ["#bf7e45", "#BF7E45"] })).toEqual(["colors.1"]);
+    expect(paths({ ...woods, theme: "woodland" })).toEqual([""]);
+    expect(diagnostics(parsePaletteDefinition({ ...woods, schemaVersion: 2 }))[0]?.code).toBe(
+      "unsupported_schema_version",
+    );
   });
 });
 

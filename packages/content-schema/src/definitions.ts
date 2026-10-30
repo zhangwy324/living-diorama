@@ -3,6 +3,7 @@ import { SCHEMA_VERSIONS, SIZE_CLASSES, WORLD_TOLERANCES } from "./constants";
 import {
   AssetRefSchema,
   ContentIdSchema,
+  HexColorSchema,
   LocalIdSchema,
   RegionPositionSchema,
   SemverSchema,
@@ -72,9 +73,12 @@ export type PropCategoryDefinition = z.output<typeof PropCategoryDefinitionSchem
 
 /**
  * What a part type does for the engine, beyond fitting sockets (ADR 0022 §10): `tail` marks a
- * part whose attach point is the body's tail. Engine code reads roles, never part type IDs.
+ * part whose attach point is the body's tail, and `root` a part a creature is built on, such as a
+ * torso, which the Studio lists first and starts from (ADR 0023 §10). The role is what tools
+ * offer, not a rule of the format: an assembly's root may be a part of any type (ADR 0022 §11).
+ * Engine code reads roles, never part type IDs.
  */
-export const PART_ROLES = ["tail"] as const;
+export const PART_ROLES = ["tail", "root"] as const;
 export type PartRole = (typeof PART_ROLES)[number];
 
 /**
@@ -94,6 +98,28 @@ export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;
 /** A registered socket type, e.g. a hip or a neck (ADR 0022 §10): a kind of place parts hang from. */
 export const SocketTypeDefinitionSchema = z.strictObject({ ...header("socketType") });
 export type SocketTypeDefinition = z.output<typeof SocketTypeDefinitionSchema>;
+
+/**
+ * A registered palette of suggested colours (ADR 0022 §4, ADR 0023 §11): plain sRGB colours the
+ * Studio offers for recolouring parts, beside a free colour picker. Nothing limits a part to them.
+ * Each colour is listed once, ignoring case.
+ */
+export const PaletteDefinitionSchema = z
+  .strictObject({
+    ...header("palette"),
+    colors: z.array(HexColorSchema).min(1, { error: "A palette needs at least one colour" }),
+  })
+  .superRefine(({ colors }, ctx) => {
+    const seen = new Set<string>();
+    colors.forEach((color, i) => {
+      const key = color.toLowerCase();
+      if (seen.has(key)) {
+        ctx.addIssue({ code: "custom", message: `${color} is listed twice`, path: ["colors", i] });
+      }
+      seen.add(key);
+    });
+  });
+export type PaletteDefinition = z.output<typeof PaletteDefinitionSchema>;
 
 /**
  * A registered voxel part, e.g. a starter leg (ADR 0022 §17, M20): a part a creature can be built

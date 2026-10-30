@@ -192,7 +192,7 @@ describe("a voxel creature", () => {
     const assembly = sampleVoxelAssembly();
     const leg = assembly.parts.leg;
     if (!leg) throw new Error("No leg");
-    // Arms fit shoulders, not the back legs' hips.
+    // Arms fit shoulders, not the legs' hips.
     leg.type = "hollow:arm";
     const refused = await library.saveVoxel(assembly, "Misfit", { locomotion: plans.walk });
     expect(refused.ok ? [] : refused.diagnostics.map((d) => d.code)).toContain("part_does_not_fit");
