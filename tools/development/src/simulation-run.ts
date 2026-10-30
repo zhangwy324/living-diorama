@@ -2,7 +2,6 @@ import {
   error,
   formatDiagnostic,
   type Result,
-  type WorldDefinition,
   type WorldEdit,
   type WorldEditResult,
   type WorldSave,
@@ -167,6 +166,8 @@ export interface RunReport {
   /** Mid-run saves and restores (`RunOptions.saveRestore`). */
   saveRestore: {
     restores: number;
+    /** Restores of a world edited earlier in the run (ADR 0021 §4). */
+    editedRestores: number;
     /** Ticks an unbroken twin ran beside a restored world. */
     comparedTicks: number;
     /**
@@ -196,18 +197,13 @@ export function loadContent(register: RunOptions["register"]): Result<Registries
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, value: registries };
 }
 
-/**
- * A fresh simulation of `options.worldId`, or of `world` instead: a definition of that world as
- * edited, which a mid-run restore of an edited world starts from (see `runWithInvariants`).
- */
 export function createSimulation(
   options: Omit<RunOptions, "ticks" | "creatures" | "speciesId" | "alsoSpawn">,
-  world?: WorldDefinition,
 ) {
   const content = loadContent(options.register);
   if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
   const created = Simulation.create(content.value, {
-    ...(world ? { world } : { worldId: options.worldId }),
+    worldId: options.worldId,
     seed: options.seed,
     ...(options.tickRateHz === undefined ? {} : { tickRateHz: options.tickRateHz }),
     ...(options.maxCreatures === undefined ? {} : { maxCreatures: options.maxCreatures }),
@@ -227,12 +223,13 @@ interface Traced {
 export function runWithInvariants(options: RunOptions): RunReport {
   const started = performance.now();
   let decisions = 0;
-  const traced = (seed = options.seed, world?: WorldDefinition): Traced => {
+  const traced = (seed = options.seed): Traced => {
     const traces: DecisionTrace[] = [];
-    const simulation = createSimulation(
-      { ...options, seed, onTrace: (trace) => traces.push(trace) },
-      world,
-    );
+    const simulation = createSimulation({
+      ...options,
+      seed,
+      onTrace: (trace) => traces.push(trace),
+    });
     return { simulation, traces };
   };
   let main = traced();
@@ -279,7 +276,13 @@ export function runWithInvariants(options: RunOptions): RunReport {
     creatures: {},
     elapsedMs: 0,
     ...(restoreReport ? { restore: restoreReport } : {}),
-    saveRestore: { restores: 0, comparedTicks: 0, largestSaveBytes: 0, fullHomes: 0 },
+    saveRestore: {
+      restores: 0,
+      editedRestores: 0,
+      comparedTicks: 0,
+      largestSaveBytes: 0,
+      fullHomes: 0,
+    },
     edits: emptyEditReport(),
   };
   const violation = (message: string) => {
@@ -572,13 +575,10 @@ export function runWithInvariants(options: RunOptions): RunReport {
       // A fresh world of another seed, as the app's at startup, then the save, which must bring
       // back the saved seed and the streams forked from it.
       //
-      // TODO(M17 PR 4): a save doesn't carry an edited world or the generated-ID counter yet.
-      // Until it does, a world edited in this run is restored into a fresh world built from the
-      // edited definition, with the counter carried over by hand, standing in for what the save
-      // will bring. Once PR 4 lands, drop `edited` here and the counter below, so the save alone
-      // brings the edited world back into a fresh world of `worldId`.
-      const edited = report.edits.applied > 0 ? simulation.state.model.definition : undefined;
-      const next = traced(options.seed + RESTORED_SEED_OFFSET, edited);
+      // A world edited in this run comes back from the save alone (ADR 0021 §4): the save holds
+      // the edited definition and the generated-ID counter, and the fresh world is the unedited
+      // `worldId`, as the app's is after a relaunch.
+      const next = traced(options.seed + RESTORED_SEED_OFFSET);
       // Without a gap the next step's time of day; after one, that plus the gap.
       const present = minutesAfter(minutesAt(simulation.tick), gapMs);
       wallMs += gapMs;
@@ -587,8 +587,14 @@ export function runWithInvariants(options: RunOptions): RunReport {
         violation(`restore failed: ${restored.diagnostics.map(formatDiagnostic).join("; ")}`);
         continue;
       }
-      if (edited) next.simulation.state.nextPropId = simulation.state.nextPropId;
       report.saveRestore.restores++;
+      if (report.edits.applied > 0) report.saveRestore.editedRestores++;
+      // The edited world and the counter, as they were saved.
+      const lost = firstDifference(
+        [simulation.state.model.definition, simulation.state.nextPropId],
+        [next.simulation.state.model.definition, next.simulation.state.nextPropId],
+      );
+      if (lost) violation(`the restore didn't bring back the world as saved: ${lost}`);
       for (const problem of restoreProblems(restored.value)) violation(problem);
       const previous = main;
       main = next;

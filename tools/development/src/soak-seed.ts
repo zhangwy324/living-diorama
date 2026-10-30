@@ -34,6 +34,8 @@ export interface SeedResult {
   lines: string[];
   failed: boolean;
   restores: number;
+  /** Restores of a world edited earlier in the run. */
+  editedRestores: number;
   comparedTicks: number;
   largestSaveBytes: number;
   /** Creatures put to bed by catch-up away from a full home (issue #158). */
@@ -121,7 +123,7 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
     `seed ${seed}: ${problems.length === 0 ? "ok" : "FAILED"}, ${report.decisions} decisions, ` +
     `first bridge use at tick ${report.firstStructureUse ?? "never"}${swam}, ` +
     `bed ${spread(bedtimes, "n/a")}, woke ${spread(wakeTimes, "n/a")} across ${sleepers.length} ` +
-    `sleepers, ${report.saveRestore.restores} restores${describeLongGap(report.saveRestore.longGap)}, ` +
+    `sleepers, ${report.saveRestore.restores} restores (${report.saveRestore.editedRestores} of an edited world)${describeLongGap(report.saveRestore.longGap)}, ` +
     `${describeSeedEdits(report.edits)}` +
     `${Math.round(report.elapsedMs)} ms`;
   return {
@@ -129,6 +131,7 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
     lines: [line, ...problems.map((problem) => `  ${problem}`)],
     failed: problems.length > 0,
     restores: report.saveRestore.restores,
+    editedRestores: report.saveRestore.editedRestores,
     comparedTicks: report.saveRestore.comparedTicks,
     largestSaveBytes: report.saveRestore.largestSaveBytes,
     fullHomes: report.saveRestore.fullHomes,
@@ -149,6 +152,7 @@ export function crashedSeed(seed: number, error: unknown): SeedResult {
     lines: [`seed ${seed}: FAILED, the run crashed`, ...message.split("\n").map((l) => `  ${l}`)],
     failed: true,
     restores: 0,
+    editedRestores: 0,
     comparedTicks: 0,
     largestSaveBytes: 0,
     fullHomes: 0,

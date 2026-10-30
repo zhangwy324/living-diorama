@@ -104,7 +104,7 @@ if (jobs === 1) {
 const sum = (of: (r: SeedResult) => number) => results.reduce((n, r) => n + of(r), 0);
 const failed = results.filter((r) => r.failed).length;
 console.log(
-  `${sum((r) => r.restores)} saves restored, ` +
+  `${sum((r) => r.restores)} saves restored (${sum((r) => r.editedRestores)} of an edited world), ` +
     `${sum((r) => r.comparedTicks)} ticks compared with unbroken runs, ` +
     `largest save ${(Math.max(0, ...results.map((r) => r.largestSaveBytes)) / 1024).toFixed(0)} KiB of JSON, ` +
     `${sum((r) => r.fullHomes)} sleepers caught up away from a full home`,
