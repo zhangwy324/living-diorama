@@ -1,8 +1,8 @@
 import type { LibraryBodyKind } from "@living-diorama/content-schema";
 
-// The images in My creatures. `blob:` URLs from the strip belong to its document, so the Studio
-// loads each species' PNG itself and makes its own URL (ADR 0015 §5). A voxel species has no
-// image; My creatures shows a placeholder for it until the Studio can draw one (ADR 0022, M21).
+// The images of drawn species in My creatures. `blob:` URLs from the strip belong to its document,
+// so the Studio loads each species' PNG itself and makes its own URL (ADR 0015 §5). A voxel
+// species has no stored image: `voxel-thumbnails.ts` draws it (ADR 0023 §19).
 
 export interface ThumbnailOptions {
   /** The PNG bytes of the species stored under `libraryId`. */

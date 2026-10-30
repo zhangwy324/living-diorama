@@ -80,11 +80,18 @@ describe("My creatures", () => {
     ]);
   });
 
-  it("shows a placeholder for a voxel species, which has no image yet", () => {
+  it("shows a voxel species' drawn image, and a placeholder until it is drawn", () => {
     const pebble: StudioSpecies = { ...twig, speciesId: "user:4", name: "Pebble", body: "voxel" };
-    const html = render({ library: { ...LIBRARY, species: [pebble] } });
-    expect(html).toContain("thumbnail voxel-placeholder");
-    expect(html).not.toContain("<img");
+    const waiting = render({ library: { ...LIBRARY, species: [pebble] } });
+    expect(waiting).toContain("thumbnail voxel-placeholder");
+    expect(waiting).not.toContain("<img");
+    const drawn = render({
+      library: { ...LIBRARY, species: [puddle, pebble] },
+      thumbnail: (id) => (id === "user:1" ? "blob:puddle" : "data:image/png;base64,pebble"),
+    });
+    expect(drawn).toContain('src="blob:puddle"');
+    expect(drawn).toContain('src="data:image/png;base64,pebble"');
+    expect(drawn).not.toContain("voxel-placeholder");
   });
 
   it("disables a species' buttons while its request is on the way, and shows a failure", () => {

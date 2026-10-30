@@ -117,7 +117,7 @@ Build mode gains the rest of its tools, each a pure function over PR 1's operati
 
 ### PR 6: My creatures, checklist and docs
 
-_To be written by PR 6._
+My creatures shows a voxel species' picture (§19, §20). `voxel-thumbnails.ts` asks for a listed voxel species' assembly with `studioClient.assembly` once, only while My creatures is open, and draws it with `VoxelThumbnails` keyed by the answer's `speciesId@version`, at 80 px for the 40 px slot; a failed fetch or drawing leaves the placeholder block and is tried again at the next library change, never in a loop. Build mode's assembly view, whose renderer the tray's thumbnails share, lives inside `AssemblyEditor` and only once the parts arrive, so My creatures has a renderer of its own: the renderer package's `createStandaloneVoxelThumbnails(document)`, an unshown canvas made when the first assembly arrives and freed with the Studio. That is a second WebGL context while both run; sharing one (lifting the thumbnails out of the view, or the view's renderer up to the Studio) is a follow-up. The manual checklist's "Building a creature" entry in `docs/development.md` runs user story 1 end to end; the README describes Build mode.
 
 ### PR 7: stepped parts snap to the finer grid
 

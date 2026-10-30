@@ -3,6 +3,7 @@ import {
   connectStudioWindow,
   openStudioChannel,
 } from "@living-diorama/desktop-integration";
+import { createStandaloneVoxelThumbnails } from "@living-diorama/renderer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   studioClient,
@@ -21,6 +22,7 @@ import type { StudioMode } from "./modes";
 import { MyCreatures } from "./MyCreatures";
 import { describeFailure, keptMessage, releasedMessage } from "./release";
 import { Thumbnails } from "./thumbnails";
+import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 
 // The Creation Studio's page (ADR 0015, ADR 0023 §1): Build mode and Draw mode side by side in one
 // window, with My creatures beside them. It never starts a simulation and never creates a
@@ -63,6 +65,7 @@ export function Studio() {
   const [deleting, setDeleting] = useState<StudioSpecies>();
   const [, setThumbnailsLoaded] = useState(0);
   const thumbnails = useRef<Thumbnails>(undefined);
+  const voxelThumbnails = useRef<VoxelCreatureThumbnails>(undefined);
 
   // Closing with a creature not released asks first (ADR 0015 §10, ADR 0023 §21).
   useEffect(
@@ -97,6 +100,28 @@ export function Studio() {
       thumbnails.current = undefined;
     };
   }, []);
+
+  // Voxel species' images are drawn by the Studio from their assemblies (ADR 0023 §19), with a
+  // renderer of its own made only once one is listed: Build mode's view, which could draw them,
+  // lives inside AssemblyEditor and only while it runs.
+  useEffect(() => {
+    const created = new VoxelCreatureThumbnails({
+      fetch: (speciesId) => client.assembly(speciesId),
+      createRenderer: () => createStandaloneVoxelThumbnails(document),
+      onChange: () => setThumbnailsLoaded((n) => n + 1),
+    });
+    voxelThumbnails.current = created;
+    return () => {
+      created.dispose();
+      voxelThumbnails.current = undefined;
+    };
+  }, []);
+
+  // Asked for only while My creatures is open, so a Studio that never opens it fetches nothing.
+  const listShown = listOpen[mode];
+  useEffect(() => {
+    if (library && listShown) voxelThumbnails.current?.sync(library.species);
+  }, [library, listShown]);
 
   useEffect(() => {
     if (!celebration) return;
@@ -153,8 +178,10 @@ export function Studio() {
       />
       <MyCreatures
         library={library}
-        thumbnail={(speciesId) => thumbnails.current?.get(speciesId)}
-        open={listOpen[mode]}
+        thumbnail={(speciesId) =>
+          thumbnails.current?.get(speciesId) ?? voxelThumbnails.current?.get(speciesId)
+        }
+        open={listShown}
         onToggle={() => setListOpen((open) => ({ ...open, [mode]: !open[mode] }))}
         busy={busySpecies}
         message={listMessage}

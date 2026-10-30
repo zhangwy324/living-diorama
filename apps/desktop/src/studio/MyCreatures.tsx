@@ -1,8 +1,9 @@
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 
-// The player's drawn species, beside the drawing (roadmap M11 task 6): each with its image, name
-// and creatures in the world, to add one, take one out or delete the species. It shows what the
-// strip's latest library snapshot says.
+// The player's species, beside Build and Draw mode (roadmap M11 task 6, ADR 0023 §19): each with
+// its image, name and creatures in the world, to add one, take one out or delete the species. It
+// shows what the strip's latest library snapshot says. A voxel species' image is drawn by the
+// Studio, so it shows a placeholder until that is ready.
 
 export interface MyCreaturesProps {
   /** Undefined until the strip answers. */
@@ -76,13 +77,12 @@ export function MyCreatures(props: MyCreaturesProps) {
               key={species.speciesId}
               className={species.available ? "species" : "species unavailable"}
             >
-              {species.body === "voxel" ? (
-                // A placeholder until the Studio can draw voxel creatures (ADR 0022, M21).
-                <span className="thumbnail voxel-placeholder" />
-              ) : image ? (
+              {image ? (
                 <img className="thumbnail" src={image} alt="" />
               ) : (
-                <span className="thumbnail" />
+                <span
+                  className={species.body === "voxel" ? "thumbnail voxel-placeholder" : "thumbnail"}
+                />
               )}
               <div className="species-text">
                 <span className="species-name">{species.name}</span>
