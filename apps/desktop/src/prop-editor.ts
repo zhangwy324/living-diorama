@@ -2,6 +2,7 @@ import {
   formatDiagnostic,
   type Diagnostic,
   type Transform,
+  type Vec3,
   type WorldEditInput,
   type WorldEditOpInput,
   type WorldEditResult,
@@ -343,8 +344,10 @@ export class PropEditor {
     }
     // A press that moved orbited the camera.
     if (moved(press.start, pointer)) return false;
-    if (this.#placing !== undefined) this.#place(pointer);
-    else if (!press.onSelected) this.select(press.picked);
+    if (this.#placing !== undefined) {
+      const ground = this.#view.pickGround(pointer);
+      if (ground) this.#place(ground);
+    } else if (!press.onSelected) this.select(press.picked);
     return false;
   }
 
@@ -379,8 +382,9 @@ export class PropEditor {
     if (overWorld) {
       this.#previewPlacing(pointer);
     } else {
+      // A preview held for an edit not drawn yet (the last placement) stays.
       this.#placingAt = undefined;
-      this.#dropGhost();
+      if (!this.#ghostHeld) this.#dropGhost();
     }
   }
 
@@ -392,8 +396,9 @@ export class PropEditor {
   endPlacingDrag(pointer: ViewPointer, overWorld: boolean): void {
     if (!this.#placingDrag) return;
     this.#placingDrag = false;
-    if (overWorld && this.#view.pickGround(pointer)) {
-      this.#place(pointer);
+    const ground = overWorld ? this.#view.pickGround(pointer) : undefined;
+    if (ground) {
+      this.#place(ground);
     } else {
       this.#cancelPlacing();
       this.#emit();
@@ -408,10 +413,12 @@ export class PropEditor {
   }
 
   /**
-   * The wheel turned over the view. Returns true when it scaled the selected prop: then the
-   * camera must not zoom. Without a selection the wheel zooms as usual.
+   * The wheel turned over the view. Returns true when it scaled the selected prop, or a tile is
+   * being dragged from the drawer: then the camera must not zoom (the ground under the dragged
+   * preview would slide away). Otherwise, without a selection, the wheel zooms as usual.
    */
   wheel(deltaY: number): boolean {
+    if (this.#active && this.#placingDrag) return true;
     if (!this.#active || this.#selected === undefined || this.#placing !== undefined) return false;
     const transform = this.#transformOf(this.#selected);
     if (!transform || deltaY === 0) return true;
@@ -597,11 +604,10 @@ export class PropEditor {
     });
   }
 
-  /** Places the chosen prop type where the pointer meets the ground, and selects it. */
-  #place(pointer: ViewPointer) {
+  /** Places the chosen prop type at this point of the ground, and selects it. */
+  #place(ground: Vec3) {
     const prop = this.#placing;
-    const ground = this.#view.pickGround(pointer);
-    if (prop === undefined || !ground) return;
+    if (prop === undefined) return;
     const rotationY = this.#placingRotation;
     this.#placing = undefined;
     this.#placingDrag = false;
@@ -624,7 +630,7 @@ export class PropEditor {
     const ground = this.#view.pickGround(pointer);
     this.#placingAt = ground ? pointer : undefined;
     if (!type || !ground) {
-      this.#dropGhost();
+      if (!this.#ghostHeld) this.#dropGhost();
       return;
     }
     this.#ghost = { hidden: undefined };

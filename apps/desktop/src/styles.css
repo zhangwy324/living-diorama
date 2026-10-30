@@ -141,15 +141,23 @@ body,
   background: rgb(160 50 40 / 85%);
 }
 
-/* The prop drawer (ADR 0021, PR 7b): on the right, pushing the world view narrower. */
+/*
+ * The prop drawer (ADR 0021, PR 7b): on the right, pushing the world view narrower. The layout
+ * takes its width at once, so the renderer is resized once, not on every frame of the slide; only
+ * the panel inside moves, by a transform.
+ */
 .prop-drawer {
-  box-sizing: border-box;
-  display: flex;
   flex: none;
-  flex-direction: column;
   width: var(--drawer-width);
   height: 100%;
   overflow: hidden;
+}
+
+.prop-drawer-panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   border-left: 1px solid rgb(255 255 255 / 10%);
   background: #232d23;
   animation: prop-drawer-in 160ms ease-out;
@@ -157,12 +165,12 @@ body,
 
 @keyframes prop-drawer-in {
   from {
-    width: 0;
+    transform: translateX(100%);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .prop-drawer {
+  .prop-drawer-panel {
     animation: none;
   }
 }

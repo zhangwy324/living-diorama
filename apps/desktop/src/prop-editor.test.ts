@@ -763,6 +763,49 @@ describe("PropEditor placing from the drawer", () => {
     expect(view.preview?.transform.position).toEqual({ x: 5, y: 1, z: 5 });
   });
 
+  it("keeps the last placement's preview while the next drag starts over the drawer", async () => {
+    const { editor, view, sent, hold, answerNext, state } = setup();
+    hold();
+    editor.startPlacingDrag("hollow:rock");
+    editor.movePlacingDrag(at(6, 7), true);
+    editor.endPlacingDrag(at(6, 7), true);
+    // The second drag starts before the first rock is drawn: over the drawer, the first one's
+    // preview stays, so it doesn't vanish until it is drawn.
+    editor.startPlacingDrag("hollow:rock");
+    editor.movePlacingDrag(at(500, 7), false);
+    expect(view.preview?.transform.position).toEqual({ x: 6, y: 1, z: 7 });
+    editor.movePlacingDrag(at(2, 3), true);
+    expect(view.preview?.transform.position).toEqual({ x: 2, y: 1, z: 3 });
+    editor.endPlacingDrag(at(2, 3), true);
+    await answerNext();
+    await answerNext();
+    expect(sent.map((e) => e.ops[0])).toMatchObject([
+      { op: "prop.add", position: { x: 6, z: 7 } },
+      { op: "prop.add", position: { x: 2, z: 3 } },
+    ]);
+    expect(state()?.placing).toBeUndefined();
+  });
+
+  it("picks the ground once when a drag is released", () => {
+    const { editor, view } = setup();
+    editor.startPlacingDrag("hollow:rock");
+    editor.movePlacingDrag(at(6, 7), true);
+    view.pickGround.mockClear();
+    editor.endPlacingDrag(at(6, 7), true);
+    expect(view.pickGround).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the wheel from zooming during a drag from the drawer", () => {
+    const { editor } = setup();
+    editor.choosePlacing("hollow:rock");
+    // A clicked placement leaves the wheel to the camera.
+    expect(editor.wheel(-100)).toBe(false);
+    editor.startPlacingDrag("hollow:rock");
+    expect(editor.wheel(-100)).toBe(true);
+    editor.endPlacingDrag(at(500, 0), false);
+    expect(editor.wheel(-100)).toBe(false);
+  });
+
   it("ignores a drag of an unknown type, or outside Edit mode", () => {
     const { editor, state } = setup();
     editor.startPlacingDrag("hollow:unknown");
