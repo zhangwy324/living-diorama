@@ -690,17 +690,24 @@ describe("edits and actions from other packs", () => {
     simulation.step();
   });
 
-  it("leaves an action without replan to carry on with its state as it was", () => {
+  it("interrupts an action without replan, which may keep a stale route (#195)", () => {
     const { simulation, creatures } = setUp();
     const strolling = creatures[2]!;
-    const state = strolling.action!.state;
-    const before = JSON.stringify(state);
+    // `core:idle` keeps no route: its hook lets it carry on.
+    const idling = spawn(simulation, MOSSLING, "meadow");
+    const idle = { remainingTicks: 100 };
+    idling.action = { id: "core:idle", behavior: "core:wander", state: idle, startTick: 0 };
     expect(
       simulation.applyEdit(
         edit({ ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: -20, z: 5 } }] }),
       ).ok,
     ).toBe(true);
-    expect(strolling.action?.state).toBe(state);
-    expect(JSON.stringify(state)).toBe(before);
+    expect(strolling.action).toBeUndefined();
+    expect(strolling.lastResult).toEqual({
+      action: "test:stroll",
+      outcome: "interrupted",
+      reason: "world_edited",
+    });
+    expect(idling.action?.state).toBe(idle);
   });
 });

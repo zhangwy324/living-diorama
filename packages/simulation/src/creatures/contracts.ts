@@ -221,7 +221,8 @@ export interface ActionProvider extends ActionType {
    * navigation, and keep the new one in `state`. Return false if there is none; the engine then
    * interrupts the action (`world_edited`). Not called for an action the edit already
    * interrupted: one whose `target` the edit changed or whose creature it moved. An action
-   * without the hook carries on with its state as it is, so one that keeps a route must have it.
+   * without the hook is interrupted after every edit (#195), as it may keep a stale route; one
+   * that keeps no route returns true to carry on.
    */
   replan?(state: unknown, context: ActionContext): boolean;
   /**
