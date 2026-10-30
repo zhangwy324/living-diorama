@@ -70,6 +70,8 @@ export const idleAction: ActionProvider = {
     return idle.remainingTicks > 0 ? { status: "running" } : { status: "done" };
   },
   checkState: (state) => isRecord(state) && isIntFrom(state.remainingTicks, 1),
+  // It keeps no route, so a world edit leaves it standing.
+  replan: () => true,
 };
 
 /** Walks to `params.destination` along a route the engine plans. */

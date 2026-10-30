@@ -508,7 +508,8 @@ export class Simulation {
    * and failed attempts to reach a placement the edit moved or scaled are forgotten, since they
    * were about where it stood before; other back-offs are kept. Every action that carries on
    * plans its route again (`ActionProvider.replan`) and is interrupted if it has none, without a
-   * `path_failed`: a goal the edit covered or cut off is no navigation fault.
+   * `path_failed`: a goal the edit covered or cut off is no navigation fault. An action without
+   * the hook is interrupted too, since it may keep a route the edit made stale (#195).
    *
    * Never throws: it runs after the new world is swapped in, so every pack-supplied hook it calls
    * (`target`, `checkState`, `interrupted`, `replan`, `forgetPlacements`) is guarded, and one
@@ -565,23 +566,26 @@ export class Simulation {
         for (const place of known) if (plan.changed.has(place.placementId)) delete place.failures;
       }
       const action = creature.action;
-      const replan = action && this.#actions.get(action.id)?.replan;
-      if (action && replan) {
-        let replanned: boolean;
-        try {
-          // An edit that covers or cuts off a walk's goal is no navigation fault: no `path_failed`,
-          // the walk is interrupted (`world_edited`).
-          const context = this.#actionContext(
-            creature,
-            profile,
-            action.id,
-            undefined,
-            false,
-            false,
-          );
-          replanned = replan(action.state, context);
-        } catch {
-          replanned = false;
+      if (action) {
+        // Without the hook the action may keep a route the edit made stale, so it ends (#195).
+        const replan = this.#actions.get(action.id)?.replan;
+        let replanned = false;
+        if (replan) {
+          try {
+            // An edit that covers or cuts off a walk's goal is no navigation fault: no
+            // `path_failed`, the walk is interrupted (`world_edited`).
+            const context = this.#actionContext(
+              creature,
+              profile,
+              action.id,
+              undefined,
+              false,
+              false,
+            );
+            replanned = replan(action.state, context);
+          } catch {
+            replanned = false;
+          }
         }
         if (!replanned) interrupt(action);
       }
