@@ -58,7 +58,7 @@ it("fits its part types and has no flush faces", () => {
 });
 
 it("is the mossling built from the registered parts, each copy naming its part as source", () => {
-  // The text of the file is checked against `pnpm mossling` in tools/development.
+  // The text of the file is checked against `pnpm parts`' mossling output in tools/development.
   const registries = registered();
   const partOf = (id: string) => {
     const definition = registries.parts.get(id);

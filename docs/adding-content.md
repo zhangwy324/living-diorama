@@ -156,7 +156,7 @@ The easiest way to make a part is in [MagicaVoxel](https://ephtracy.github.io/):
 }
 ```
 
-`pnpm parts --in <your vox folder> --out <your parts folder>` turns each pair into a definition (MagicaVoxel's z is up; the importer turns it into Y up). Import the definitions and register them with `registries.parts.register`. The built-in pack's own run with `pnpm parts` and no options; see [development](development.md) for its workflow. The built-in mossling is such an assembly, frozen from the pack's parts with a copy of each part (its `source` the part's ID) by `pnpm mossling` and registered as an asset of kind `voxel`; a pack species uses one the same way.
+`pnpm parts --in <your vox folder> --out <your parts folder>` turns each pair into a definition (MagicaVoxel's z is up; the importer turns it into Y up). Import the definitions and register them with `registries.parts.register`. The built-in pack's own run with `pnpm parts` and no options; see [development](development.md) for its workflow. The built-in mossling is such an assembly, frozen from the pack's parts with a copy of each part (its `source` the part's ID) by the pack's own `pnpm parts` run and registered as an asset of kind `voxel`; a pack species uses one the same way.
 
 ## Worlds
 
