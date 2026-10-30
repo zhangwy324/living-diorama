@@ -28,6 +28,11 @@ export function BodyPlanPanel({
   name: string;
   plan: BodyPlanChoice;
   onLocomotion(locomotion: LocomotionChoice): void;
+  /**
+   * Whether the points (anchors) are shown, true by default. A voxel body's are derived from its
+   * cubes, so Build mode leaves them out (ADR 0023 §2).
+   */
+  showAnchors?: boolean;
   /** The point a click on the drawing places, when there is one. */
   placing: AnchorName | undefined;
   onPlacing(name: AnchorName): void;
@@ -42,7 +47,7 @@ export function BodyPlanPanel({
 }) {
   const { plan } = props;
   const { locomotion } = plan;
-  const anchors = planAnchors(locomotion);
+  const anchors = props.showAnchors === false ? [] : planAnchors(locomotion);
   const set = (change: Partial<LocomotionChoice>) =>
     props.onLocomotion({ ...locomotion, ...change });
   return (

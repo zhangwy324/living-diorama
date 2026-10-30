@@ -124,7 +124,7 @@ const GRID_DIVISIONS = 24;
 const WATER_COLOUR = "#4f8fb0";
 const WATER_OPACITY = 0.55;
 /** A socket marker's radius, as a share of the camera's distance, so it keeps its size on screen. */
-const MARKER_SCALE = 0.016;
+const MARKER_SCALE = 0.009;
 const MARKER_COLOUR = "#2fc4ff";
 const SELECTION_COLOUR = "#ffd84a";
 const SELECTION_OPACITY = 0.45;

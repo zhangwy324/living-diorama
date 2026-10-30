@@ -1,4 +1,5 @@
 import { RequestTimeoutError } from "@living-diorama/desktop-integration";
+import { studioErrorCode } from "../studio-protocol";
 
 // Releasing a drawing (roadmap M11 task 6): when the button is available and what the Studio
 // says afterwards.
@@ -37,3 +38,17 @@ export function describeFailure(error: unknown): string {
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Why a voxel release failed, in the player's words (ADR 0023 §14, §17). The strip's typed
+ * refusals (`too_large`, `no_spawn_point`, `assembly_too_big`, `world_full`, `release_failed`)
+ * carry a message saying what to change, so they are shown as they are; `not_ready` says to wait.
+ * A timeout may have worked, so trying again is safe.
+ */
+export function voxelReleaseFailure(error: unknown): string {
+  if (studioErrorCode(error) === "not_ready") return NOT_READY;
+  return describeFailure(error);
+}
+
+/** Said when the world or the library is still starting. */
+export const NOT_READY = "The world is still starting. Try again in a moment.";

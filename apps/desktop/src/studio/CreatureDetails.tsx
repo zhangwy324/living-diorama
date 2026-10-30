@@ -30,15 +30,23 @@ export function CreatureDetails(props: {
   onName(name: string): void;
   /** Replaces the name, typed or suggested, with a new suggestion. */
   onSuggestName(): void;
-  sizeClass: SizeClass;
+  /** The size shown; none for a voxel creature too large for every size class. */
+  sizeClass: SizeClass | undefined;
   /** The size suggested from the drawing (issue #49), marked in the picker; none while empty. */
   suggestedSize?: SizeClass | undefined;
-  onSizeClass(size: SizeClass): void;
-  /** Depth as a share of the height. */
-  thickness: number;
-  onThickness(thickness: number): void;
+  /**
+   * Picks a size. Left out, the sizes only show the one measured from a voxel creature's cubes
+   * (ADR 0022 §3), with `measured` beside the heading.
+   */
+  onSizeClass?(size: SizeClass): void;
+  /** What the size is measured from, e.g. "32 cm tall", for a voxel creature. */
+  measured?: string | undefined;
+  /** Depth as a share of the height; only a drawn body has one (ADR 0023 §2). */
+  thickness?: number;
+  onThickness?(thickness: number): void;
   hints: readonly string[];
 }) {
+  const { onSizeClass, thickness, onThickness } = props;
   return (
     <div className="creature-details">
       <label className="field">
@@ -80,8 +88,10 @@ export function CreatureDetails(props: {
           </button>
         </span>
       </label>
-      <fieldset className="field sizes">
-        <legend>Size</legend>
+      <fieldset className={onSizeClass ? "field sizes" : "field sizes measured-size"}>
+        <legend>
+          Size{props.measured && <small className="measured"> · {props.measured}</small>}
+        </legend>
         {SIZES.map((size) => (
           <label key={size} title={`${Math.round(SIZE_CLASSES[size].height * 100)} cm tall`}>
             <input
@@ -89,10 +99,11 @@ export function CreatureDetails(props: {
               name="size"
               value={size}
               checked={props.sizeClass === size}
-              onChange={() => props.onSizeClass(size)}
+              disabled={!onSizeClass && props.sizeClass !== size}
+              onChange={() => onSizeClass?.(size)}
               // A click on the size already shown fires no change, but taking the suggestion
               // is a pick too, so later drawing doesn't move it (issue #49).
-              onClick={() => props.onSizeClass(size)}
+              onClick={() => onSizeClass?.(size)}
             />
             <span>{sizeLabel(size)}</span>
             {/* Each option keeps the line, so the row doesn't jump as the suggestion moves. */}
@@ -100,22 +111,24 @@ export function CreatureDetails(props: {
           </label>
         ))}
       </fieldset>
-      <label className="field thickness">
-        <span>Thickness</span>
-        <span className="thickness-row">
-          <input
-            type="range"
-            min={percent(BODY_THICKNESS.min)}
-            max={percent(BODY_THICKNESS.max)}
-            step={THICKNESS_STEP_PERCENT}
-            value={percent(props.thickness)}
-            aria-label="Thickness"
-            aria-valuetext={thicknessLabel(props.thickness)}
-            onChange={(event) => props.onThickness(Number(event.target.value) / 100)}
-          />
-          <output>{percent(props.thickness)}%</output>
-        </span>
-      </label>
+      {thickness !== undefined && onThickness && (
+        <label className="field thickness">
+          <span>Thickness</span>
+          <span className="thickness-row">
+            <input
+              type="range"
+              min={percent(BODY_THICKNESS.min)}
+              max={percent(BODY_THICKNESS.max)}
+              step={THICKNESS_STEP_PERCENT}
+              value={percent(thickness)}
+              aria-label="Thickness"
+              aria-valuetext={thicknessLabel(thickness)}
+              onChange={(event) => onThickness(Number(event.target.value) / 100)}
+            />
+            <output>{percent(thickness)}%</output>
+          </span>
+        </label>
+      )}
       {props.hints.length > 0 && (
         <ul className="hints" aria-label="Hints" aria-live="polite">
           {props.hints.map((hint) => (
