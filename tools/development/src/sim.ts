@@ -20,6 +20,7 @@ import { parseArgs } from "node:util";
 import { describeEdits, parseEditScript, scriptedEdits } from "./edit-cycles";
 import { beaver, carp, otter, registerHollowCreatures, toad } from "./fixtures/hollow-creatures";
 import { registerRiverCrossing } from "./fixtures/river-crossing";
+import { VOXEL_SPECIES } from "./fixtures/voxel-creatures";
 import { HUNGRY_FROM, MEAL_EVENT } from "./long-run-checks";
 import { saveThroughText } from "./save-cycles";
 import {
@@ -46,7 +47,11 @@ import { renderDebugMap } from "./worldgen/debug-map";
 // `--species` picks who lives in the world, a comma-separated list of names from its species
 // table, `--creatures` of each. Woodland Hollow has `mossling` (the default), `amphibian`,
 // `water-amphibian` (one that prefers the water, #163), `swimmer` and `hopper`, all but the
-// mossling the test species of `fixtures/hollow-creatures.ts` (ADR 0020).
+// mossling the test species of `fixtures/hollow-creatures.ts` (ADR 0020), and the voxel species
+// `voxel-walk`, `voxel-hop`, `voxel-swim` and `voxel-land+swim`, the sample voxel creature in
+// each body plan (`fixtures/voxel-creatures.ts`, ADR 0022). Those are registered as the app
+// registers library species, while the world runs and before a save is restored, so a save with
+// voxel creatures loads with them.
 //
 // `--edits <file>` applies world edits during the run (ADR 0021): a JSON array of
 // `{ "tick": n, "edit": { "ops": [...] } }`, the edit as the app's worker takes it, or
@@ -68,7 +73,14 @@ const WORLDS = {
       "water-amphibian": beaver.id,
       swimmer: carp.id,
       hopper: toad.id,
+      ...Object.fromEntries(
+        Object.entries(VOXEL_SPECIES).map(([plan, s]) => [`voxel-${plan}`, s.input.id]),
+      ),
     } as Record<string, string>,
+    // Registered in every run, so a loaded save keeps their creatures. A navigation profile is a
+    // size class and a set of capabilities, so while they share both with the species above they
+    // add no profile to build.
+    runtimeSpecies: Object.values(VOXEL_SPECIES),
     ...LIVING_BEHAVIOR_CHECKS,
   },
   river: {

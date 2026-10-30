@@ -1,5 +1,6 @@
 import { emptyEditReport, randomEdits, type EditReport } from "./edit-cycles";
 import { beaver, carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
+import { VOXEL_SPECIES } from "./fixtures/voxel-creatures";
 import { LIVING_BEHAVIOR_CHECKS, runWithInvariants } from "./simulation-run";
 import { spread } from "./time-spread";
 
@@ -12,7 +13,15 @@ export const MOSSLING = "hollow:mossling";
 export const AMPHIBIANS = [
   { name: "amphibian", id: otter.id },
   { name: "water-loving amphibian", id: beaver.id },
+  { name: "voxel amphibian", id: VOXEL_SPECIES["land+swim"].input.id },
 ];
+
+/**
+ * The voxel species each seed adds a creature of (ADR 0022, M19): the sample voxel creature as an
+ * amphibian and as a hopper, so between them they walk, hop and swim. Registered while the world
+ * runs and again before each restore, as the app registers library species.
+ */
+export const SOAK_VOXEL_SPECIES = [VOXEL_SPECIES["land+swim"], VOXEL_SPECIES.hop];
 
 /** What every seed of a soak runs with. */
 export interface SoakConfig {
@@ -20,7 +29,7 @@ export interface SoakConfig {
   tickRateHz: number;
   /** Mosslings per run. */
   creatures: number;
-  /** Leave out the amphibians and the swimmer. */
+  /** Leave out the amphibians, the swimmer and the voxel creatures. */
   mosslingsOnly: boolean;
   saveRestore: { cycles: number; compareTicks: number; longGap: boolean };
   /** Random prop edits per run, some of them undos (ADR 0021). */
@@ -66,7 +75,17 @@ export function runSoakSeed(seed: number, config: SoakConfig): SeedResult {
     ticks: config.ticks,
     tickRateHz: config.tickRateHz,
     creatures: config.creatures,
-    alsoSpawn: config.mosslingsOnly ? {} : { [otter.id]: 1, [beaver.id]: 1, [carp.id]: 1 },
+    ...(config.mosslingsOnly
+      ? {}
+      : {
+          alsoSpawn: {
+            [otter.id]: 1,
+            [beaver.id]: 1,
+            [carp.id]: 1,
+            ...Object.fromEntries(SOAK_VOXEL_SPECIES.map((s) => [s.input.id, 1])),
+          },
+          runtimeSpecies: SOAK_VOXEL_SPECIES,
+        }),
     ...LIVING_BEHAVIOR_CHECKS,
     saveRestore: config.saveRestore,
     edits: randomEdits(seed, config.ticks, { count: config.edits }),

@@ -38,9 +38,9 @@ function box(
 }
 
 /**
- * A small four-legged creature of 2.5 cm cubes, about 36 cm long and 22 cm tall (the `small`
+ * A four-legged creature of 5 cm cubes, about 72 cm long and 45 cm tall (the `medium`
  * size class), facing +X: a torso (the root) with two front legs on shoulders and two back legs on
- * hips, the right-hand ones mirrored; a head on the neck with two 1.25 cm eyes on eye mounts, the
+ * hips, the right-hand ones mirrored; a head on the neck with two 2.5 cm eyes on eye mounts, the
  * right one mirrored; and a tail on the tail base, of the built-in `hollow:tail` type, which has
  * the tail role. Its parts are of the built-in pack's part and socket types, so it passes
  * `checkAssemblyFit` against them. A fresh copy on each call.
@@ -49,7 +49,7 @@ export function sampleVoxelAssembly(): VoxelAssembly {
   const torso = box(
     "hollow:torso",
     { x: 8, y: 5, z: 6 },
-    0.025,
+    0.05,
     [COAT, CREAM],
     { x: 4, y: 0, z: 3 },
     [
@@ -76,7 +76,7 @@ export function sampleVoxelAssembly(): VoxelAssembly {
   const leg = box(
     "hollow:leg",
     { x: 2, y: 3, z: 1 },
-    0.025,
+    0.05,
     [COAT, PAWS],
     { x: 1, y: 3, z: 0.5 },
     [],
@@ -86,7 +86,7 @@ export function sampleVoxelAssembly(): VoxelAssembly {
   const head = box(
     "hollow:head",
     { x: 5, y: 4, z: 4 },
-    0.025,
+    0.05,
     [COAT, CREAM],
     { x: 1, y: 1, z: 2 },
     [
@@ -104,7 +104,7 @@ export function sampleVoxelAssembly(): VoxelAssembly {
   const eye = box(
     "hollow:eye",
     { x: 2, y: 2, z: 2 },
-    0.0125,
+    0.025,
     [EYE, GLINT],
     { x: 0, y: 1, z: 1 },
     [],
@@ -114,7 +114,7 @@ export function sampleVoxelAssembly(): VoxelAssembly {
   const tail = box(
     "hollow:tail",
     { x: 4, y: 2, z: 2 },
-    0.025,
+    0.05,
     [COAT, CREAM],
     { x: 4, y: 1, z: 1 },
     [],

@@ -307,7 +307,7 @@ describe("voxel species", () => {
     expect(saved).toEqual({
       speciesId,
       name: "Pebble",
-      sizeClass: "small",
+      sizeClass: "medium",
       createdAt: "2026-10-27T12:00:00.000Z",
       body: "voxel",
       available: true,
@@ -333,7 +333,7 @@ describe("voxel species", () => {
         version: "1.0.0",
         name: "Pebble",
         appearance: `${speciesId}/assembly.json`,
-        sizeClass: "small",
+        sizeClass: "medium",
         // Its gait only: a voxel entry holds no thickness or anchors.
         body: { locomotion: { land: { gait: "hop" } } },
         capabilities: { "core:land": 1 },
