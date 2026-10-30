@@ -46,6 +46,7 @@ const render = (props: Partial<MyCreaturesProps> = {}) =>
       onAdd={() => {}}
       onRemove={() => {}}
       onDelete={() => {}}
+      onEditCopy={() => {}}
       {...props}
     />,
   );

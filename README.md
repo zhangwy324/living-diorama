@@ -33,8 +33,8 @@ The tray icon has the rest. Left-click it to hide or show the strip. Right-click
 
 Build a creature from parts in the Creation Studio and release it into the diorama, where it lives as a creature of small blocks. **Open the Studio** with the pencil button on the strip or the expanded window, or **Creation Studio** in the tray menu. It opens in **Build** mode, with a torso to build on.
 
-1. **Pick a part** from the tray (torsos, legs, heads, eyes and more) and click one of the marked spots on your creature to attach it. A part that fits only one spot goes there at once. With **Mirror** on, the other side gets one too.
-2. **Shape it.** Click a part to select it; you can recolour it, make it bigger or smaller, turn it, or remove it (Delete). **Randomize** builds a whole new creature to start from. **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) work as in drawing.
+1. **Pick a part** from the tray (torsos, legs, heads, eyes and more) and click one of the marked spots on your creature to attach it, or drag it onto one. A part that fits only one spot goes there at once. With **Mirror** on, the other side gets one too.
+2. **Shape it.** Click a part to select it. Pick one of its colours and a suggested colour, or **Any colour…** for your own. **Turn part** (R) turns it a quarter turn, **Smaller part** (−) and **Bigger part** (+ or =) resize it, and **Delete** removes it. **Smaller creature** and **Bigger creature** resize the whole creature. **Randomize** builds a whole new creature to start from, **Fill empty** puts parts on every free spot and keeps yours, and **Reset** goes back to where you started. **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) work as in drawing.
 3. **Name it, choose how it moves and release it**, as for a drawn creature below: **Next: how it moves →**, then **Release**.
 
 To change a creature you built, press **Edit a copy** on it in **My creatures**: the Studio loads a copy to edit, and releasing it adds a new creature, keeping the old one.

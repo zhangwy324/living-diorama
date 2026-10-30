@@ -18,6 +18,8 @@ export interface MyCreaturesProps {
   onAdd(speciesId: string): void;
   onRemove(speciesId: string): void;
   onDelete(species: StudioSpecies): void;
+  /** Loads a copy of a voxel species into Build mode (ADR 0023 §3). */
+  onEditCopy(species: StudioSpecies): void;
 }
 
 const reasonsOf = (species: StudioSpecies) =>
@@ -116,6 +118,17 @@ export function MyCreatures(props: MyCreaturesProps) {
                       <Icon d="M3.5 8h9M8 3.5v9" />
                     </button>
                   </>
+                )}
+                {species.body === "voxel" && (
+                  <button
+                    type="button"
+                    aria-label={`Edit a copy of ${species.name}`}
+                    title="Edit a copy"
+                    disabled={busy}
+                    onClick={() => props.onEditCopy(species)}
+                  >
+                    <Icon d="M10.5 3l2.5 2.5-7 7H3.5V10zM9 4.5L11.5 7" />
+                  </button>
                 )}
                 <button
                   type="button"

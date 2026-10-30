@@ -13,10 +13,11 @@ import {
   type StudioRequests,
   type StudioSpecies,
 } from "../studio-protocol";
-import { AssemblyEditor } from "./AssemblyEditor";
+import { AssemblyEditor, type LoadRequest } from "./AssemblyEditor";
 import { CloseDialog } from "./CloseDialog";
 import { DeleteDialog } from "./DeleteDialog";
 import { DrawMode } from "./DrawMode";
+import { copyRequest } from "./edit-copy";
 import type { AskLimits } from "./limits";
 import type { StudioMode } from "./modes";
 import { MyCreatures } from "./MyCreatures";
@@ -66,6 +67,9 @@ export function Studio() {
   const [, setThumbnailsLoaded] = useState(0);
   const thumbnails = useRef<Thumbnails>(undefined);
   const voxelThumbnails = useRef<VoxelCreatureThumbnails>(undefined);
+  // Edit a copy's latest creature for Build mode, a new key each time (ADR 0023 §3).
+  const [loadRequest, setLoadRequest] = useState<LoadRequest>();
+  const loadKey = useRef(0);
 
   // Closing with a creature not released asks first (ADR 0015 §10, ADR 0023 §21).
   useEffect(
@@ -164,6 +168,7 @@ export function Studio() {
         onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsavedBuild}
+        loadRequest={loadRequest}
       />
       <DrawMode
         active={mode === "draw"}
@@ -190,6 +195,14 @@ export function Studio() {
           ask(speciesId, () => channel.request("removeCreature", { speciesId }))
         }
         onDelete={setDeleting}
+        onEditCopy={(species) =>
+          ask(species.speciesId, () =>
+            copyRequest(client.assembly, species, ++loadKey.current).then((request) => {
+              setLoadRequest(request);
+              setMode("build");
+            }),
+          )
+        }
       />
       {celebration && (
         <div
