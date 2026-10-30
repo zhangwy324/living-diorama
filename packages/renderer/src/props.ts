@@ -28,6 +28,20 @@ function fallbackModel(): THREE.Mesh {
   );
 }
 
+/**
+ * Makes a model's standard materials non-metallic, in place. The scene has no environment map, so
+ * a metallic surface reflects only direct light and its shaded sides render pure black. Low-poly
+ * exports often keep glTF's default `metallicFactor` of 1, as the built-in props did (#201).
+ */
+export function matteModel(model: THREE.Object3D): void {
+  model.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    for (const material of [object.material].flat()) {
+      if (material instanceof THREE.MeshStandardMaterial) material.metalness = 0;
+    }
+  });
+}
+
 /** A placement's transform as a matrix: where it stands, its turn, its scale times the model's. */
 export function placementMatrix(transform: SceneProp["transform"], unitScale: number) {
   const { position, rotationY, scale } = transform;
@@ -265,6 +279,7 @@ export class PropSet {
             resolve(undefined);
             return;
           }
+          matteModel(arrived);
           this.#loaded.add(arrived);
           // Late: the lists placed meanwhile keep their block; later ones draw the model.
           if (timedOut) this.#models.set(url, Promise.resolve(arrived));
