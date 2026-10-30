@@ -154,3 +154,11 @@ The mesher (§7, §18, §19) is `packages/renderer/src/voxel/mesher.ts`. `meshVo
 - **Not here:** the bind transform (offset, cube step, rest rotation) and the slight shrink of child parts against flush faces belong to the skeleton that draws the body.
 
 Timings: 32³ parts mesh in 0.9 to 5.4 ms (solid to checkerboard, the most faces a part can have), a 9-part creature in 0.4 ms (Node 24, `packages/renderer/src/voxel/mesher.timing.ts`).
+
+## As built: M19 PR 4a
+
+The species library stores voxel species (§17; ADR 0014 §1–§5 amended).
+
+- **No assembly file.** The assembly lives inline in `entry.json` (§17), so a voxel species' folder holds `entry.json` alone. Its appearance, `user:<uuid>/assembly.json`, is a name, not a file: the app makes a `blob:` URL of the assembly's JSON from the entry it already read, as it makes one from a drawn species' PNG. A separate file would hold the same data twice and need a load command of its own.
+- **Drawn files are optional, as a pair.** `save_library_entry` takes the drawing and the image as optional arguments, both or neither. Listing skips a folder with one and not the other. Rust still never reads an entry, so it doesn't check that a drawn entry has them; loading a missing image fails in the frontend, which lists that species as unavailable. In `desktop-integration`, `LibraryStore.save(id, entry, drawn?)` takes `{ drawing, image }` for a drawn species and nothing for a voxel one; `loadDrawing` and `loadImage` reject for a voxel entry.
+- **The entry limit is 8 MB** (was 64 KB). Faces are capped at 131,072, runs are not: a full 32³ part whose cubes alternate between two colours is 32,768 runs and only 6,144 faces, so 21 of them fit under the face cap, about 4.2 MB of compact JSON. 8 MB covers it with room for the species. `entry.json` is now written compact, since pretty printing would put each number of the runs on its own line. The drawing (16 MB) and image (4 MB) limits are unchanged.

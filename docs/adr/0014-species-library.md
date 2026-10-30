@@ -15,11 +15,19 @@
 
    **Amendment (M13, issue #73):** `appearance.png` is now the drawing itself, the 256 px image the player drew in the Studio, and `drawing.json` is a record of how it was drawn (§5). Nothing derives the image from the strokes any more. ADR 0017 records the M13 decisions as a whole.
 
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ the library also holds voxel species. A voxel species' folder holds only `entry.json`, with its assembly inline; `drawing.json` and `appearance.png` belong to drawn species. Its appearance, `user:<uuid>/assembly.json`, names no file: the app makes a `blob:` URL from the entry's assembly, as it does from a drawn species' PNG (§7).
+
 2. **Saves are atomic and entries never change.** A save writes the three files to `<uuid>.tmp/`, then renames the folder into place, so an entry appears complete or not at all. A delete renames the folder to `<uuid>.tmp/` before removing it. Listing removes `.tmp` folders left by a crash. Saving over an existing ID is an error: a redraw is a new species, and editing comes later.
+
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ a voxel species' save writes `entry.json` alone. A save sends the drawing and the image together or neither; Rust rejects one without the other.
 
 3. **Rust stores, TypeScript checks.** `apps/desktop/src-tauri/src/library.rs` lists, saves, loads and deletes entries, and doesn't interpret their contents. It skips, with a warning in the log, folders that aren't entries and entries it can't read: a missing file, JSON that doesn't parse, a file over its size limit. The schemas and migrations live in `content-schema`, so they exist once. An entry that fails them, comes from a newer version, or holds a species other than `user:<its folder>` with the image `user:<its folder>/appearance.png`, is skipped with a diagnostic, and its files are left alone, so a newer build can still read them. A bad entry never stops the app.
 
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ `drawing.json` and `appearance.png` are optional, but come as a pair: a folder with one and not the other is skipped as unreadable. Rust still doesn't read the entry, so it can't tell a drawn entry that lost both files from a voxel one; the frontend finds that out when the drawn entry's image fails to load, and lists the species as unavailable.
+
 4. **Rust guards the paths and sizes.** IDs must be lowercase UUIDs before any path is built from them, so the frontend can't reach outside the library. Each file has a size limit, well above what the Studio produces: 64 KB for the entry, 16 MB for the drawing, 4 MB for the image.
+
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ the entry's limit is 8 MB, since a voxel entry holds its whole assembly. The assembly's faces are capped (131,072), its run-length runs are not: a part full of cubes alternating between two colours is 32,768 runs for 6,144 faces, so 21 such parts fit under the face cap, about 4.2 MB of compact JSON. 8 MB covers that with room for the species. `entry.json` is now written compact rather than pretty-printed, which would put each number of the assembly on its own line.
 
 5. **The schemas.**
    - Library entry: `{ schemaVersion, species, createdAt }`. `species` is a species definition, checked like pack content. The name shown to the player is the species' name.
@@ -33,6 +41,8 @@
    - Version 1 files still read: a migration turns each stroke into a stroke operation, in order. It is cheap, and the app never reads a drawing at launch anyway (entries register from their image), so old entries load as before. No other migration is needed, since every entry already holds its image.
    - Beyond that migration, nothing promises that older library files keep loading: a later format change may leave them unreadable, and they are skipped as §3 says rather than lost.
    - Rust is unchanged: it never interprets `drawing.json`.
+
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19):_ library entry version 5 adds the species' `body`, `{ kind: "drawn" }` or `{ kind: "voxel", assembly }`, with the assembly inline (M19 PR 1). A drawing belongs to a drawn entry only. No migration from version 4.
 
 6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Drawings have one migration, from version 1 to 2 (§5 amendment). Library entries have one too, from version 1 to 2, which gives a stored drawn species `core:feed`, `core:rest` and vision ([ADR 0018](0018-living-behavior.md) §4). A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
 

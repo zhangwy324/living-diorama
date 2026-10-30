@@ -1,7 +1,8 @@
-//! The species library (ADR 0014): one folder per drawn species in `library/` under the app data
-//! directory, holding `entry.json`, `drawing.json` and `appearance.png`. Rust only stores the files;
-//! the frontend validates and migrates their contents. The store is plain functions over a
-//! directory, so it is unit tested without the app.
+//! The species library (ADR 0014): one folder per species in `library/` under the app data
+//! directory, holding `entry.json` and, for a drawn species, `drawing.json` and `appearance.png`.
+//! A voxel species keeps its assembly inline in `entry.json` (ADR 0022 §17), so it has no other
+//! files. Rust only stores the files; the frontend validates and migrates their contents. The
+//! store is plain functions over a directory, so it is unit tested without the app.
 
 use std::fs;
 use std::io;
@@ -21,10 +22,19 @@ const IMAGE_FILE: &str = "appearance.png";
 const PENDING_SUFFIX: &str = ".tmp";
 
 /// Size limits, well above what the Studio produces, so a broken or hostile file can't make the
-/// app read or send something huge.
-const MAX_ENTRY_BYTES: u64 = 64 * 1024;
+/// app read or send something huge. An entry holds a voxel species' whole assembly (ADR 0022
+/// §17). Its faces are capped, but not its runs: a part full of cubes alternating between two
+/// colours is 32,768 runs for only 6,144 faces, and 21 such parts, about 4.2 MB of compact JSON,
+/// fit under the face cap. 8 MB leaves room for that and for the species around it.
+const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_DRAWING_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// A drawn species' files beside its entry: the drawing record and the image.
+pub struct DrawnFiles<'a> {
+    pub drawing: &'a Value,
+    pub image: &'a [u8],
+}
 
 /// An entry as stored: the folder's ID and `entry.json`, unvalidated.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -98,12 +108,15 @@ pub fn list(library: &Path) -> Vec<StoredEntry> {
     entries
 }
 
-/// `entry.json`, once the drawing and the image are known to be there too.
+/// `entry.json`, once the drawing and the image are known to be both there or both absent. Rust
+/// doesn't read the entry's kind of body: a drawn entry without either file is listed, and the
+/// frontend's load of its image fails instead.
 fn read_entry(dir: &Path) -> io::Result<Value> {
-    for file in [DRAWING_FILE, IMAGE_FILE] {
-        if !dir.join(file).is_file() {
-            return Err(io::Error::other(format!("{file} is missing")));
-        }
+    let drawing = dir.join(DRAWING_FILE).is_file();
+    let image = dir.join(IMAGE_FILE).is_file();
+    if drawing != image {
+        let missing = if drawing { IMAGE_FILE } else { DRAWING_FILE };
+        return Err(io::Error::other(format!("{missing} is missing")));
     }
     read_json(&dir.join(ENTRY_FILE), MAX_ENTRY_BYTES)
 }
@@ -120,26 +133,34 @@ pub fn load_image(library: &Path, id: &str) -> Result<Vec<u8>, String> {
     read_limited(&path, MAX_IMAGE_BYTES).map_err(|error| error.to_string())
 }
 
-/// Adds an entry. Its files are written to a pending folder that is then renamed into place, so an
-/// entry appears complete or not at all. Entries never change, so an existing ID is an error.
+/// Adds an entry, with a drawn species' files when given. Its files are written to a pending
+/// folder that is then renamed into place, so an entry appears complete or not at all. Entries
+/// never change, so an existing ID is an error.
 pub fn save(
     library: &Path,
     id: &str,
     entry: &Value,
-    drawing: &Value,
-    image: &[u8],
+    drawn: Option<DrawnFiles>,
 ) -> Result<(), String> {
     let dir = entry_dir(library, id)?;
     if dir.exists() {
         return Err(format!("library entry {id} already exists"));
     }
-    let entry = serde_json::to_vec_pretty(entry).map_err(|error| error.to_string())?;
-    let drawing = serde_json::to_vec(drawing).map_err(|error| error.to_string())?;
-    for (file, size, max) in [
-        (ENTRY_FILE, entry.len(), MAX_ENTRY_BYTES),
-        (DRAWING_FILE, drawing.len(), MAX_DRAWING_BYTES),
-        (IMAGE_FILE, image.len(), MAX_IMAGE_BYTES),
-    ] {
+    // Compact: pretty printing would put each number of a voxel assembly on its own line.
+    let entry = serde_json::to_vec(entry).map_err(|error| error.to_string())?;
+    let drawn = match drawn {
+        Some(DrawnFiles { drawing, image }) => Some((
+            serde_json::to_vec(drawing).map_err(|error| error.to_string())?,
+            image,
+        )),
+        None => None,
+    };
+    let mut sizes = vec![(ENTRY_FILE, entry.len(), MAX_ENTRY_BYTES)];
+    if let Some((drawing, image)) = &drawn {
+        sizes.push((DRAWING_FILE, drawing.len(), MAX_DRAWING_BYTES));
+        sizes.push((IMAGE_FILE, image.len(), MAX_IMAGE_BYTES));
+    }
+    for (file, size, max) in sizes {
         if size as u64 > max {
             return Err(format!("{file} is {size} bytes, more than {max}"));
         }
@@ -151,8 +172,10 @@ pub fn save(
         }
         fs::create_dir_all(&pending)?;
         fs::write(pending.join(ENTRY_FILE), &entry)?;
-        fs::write(pending.join(DRAWING_FILE), &drawing)?;
-        fs::write(pending.join(IMAGE_FILE), image)?;
+        if let Some((drawing, image)) = &drawn {
+            fs::write(pending.join(DRAWING_FILE), drawing)?;
+            fs::write(pending.join(IMAGE_FILE), image)?;
+        }
         fs::rename(&pending, &dir)
     };
     write().map_err(|error| {
@@ -177,6 +200,18 @@ pub fn delete(library: &Path, id: &str) -> Result<(), String> {
         fs::remove_dir_all(&pending)
     };
     remove().map_err(|error| format!("Could not delete library entry {id}: {error}"))
+}
+
+/// The drawn files a save sent: both or neither, since an entry is drawn or voxel.
+fn drawn_files<'a>(
+    drawing: &'a Option<Value>,
+    image: &'a Option<Vec<u8>>,
+) -> Result<Option<DrawnFiles<'a>>, String> {
+    match (drawing, image) {
+        (Some(drawing), Some(image)) => Ok(Some(DrawnFiles { drawing, image })),
+        (None, None) => Ok(None),
+        _ => Err("a drawing and its image are saved together".into()),
+    }
 }
 
 /// `library/` in the data directory (the development one, if set).
@@ -204,15 +239,21 @@ pub mod commands {
         load_image(&library_dir(&app)?, &id).map(Response::new)
     }
 
+    /// Saves an entry: a drawn species sends its drawing and image, a voxel one neither.
     #[tauri::command]
     pub async fn save_library_entry(
         app: AppHandle,
         id: String,
         entry: Value,
-        drawing: Value,
-        image: Vec<u8>,
+        drawing: Option<Value>,
+        image: Option<Vec<u8>>,
     ) -> Result<(), String> {
-        save(&library_dir(&app)?, &id, &entry, &drawing, &image)
+        save(
+            &library_dir(&app)?,
+            &id,
+            &entry,
+            drawn_files(&drawing, &image)?,
+        )
     }
 
     #[tauri::command]
@@ -254,10 +295,25 @@ mod tests {
             library,
             id,
             &json!({ "schemaVersion": 1, "name": id }),
-            &json!({ "strokes": [] }),
-            b"png",
+            Some(DrawnFiles {
+                drawing: &json!({ "strokes": [] }),
+                image: b"png",
+            }),
         )
         .unwrap();
+    }
+
+    fn voxel_entry(id: &str) -> Value {
+        json!({ "name": id, "body": { "kind": "voxel", "assembly": { "voxels": [32768, 1] } } })
+    }
+
+    /// A drawn sample's files, for saves that should fail.
+    fn drawn<'a>(image: &'a [u8]) -> Option<DrawnFiles<'a>> {
+        static DRAWING: Value = Value::Null;
+        Some(DrawnFiles {
+            drawing: &DRAWING,
+            image,
+        })
     }
 
     #[test]
@@ -302,24 +358,86 @@ mod tests {
     fn never_overwrites_an_entry() {
         let dir = TempDir::new("overwrite");
         save_sample(&dir.0, ID);
-        assert!(save(&dir.0, ID, &json!({}), &json!({}), b"other").is_err());
+        assert!(save(&dir.0, ID, &json!({}), drawn(b"other")).is_err());
+        assert!(save(&dir.0, ID, &voxel_entry(ID), None).is_err());
         assert_eq!(load_image(&dir.0, ID).unwrap(), b"png");
+    }
+
+    #[test]
+    fn round_trips_a_voxel_entry() {
+        let dir = TempDir::new("voxel");
+        save(&dir.0, ID, &voxel_entry(ID), None).unwrap();
+        save_sample(&dir.0, OTHER_ID);
+        assert_eq!(
+            list(&dir.0),
+            vec![
+                StoredEntry {
+                    id: OTHER_ID.into(),
+                    entry: json!({ "schemaVersion": 1, "name": OTHER_ID }),
+                },
+                StoredEntry {
+                    id: ID.into(),
+                    entry: voxel_entry(ID),
+                },
+            ]
+        );
+        // Only the entry is stored: the assembly is inline.
+        let files: Vec<_> = fs::read_dir(dir.0.join(ID))
+            .unwrap()
+            .map(|file| file.unwrap().file_name())
+            .collect();
+        assert_eq!(files, [ENTRY_FILE]);
+        assert!(load_drawing(&dir.0, ID).is_err());
+        assert!(load_image(&dir.0, ID).is_err());
+
+        delete(&dir.0, ID).unwrap();
+        assert_eq!(list(&dir.0).len(), 1);
+        assert!(!dir.0.join(ID).exists());
+    }
+
+    #[test]
+    fn saves_a_drawing_and_its_image_together() {
+        let drawing = Some(json!({}));
+        let image = Some(b"png".to_vec());
+        assert!(drawn_files(&drawing, &image).unwrap().is_some());
+        assert!(drawn_files(&None, &None).unwrap().is_none());
+        assert!(drawn_files(&drawing, &None).is_err());
+        assert!(drawn_files(&None, &image).is_err());
     }
 
     #[test]
     fn rejects_ids_outside_the_library() {
         let dir = TempDir::new("outside");
-        assert!(save(&dir.0, "../escape", &json!({}), &json!({}), b"").is_err());
+        assert!(save(&dir.0, "../escape", &json!({}), drawn(b"")).is_err());
+        assert!(save(&dir.0, "../escape", &voxel_entry(ID), None).is_err());
+        assert!(save(&dir.0, r"..\escape", &voxel_entry(ID), None).is_err());
         assert!(load_image(&dir.0, "..").is_err());
+        assert!(load_drawing(&dir.0, "../escape").is_err());
         assert!(delete(&dir.0, "..").is_err());
         assert!(!dir.0.parent().unwrap().join("escape").exists());
+        assert!(!dir.0.exists());
+    }
+
+    #[test]
+    fn takes_entries_up_to_the_limit() {
+        let dir = TempDir::new("entry-limit");
+        // A JSON string is its characters and two quotes.
+        let entry = |bytes: u64| json!("x".repeat(bytes as usize - 2));
+        assert!(save(&dir.0, OTHER_ID, &entry(MAX_ENTRY_BYTES + 1), None).is_err());
+        assert!(!dir.0.join(OTHER_ID).exists());
+        save(&dir.0, ID, &entry(MAX_ENTRY_BYTES), None).unwrap();
+        assert_eq!(
+            fs::metadata(dir.0.join(ID).join(ENTRY_FILE)).unwrap().len(),
+            MAX_ENTRY_BYTES
+        );
+        assert_eq!(list(&dir.0)[0].entry, entry(MAX_ENTRY_BYTES));
     }
 
     #[test]
     fn rejects_oversized_files() {
         let dir = TempDir::new("oversized");
         let image = vec![0; MAX_IMAGE_BYTES as usize + 1];
-        assert!(save(&dir.0, ID, &json!({}), &json!({}), &image).is_err());
+        assert!(save(&dir.0, ID, &json!({}), drawn(&image)).is_err());
         assert!(!dir.0.join(ID).exists());
 
         // A file that grew on disk is skipped too.
@@ -354,6 +472,10 @@ mod tests {
         let partial = "22222222-0000-4000-8000-000000000000";
         save_sample(&dir.0, partial);
         fs::remove_file(dir.0.join(partial).join(IMAGE_FILE)).unwrap();
+        // Missing its drawing.
+        let undrawn = "33333333-0000-4000-8000-000000000000";
+        save_sample(&dir.0, undrawn);
+        fs::remove_file(dir.0.join(undrawn).join(DRAWING_FILE)).unwrap();
         // Not an entry at all.
         fs::create_dir_all(dir.0.join("notes")).unwrap();
         fs::write(dir.0.join("readme.txt"), "hi").unwrap();

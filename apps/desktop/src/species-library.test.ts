@@ -181,7 +181,11 @@ describe("startup", () => {
     const { species } = stored?.entry as { species: SpeciesDefinition };
     species.name = "Rejected";
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { ...(stored?.entry as object), species }, DRAWING, PNG);
+    await store.save(
+      UUIDS[0] ?? "",
+      { ...(stored?.entry as object), species },
+      { drawing: DRAWING, image: PNG },
+    );
 
     const { library } = await open(store);
     expect(library.list()).toMatchObject([
@@ -192,7 +196,7 @@ describe("startup", () => {
   it("skips entries that fail their schema or hold another ID, and leaves their files", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { schemaVersion: 6 }, DRAWING, PNG);
+    await store.save(UUIDS[0] ?? "", { schemaVersion: 6 }, { drawing: DRAWING, image: PNG });
     const other = userSpeciesIds(UUIDS[0]);
     await store.save(
       UUIDS[1] ?? "",
@@ -212,8 +216,7 @@ describe("startup", () => {
           behaviors: ["core:wander"],
         },
       },
-      DRAWING,
-      PNG,
+      { drawing: DRAWING, image: PNG },
     );
 
     const { library, registered } = await open(store);
