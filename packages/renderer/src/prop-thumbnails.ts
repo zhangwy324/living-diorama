@@ -25,7 +25,7 @@ export function canvasEncoder(document: Document): ThumbnailEncoder {
     canvas.width = size;
     canvas.height = size;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("No 2D canvas context to encode a prop thumbnail");
+    if (!context) throw new Error("No 2D canvas context to encode a thumbnail");
     const image = context.createImageData(size, size);
     image.data.set(pixels);
     context.putImageData(image, 0, 0);
@@ -73,6 +73,40 @@ export function thumbnailPixels(raw: Uint8Array, size: number): Uint8ClampedArra
 }
 
 /**
+ * The size, in whole pixels, a thumbnail asked for at `size` is drawn at: rounded and capped at
+ * `MAX_THUMBNAIL_SIZE`. Throws a `RangeError` for one below a pixel.
+ */
+export function thumbnailSize(size: number): number {
+  if (!(size >= 1)) throw new RangeError(`Bad thumbnail size ${size}`);
+  return Math.min(MAX_THUMBNAIL_SIZE, Math.round(size));
+}
+
+/**
+ * Draws `model` `size` pixels square as `drawIcon` does, on a transparent background, and reads
+ * it back as an image URL. The model is only read; the render target is freed before returning.
+ */
+export function drawThumbnail(
+  renderer: ThumbnailRenderer,
+  model: THREE.Object3D,
+  size: number,
+  encode: ThumbnailEncoder,
+): string {
+  const target = new THREE.WebGLRenderTarget(size, size, {
+    samples: 4,
+    // Stored in sRGB, so the picture reads back as an image's bytes without banding.
+    colorSpace: THREE.SRGBColorSpace,
+  });
+  try {
+    drawIcon(renderer, model, target);
+    const raw = new Uint8Array(size * size * 4);
+    renderer.readRenderTargetPixels(target, 0, 0, size, size, raw);
+    return encode(thumbnailPixels(raw, size), size);
+  } finally {
+    target.dispose();
+  }
+}
+
+/**
  * Thumbnails of prop models by asset ref and size, drawn with the view's renderer when first
  * asked for and kept as image URLs, so each model is drawn once per size. The models come from the
  * view's `PropSet`, so a model already loaded for the world is not loaded again. A ref with no
@@ -111,8 +145,12 @@ export class PropThumbnails {
    * `MAX_THUMBNAIL_SIZE`), on a transparent background; undefined once disposed.
    */
   thumbnail(ref: string, size: number): Promise<string | undefined> {
-    if (!(size >= 1)) return Promise.reject(new RangeError(`Bad thumbnail size ${size}`));
-    const pixels = Math.min(MAX_THUMBNAIL_SIZE, Math.round(size));
+    let pixels: number;
+    try {
+      pixels = thumbnailSize(size);
+    } catch (cause) {
+      return Promise.reject(cause as Error);
+    }
     const key = `${pixels}:${ref}`;
     let thumbnail = this.#cache.get(key);
     if (!thumbnail) {
@@ -145,21 +183,8 @@ export class PropThumbnails {
     }
   }
 
-  /** Draws `model` `size` pixels square and reads it back as an image URL. */
   #picture(model: THREE.Object3D, size: number): string {
-    const target = new THREE.WebGLRenderTarget(size, size, {
-      samples: 4,
-      // Stored in sRGB, so the picture reads back as an image's bytes without banding.
-      colorSpace: THREE.SRGBColorSpace,
-    });
-    try {
-      drawIcon(this.#renderer, model, target);
-      const raw = new Uint8Array(size * size * 4);
-      this.#renderer.readRenderTargetPixels(target, 0, 0, size, size, raw);
-      return this.#encode(thumbnailPixels(raw, size), size);
-    } finally {
-      target.dispose();
-    }
+    return drawThumbnail(this.#renderer, model, size, this.#encode);
   }
 
   dispose(): void {

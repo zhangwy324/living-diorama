@@ -130,9 +130,10 @@ function iconTarget(): THREE.WebGLRenderTarget {
 }
 
 /**
- * A scene holding a copy of `model`'s meshes, sharing their geometry, with material copies free
- * of any clipping planes, lit in plain daylight, and a camera framing it in a three-quarter view
- * from slightly above. `dispose` frees the material copies only.
+ * A scene holding a copy of `model`'s meshes, sharing their geometry (and a skinned mesh's
+ * skeleton, posed as it is), with material copies free of any clipping planes but keeping their
+ * shader patches, lit in plain daylight, and a camera framing it in a three-quarter view from
+ * slightly above. `dispose` frees the material copies only.
  */
 export function iconStage(model: THREE.Object3D): {
   scene: THREE.Scene;
@@ -152,6 +153,9 @@ export function iconStage(model: THREE.Object3D): {
   const copy = (material: THREE.Material) => {
     const c = material.clone();
     c.clippingPlanes = null;
+    // `clone` drops these, e.g. a voxel body's colour and occlusion decoding (`voxel/body.ts`).
+    c.onBeforeCompile = material.onBeforeCompile;
+    c.customProgramCacheKey = material.customProgramCacheKey;
     copies.push(c);
     return c;
   };
@@ -162,19 +166,40 @@ export function iconStage(model: THREE.Object3D): {
     const material = Array.isArray(object.material)
       ? object.material.map(copy)
       : copy(object.material as THREE.Material);
-    const mesh = new THREE.Mesh(object.geometry, material);
+    const mesh =
+      object instanceof THREE.SkinnedMesh
+        ? skinnedCopy(object, material)
+        : new THREE.Mesh(object.geometry, material);
     mesh.matrixAutoUpdate = false;
     mesh.matrix.copy(object.matrixWorld);
     mesh.matrixWorld.copy(object.matrixWorld);
     scene.add(mesh);
-    const geometry = object.geometry as THREE.BufferGeometry;
-    geometry.computeBoundingBox();
-    if (geometry.boundingBox) {
-      bounds.union(geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
+    let box: THREE.Box3 | null;
+    if (mesh instanceof THREE.SkinnedMesh) {
+      // Its vertices where its bones put them, not where its geometry holds them.
+      mesh.computeBoundingBox();
+      box = mesh.boundingBox;
+    } else {
+      const geometry = object.geometry as THREE.BufferGeometry;
+      geometry.computeBoundingBox();
+      box = geometry.boundingBox;
     }
+    if (box) bounds.union(box.clone().applyMatrix4(object.matrixWorld));
   });
   const camera = frameIcon(bounds);
   return { scene, camera, dispose: () => copies.forEach((m) => m.dispose()) };
+}
+
+/** A skinned mesh of `source`'s geometry and skeleton, bound as it is, drawn with `material`. */
+function skinnedCopy(
+  source: THREE.SkinnedMesh,
+  material: THREE.Material | THREE.Material[],
+): THREE.SkinnedMesh {
+  const mesh = new THREE.SkinnedMesh(source.geometry, material);
+  mesh.bindMode = source.bindMode;
+  mesh.bind(source.skeleton, source.bindMatrix);
+  mesh.frustumCulled = false;
+  return mesh;
 }
 
 /** An orthographic camera seeing `bounds` whole and centred, from `ICON_PITCH` and `ICON_YAW`. */
