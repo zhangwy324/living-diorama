@@ -4,7 +4,6 @@ import {
   formatDiagnostic,
   type Drawing,
   type PartFitLookup,
-  type PartRole,
   type Result,
   type SizeClass,
   type VoxelAssembly,
@@ -139,14 +138,12 @@ export async function saveVoxelSample(
 }
 
 /**
- * The registered voxel parts (`ready.parts`), what the assembler needs of the registered types
- * (`partFitLookup`) and their roles (`partRoleLookup`), to assemble starter creatures from
- * (ADR 0022, M20 decisions).
+ * The registered voxel parts (`ready.parts`) and what the assembler needs of the registered types
+ * (`partFitLookup`), to assemble starter creatures from (ADR 0022, M20 decisions).
  */
 export interface StarterParts {
   parts: readonly PartSummary[];
   lookup: PartFitLookup;
-  roleOf: (partType: string) => PartRole | undefined;
 }
 
 /**
@@ -154,9 +151,9 @@ export interface StarterParts {
  * the torsos (ADR 0023 §10). Read from roles, not from IDs, so a pack's parts work the same.
  * Sorted by ID, so the root a seed picks doesn't depend on the order the parts come in.
  */
-export function starterRoots({ parts, roleOf }: StarterParts): PartSummary[] {
+export function starterRoots({ parts, lookup }: StarterParts): PartSummary[] {
   return parts
-    .filter(({ part }) => roleOf(part.type) === "root")
+    .filter(({ part }) => lookup.roleOf(part.type) === "root")
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 

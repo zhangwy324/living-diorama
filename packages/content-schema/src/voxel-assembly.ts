@@ -851,12 +851,17 @@ export interface LibraryPart {
   readonly part: VoxelPart;
 }
 
-/** What `assembleParts` needs to know of the registered part and socket types. */
+/**
+ * What `assembleParts` and the edit operations need to know of the registered part and socket
+ * types.
+ */
 export interface PartFitLookup {
   /** The socket types a part type fits, or undefined for a type that isn't registered. */
   fitsOf(partType: string): readonly string[] | undefined;
   /** Whether a socket type is registered. */
   isSocketType(socketType: string): boolean;
+  /** A part type's role, or undefined for none or a type that isn't registered. */
+  roleOf(partType: string): PartRole | undefined;
 }
 
 /** What `assembleParts` builds from. */

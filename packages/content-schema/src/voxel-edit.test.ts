@@ -194,6 +194,7 @@ const FITS = new Map([
 const lookup: PartFitLookup = {
   fitsOf: (id) => FITS.get(id),
   isSocketType: () => true,
+  roleOf: (id) => (id === "test:torso" ? "root" : undefined),
 };
 const MIRROR = { mirror: true };
 const SINGLE = { mirror: false };
@@ -558,6 +559,12 @@ describe("replacePart", () => {
     // The lopsided torso's right hip is off the grid for a mirrored leg.
     expect(ids(after)).toEqual(["torso", "left-hip", "foot"]);
     expect(Object.keys(after.parts)).toEqual(["legs-long", "foot", "lopsided"]);
+  });
+
+  it("replaces the root only with a part of a root type", () => {
+    expect(refusal(replacePart(legged(), "torso", HEAD, lookup, MIRROR))).toBe("not_root");
+    const noRoles = { ...lookup, roleOf: () => undefined };
+    expect(refusal(replacePart(legged(), "torso", LOPSIDED, noRoles, MIRROR))).toBe("not_root");
   });
 
   it("refuses a part that doesn't fit the socket", () => {

@@ -13,7 +13,7 @@ import {
   starterRoots,
   type StarterParts,
 } from "./dev-library";
-import { partFitLookup, partRoleLookup } from "./part-types";
+import { partFitLookup } from "./part-types";
 import type { SpeciesLibrary } from "./species-library";
 
 it("ships a valid sample drawing", () => {
@@ -61,7 +61,6 @@ describe("starter creatures", () => {
   if (!content.ok) throw new Error("The built-in content doesn't load");
   const ready = describeVoxelParts(content.value);
   const lookup = partFitLookup(ready.partTypes, ready.socketTypes);
-  const roleOf = partRoleLookup(ready.partTypes);
   const parts: PartSummary[] = Object.entries(sampleVoxelAssembly().parts)
     .map(([key, part]) => ({
       id: `test:${key}`,
@@ -70,7 +69,7 @@ describe("starter creatures", () => {
       part,
     }))
     .sort((a, b) => (a.id < b.id ? -1 : 1)); // By ID, as `ready` lists them.
-  const starter: StarterParts = { parts, lookup, roleOf };
+  const starter: StarterParts = { parts, lookup };
 
   const library = () =>
     ({

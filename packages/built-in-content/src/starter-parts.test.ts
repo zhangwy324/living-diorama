@@ -172,8 +172,9 @@ describe("assembled at random from each torso", () => {
   const lookup = {
     fitsOf: (type: string) => registries.partTypes.get(type)?.fits,
     isSocketType: (type: string) => registries.socketTypes.get(type) !== undefined,
+    roleOf: (type: string) => registries.partTypes.get(type)?.role,
   };
-  const torsos = library.filter(({ part }) => registries.partTypes.get(part.type)?.role === "root");
+  const torsos = library.filter(({ part }) => lookup.roleOf(part.type) === "root");
 
   it.each(torsos.map((t) => t.id))(
     "%s gives valid, fitting, medium creatures with no flush faces",

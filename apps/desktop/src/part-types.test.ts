@@ -46,6 +46,7 @@ describe("partFitLookup", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
     for (const type of content.value.partTypes.values()) {
       expect(lookup.fitsOf(type.id)).toEqual(type.fits);
+      expect(lookup.roleOf(type.id)).toBe(type.role);
     }
     for (const type of content.value.socketTypes.values()) {
       expect(lookup.isSocketType(type.id)).toBe(true);

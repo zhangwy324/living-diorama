@@ -228,7 +228,6 @@ export function App() {
         installLibraryDevHook(opened, {
           parts,
           lookup: partFitLookup(partTypes, socketTypes),
-          roleOf: partRoleLookup(partTypes),
         });
         uninstallWorldHook = installWorldDevHook(world, {
           history,
