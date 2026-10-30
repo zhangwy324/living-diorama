@@ -98,12 +98,23 @@ export type SocketTypeDefinition = z.output<typeof SocketTypeDefinitionSchema>;
 /**
  * A registered voxel part, e.g. a starter leg (ADR 0022 §17, M20): a part a creature can be built
  * from, held inline. An assembly that uses it holds a frozen copy of `part`, with this ID as the
- * copy's `source`. Its part type and socket types are checked when references resolve.
+ * copy's `source`, so the part itself has none. Its part type and socket types are checked when
+ * references resolve.
  */
-export const PartDefinitionSchema = z.strictObject({
-  ...header("part"),
-  part: VoxelPartSchema,
-});
+export const PartDefinitionSchema = z
+  .strictObject({
+    ...header("part"),
+    part: VoxelPartSchema,
+  })
+  .superRefine(({ part }, ctx) => {
+    if (part.source !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A registered part has no source: it is the source of the copies made from it",
+        path: ["part", "source"],
+      });
+    }
+  });
 export type PartDefinition = z.output<typeof PartDefinitionSchema>;
 
 /** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */

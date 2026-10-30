@@ -574,6 +574,13 @@ describe("PartDefinition", () => {
     expect(runs.map((d) => d.path.join("."))).toEqual(["part.voxels"]);
   });
 
+  it("refuses a source: a registered part is where copies come from", () => {
+    const found = diagnostics(
+      parsePartDefinition({ ...leg, part: { ...leg.part, source: "test:other-leg" } }),
+    );
+    expect(found.map((d) => d.path.join("."))).toEqual(["part.source"]);
+  });
+
   it("needs a name and allows nothing else", () => {
     const found = diagnostics(parsePartDefinition({ ...leg, name: "", mirrored: true }));
     expect(found.map((d) => d.path.join("."))).toEqual(["name", ""]);

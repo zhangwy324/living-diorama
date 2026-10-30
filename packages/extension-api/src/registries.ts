@@ -19,6 +19,7 @@ import {
   type ContentId,
   type Diagnostic,
   type DiagnosticPath,
+  type DrawnOnlyBodySetting,
   type LocomotionMedium,
   type PartDefinition,
   type PartTypeDefinition,
@@ -691,7 +692,7 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
 function checkVoxelBodyPlan(
   species: SpeciesDefinition,
   lookup: Lookup,
-  written: readonly string[],
+  written: readonly DrawnOnlyBodySetting[],
 ): Diagnostic[] {
   if (written.length === 0) return [];
   const appearance = lookup("assets", species.appearance) as AssetEntry | undefined;
@@ -821,7 +822,7 @@ export const checkAssemblyTypes = (
 
 export function createRegistries(): Registries {
   // The drawn-only body settings each species set as written, by its parsed definition.
-  const writtenSettings = new WeakMap<SpeciesDefinition, readonly string[]>();
+  const writtenSettings = new WeakMap<SpeciesDefinition, readonly DrawnOnlyBodySetting[]>();
   return {
     worlds: new Registry("worlds", { validate: parseWorldDefinition, references: worldReferences }),
     structures: new Registry("structures", {

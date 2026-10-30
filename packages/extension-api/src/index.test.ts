@@ -909,6 +909,17 @@ describe("parts", () => {
     ]);
   });
 
+  it("refuses a part whose mirrored socket's type isn't registered", () => {
+    const registries = registered();
+    const left = { id: "left", type: "test:shoulder", position: { x: 1, y: 1, z: 0 } };
+    const right = { ...left, id: "right", position: { x: 1, y: 1, z: 2 }, mirrors: "left" };
+    expectOk(registries.parts.register(torso("test:torso-a", [hip, left, right])));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: parts/test:torso-a part.sockets[1].type: "test:shoulder" is not registered in socketTypes (unresolved_reference)',
+      'error: parts/test:torso-a part.sockets[2].type: "test:shoulder" is not registered in socketTypes (unresolved_reference)',
+    ]);
+  });
+
   it("refuses a part added at runtime whose types aren't registered, and adds nothing", () => {
     const registries = registered();
     const result = addEntries(registries, [
@@ -970,6 +981,20 @@ describe("voxel species' body plans", () => {
     expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
       'error: species/test:cubes body.thickness: "test:cubes" is a voxel species, which has no thickness: its cubes give it (drawn_only_setting)',
       'error: species/test:cubes body.anchors: "test:cubes" is a voxel species, which has no anchors: its cubes give it (drawn_only_setting)',
+    ]);
+  });
+
+  it("leaves a species whose appearance isn't registered to reference resolution", () => {
+    const registries = registered();
+    expectOk(
+      registries.species.register({
+        ...cubes,
+        appearance: "test:sprites/missing.json",
+        body: { thickness: 0.4 },
+      }),
+    );
+    expect(resolveReferences(registries).diagnostics.map((d) => d.code)).toEqual([
+      "unresolved_reference",
     ]);
   });
 
