@@ -27,9 +27,9 @@ const labels = (
 };
 
 it("offers the Studio, pause, expand, reset camera, debug overlays and hide in the strip", () => {
+  // No prop editing in the strip: only the normal window has it.
   expect(labels({ paused: false, expanded: false, debug: false })).toEqual([
     "Creation Studio",
-    "Edit props",
     "Pause",
     "Expand",
     "Reset camera",
@@ -63,7 +63,7 @@ it("offers the opposite of the current state", () => {
 });
 
 it("offers to stop editing while Edit mode is on", () => {
-  expect(labels({ paused: false, expanded: false, debug: false, editing: true })).toContain(
+  expect(labels({ paused: false, expanded: true, debug: false, editing: true })).toContain(
     "Stop editing props",
   );
 });

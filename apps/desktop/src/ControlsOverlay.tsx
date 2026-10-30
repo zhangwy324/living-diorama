@@ -20,8 +20,8 @@ export interface ControlsOverlayProps {
  * Icon buttons in the top-right corner that fade in while the pointer is over the window (ADR 0008
  * §11), and the Creation Studio (ADR 0015 §1). The strip never takes keyboard focus, so these are
  * its only controls besides the tray. The normal window has Full screen where the strip has Hide,
- * since minimizing hides it (ADR 0016 §7); Collapse stays where Expand was. Edit props turns the
- * prop editor's Edit mode on and off (ADR 0021 §12).
+ * since minimizing hides it (ADR 0016 §7); Collapse stays where Expand was. Edit props, in the normal
+ * window only, turns the prop editor's Edit mode on and off (ADR 0021 §12).
  */
 export function ControlsOverlay(props: ControlsOverlayProps) {
   return (
@@ -29,16 +29,18 @@ export function ControlsOverlay(props: ControlsOverlayProps) {
       <ControlButton label="Creation Studio" onClick={props.onOpenStudio}>
         <path className="stroke" d="M3 13l1-3.5 7-7 2.5 2.5-7 7zM9.5 4l2.5 2.5" />
       </ControlButton>
-      <ControlButton
-        label={props.editing ? "Stop editing props" : "Edit props"}
-        pressed={props.editing}
-        onClick={props.onToggleEditing}
-      >
-        <path
-          className="stroke"
-          d="M8 2v12M2 8h12M8 2L6.5 3.5M8 2l1.5 1.5M8 14l-1.5-1.5M8 14l1.5-1.5M2 8l1.5-1.5M2 8l1.5 1.5M14 8l-1.5-1.5M14 8l-1.5 1.5"
-        />
-      </ControlButton>
+      {props.expanded && (
+        <ControlButton
+          label={props.editing ? "Stop editing props" : "Edit props"}
+          pressed={props.editing}
+          onClick={props.onToggleEditing}
+        >
+          <path
+            className="stroke"
+            d="M8 2v12M2 8h12M8 2L6.5 3.5M8 2l1.5 1.5M8 14l-1.5-1.5M8 14l1.5-1.5M2 8l1.5-1.5M2 8l1.5 1.5M14 8l-1.5-1.5M14 8l-1.5 1.5"
+          />
+        </ControlButton>
+      )}
       <ControlButton label={props.paused ? "Resume" : "Pause"} onClick={props.onTogglePaused}>
         {props.paused ? (
           <path d="M5 3.5v9l7-4.5z" />

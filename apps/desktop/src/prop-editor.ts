@@ -10,7 +10,7 @@ import type { DioramaView, PropPreview, ViewPointer } from "@living-diorama/rend
 import type { PropSummary, SceneProp } from "@living-diorama/simulation";
 import type { EditHistory } from "./edit-history";
 
-// The in-strip prop editor (ADR 0021 §12): what a click, a drag, the wheel or a key does to the
+// The prop editor (ADR 0021 §12), in the normal window only: what a click, a drag, the wheel or a key does to the
 // world's props in Edit mode. The renderer only picks and previews; every change is one edit sent
 // to the worker, committed when a gesture ends, never on every pointer move, since each edit
 // rebuilds the world. The world keeps running meanwhile (§3).
@@ -84,6 +84,19 @@ interface Pending {
   timer?: unknown;
 }
 
+/** An edit the editor sent, until it is drawn or refused. */
+interface Commit {
+  seq: number;
+  /** The placement it changes, if it existed before the edit. */
+  id: string | undefined;
+  /** What it sets on that placement, so a gesture before the redraw starts from it. */
+  values: Partial<Transform>;
+  /** It shows as the preview until it is drawn. */
+  ghosted: boolean;
+  /** The worker applied it; it is drawn by the next `world_changed`. */
+  applied: boolean;
+}
+
 /** A pointer pressed in the view, until it is released. */
 interface Press {
   start: ViewPointer;
@@ -129,11 +142,12 @@ export class PropEditor {
   #placingRotation = 0;
   #press: Press | undefined;
   #pending: Pending | undefined;
-  /**
-   * Values committed but not drawn yet, by placement, so a gesture that starts before the redraw
-   * starts from them.
-   */
-  #committed = new Map<string, Partial<Transform>>();
+  /** Edits sent and not drawn yet, oldest first. */
+  #commits: Commit[] = [];
+  #nextSeq = 1;
+  /** Goes up on every `clear`, so answers to edits sent before it change nothing here. */
+  #generation = 0;
+  #disposed = false;
   /** The preview shows, and the placement this hides, if any. */
   #ghost: { hidden: string | undefined } | undefined;
   /** The preview stays until the edit it shows is drawn, so the prop never jumps back. */
@@ -161,14 +175,17 @@ export class PropEditor {
     };
   }
 
-  /** Turns Edit mode on or off. Turning it off commits a pending turn or scale. */
+  /**
+   * Turns Edit mode on or off. Turning it off commits a pending turn or scale, drops a drag or a
+   * placement, and takes the preview away, showing the hidden prop again.
+   */
   setActive(active: boolean): void {
-    if (active === this.#active) return;
+    if (active === this.#active || this.#disposed) return;
     if (!active) {
       this.#flush();
       this.#cancelPress();
       this.#placing = undefined;
-      if (!this.#ghostHeld) this.#dropGhost();
+      this.#dropGhost();
       this.#setSelected(undefined);
       this.#setNotice(undefined);
     }
@@ -177,13 +194,24 @@ export class PropEditor {
   }
 
   /**
-   * The props are drawn anew, after an edit or a restore. A preview held for a committed edit
-   * goes, and a selection whose placement is gone is dropped.
+   * A `world_changed` arrived: returns a token for `setProps` once its props are drawn. It counts
+   * every edit applied so far, since the worker sends an edit's answer before its `world_changed`.
    */
-  setProps(props: readonly SceneProp[]): void {
+  worldChanged(): number {
+    return this.#commits.reduce((last, c) => (c.applied ? Math.max(last, c.seq) : last), 0);
+  }
+
+  /**
+   * The props are drawn anew, after an edit or a restore; `drawn` is what `worldChanged` returned
+   * when that change arrived (by default, every edit applied so far). The edits it includes are
+   * done with: the preview stays only while a later edit of the same prop isn't drawn yet. A
+   * selection whose placement is gone is dropped.
+   */
+  setProps(props: readonly SceneProp[], drawn = this.worldChanged()): void {
+    if (this.#disposed) return;
     this.#props = new Map(props.map((prop) => [prop.id, prop]));
-    this.#committed.clear();
-    if (this.#ghostHeld) this.#dropGhost();
+    this.#commits = this.#commits.filter((c) => !(c.applied && c.seq <= drawn));
+    if (this.#ghostHeld) this.#releaseGhost();
     if (this.#pending && !this.#props.has(this.#pending.id)) this.#cancelPending();
     if (this.#selected !== undefined && !this.#props.has(this.#selected)) {
       this.#setSelected(undefined);
@@ -196,13 +224,27 @@ export class PropEditor {
    * replaced the world (ADR 0021 §4) or the world was reset.
    */
   clear(): void {
+    if (this.#disposed) return;
     this.#history.clear();
+    this.#generation++;
     this.#cancelPending();
     this.#cancelPress();
-    this.#committed.clear();
+    this.#commits = [];
     this.#dropGhost();
     this.#setSelected(undefined);
     this.#emit();
+  }
+
+  /**
+   * Stops the editor with the view: a pending turn or scale is dropped, timers are cleared, and
+   * answers still to come change nothing.
+   */
+  dispose(): void {
+    this.#cancelPending();
+    if (this.#noticeTimer !== undefined) this.#timers.clear(this.#noticeTimer);
+    this.#noticeTimer = undefined;
+    this.#press = undefined;
+    this.#disposed = true;
   }
 
   /** Called when the history changes, so canUndo and canRedo reach the toolbar. */
@@ -300,8 +342,8 @@ export class PropEditor {
   }
 
   /**
-   * A key went down. Returns true when it was the editor's. Keys reach the app only in the
-   * normal window, since the strip never takes focus (ADR 0008 §6); the toolbar covers them there.
+   * A key went down. Returns true when it was the editor's. Edit mode is only on in the normal
+   * window, which takes focus (ADR 0016 §1), so its keys arrive.
    */
   key(event: EditorKey): boolean {
     if (!this.#active || event.altKey || event.metaKey) return false;
@@ -379,13 +421,15 @@ export class PropEditor {
   /** Undoes the last edit, after committing a pending turn or scale. */
   async undo(): Promise<void> {
     this.#flush();
-    this.#report(await this.#history.undo());
+    const result = await this.#history.undo();
+    if (!this.#disposed) this.#report(result);
   }
 
   /** Redoes the last undone edit. */
   async redo(): Promise<void> {
     this.#flush();
-    this.#report(await this.#history.redo());
+    const result = await this.#history.redo();
+    if (!this.#disposed) this.#report(result);
   }
 
   // ---- Internals -----------------------------------------------------------------------------
@@ -395,9 +439,12 @@ export class PropEditor {
     const prop = this.#props.get(id);
     if (!prop) return undefined;
     const pending = this.#pending?.id === id ? this.#pending : undefined;
+    const committed = this.#commits
+      .filter((c) => c.id === id)
+      .reduce<Partial<Transform>>((values, c) => ({ ...values, ...c.values }), {});
     return {
       ...prop.transform,
-      ...this.#committed.get(id),
+      ...committed,
       ...(pending?.rotationY === undefined ? {} : { rotationY: pending.rotationY }),
       ...(pending?.scale === undefined ? {} : { scale: pending.scale }),
     };
@@ -442,8 +489,7 @@ export class PropEditor {
     if (!pending) return;
     const ops = this.#pendingOps();
     this.#cancelPending();
-    this.#remember(pending.id, pending);
-    if (ops.length > 0) void this.#commit({ ops }, true, pending.id);
+    if (ops.length > 0) void this.#commit({ ops }, true, pending.id, valuesOf(pending));
   }
 
   #cancelPending() {
@@ -454,23 +500,20 @@ export class PropEditor {
   #commitDrag(press: Press) {
     const id = this.#selected;
     if (id === undefined || !press.to) {
-      this.#cancelPress();
+      // Never on the ground: nothing moves, but a pending turn or scale still commits.
+      const pending = this.#pending;
+      if (pending) this.#change(pending.id, {});
+      else this.#dropGhost();
       return;
     }
     const position = { x: press.to.x, z: press.to.z };
     const pending = this.#pending?.id === id ? this.#pending : undefined;
     const ops = pending ? this.#pendingOps(position) : [{ op: "prop.move" as const, id, position }];
     this.#cancelPending();
-    this.#remember(id, { ...pending, position: press.to });
-    void this.#commit({ ops }, true, id);
-  }
-
-  #remember(id: string, change: Partial<Pick<Transform, "position" | "rotationY" | "scale">>) {
-    const committed: Partial<Transform> = { ...this.#committed.get(id) };
-    if (change.position) committed.position = change.position;
-    if (change.rotationY !== undefined) committed.rotationY = change.rotationY;
-    if (change.scale !== undefined) committed.scale = change.scale;
-    this.#committed.set(id, committed);
+    void this.#commit({ ops }, true, id, {
+      ...(pending ? valuesOf(pending) : {}),
+      position: press.to,
+    });
   }
 
   /** Places the chosen prop type where the pointer meets the ground, and selects it. */
@@ -481,12 +524,15 @@ export class PropEditor {
     const rotationY = this.#placingRotation;
     this.#placing = undefined;
     this.#emit();
+    const generation = this.#generation;
     void this.#commit(
       { ops: [{ op: "prop.add", prop, position: { x: ground.x, z: ground.z }, rotationY }] },
       true,
     ).then((result) => {
+      // Not if the world was replaced, or Edit mode left, meanwhile.
+      if (generation !== this.#generation || this.#disposed || !this.#active) return;
       const added = result.ok ? result.edit.ops.find((op) => op.op === "prop.add") : undefined;
-      if (added?.op === "prop.add" && this.#active) this.select(added.id);
+      if (added?.op === "prop.add") this.select(added.id);
     });
   }
 
@@ -524,6 +570,22 @@ export class PropEditor {
     this.#view.previewProp(preview);
   }
 
+  /**
+   * A held preview stays while an edit it shows isn't drawn yet, at what is left of the prop's
+   * committed values; otherwise it goes.
+   */
+  #releaseGhost() {
+    const hidden = this.#ghost?.hidden;
+    const waiting = this.#commits.some((c) => c.ghosted && c.id === hidden);
+    const transform = hidden === undefined ? undefined : this.#transformOf(hidden);
+    if (hidden === undefined || !waiting || !transform) {
+      this.#dropGhost();
+      return;
+    }
+    this.#showGhost(hidden, transform);
+    this.#ghostHeld = true;
+  }
+
   #dropGhost() {
     this.#ghostHeld = false;
     if (!this.#ghost) return;
@@ -545,19 +607,34 @@ export class PropEditor {
   }
 
   /**
-   * Sends an edit. With `ghosted`, the preview shows until the edit is drawn, or goes at once if
-   * it is refused, as do the values remembered for `placementId`.
+   * Sends an edit of `placementId` that sets `values`. With `ghosted`, the preview shows until
+   * the edit is drawn. A refused edit is forgotten at once, and only it: the preview falls back to
+   * what earlier edits not drawn yet set, or goes.
    */
   async #commit(
     edit: WorldEditInput,
     ghosted: boolean,
     placementId?: string,
+    values: Partial<Transform> = {},
   ): Promise<WorldEditResult> {
+    const commit: Commit = {
+      seq: this.#nextSeq++,
+      id: placementId,
+      values,
+      ghosted,
+      applied: false,
+    };
+    this.#commits.push(commit);
     if (ghosted) this.#ghostHeld = true;
+    const generation = this.#generation;
     const result = await this.#history.apply(edit);
-    if (!result.ok) {
-      if (placementId !== undefined) this.#committed.delete(placementId);
-      if (ghosted && this.#ghostHeld) this.#dropGhost();
+    // After a clear the commit is already forgotten, and after dispose nothing is drawn.
+    if (generation !== this.#generation || this.#disposed) return result;
+    if (result.ok) {
+      commit.applied = true;
+    } else {
+      this.#commits = this.#commits.filter((c) => c !== commit);
+      if (ghosted && this.#ghostHeld) this.#releaseGhost();
     }
     this.#report(result);
     return result;
@@ -608,8 +685,15 @@ export class PropEditor {
   }
 
   #emit() {
+    if (this.#disposed) return;
     this.#onChange(this.state);
   }
 }
+
+/** The values a pending turn or scale sets. */
+const valuesOf = ({ rotationY, scale }: Pending): Partial<Transform> => ({
+  ...(rotationY === undefined ? {} : { rotationY }),
+  ...(scale === undefined ? {} : { scale }),
+});
 
 const messages = (diagnostics: readonly Diagnostic[]) => diagnostics.map((d) => d.message);

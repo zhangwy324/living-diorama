@@ -16,7 +16,7 @@ export interface EditToolbarProps {
 /**
  * Edit mode's toolbar in the top-left corner (ADR 0021 §12): the palette of prop types, then turn,
  * delete, undo and redo, with a line below saying what a click does now, or what the last edit
- * was refused for or warned about. The strip never takes focus, so every key has a button here.
+ * was refused for or warned about. Every key has a button here too.
  */
 export function EditToolbar({ state, propTypes, ...props }: EditToolbarProps) {
   const selected = state.selected !== undefined;

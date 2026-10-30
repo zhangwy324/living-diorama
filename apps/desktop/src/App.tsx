@@ -81,6 +81,8 @@ export function App() {
       }),
       shell.onExpandedChanged((value) => {
         cameras.current.switchTo(value, view.current);
+        // Props are edited only in the normal window (ADR 0021, PR 6).
+        if (!value) editor.current?.setActive(false);
         setExpanded(value);
       }),
       shell.onFullScreenChanged(setFullScreen),
@@ -242,8 +244,9 @@ export function App() {
       // world this queues a second save behind the one opening the world makes; that is harmless.
       // The editor hears of the new props once they are drawn, so its preview goes only then.
       onWorldChanged: ({ scene, navigations: [navigation] }) => {
+        const drawn = propEditor?.worldChanged();
         void created?.replaceProps(scene, navigation).then((placed) => {
-          if (placed) propEditor?.setProps(scene.props);
+          if (placed) propEditor?.setProps(scene.props, drawn);
         });
         void world.save();
       },
@@ -276,6 +279,7 @@ export function App() {
       simulation.current = undefined;
       editor.current = undefined;
       detachEditorInput();
+      propEditor?.dispose();
       saving.current = undefined;
       world.stop();
       client.stop();

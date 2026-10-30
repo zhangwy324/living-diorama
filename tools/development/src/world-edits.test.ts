@@ -280,6 +280,22 @@ describe("Simulation edits", () => {
     expect(events[0]).toEqual({ type: "world_edited", tick: 20, edit: result.edit });
   });
 
+  it("takes no placement ID from the counter for a dry run, accepted or refused", () => {
+    const simulation = hollowSim();
+    const add = (x: number) =>
+      edit({ ops: [{ op: "prop.add", prop: "hollow:rock", position: { x, z: 2 } }] });
+    // A refused check names the ID the edit would get, and leaves it free.
+    const refused = simulation.validateEdit(add(500));
+    expect(refused.ok ? [] : refused.diagnostics.map((d) => d.message)).toEqual([
+      'Prop "prop-1" would reach outside the world',
+    ]);
+    expect(simulation.validateEdit(add(10)).ok).toBe(true);
+    expect(simulation.state.nextPropId).toBe(1);
+    const result = simulation.applyEdit(add(10));
+    expect(result.ok && result.edit.ops[0]).toMatchObject({ id: "prop-1" });
+    expect(simulation.state.nextPropId).toBe(2);
+  });
+
   it("moves a creature a prop is dropped on to the nearest walkable cell, interrupting it", () => {
     const simulation = hollowSim();
     const creature = spawn(simulation, MOSSLING, "meadow");

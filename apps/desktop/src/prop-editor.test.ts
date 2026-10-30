@@ -71,9 +71,13 @@ function manualTimers() {
 function setup(props: SceneProp[] = [prop("rock-1", 0, 0), prop("pine-1", 10, 10)]) {
   const sent: WorldEditInput[] = [];
   let answer: (edit: WorldEditInput) => WorldEditResult = (edit) => applied(edit);
+  // While holding, each edit waits to be answered until `answerNext`.
+  let holding = false;
+  const held: (() => void)[] = [];
   const history = new EditHistory(
     async (edit) => {
       sent.push(edit);
+      if (holding) await new Promise<void>((resolve) => held.push(resolve));
       return answer(edit);
     },
     () => editor.historyChanged(),
@@ -121,6 +125,12 @@ function setup(props: SceneProp[] = [prop("rock-1", 0, 0), prop("pine-1", 10, 10
     time,
     state: () => state,
     answer: (next: (edit: WorldEditInput) => WorldEditResult) => (answer = next),
+    hold: () => (holding = true),
+    /** Answers the oldest held edit and lets the answer through. */
+    async answerNext() {
+      held.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
     /** Lets the edits sent so far be answered. */
     settle: () => new Promise((resolve) => setTimeout(resolve, 0)),
     click(pointer: ViewPointer) {
@@ -503,5 +513,136 @@ describe("PropEditor clearing", () => {
     expect(sent).toHaveLength(1);
     expect(await editor.undo()).toBeUndefined();
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("PropEditor with edits in flight", () => {
+  const rockAt = (scale: number) => [prop("rock-1", 0, 0, scale), prop("pine-1", 10, 10)];
+  const scaleOf = (edit: WorldEditInput | undefined) => {
+    const op = edit?.ops[0];
+    return op?.op === "prop.scale" ? op.scale : undefined;
+  };
+
+  it("keeps the preview of a later edit when an earlier one is drawn", async () => {
+    const { editor, view, sent, click, time, settle } = setup();
+    click(at(0, 0));
+    editor.wheel(-100);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    // A's world_changed arrives, but its props are still loading when B is applied.
+    const drawnA = editor.worldChanged();
+    editor.wheel(-100);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    expect(scaleOf(sent[1])).toBeCloseTo(SCALE_STEP ** 2);
+    editor.setProps(rockAt(SCALE_STEP), drawnA);
+    // B isn't drawn yet: its preview stays, the original hidden, and the next scale starts from it.
+    expect(view.hidden).toBe("rock-1");
+    expect(view.preview?.transform.scale).toBeCloseTo(SCALE_STEP ** 2);
+    editor.setProps(rockAt(SCALE_STEP ** 2), editor.worldChanged());
+    expect(view.preview).toBeUndefined();
+    expect(view.hidden).toBeUndefined();
+  });
+
+  it("forgets only a refused edit, falling back to an earlier one not drawn yet", async () => {
+    const { editor, view, sent, click, time, settle, answer } = setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    click(at(0, 0));
+    editor.wheel(-100);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    answer(() => ({
+      ok: false,
+      diagnostics: [{ severity: "error", code: "outside_world", message: "Too big", path: [] }],
+    }));
+    editor.wheel(-100);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    // A is applied and not drawn: its preview stays, and the next scale starts from it.
+    expect(view.preview?.transform.scale).toBeCloseTo(SCALE_STEP);
+    expect(view.hidden).toBe("rock-1");
+    answer((edit) => applied(edit));
+    editor.wheel(-100);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    expect(scaleOf(sent[2])).toBeCloseTo(SCALE_STEP ** 2);
+    warn.mockRestore();
+  });
+
+  it("commits a pending turn when a drag ends without reaching the ground", async () => {
+    const { editor, view, sent, click, time, settle } = setup();
+    click(at(0, 0));
+    editor.rotate(1);
+    editor.pointerDown(at(0, 0), 0);
+    editor.pointerMove(at(-200, 0));
+    editor.pointerUp(at(-200, 0));
+    expect(view.preview?.transform.rotationY).toBeCloseTo(ROTATE_STEP);
+    time.advance(COMMIT_DELAY_MS);
+    await settle();
+    expect(sent).toEqual([{ ops: [{ op: "prop.move", id: "rock-1", rotationY: ROTATE_STEP }] }]);
+  });
+
+  it("selects nothing for a placement answered after a restore", async () => {
+    const { editor, view, click, hold, answerNext } = setup();
+    editor.choosePlacing("hollow:rock");
+    hold();
+    click(at(6, 7));
+    editor.clear();
+    await answerNext();
+    expect(view.selected).toBeUndefined();
+  });
+
+  it("leaves Edit mode committing a pending scale, without its preview or a selection", async () => {
+    const { editor, view, sent, click, settle, state } = setup();
+    click(at(0, 0));
+    editor.wheel(-100);
+    editor.setActive(false);
+    await settle();
+    expect(scaleOf(sent[0])).toBeCloseTo(SCALE_STEP);
+    expect(view.preview).toBeUndefined();
+    expect(view.hidden).toBeUndefined();
+    expect(view.selected).toBeUndefined();
+    expect(state()).toMatchObject({ active: false, selected: undefined, placing: undefined });
+  });
+
+  it("leaves Edit mode dropping a drag or a placement", async () => {
+    const { editor, view, sent, click, settle } = setup();
+    click(at(0, 0));
+    editor.pointerDown(at(0, 0), 0);
+    editor.pointerMove(at(6, 0));
+    editor.setActive(false);
+    editor.pointerUp(at(6, 0));
+    editor.setActive(true);
+    editor.choosePlacing("hollow:rock");
+    editor.pointerMove(at(4, 4));
+    editor.setActive(false);
+    await settle();
+    expect(sent).toEqual([]);
+    expect(view.preview).toBeUndefined();
+    expect(view.hidden).toBeUndefined();
+    expect(editor.state.placing).toBeUndefined();
+  });
+
+  it("drops a pending scale and its timers when disposed", async () => {
+    const { editor, sent, click, time, settle, answer, state } = setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    answer(() => ({
+      ok: false,
+      diagnostics: [{ severity: "error", code: "no", message: "No", path: [] }],
+    }));
+    click(at(0, 0));
+    editor.deleteSelected();
+    await settle();
+    editor.select("pine-1");
+    editor.wheel(-100);
+    const before = state();
+    expect(before?.notice?.kind).toBe("error");
+    editor.dispose();
+    time.advance(NOTICE_MS);
+    await settle();
+    // The scale was never sent, and the notice timer changed nothing.
+    expect(sent).toHaveLength(1);
+    expect(state()).toBe(before);
+    warn.mockRestore();
   });
 });
