@@ -9,7 +9,10 @@ import type { PropEditor } from "./prop-editor";
  */
 export function attachEditorInput(
   element: HTMLElement,
-  editor: Pick<PropEditor, "pointerDown" | "pointerMove" | "pointerUp" | "pointerCancel" | "wheel">,
+  editor: Pick<
+    PropEditor,
+    "pointerDown" | "pointerMove" | "pointerUp" | "pointerCancel" | "pointerLeave" | "wheel"
+  >,
 ): () => void {
   const take = (event: Event) => {
     event.stopPropagation();
@@ -29,6 +32,8 @@ export function attachEditorInput(
     if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
   };
   const onPointerCancel = () => editor.pointerCancel();
+  // Onto the prop drawer, say: a placement's preview doesn't stay stuck at the view's edge.
+  const onPointerLeave = () => editor.pointerLeave();
   const onWheel = (event: WheelEvent) => {
     // A scroll in lines or pages (rare on Windows) counts as one notch.
     const deltaY =
@@ -40,12 +45,14 @@ export function attachEditorInput(
   element.addEventListener("pointermove", onPointerMove, options);
   element.addEventListener("pointerup", onPointerUp, options);
   element.addEventListener("pointercancel", onPointerCancel, options);
+  element.addEventListener("pointerleave", onPointerLeave);
   element.addEventListener("wheel", onWheel, { capture: true, passive: false });
   return () => {
     element.removeEventListener("pointerdown", onPointerDown, options);
     element.removeEventListener("pointermove", onPointerMove, options);
     element.removeEventListener("pointerup", onPointerUp, options);
     element.removeEventListener("pointercancel", onPointerCancel, options);
+    element.removeEventListener("pointerleave", onPointerLeave);
     element.removeEventListener("wheel", onWheel, options);
   };
 }

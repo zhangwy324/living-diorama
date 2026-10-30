@@ -6,7 +6,12 @@ import {
   type Result,
   type SpeciesDefinition,
 } from "@living-diorama/content-schema";
-import type { AssetEntry, LocomotionRule, Registries } from "@living-diorama/extension-api";
+import {
+  sortedPropCategories,
+  type AssetEntry,
+  type LocomotionRule,
+  type Registries,
+} from "@living-diorama/extension-api";
 import { describeNavigation } from "../navigation/overlay";
 import {
   envelope,
@@ -82,8 +87,12 @@ export function describeContent({ state }: Simulation): WorldContent {
     props: Object.fromEntries(
       registries.props
         .values()
-        .map(({ id, name, model, blockRadius }) => [id, { name, model, blockRadius }]),
+        .map(({ id, name, model, blockRadius, category }) => [
+          id,
+          { name, model, blockRadius, ...(category === undefined ? {} : { category }) },
+        ]),
     ),
+    propCategories: sortedPropCategories(registries).map(({ id, name }) => ({ id, name })),
   };
 }
 

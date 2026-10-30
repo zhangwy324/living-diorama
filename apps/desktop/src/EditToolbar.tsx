@@ -1,12 +1,13 @@
 import type { PropSummary } from "@living-diorama/simulation";
 import type { ReactNode } from "react";
+import { aProp } from "./prop-drawer";
 import type { EditorState } from "./prop-editor";
 
 export interface EditToolbarProps {
   state: EditorState;
-  /** The registered prop types, by ID: the palette. */
+  /** The registered prop types, by ID, to name the one being placed. */
   propTypes: Record<string, PropSummary>;
-  onChoose(propType: string | undefined): void;
+  onToggleDrawer(): void;
   onRotate(direction: 1 | -1): void;
   onDelete(): void;
   onUndo(): void;
@@ -14,31 +15,24 @@ export interface EditToolbarProps {
 }
 
 /**
- * Edit mode's toolbar in the top-left corner (ADR 0021 §12): the palette of prop types, then turn,
+ * Edit mode's toolbar in the top-left corner (ADR 0021 §12): the prop drawer's toggle, then turn,
  * delete, undo and redo, with a line below saying what a click does now, or what the last edit
- * was refused for or warned about. Every key has a button here too.
+ * was refused for or warned about. Every key has a button here too. The prop types to add are in
+ * the drawer (PR 7b).
  */
 export function EditToolbar({ state, propTypes, ...props }: EditToolbarProps) {
   const selected = state.selected !== undefined;
   const placing = state.placing === undefined ? undefined : propTypes[state.placing];
-  const types = Object.entries(propTypes).sort(([, a], [, b]) => a.name.localeCompare(b.name));
   return (
     <div className="editor">
       <div className="editor-toolbar" role="toolbar" aria-label="Edit props">
-        <div className="editor-palette">
-          {types.map(([id, type]) => (
-            <button
-              key={id}
-              type="button"
-              className="editor-chip"
-              title={`Place a ${type.name.toLowerCase()}`}
-              aria-pressed={state.placing === id}
-              onClick={() => props.onChoose(state.placing === id ? undefined : id)}
-            >
-              {type.name}
-            </button>
-          ))}
-        </div>
+        <ToolButton
+          label={state.drawerOpen ? "Hide the props drawer" : "Show the props drawer"}
+          pressed={state.drawerOpen}
+          onClick={props.onToggleDrawer}
+        >
+          <path className="stroke" d="M2.5 3.5h11v9h-11zM9.5 3.5v9M11 6h1M11 8h1M11 10h1" />
+        </ToolButton>
         <ToolButton
           label="Turn left (R)"
           disabled={!selected && !placing}
@@ -75,14 +69,20 @@ export function EditToolbar({ state, propTypes, ...props }: EditToolbarProps) {
 
 /** What a click does now. */
 function hint(state: EditorState, placing: PropSummary | undefined): string {
-  if (placing) return `Click the ground to place a ${placing.name.toLowerCase()}`;
+  if (placing && state.placingDrag) {
+    return `Release over the ground to place ${aProp(placing.name)}`;
+  }
+  if (placing) return `Click the ground to place ${aProp(placing.name)}`;
   if (state.selected !== undefined) return "Drag it to move, scroll to scale";
-  return "Click a prop to select it, or pick one to add";
+  return state.drawerOpen
+    ? "Click a prop to select it, or drag one in from the drawer"
+    : "Click a prop to select it";
 }
 
 function ToolButton(props: {
   label: string;
   disabled?: boolean;
+  pressed?: boolean;
   onClick(): void;
   children: ReactNode;
 }) {
@@ -92,6 +92,7 @@ function ToolButton(props: {
       title={props.label}
       aria-label={props.label}
       disabled={props.disabled}
+      aria-pressed={props.pressed}
       onClick={props.onClick}
     >
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">

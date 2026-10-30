@@ -2,6 +2,7 @@ import {
   formatDiagnostic,
   type Diagnostic,
   type Transform,
+  type Vec3,
   type WorldEditInput,
   type WorldEditOpInput,
   type WorldEditResult,
@@ -31,8 +32,12 @@ export interface EditorState {
   active: boolean;
   /** The selected placement's ID. */
   selected: string | undefined;
-  /** The prop type being placed, chosen from the palette. */
+  /** The prop type being placed, chosen in the prop drawer. */
   placing: string | undefined;
+  /** The type being placed is dragged from the drawer: it is placed where the pointer is released. */
+  placingDrag: boolean;
+  /** The prop drawer shows (in Edit mode only). */
+  drawerOpen: boolean;
   canUndo: boolean;
   canRedo: boolean;
   notice: EditorNotice | undefined;
@@ -62,7 +67,7 @@ const windowTimers: EditorTimers = {
 export interface PropEditorOptions {
   view: EditorView;
   history: EditHistory;
-  /** The registered prop types, by ID, for the palette. */
+  /** The registered prop types, by ID, for the drawer. */
   propTypes: Record<string, PropSummary>;
   /** The props drawn now. */
   props: readonly SceneProp[];
@@ -140,6 +145,10 @@ export class PropEditor {
   #selected: string | undefined;
   #placing: string | undefined;
   #placingRotation = 0;
+  #placingDrag = false;
+  /** Where the placement's preview last followed the pointer, so a turn shows at once. */
+  #placingAt: ViewPointer | undefined;
+  #drawerOpen = true;
   #press: Press | undefined;
   #pending: Pending | undefined;
   /** Edits sent and not drawn yet, oldest first. */
@@ -169,6 +178,8 @@ export class PropEditor {
       active: this.#active,
       selected: this.#selected,
       placing: this.#placing,
+      placingDrag: this.#placingDrag,
+      drawerOpen: this.#drawerOpen,
       canUndo: this.#history.canUndo,
       canRedo: this.#history.canRedo,
       notice: this.#notice,
@@ -176,20 +187,34 @@ export class PropEditor {
   }
 
   /**
-   * Turns Edit mode on or off. Turning it off commits a pending turn or scale, drops a drag or a
-   * placement, and takes the preview away, showing the hidden prop again.
+   * Turns Edit mode on or off. Turning it on opens the prop drawer. Turning it off commits a
+   * pending turn or scale, drops a drag or a placement, and takes the preview away, showing the
+   * hidden prop again.
    */
   setActive(active: boolean): void {
     if (active === this.#active || this.#disposed) return;
-    if (!active) {
+    if (active) {
+      this.#drawerOpen = true;
+    } else {
       this.#flush();
       this.#cancelPress();
-      this.#placing = undefined;
+      this.#cancelPlacing();
       this.#dropGhost();
       this.#setSelected(undefined);
       this.#setNotice(undefined);
     }
     this.#active = active;
+    this.#emit();
+  }
+
+  /**
+   * Opens or closes the prop drawer. Closing it ends a placement, dragged or not, and keeps the
+   * rest: the selection, a pending turn or scale, and Edit mode itself.
+   */
+  setDrawerOpen(open: boolean): void {
+    if (open === this.#drawerOpen || this.#disposed) return;
+    if (!open) this.#cancelPlacing();
+    this.#drawerOpen = open;
     this.#emit();
   }
 
@@ -319,8 +344,10 @@ export class PropEditor {
     }
     // A press that moved orbited the camera.
     if (moved(press.start, pointer)) return false;
-    if (this.#placing !== undefined) this.#place(pointer);
-    else if (!press.onSelected) this.select(press.picked);
+    if (this.#placing !== undefined) {
+      const ground = this.#view.pickGround(pointer);
+      if (ground) this.#place(ground);
+    } else if (!press.onSelected) this.select(press.picked);
     return false;
   }
 
@@ -329,11 +356,69 @@ export class PropEditor {
     this.#cancelPress();
   }
 
+  /** The pointer left the view: a placement's preview goes until it is back over the ground. */
+  pointerLeave(): void {
+    if (!this.#active || this.#placing === undefined || this.#placingDrag) return;
+    this.#placingAt = undefined;
+    if (!this.#ghostHeld) this.#dropGhost();
+  }
+
+  // ---- Dragging a prop type from the drawer --------------------------------------------------
+
   /**
-   * The wheel turned over the view. Returns true when it scaled the selected prop: then the
-   * camera must not zoom. Without a selection the wheel zooms as usual.
+   * A tile of the drawer is being dragged: the type is placed where the pointer is released over
+   * the ground (`endPlacingDrag`). Until then the preview follows the pointer over the world.
+   */
+  startPlacingDrag(propType: string): void {
+    if (!this.#active || !this.#drawerOpen || !(propType in this.#types)) return;
+    this.choosePlacing(propType);
+    this.#placingDrag = true;
+    this.#emit();
+  }
+
+  /** The dragged tile moved; `overWorld` says the pointer is over the world, not the drawer. */
+  movePlacingDrag(pointer: ViewPointer, overWorld: boolean): void {
+    if (!this.#placingDrag) return;
+    if (overWorld) {
+      this.#previewPlacing(pointer);
+    } else {
+      // A preview held for an edit not drawn yet (the last placement) stays.
+      this.#placingAt = undefined;
+      if (!this.#ghostHeld) this.#dropGhost();
+    }
+  }
+
+  /**
+   * The dragged tile was released. Over the ground of the world, the type is placed there and
+   * selected, as by a click; over the drawer, anywhere else, or off the ground, nothing is placed
+   * and placing ends.
+   */
+  endPlacingDrag(pointer: ViewPointer, overWorld: boolean): void {
+    if (!this.#placingDrag) return;
+    this.#placingDrag = false;
+    const ground = overWorld ? this.#view.pickGround(pointer) : undefined;
+    if (ground) {
+      this.#place(ground);
+    } else {
+      this.#cancelPlacing();
+      this.#emit();
+    }
+  }
+
+  /** The dragged tile lost the pointer: nothing is placed, and placing ends. */
+  cancelPlacingDrag(): void {
+    if (!this.#placingDrag) return;
+    this.#cancelPlacing();
+    this.#emit();
+  }
+
+  /**
+   * The wheel turned over the view. Returns true when it scaled the selected prop, or a tile is
+   * being dragged from the drawer: then the camera must not zoom (the ground under the dragged
+   * preview would slide away). Otherwise, without a selection, the wheel zooms as usual.
    */
   wheel(deltaY: number): boolean {
+    if (this.#active && this.#placingDrag) return true;
     if (!this.#active || this.#selected === undefined || this.#placing !== undefined) return false;
     const transform = this.#transformOf(this.#selected);
     if (!transform || deltaY === 0) return true;
@@ -356,8 +441,10 @@ export class PropEditor {
     }
     switch (key) {
       case "escape":
-        if (this.#placing !== undefined) this.choosePlacing(undefined);
-        else if (this.#selected !== undefined) this.select(undefined);
+        if (this.#placing !== undefined) {
+          this.#cancelPlacing();
+          this.#emit();
+        } else if (this.#selected !== undefined) this.select(undefined);
         else return false;
         return true;
       case "delete":
@@ -383,13 +470,13 @@ export class PropEditor {
     this.#emit();
   }
 
-  /** Starts placing a prop type from the palette, or stops. The next click places it. */
+  /** Starts placing a prop type from the drawer, or stops. The next click on the ground places it. */
   choosePlacing(propType: string | undefined): void {
     this.#flush();
     this.#setSelected(undefined);
-    this.#placing = propType !== undefined && propType in this.#types ? propType : undefined;
-    this.#placingRotation = 0;
+    this.#cancelPlacing();
     if (!this.#ghostHeld) this.#dropGhost();
+    this.#placing = propType !== undefined && propType in this.#types ? propType : undefined;
     this.#emit();
   }
 
@@ -397,6 +484,7 @@ export class PropEditor {
   rotate(direction: 1 | -1): void {
     if (this.#placing !== undefined) {
       this.#placingRotation = normalizeAngle(this.#placingRotation + direction * ROTATE_STEP);
+      if (this.#placingAt) this.#previewPlacing(this.#placingAt);
       return;
     }
     if (this.#selected === undefined) return;
@@ -516,13 +604,14 @@ export class PropEditor {
     });
   }
 
-  /** Places the chosen prop type where the pointer meets the ground, and selects it. */
-  #place(pointer: ViewPointer) {
+  /** Places the chosen prop type at this point of the ground, and selects it. */
+  #place(ground: Vec3) {
     const prop = this.#placing;
-    const ground = this.#view.pickGround(pointer);
-    if (prop === undefined || !ground) return;
+    if (prop === undefined) return;
     const rotationY = this.#placingRotation;
     this.#placing = undefined;
+    this.#placingDrag = false;
+    this.#placingAt = undefined;
     this.#emit();
     const generation = this.#generation;
     void this.#commit(
@@ -539,8 +628,9 @@ export class PropEditor {
   #previewPlacing(pointer: ViewPointer) {
     const type = this.#placing === undefined ? undefined : this.#types[this.#placing];
     const ground = this.#view.pickGround(pointer);
+    this.#placingAt = ground ? pointer : undefined;
     if (!type || !ground) {
-      this.#dropGhost();
+      if (!this.#ghostHeld) this.#dropGhost();
       return;
     }
     this.#ghost = { hidden: undefined };
@@ -584,6 +674,19 @@ export class PropEditor {
     }
     this.#showGhost(hidden, transform);
     this.#ghostHeld = true;
+  }
+
+  /**
+   * Ends a placement, dragged or not, taking its preview away (unless the preview is held for an
+   * edit not drawn yet).
+   */
+  #cancelPlacing() {
+    const placing = this.#placing !== undefined;
+    this.#placing = undefined;
+    this.#placingDrag = false;
+    this.#placingRotation = 0;
+    this.#placingAt = undefined;
+    if (placing && !this.#ghostHeld) this.#dropGhost();
   }
 
   #dropGhost() {

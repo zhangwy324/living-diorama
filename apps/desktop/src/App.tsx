@@ -5,14 +5,15 @@ import {
   connectWorldStore,
   serveStudio,
 } from "@living-diorama/desktop-integration";
-import { createDioramaView, type DioramaView } from "@living-diorama/renderer";
+import { createDioramaView, type DioramaView, type ViewPointer } from "@living-diorama/renderer";
 import type {
   AssetSummary,
+  PropCategorySummary,
   PropSummary,
   SimulationSnapshot,
   SpeciesSummary,
 } from "@living-diorama/simulation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
 import { EditHistory } from "./edit-history";
 import { EditToolbar } from "./EditToolbar";
@@ -22,6 +23,8 @@ import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
 import { attachEditorInput } from "./editor-input";
+import { PropDrawer } from "./PropDrawer";
+import { drawerShown, drawerTabs, PropThumbnails, TILE_THUMBNAIL_PX } from "./prop-drawer";
 import { PropEditor, type EditorState } from "./prop-editor";
 import {
   COUNT_OVERRIDE,
@@ -66,6 +69,24 @@ export function App() {
   const editor = useRef<PropEditor>(undefined);
   const [editorState, setEditorState] = useState<EditorState>();
   const [propTypes, setPropTypes] = useState<Record<string, PropSummary>>({});
+  const [propCategories, setPropCategories] = useState<PropCategorySummary[]>([]);
+  // The drawer's tab is kept while it is closed, and its thumbnails for the view's life.
+  const [drawerTab, setDrawerTab] = useState<string>();
+  const [thumbnails, setThumbnails] = useState<PropThumbnails>();
+  const tabs = useMemo(() => drawerTabs(propTypes, propCategories), [propTypes, propCategories]);
+  // The drawer reaches the editor through the ref, which is set once the view starts.
+  const drawerEditor = useMemo(
+    () => ({
+      choosePlacing: (propType: string | undefined) => editor.current?.choosePlacing(propType),
+      startPlacingDrag: (propType: string) => editor.current?.startPlacingDrag(propType),
+      movePlacingDrag: (pointer: ViewPointer, overWorld: boolean) =>
+        editor.current?.movePlacingDrag(pointer, overWorld),
+      endPlacingDrag: (pointer: ViewPointer, overWorld: boolean) =>
+        editor.current?.endPlacingDrag(pointer, overWorld),
+      cancelPlacingDrag: () => editor.current?.cancelPlacingDrag(),
+    }),
+    [],
+  );
 
   // Every failure reaches the diagnostics log too (ADR 0009 §14).
   useEffect(() => {
@@ -226,6 +247,16 @@ export function App() {
         editor.current = propEditor;
         detachEditorInput = attachEditorInput(element, propEditor);
         setPropTypes(content.props);
+        setPropCategories(content.propCategories);
+        // One size for every thumbnail, fixed now, so none is drawn twice (#198).
+        const thumbnailSize = Math.round(TILE_THUMBNAIL_PX * Math.max(1, devicePixelRatio));
+        const thumbnailView = created;
+        setThumbnails(
+          new PropThumbnails(
+            (model, size) => thumbnailView.propThumbnail(model, size),
+            thumbnailSize,
+          ),
+        );
         setEditorState(propEditor.state);
         if (import.meta.env.DEV) uninstallTimeHook = installTimeDevHook(client);
         worldReady();
@@ -308,8 +339,9 @@ export function App() {
       />
     );
   }
+  const showDrawer = drawerShown(expanded, editorState);
   return (
-    <div className="app">
+    <div className={showDrawer ? "app with-drawer" : "app"}>
       {/* A double click while editing is a quick reselect, not a camera reset. */}
       <main
         className="diorama"
@@ -322,11 +354,27 @@ export function App() {
         <EditToolbar
           state={editorState}
           propTypes={propTypes}
-          onChoose={(propType) => editor.current?.choosePlacing(propType)}
+          onToggleDrawer={() => editor.current?.setDrawerOpen(!editorState.drawerOpen)}
           onRotate={(direction) => editor.current?.rotate(direction)}
           onDelete={() => editor.current?.deleteSelected()}
           onUndo={() => void editor.current?.undo()}
           onRedo={() => void editor.current?.redo()}
+        />
+      )}
+      {showDrawer && (
+        <PropDrawer
+          tabs={tabs}
+          tab={drawerTab}
+          onTab={setDrawerTab}
+          propTypes={propTypes}
+          placing={editorState?.placing}
+          thumbnails={thumbnails}
+          editor={drawerEditor}
+          overWorld={(pointer) => {
+            const element = document.elementFromPoint(pointer.clientX, pointer.clientY);
+            return element !== null && container.current?.contains(element) === true;
+          }}
+          onClose={() => editor.current?.setDrawerOpen(false)}
         />
       )}
       {/* The shell ignores height changes while expanded (ADR 0016 §1). */}
