@@ -95,6 +95,7 @@ const creatures = Array.from({ length: CREATURES }, (_, n) => ({
     gait: n % 3 === 0 ? "hop" : "walk",
     leap: undefined,
     phase: n / CREATURES,
+    height: body.measure.height,
     cues: { eating: n % 5 === 0 ? 1 : 0, sleeping: n % 7 === 0 ? 1 : 0, hungry: 0 },
   } satisfies MotionInput,
 }));

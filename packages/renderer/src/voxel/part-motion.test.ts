@@ -11,9 +11,18 @@ import { box, creature } from "../body/fixtures/voxel-creature";
 import { eatingPeck, type CueWeights } from "../cues";
 import { buildVoxelBody, type VoxelBody } from "./body";
 import { composePose } from "./compose-pose";
-import { MAX_SWING, buildMotionRig, type MotionName, type MotionRig } from "./motion-rig";
+import {
+  MAX_SWING,
+  STRIDE_RANGE,
+  buildMotionRig,
+  type MotionName,
+  type MotionRig,
+} from "./motion-rig";
 import {
   BLINK,
+  SLEEP,
+  SWIM,
+  WALK,
   createMotionPose,
   writeMotion,
   type MotionInput,
@@ -169,6 +178,7 @@ function input(overrides: Partial<MotionInput> = {}): MotionInput {
     gait: undefined,
     leap: undefined,
     phase: 0.3,
+    height: 0.2,
     cues: awake(),
     ...overrides,
   };
@@ -218,7 +228,10 @@ function expectMirrorImages(a: THREE.Vector3[], b: THREE.Vector3[]) {
 describe("motion rig", () => {
   it("classifies legs by socket position: side, front or back, and diagonal pairs that trot", () => {
     const { rig, index } = build(animal());
-    const legOf = (id: string) => rig.parts[index(id)]!.leg!;
+    const legOf = (id: string) => ({
+      side: rig.parts[index(id)]!.side,
+      ...rig.parts[index(id)]!.leg!,
+    });
     expect(legOf("leg-0-l")).toMatchObject({ side: -1, front: true, grounded: true });
     expect(legOf("leg-0-r")).toMatchObject({ side: 1, front: true });
     expect(legOf("leg-1-l")).toMatchObject({ side: -1, front: false });
@@ -269,7 +282,7 @@ describe("motion rig", () => {
     const { rig, index } = build(input);
     const back = rig.parts[index("leg-back")]!.leg!;
     expect(rig.parts[index("leg-back")]!.origin.z).toBeCloseTo(0, 9);
-    expect(back.side).toBe(-1);
+    expect(rig.parts[index("leg-back")]!.side).toBe(-1);
     expect(back.grounded).toBe(true);
     expect(back.offset).toBe(rig.parts[index("leg-0-r")]!.leg!.offset);
     expect(back.offset).not.toBe(rig.parts[index("leg-0-l")]!.leg!.offset);
@@ -522,5 +535,220 @@ describe("pose composer", () => {
     );
     expect(posed.length).toBe(squashed.length);
     posed.forEach((p, k) => expect(p.distanceTo(squashed[k]!)).toBeLessThan(1e-9));
+  });
+});
+
+/** A 12-cube torso with an unpaired leg at each (x, z), in torso cubes. */
+function legsAt(positions: readonly (readonly [number, number])[]): VoxelAssemblyInput {
+  return {
+    parts: {
+      torso: box(12, 4, 6, {
+        attach: { x: 6, y: 0, z: 3 },
+        sockets: positions.map(([x, z], n) => ({
+          id: `hip-${n}`,
+          type: "test:hip",
+          position: { x, y: 1, z },
+        })),
+      }),
+      leg: leg(4),
+    },
+    instances: [
+      { id: "torso", part: "torso" },
+      ...positions.map((_, n) => ({
+        id: `leg-${n}`,
+        part: "leg",
+        parent: { instance: "torso", socket: `hip-${n}` },
+      })),
+    ],
+  };
+}
+
+const asleep = (): CueWeights => ({ eating: 0, sleeping: 1, hungry: 0 });
+/** A part's turn about one body axis, for parts that turn about that axis alone. */
+const turnAbout = (pose: MotionPose, i: number, axis: 0 | 1 | 2) =>
+  2 * Math.asin(pose.rotations[4 * i + axis]!);
+
+describe("odd leg counts", () => {
+  const cases: [string, [number, number][], number[]][] = [
+    ["one", [[6, 3]], [0]],
+    [
+      "three",
+      [
+        [10, 1.5],
+        [6, 4.5],
+        [2, 1.5],
+      ],
+      [0, 0.5, 0.5],
+    ],
+    [
+      "five",
+      [
+        [10, 1.5],
+        [8, 4.5],
+        [6, 1.5],
+        [4, 4.5],
+        [2, 1.5],
+      ],
+      [0, 0.5, 0.5, 0, 0],
+    ],
+  ];
+  it.each(cases)("alternates %s in X order per side", (_, positions, offsets) => {
+    const { rig, index } = build(legsAt(positions));
+    expect(positions.map((_, n) => rig.parts[index(`leg-${n}`)]!.leg!.offset)).toEqual(offsets);
+    const pose = motion(rig, walking(rig.stride * 0.15));
+    if (positions.length > 1) {
+      // The first two legs on the left, neighbours in X, move against each other.
+      expect(swingOf(pose, index("leg-0"))).toBeCloseTo(-swingOf(pose, index("leg-2")), 9);
+    } else {
+      expect(Math.abs(swingOf(pose, index("leg-0")))).toBeGreaterThan(0.1);
+    }
+  });
+});
+
+describe("sides", () => {
+  it("are measured against the root's middle plane, not the bounds', on an asymmetric creature", () => {
+    // A long claw out to the right moves the middle of the bounds well off the torso's.
+    const input0 = animal({ legsAt: [4] });
+    const torso = input0.parts["torso"]!;
+    torso.sockets = [
+      ...(torso.sockets ?? []),
+      { id: "claw", type: "test:claw", position: { x: 6, y: 3, z: 5 } },
+    ];
+    input0.parts["claw"] = box(1, 1, 8, { type: "test:claw", attach: { x: 0.5, y: 0.5, z: 0 } });
+    input0.instances.push({
+      id: "claw",
+      part: "claw",
+      parent: { instance: "torso", socket: "claw" },
+    });
+    const { rig, index } = build(input0);
+    const right = rig.parts[index("leg-0-r")]!;
+    expect(right.origin.z).toBeLessThan(0); // left of the bounds' middle...
+    expect(right.side).toBe(1); // ...but right of the torso's
+    expect(rig.parts[index("leg-0-l")]!.side).toBe(-1);
+    expect(rig.parts[index("claw")]!.side).toBe(1);
+  });
+});
+
+describe("motions", () => {
+  it("paddles fins in water only, as mirror images, a little even at rest", () => {
+    const { rig, body, index } = build(animal(), { ...MOTION_BY_TYPE, "test:ear": "paddle" });
+    const ear = index("ear-l");
+    const afloat = input({ gait: "swim", time: 0.1 });
+    const resting = motion(rig, afloat);
+    expect(Math.abs(turnAbout(resting, ear, 0))).toBeGreaterThan(0.02);
+    const swimming = motion(rig, { ...afloat, speed: 1 });
+    expect(Math.abs(turnAbout(swimming, ear, 0))).toBeGreaterThan(
+      Math.abs(turnAbout(resting, ear, 0)),
+    );
+    expect(turnAbout(motion(rig, { ...afloat, gait: "walk" }), ear, 0)).toBe(0);
+    const bones = compose(rig, swimming);
+    expectMirrorImages(
+      vertices(body, ear, bones[ear]!),
+      vertices(body, index("ear-r"), bones[index("ear-r")]!),
+    );
+  });
+
+  it("paddles legs slowly when swimming, alternating, one stroke per two strides", () => {
+    const { rig, index } = build(animal());
+    const at = (travelled: number) => motion(rig, walking(travelled, "swim"));
+    const fl = index("leg-0-l");
+    const quarter = at(rig.stride * SWIM.stroke * 0.25);
+    expect(swingOf(quarter, fl)).toBeCloseTo(SWIM.legPaddle, 9);
+    expect(swingOf(quarter, index("leg-0-r"))).toBeCloseTo(-SWIM.legPaddle, 9);
+    // A full walk cycle in is only half a stroke.
+    expect(swingOf(at(rig.stride), fl)).toBeCloseTo(0, 9);
+    expect(swingOf(at(rig.stride * SWIM.stroke * 0.75), fl)).toBeCloseTo(-SWIM.legPaddle, 9);
+  });
+
+  it("flicks the tail now and then at rest, wags it with the walk, curls it asleep", () => {
+    const { rig, index } = build(animal());
+    const tail = index("tail");
+    const yaw = (at: MotionInput) => turnAbout(motion(rig, at), tail, 1);
+    let flicking = 0;
+    let still = 0;
+    const samples = 1500;
+    for (let k = 0; k < samples; k++) {
+      const y = yaw(input({ time: k * 0.02 }));
+      if (Math.abs(y) > 0.05) flicking++;
+      if (y === 0) still++;
+    }
+    expect(flicking).toBeGreaterThan(0);
+    expect(still).toBeGreaterThan(0.8 * samples);
+    // At a time with no flick, the walk alone wags it, once each way per stride.
+    let calm = 0;
+    while (yaw(input({ time: calm })) !== 0) calm += 0.01;
+    const walk = (travelled: number) => yaw({ ...walking(travelled), time: calm });
+    expect(walk(rig.stride * 0.25)).toBeCloseTo(WALK.tailWag, 9);
+    expect(walk(rig.stride * 0.75)).toBeCloseTo(-WALK.tailWag, 9);
+    expect(yaw(input({ time: calm, cues: asleep() }))).toBeCloseTo(SLEEP.tailCurl, 9);
+  });
+
+  it("twitches the ears outward now and then, each on its own side", () => {
+    // An extra ear on the right that is no mirror image, so the side decides, not the parity.
+    const input0 = animal();
+    const head = input0.parts["head"]!;
+    head.sockets = [
+      ...(head.sockets ?? []),
+      { id: "ear-extra", type: "test:ear-mount", position: { x: 2, y: 3, z: 3 } },
+    ];
+    input0.instances.push({
+      id: "ear-extra",
+      part: "ear",
+      parent: { instance: "head", socket: "ear-extra" },
+    });
+    const { rig, index } = build(input0);
+    const out = (pose: MotionPose, id: string) => turnAbout(pose, index(id), 0);
+    let twitches = 0;
+    for (let k = 0; k < 1500; k++) {
+      const pose = motion(rig, input({ time: k * 0.02 }));
+      if (Math.abs(out(pose, "ear-l")) < 0.05) continue;
+      twitches++;
+      expect(out(pose, "ear-l")).toBeLessThan(0);
+      expect(out(pose, "ear-r")).toBeCloseTo(-out(pose, "ear-l"), 9);
+      expect(out(pose, "ear-extra")).toBeGreaterThan(0);
+    }
+    expect(twitches).toBeGreaterThan(0);
+  });
+});
+
+describe("limbs off the ground", () => {
+  it("set the stride and alternate in X order when no limb is grounded", () => {
+    const { rig, index } = build(animal({ legsAt: [4], arms: true }), { "test:limb": "swing" });
+    const arm = rig.parts[index("arm-l")]!;
+    expect(arm.leg!.grounded).toBe(false);
+    expect(rig.stride).toBeCloseTo(1.5 * arm.length, 9);
+    expect(Math.abs(arm.leg!.offset - rig.parts[index("arm-r")]!.leg!.offset)).toBe(0.5);
+  });
+
+  it("fall back to half the body's height for the stride with no limbs at all", () => {
+    const { rig, body } = build(animal(), {});
+    expect(rig.legs).toEqual([]);
+    expect(rig.stride).toBeCloseTo(
+      Math.min(STRIDE_RANGE.max, Math.max(STRIDE_RANGE.min, 1.5 * (body.measure.height / 2))),
+      9,
+    );
+  });
+});
+
+describe("two creatures' legs", () => {
+  it("move differently when posed: the longer leg's foot sweeps further", () => {
+    /** How far the front left foot moves along X between its walk's two extremes. */
+    const sweep = (built: Built) => {
+      const { rig, body, index } = built;
+      const leg = index("leg-0-l");
+      const offset = rig.parts[leg]!.leg!.offset;
+      const foot = (cycles: number) => {
+        const bones = compose(rig, motion(rig, walking(rig.stride * (cycles - offset))));
+        const points = vertices(body, leg, bones[leg]!);
+        const lowest = Math.min(...points.map((p) => p.y));
+        const feet = points.filter((p) => p.y < lowest + 1e-3);
+        return feet.reduce((sum, p) => sum + p.x, 0) / feet.length;
+      };
+      return Math.abs(foot(0.25) - foot(0.75));
+    };
+    const short = sweep(build(animal({ legHeight: 3 })));
+    const long = sweep(build(animal({ legHeight: 6 })));
+    expect(short).toBeGreaterThan(0.01);
+    expect(long).toBeGreaterThan(short * 1.5);
   });
 });

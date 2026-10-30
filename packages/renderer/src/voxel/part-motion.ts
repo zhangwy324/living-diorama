@@ -31,6 +31,11 @@ export interface MotionInput {
   leap: number | undefined;
   /** The creature's own 0–1 phase (`cuePhase`), so neighbours blink and twitch apart. */
   phase: number;
+  /**
+   * The body's height in metres as the whole-body profiles see it (`LocomotionInput.height`), so
+   * the legs tuck to the hop the body makes, even when a preview scales the body.
+   */
+  height: number;
   /** Its cue weights, linear as `stepCueWeights` keeps them; eased here. */
   cues: CueWeights;
 }
@@ -212,7 +217,7 @@ const paddle: Motion = (_part, f, out) => {
 };
 
 /** `flop`: ears. An occasional twitch outward, a bounce with the gait, dropped asleep. */
-const flop: Motion = (_part, f, out) => {
+const flop: Motion = (part, f, out) => {
   const { time, phase } = f.input;
   const awake = 1 - f.sleeping;
   const twitch = pulse(
@@ -223,10 +228,12 @@ const flop: Motion = (_part, f, out) => {
   if (f.walk) back = f.gait * WALK.earBounce * Math.sin(2 * TAU * f.cycles);
   else if (f.hop !== undefined && f.hop >= HOP_GROUND)
     back = f.gait * HOP.earTrail * Math.sin((Math.PI * (f.hop - HOP_GROUND)) / (1 - HOP_GROUND));
-  // A turn about +Z tips an ear's top towards −X, back. Outward, for an ear on the left (−Z) as
-  // built, is a turn about −X; its mirror image on the right turns about +X.
+  // A turn about +Z tips an ear's top towards −X, back. Outward is a turn about +X for an ear on
+  // the right (+Z), about −X on the left. `writeMotion` mirrors a reflected part's turn after
+  // this, so a reflected ear's turn is given unmirrored: the mirror then turns it outward.
   out.z = awake * back + f.sleeping * SLEEP.earBack;
-  out.x = -(awake * EAR_TWITCH.angle * twitch + f.sleeping * SLEEP.earOut);
+  const outward = part.mirrored ? -part.side : part.side;
+  out.x = outward * (awake * EAR_TWITCH.angle * twitch + f.sleeping * SLEEP.earOut);
 };
 
 /** `blink`: eyes. A blink every few seconds, shut asleep. */
@@ -256,7 +263,7 @@ export function writeMotion(rig: MotionRig, input: MotionInput, pose: MotionPose
   frame.cycles = input.travelled / rig.stride;
   frame.walk = gait === "walk";
   frame.swim = gait === "swim";
-  frame.hop = gait === "hop" ? hopProgress(input.travelled, rig.height) : undefined;
+  frame.hop = gait === "hop" ? hopProgress(input.travelled, input.height) : undefined;
   const { rotations, squash } = pose;
   const parts = rig.parts;
   for (let i = 0; i < parts.length; i++) {

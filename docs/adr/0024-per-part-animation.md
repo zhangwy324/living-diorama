@@ -92,7 +92,7 @@ In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compos
   - A part drawn reflected (`VoxelBody.mirrored`, the parity down the tree) takes `[x, y, z, w]` → `[−x, −y, z, w]`.
 - **Limbs (§4, §11, §12).**
   - All `swing` parts join the gait.
-  - Side comes from the sign of the attach point's Z. A point within 1e-6 m of the middle plane counts as right when the part is drawn reflected, else as left. Front or back comes from X against the centre of gravity.
+  - Every part's side (`RigPart.side`) comes from its attach point's Z against the root part's middle plane, the middle of the root's cubes, not the body bounds' middle, which an asymmetric creature moves. A point within 1e-6 m of that plane counts as right when the part is drawn reflected (the mirrored half of a pair), else as left. Front or back comes from X against the centre of gravity.
   - A limb is grounded when its lowest rest cube is within `VOXEL_UNIT` (half the finest cube, more than any shrink lifts it) of the ground contact, y = 0.
   - Grounded limbs are taken front to back, then top to bottom, then by index. They alternate per side, and the right side starts half a cycle later. This gives: two legs alternate, four trot in diagonal pairs, six walk in tripods, and odd counts alternate in X order.
   - A limb off the ground swings against the frontmost grounded limb on its side, so with the opposite leg. A side with no grounded limb falls back to X order.
@@ -104,7 +104,7 @@ In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compos
   - `swing`:
     - Walk: a sine at the limb's offset.
     - Swim: a slow paddle, 0.35 rad, one stroke per two strides.
-    - Hop: all limbs together, timed by `locomotion.ts`'s `hopProgress`. They reach out 0.3 rad at landing and take-off and tuck 0.5 rad mid-air.
+    - Hop: all limbs together, timed by `locomotion.ts`'s `hopProgress` with the height the body's profile is given (`MotionInput.height`), so the legs keep to the body's hop even when a preview scales it. They reach out 0.3 rad at landing and take-off and tuck 0.5 rad mid-air.
     - Bank leap: replaces the gait and tucks 0.55 rad.
   - `wag`:
     - A flick, twice side to side, about every 7 s.
@@ -115,7 +115,7 @@ In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compos
     - A 0.35 rad dip with each peck, using `cues.ts`'s `eatingPeck`, the same bob as `bodyMotion`.
     - A 0.3 rad droop asleep.
   - `flop`:
-    - A 0.3 rad twitch outward about every 5.5 s.
+    - A 0.3 rad twitch outward about every 5.5 s. Outward is taken from the ear's side, not from its parity, so an unpaired ear on either side twitches away from the middle.
     - A bounce with the walk and a trail in a hop.
     - Dropped back 0.5 rad and out 0.25 rad asleep.
   - `blink`: about every 4 s for 0.16 s, squashed to 0.15. Shut asleep.
