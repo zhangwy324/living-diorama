@@ -240,6 +240,14 @@ export class LongRunChecks {
     this.#awakeSinceMeal.clear();
   }
 
+  /**
+   * When the meal check holds a creature again, e.g. after a world edit gave it food in reach once
+   * more: the time it spent awake with no food in reach no longer counts towards a gap.
+   */
+  mealsResumed(creatureId: string) {
+    this.#awakeSinceMeal.delete(creatureId);
+  }
+
   /** After each tick, with every creature alive. */
   tick(tick: number, dayPhase: DayPhase, creatures: Iterable<CreatureTick>) {
     const { meals } = this.options;

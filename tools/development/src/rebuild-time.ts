@@ -1,5 +1,11 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
-import { formatDiagnostic, type RegionPosition } from "@living-diorama/content-schema";
+import {
+  formatDiagnostic,
+  parseWorldEdit,
+  type RegionPosition,
+  type WorldEdit,
+  type WorldEditInput,
+} from "@living-diorama/content-schema";
 import {
   createRegistries,
   resolveReferences,
@@ -14,8 +20,10 @@ import {
   speciesProfiles,
   WorldState,
   type Pathfinder,
+  type Simulation,
 } from "@living-diorama/simulation";
-import { registerHollowCreatures } from "./fixtures/hollow-creatures";
+import { beaver, carp, otter, registerHollowCreatures } from "./fixtures/hollow-creatures";
+import { createSimulation } from "./simulation-run";
 
 // `pnpm rebuild-time`: times a full rebuild of Woodland Hollow, what a world edit costs (ADR
 // 0021), once with the built-in content alone and once with the soak's test species too, which
@@ -25,11 +33,25 @@ import { registerHollowCreatures } from "./fixtures/hollow-creatures";
 // lazily (every connection's crossings, every region's areas and the banks' crossings, as the
 // relocation and blocked-exit checks need), then `ROUTES` route queries per profile between fixed
 // walkable cells, as creatures replanning after the edit would make.
+//
+// Then it times the edit itself in a running world of `CREATURES` creatures (mosslings, plus the
+// soak's amphibians and swimmer with the test species): `Simulation.validateEdit` and
+// `Simulation.applyEdit`, which add the reconcile (relocations, pruning and every creature's
+// replan) to the rebuild. Each timed apply is one of `EDITS` (a move, a scale, an add, a removal)
+// or the undo of the one before, so the world comes back to where it started.
 
 const WORLD = "hollow:woodland-hollow";
+const MOSSLING = "hollow:mossling";
 const RUNS = 30;
 const WARMUP = 5;
 const ROUTES = 20;
+const CREATURES = 20;
+const EDITS: WorldEditInput[] = [
+  { ops: [{ op: "prop.move", id: "rock-2", position: { x: 10, z: -2 } }] },
+  { ops: [{ op: "prop.scale", id: "pine-1", scale: 1.5 }] },
+  { ops: [{ op: "prop.add", prop: "hollow:bush", position: { x: 12, z: 3 } }] },
+  { ops: [{ op: "prop.remove", id: "bush-3" }] },
+];
 
 function load(register: (r: Registries) => unknown): Registries {
   const registries = createRegistries();
@@ -91,9 +113,47 @@ function routeQueries(pathfinder: Pathfinder, count: number) {
   return Array.from({ length: count }, () => ({ from: draw(), to: draw() }));
 }
 
-for (const [name, register] of [
-  ["built-in content", registerBuiltInContent],
-  ["built-in + hollow creatures (soak set)", registerHollowCreatures],
+/** `EDITS` as the worker would take them. */
+function parsedEdits(): WorldEdit[] {
+  return EDITS.map((input) => {
+    const parsed = parseWorldEdit(input);
+    if (!parsed.ok) throw new Error(parsed.diagnostics.map(formatDiagnostic).join("\n"));
+    return parsed.value;
+  });
+}
+
+/** Woodland Hollow with `CREATURES` creatures of `species`, in turn, a minute into their day. */
+function livingWorld(register: (r: Registries) => unknown, species: readonly string[]) {
+  const simulation = createSimulation({ register, worldId: WORLD, seed: 1 });
+  for (let n = 0; n < CREATURES; n++) {
+    const spawned = simulation.spawn(species[n % species.length] ?? "");
+    if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
+  }
+  for (let n = 0; n < 600; n++) simulation.step();
+  return simulation;
+}
+
+/** Times `validateEdit` and `applyEdit`, each apply an edit of `EDITS` or the undo of the last. */
+function timeEdits(simulation: Simulation): void {
+  const edits = parsedEdits();
+  let next = 0;
+  time("validateEdit", () => simulation.validateEdit(edits[next++ % edits.length] as WorldEdit));
+  let undo: WorldEdit | undefined;
+  time("applyEdit (an edit, then its undo)", () => {
+    const edit = undo ?? (edits[next++ % edits.length] as WorldEdit);
+    const result = simulation.applyEdit(edit);
+    if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
+    undo = undo ? undefined : result.inverse;
+  });
+}
+
+for (const [name, register, species] of [
+  ["built-in content", registerBuiltInContent, [MOSSLING]],
+  [
+    "built-in + hollow creatures (soak set)",
+    registerHollowCreatures,
+    [MOSSLING, MOSSLING, MOSSLING, otter.id, beaver.id, carp.id],
+  ],
 ] as const) {
   const registries = load(register);
   const world = registries.worlds.get(WORLD);
@@ -124,4 +184,5 @@ for (const [name, register] of [
       }
     }
   });
+  timeEdits(livingWorld(register, species));
 }

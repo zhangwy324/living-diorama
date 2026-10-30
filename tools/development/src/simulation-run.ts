@@ -1,4 +1,12 @@
-import { formatDiagnostic, type Result, type WorldSave } from "@living-diorama/content-schema";
+import {
+  error,
+  formatDiagnostic,
+  type Result,
+  type WorldDefinition,
+  type WorldEdit,
+  type WorldEditResult,
+  type WorldSave,
+} from "@living-diorama/content-schema";
 import {
   createRegistries,
   resolveReferences,
@@ -17,8 +25,10 @@ import {
   type CreatureState,
   type DecisionTrace,
   type RestoreReport,
+  type Navigation,
   type SimulationEvent,
 } from "@living-diorama/simulation";
+import { emptyEditReport, type EditReport, type EditRequest, type EditSource } from "./edit-cycles";
 import {
   LongRunChecks,
   type CreatureFilter,
@@ -72,6 +82,14 @@ export interface RunOptions extends LongRunCheckOptions {
   restore?: { save: WorldSave; nowMs: number; minutes: number };
   /** Save and restore mid-run at random ticks, checking each restore (`pnpm soak`). */
   saveRestore?: SaveRestoreOptions;
+  /**
+   * World edits to apply between steps (ADR 0021): a script (`pnpm sim --edits`) or random edits
+   * (`pnpm soak`). Each is applied with `Simulation.applyEdit` and timed, and the creatures are
+   * checked at once after it; an undo applies the inverse of the last edit applied and not undone.
+   */
+  edits?: EditSource;
+  /** Called after each edit request, applied or refused. */
+  onEdit?: (log: EditLog) => void;
   onTrace?: (trace: DecisionTrace) => void;
   /**
    * Called after every tick, e.g. to record trajectories. After a mid-run restore, it is passed
@@ -80,6 +98,17 @@ export interface RunOptions extends LongRunCheckOptions {
   onTick?: (simulation: Simulation, events: SimulationEvent[]) => void;
   /** Called with the simulation as the run leaves it. */
   onEnd?: (simulation: Simulation) => void;
+}
+
+/** One edit request of a run and what came of it. */
+export interface EditLog {
+  /** The step it was applied before, counted from the run's start. */
+  step: number;
+  request: EditRequest;
+  /** The edit applied, an undo's inverse included; undefined for an undo with nothing to undo. */
+  edit?: WorldEdit;
+  result: WorldEditResult;
+  ms: number;
 }
 
 /** Where a run starts in the day unless told otherwise. */
@@ -150,6 +179,8 @@ export interface RunReport {
     /** The restore after a long gap, if any: the gap and the time of day it ended at. */
     longGap?: { gapMs: number; at: string };
   };
+  /** World edits (`RunOptions.edits`). */
+  edits: EditReport;
 }
 
 const MAX_VIOLATIONS = 20;
@@ -165,13 +196,18 @@ export function loadContent(register: RunOptions["register"]): Result<Registries
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, value: registries };
 }
 
+/**
+ * A fresh simulation of `options.worldId`, or of `world` instead: a definition of that world as
+ * edited, which a mid-run restore of an edited world starts from (see `runWithInvariants`).
+ */
 export function createSimulation(
   options: Omit<RunOptions, "ticks" | "creatures" | "speciesId" | "alsoSpawn">,
+  world?: WorldDefinition,
 ) {
   const content = loadContent(options.register);
   if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
   const created = Simulation.create(content.value, {
-    worldId: options.worldId,
+    ...(world ? { world } : { worldId: options.worldId }),
     seed: options.seed,
     ...(options.tickRateHz === undefined ? {} : { tickRateHz: options.tickRateHz }),
     ...(options.maxCreatures === undefined ? {} : { maxCreatures: options.maxCreatures }),
@@ -191,13 +227,12 @@ interface Traced {
 export function runWithInvariants(options: RunOptions): RunReport {
   const started = performance.now();
   let decisions = 0;
-  const traced = (seed = options.seed): Traced => {
+  const traced = (seed = options.seed, world?: WorldDefinition): Traced => {
     const traces: DecisionTrace[] = [];
-    const simulation = createSimulation({
-      ...options,
-      seed,
-      onTrace: (trace) => traces.push(trace),
-    });
+    const simulation = createSimulation(
+      { ...options, seed, onTrace: (trace) => traces.push(trace) },
+      world,
+    );
     return { simulation, traces };
   };
   let main = traced();
@@ -230,11 +265,9 @@ export function runWithInvariants(options: RunOptions): RunReport {
     }
   }
 
-  const { model } = simulation.state;
-  // Per species, since `onTick` may add species with other navigation profiles.
+  // Per species, since `onTick` may add species with other navigation profiles. Like the world
+  // model, read afresh each time: an edit replaces both.
   const navigationOf = (speciesId: string) => simulation.state.pathfinderFor(speciesId)?.navigation;
-  const water = [...model.regions.values()].filter((r) => r.kind === "water");
-  const { min, max } = model.bounds;
   const report: RunReport = {
     seed: options.seed,
     ticks: options.ticks,
@@ -247,6 +280,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
     elapsedMs: 0,
     ...(restoreReport ? { restore: restoreReport } : {}),
     saveRestore: { restores: 0, comparedTicks: 0, largestSaveBytes: 0, fullHomes: 0 },
+    edits: emptyEditReport(),
   };
   const violation = (message: string) => {
     if (report.violations.length < MAX_VIOLATIONS) {
@@ -276,7 +310,130 @@ export function runWithInvariants(options: RunOptions): RunReport {
   let twin: (Traced & { ticksLeft: number }) | undefined;
   /** Set by a restore with catch-up, which is checked after the step that follows. */
   let caughtUp: { save: WorldSave; report: RestoreReport } | undefined;
+
+  /**
+   * Every creature where it may be, after each tick and each edit: in a region its locomotion
+   * covers, on a walkable cell of its own profile, on the region's surface, inside the bounds and
+   * never under another water region's surface.
+   */
+  const checkPositions = (snapshot: ReturnType<Simulation["snapshot"]>) => {
+    const { model } = simulation.state;
+    const { min, max } = model.bounds;
+    const water = [...model.regions.values()].filter((r) => r.kind === "water");
+    for (const c of snapshot.creatures) {
+      const { regionId, x, z } = c.position;
+      const where = `${c.id} at "${regionId}" (${x.toFixed(3)}, ${z.toFixed(3)})`;
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        violation(`${where}: not a finite position`);
+        continue;
+      }
+      const region = model.regions.get(regionId);
+      if (!region) {
+        violation(`${where}: unknown region`);
+        continue;
+      }
+      // Per capability (ADR 0020): only in a region kind its locomotion covers, so a walker
+      // never in water, and on a walkable cell of its own profile there.
+      const navigation = navigationOf(c.speciesId);
+      if (!navigation?.profile.maxSlopeByKind.has(region.kind)) {
+        violation(`${where}: in a ${region.kind} region it can't move in`);
+      }
+      if (!navigation?.masks.get(regionId)?.isWalkableAt(x, z)) {
+        violation(`${where}: not on a walkable cell`);
+      }
+      if (region.kind !== "water" && c.submersion !== 0) {
+        violation(`${where}: submerged by ${c.submersion} out of the water`);
+      }
+      const y = c.world.y;
+      if (!Number.isFinite(y) || y !== region.surface.heightAt(x, z)) {
+        violation(`${where}: height ${y} is not on the region's surface`);
+      }
+      if (x < min.x || x > max.x || z < min.z || z > max.z || y < min.y || y > max.y) {
+        violation(`${where}: outside the world bounds`);
+      }
+      for (const w of water) {
+        // A swimmer is on its own water region's surface, never under another's.
+        if (w === region) continue;
+        const surface = w.surface.heightAt(x, z);
+        if (surface !== undefined && pointInPolygon(x, z, w.footprint) && y <= surface) {
+          violation(`${where}: under the surface of "${w.id}"`);
+        }
+      }
+    }
+  };
+
+  /**
+   * After an edit, decides afresh whether the meal check holds each creature it has seen: an edit
+   * may take away the only food it could reach, or cut it off from all food, which the edit's
+   * `disconnected_region` warning tells the editor. Its time without food in reach doesn't count
+   * if food comes back. `EditReport.foodCutOff` counts the creatures that lose the check.
+   */
+  const refreshMealCheck = () => {
+    if (!options.meals?.creatures) return;
+    for (const [id, entry] of checked) {
+      const creature = simulation.state.creatures.get(id);
+      if (!creature) continue;
+      const checkMeals = options.meals.creatures(creature, simulation);
+      if (entry.checkMeals && !checkMeals) report.edits.foodCutOff++;
+      if (!entry.checkMeals && checkMeals) checks.mealsResumed(id);
+      entry.checkMeals = checkMeals;
+    }
+  };
+
+  /** Inverses of the edits applied and not undone, the last on top. */
+  const undoStack: WorldEdit[] = [];
+  /**
+   * Each species' navigation from before the first edit since the last step, to tell the routes
+   * an edit took away (`EditReport.lostGoals`) from other failed paths.
+   */
+  let navigationsBeforeEdit: Map<string, Navigation | undefined> | undefined;
+  /**
+   * Applies one edit request between steps, to the unbroken twin too while one runs, which must
+   * answer the same; then checks every creature's position at once.
+   */
+  const applyEditRequest = (step: number, request: EditRequest) => {
+    const undo = "undo" in request;
+    const edit = undo ? undoStack.pop() : request.edit;
+    const { edits } = report;
+    if (!edit) {
+      const result: WorldEditResult = {
+        ok: false,
+        diagnostics: [error("nothing_to_undo", "No edit left to undo")],
+      };
+      edits.rejected.nothing_to_undo = (edits.rejected.nothing_to_undo ?? 0) + 1;
+      options.onEdit?.({ step, request, result, ms: 0 });
+      return;
+    }
+    navigationsBeforeEdit ??= new Map(
+      [...simulation.state.creatures.values()].map((c) => [c.speciesId, navigationOf(c.speciesId)]),
+    );
+    const started = performance.now();
+    const result = simulation.applyEdit(edit);
+    const ms = performance.now() - started;
+    edits.applyMs.push(ms);
+    if (twin) {
+      const differs = firstDifference(result, twin.simulation.applyEdit(edit));
+      if (differs) violation(`an edit did otherwise in the unbroken run: ${differs}`);
+    }
+    if (result.ok) {
+      edits.applied++;
+      if (undo) edits.undos++;
+      else undoStack.push(result.inverse);
+      edits.relocated += result.relocated.length;
+      refreshMealCheck();
+      for (const w of result.warnings) edits.warnings[w.code] = (edits.warnings[w.code] ?? 0) + 1;
+      checkPositions(simulation.snapshot());
+    } else {
+      const code = result.diagnostics[0]?.code ?? "unknown";
+      edits.rejected[code] = (edits.rejected[code] ?? 0) + 1;
+      // A refused undo leaves the history as it was.
+      if (undo) undoStack.push(edit);
+    }
+    options.onEdit?.({ step, request, edit, result, ms });
+  };
+
   for (let t = 0; t < options.ticks; t++) {
+    for (const request of options.edits?.(t, simulation) ?? []) applyEditRequest(t, request);
     const minutes = minutesAt(simulation.tick);
     simulation.setTimeOfDay(minutes);
     // Where each creature stood before the tick, to check that a bank jump starts where one of
@@ -301,8 +458,12 @@ export function runWithInvariants(options: RunOptions): RunReport {
         // restore clears, so a creature that arrived and is still at its action shows `[]` in
         // the unbroken run and no route after a restore. The save holds the rest of it.
         differs = firstDifference(
-          [twin.simulation.save(0), twin.simulation.snapshot()],
-          [simulation.save(0), simulation.snapshot()],
+          [
+            twin.simulation.save(0),
+            twin.simulation.snapshot(),
+            twin.simulation.state.model.definition,
+          ],
+          [simulation.save(0), simulation.snapshot(), simulation.state.model.definition],
         );
       }
       report.saveRestore.comparedTicks++;
@@ -318,6 +479,19 @@ export function runWithInvariants(options: RunOptions): RunReport {
       }
       caughtUp = undefined;
     }
+    if (navigationsBeforeEdit) {
+      // An edit replans every walk at once (ADR 0021 §6); one whose goal the edit covered or cut
+      // off fails, with `path_failed`, and the walk is interrupted. That is the edit's doing.
+      for (const event of events) {
+        if (event.type !== "path_failed" || event.reason === "start_not_walkable") continue;
+        const speciesId = simulation.state.creatures.get(event.creatureId)?.speciesId ?? "";
+        const { regionId, x, z } = event.to;
+        if (navigationsBeforeEdit.get(speciesId)?.masks.get(regionId)?.isWalkableAt(x, z)) {
+          report.edits.lostGoals++;
+        }
+      }
+      navigationsBeforeEdit = undefined;
+    }
     for (const event of events) {
       report.eventCounts[event.type] = (report.eventCounts[event.type] ?? 0) + 1;
       checks.event(event, { dayPhase: simulation.state.dayPhase, minutes });
@@ -329,7 +503,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
         // "Contradictions resolved"). A jump starts the creature's move on its tick and ends it,
         // so it stood at the start before the tick and still stands where it landed.
         const { fromRegionId: from, toRegionId: to, connectionId } = event;
-        const c = model.connections.find((c) => c.id === connectionId);
+        const c = simulation.state.model.connections.find((c) => c.id === connectionId);
         const forward = c?.from === from && c.to === to;
         const backward = c?.bidirectional && c.to === from && c.from === to;
         const creature = simulation.state.creatures.get(event.creatureId);
@@ -377,42 +551,10 @@ export function runWithInvariants(options: RunOptions): RunReport {
       }),
     );
     for (const c of snapshot.creatures) {
-      const { regionId, x, z } = c.position;
-      const where = `${c.id} at "${regionId}" (${x.toFixed(3)}, ${z.toFixed(3)})`;
+      const { regionId } = c.position;
       report.regionTicks[regionId] = (report.regionTicks[regionId] ?? 0) + 1;
-      const region = model.regions.get(regionId);
-      if (!region) {
-        violation(`${where}: unknown region`);
-        continue;
-      }
-      // Per capability (ADR 0020): only in a region kind its locomotion covers, so a walker
-      // never in water, and on a walkable cell of its own profile there.
-      const navigation = navigationOf(c.speciesId);
-      if (!navigation?.profile.maxSlopeByKind.has(region.kind)) {
-        violation(`${where}: in a ${region.kind} region it can't move in`);
-      }
-      if (!navigation?.masks.get(regionId)?.isWalkableAt(x, z)) {
-        violation(`${where}: not on a walkable cell`);
-      }
-      if (region.kind !== "water" && c.submersion !== 0) {
-        violation(`${where}: submerged by ${c.submersion} out of the water`);
-      }
-      const y = c.world.y;
-      if (!Number.isFinite(y) || y !== region.surface.heightAt(x, z)) {
-        violation(`${where}: height ${y} is not on the region's surface`);
-      }
-      if (x < min.x || x > max.x || z < min.z || z > max.z || y < min.y || y > max.y) {
-        violation(`${where}: outside the world bounds`);
-      }
-      for (const w of water) {
-        // A swimmer is on its own water region's surface, never under another's.
-        if (w === region) continue;
-        const surface = w.surface.heightAt(x, z);
-        if (surface !== undefined && pointInPolygon(x, z, w.footprint) && y <= surface) {
-          violation(`${where}: under the surface of "${w.id}"`);
-        }
-      }
     }
+    checkPositions(snapshot);
     options.onTick?.(simulation, events);
     if (restores[0]?.afterStep === t) {
       const { gapMs } = restores.shift() as PlannedRestore;
@@ -429,7 +571,14 @@ export function runWithInvariants(options: RunOptions): RunReport {
       );
       // A fresh world of another seed, as the app's at startup, then the save, which must bring
       // back the saved seed and the streams forked from it.
-      const next = traced(options.seed + RESTORED_SEED_OFFSET);
+      //
+      // TODO(M17 PR 4): a save doesn't carry an edited world or the generated-ID counter yet.
+      // Until it does, a world edited in this run is restored into a fresh world built from the
+      // edited definition, with the counter carried over by hand, standing in for what the save
+      // will bring. Once PR 4 lands, drop `edited` here and the counter below, so the save alone
+      // brings the edited world back into a fresh world of `worldId`.
+      const edited = report.edits.applied > 0 ? simulation.state.model.definition : undefined;
+      const next = traced(options.seed + RESTORED_SEED_OFFSET, edited);
       // Without a gap the next step's time of day; after one, that plus the gap.
       const present = minutesAfter(minutesAt(simulation.tick), gapMs);
       wallMs += gapMs;
@@ -438,6 +587,7 @@ export function runWithInvariants(options: RunOptions): RunReport {
         violation(`restore failed: ${restored.diagnostics.map(formatDiagnostic).join("; ")}`);
         continue;
       }
+      if (edited) next.simulation.state.nextPropId = simulation.state.nextPropId;
       report.saveRestore.restores++;
       for (const problem of restoreProblems(restored.value)) violation(problem);
       const previous = main;
