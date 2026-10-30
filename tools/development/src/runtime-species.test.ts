@@ -270,7 +270,8 @@ describe("runtime species", () => {
       sizeClass: "medium",
       body: { locomotion: { land: { gait: "walk" } } },
     });
-    expect(content.species[hollow.speciesId]?.body).toHaveProperty("thickness");
+    expect(simulation.registerSpecies(drawnSpecies("drawn"), URL, "image").ok).toBe(true);
+    expect(describeContent(simulation).species["user:drawn"]?.body).toHaveProperty("thickness");
     // A voxel species can't set the drawn-only settings (ADR 0022, M20).
     const thick = { ...drawnSpecies("thick"), appearance: "user:thick/assembly.json" };
     const refused = simulation.registerSpecies(

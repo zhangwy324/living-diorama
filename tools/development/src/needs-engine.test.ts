@@ -16,6 +16,7 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { pebble, registerRiverCrossing } from "./index";
+import { mosslingInput } from "./fixtures/hollow-creatures";
 import { createSimulation } from "./simulation-run";
 
 // The needs engine (ADR 0018 §1, §7, §8, §15, §16, §18 and amendments), exercised with a test
@@ -225,7 +226,7 @@ describe("spawning", () => {
           ),
         );
         r.species.register({
-          ...r.species.get("hollow:mossling")!,
+          ...mosslingInput(r),
           id: "test:observant-mossling",
           behaviors: ["test:observer"],
         });

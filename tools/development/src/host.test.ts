@@ -114,13 +114,13 @@ describe("simulation host", () => {
     expect(ready.scene.terrain.heights.length).toBeGreaterThan(0);
     expect(ready.navigations).toHaveLength(1);
     const mossling = ready.species[SPECIES_ID];
-    // The built-in mossling has no body plan, so it is a walker with the default thickness.
+    // The built-in mossling is a voxel walker: only the locomotion of its body plan is sent.
     expect(mossling).toEqual({
       appearance: expect.any(String),
-      sizeClass: expect.any(String),
-      body: defaultBody(),
+      sizeClass: "medium",
+      body: { locomotion: { land: { gait: "walk" } } },
     });
-    expect(ready.assets[mossling!.appearance]).toMatchObject({ kind: "image" });
+    expect(ready.assets[mossling!.appearance]).toMatchObject({ kind: "voxel" });
     for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
   });
 

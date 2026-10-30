@@ -107,7 +107,7 @@ describe("bodyColours", () => {
 describe("walls of Studio drawings and the mossling", () => {
   const cases = [
     ...STUDIO_FIXTURES,
-    // The mossling's own colours, from its SVG.
+    // The drawn mossling's own colours, from its SVG.
     {
       name: "mossling",
       url: MOSSLING,

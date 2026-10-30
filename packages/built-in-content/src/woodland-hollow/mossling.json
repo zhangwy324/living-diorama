@@ -3,10 +3,11 @@
   "id": "hollow:mossling",
   "version": "1.0.0",
   "name": "Mossling",
-  "appearance": "hollow:sprites/mossling.svg",
+  "appearance": "hollow:voxels/mossling.json",
   "sizeClass": "medium",
   "capabilities": { "core:land": 1 },
   "baseSpeed": 0.6,
   "behaviors": ["core:wander", "core:feed", "core:rest"],
-  "senses": { "core:vision": 8 }
+  "senses": { "core:vision": 8 },
+  "body": { "locomotion": { "land": { "gait": "walk" } } }
 }
