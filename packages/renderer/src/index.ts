@@ -30,6 +30,10 @@ export {
   type VoxelThumbnailOptions,
 } from "./voxel/thumbnails";
 export {
+  createStandaloneVoxelThumbnails,
+  type StandaloneVoxelThumbnails,
+} from "./voxel/standalone-thumbnails";
+export {
   createAssemblyView,
   type AssemblyGhost,
   type AssemblyPick,

@@ -1,8 +1,9 @@
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 
-// The player's drawn species, beside the drawing (roadmap M11 task 6): each with its image, name
-// and creatures in the world, to add one, take one out or delete the species. It shows what the
-// strip's latest library snapshot says.
+// The player's species, beside Build and Draw mode (roadmap M11 task 6, ADR 0023 §19): each with
+// its image, name and creatures in the world, to add one, take one out or delete the species. It
+// shows what the strip's latest library snapshot says. A voxel species' image is drawn by the
+// Studio, so it shows a placeholder until that is ready.
 
 export interface MyCreaturesProps {
   /** Undefined until the strip answers. */
@@ -17,6 +18,8 @@ export interface MyCreaturesProps {
   onAdd(speciesId: string): void;
   onRemove(speciesId: string): void;
   onDelete(species: StudioSpecies): void;
+  /** Loads a copy of a voxel species into Build mode (ADR 0023 §3). */
+  onEditCopy(species: StudioSpecies): void;
 }
 
 const reasonsOf = (species: StudioSpecies) =>
@@ -76,13 +79,12 @@ export function MyCreatures(props: MyCreaturesProps) {
               key={species.speciesId}
               className={species.available ? "species" : "species unavailable"}
             >
-              {species.body === "voxel" ? (
-                // A placeholder until the Studio can draw voxel creatures (ADR 0022, M21).
-                <span className="thumbnail voxel-placeholder" />
-              ) : image ? (
+              {image ? (
                 <img className="thumbnail" src={image} alt="" />
               ) : (
-                <span className="thumbnail" />
+                <span
+                  className={species.body === "voxel" ? "thumbnail voxel-placeholder" : "thumbnail"}
+                />
               )}
               <div className="species-text">
                 <span className="species-name">{species.name}</span>
@@ -116,6 +118,17 @@ export function MyCreatures(props: MyCreaturesProps) {
                       <Icon d="M3.5 8h9M8 3.5v9" />
                     </button>
                   </>
+                )}
+                {species.body === "voxel" && (
+                  <button
+                    type="button"
+                    aria-label={`Edit a copy of ${species.name}`}
+                    title="Edit a copy"
+                    disabled={busy}
+                    onClick={() => props.onEditCopy(species)}
+                  >
+                    <Icon d="M10.5 3l2.5 2.5-7 7H3.5V10zM9 4.5L11.5 7" />
+                  </button>
                 )}
                 <button
                   type="button"

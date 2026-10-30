@@ -240,10 +240,10 @@ export function createAssemblyView(
   /** Whether the canvas has had its size, so a body framed before it is framed again. */
   let sized = false;
 
-  /** How far away the camera must be to see a ball of `radius` whole. */
-  const fitDistance = (radius: number) => {
+  /** How far away the camera must be to see a ball of `radius` whole, at an aspect ratio. */
+  const fitDistance = (radius: number, aspect = camera.aspect) => {
     const half = THREE.MathUtils.degToRad(FOV / 2);
-    const horizontal = Math.atan(Math.tan(half) * camera.aspect);
+    const horizontal = Math.atan(Math.tan(half) * aspect);
     return (radius * FRAME_MARGIN) / Math.sin(Math.min(half, horizontal));
   };
 
@@ -262,6 +262,20 @@ export function createAssemblyView(
     controls.maxDistance = Math.max(next.radius * MAX_DISTANCE, distance);
     controls.target.copy(centre);
     camera.position.copy(centre).add(offset.setLength(distance));
+    controls.update();
+  };
+
+  /**
+   * Keeps the body the same share of the view when the canvas changes shape, e.g. as a side
+   * panel opens: the camera moves along its own line by how much further (or nearer) it must be to
+   * see the body whole, so the player's orbit stays and their zoom is kept relative to the fit.
+   */
+  const keepShare = (current: Built, aspectBefore: number) => {
+    const scale = fitDistance(current.radius) / fitDistance(current.radius, aspectBefore);
+    if (Math.abs(scale - 1) < 1e-9) return;
+    const offset = camera.position.clone().sub(controls.target).multiplyScalar(scale);
+    controls.maxDistance = Math.max(current.radius * MAX_DISTANCE, offset.length());
+    camera.position.copy(controls.target).add(offset);
     controls.update();
   };
 
@@ -389,9 +403,11 @@ export function createAssemblyView(
     const box = entry?.contentRect;
     if (!box || box.width === 0 || box.height === 0) return;
     renderer.setSize(box.width, box.height, false);
+    const before = camera.aspect;
     camera.aspect = box.width / box.height;
     camera.updateProjectionMatrix();
     if (!sized && built) frame(built, undefined);
+    else if (built) keepShare(built, before);
     sized = true;
     dirty = true;
   });

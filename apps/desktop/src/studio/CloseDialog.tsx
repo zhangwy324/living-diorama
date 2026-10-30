@@ -1,15 +1,25 @@
 import { useEffect, useRef } from "react";
 
 export interface CloseDialogProps {
+  /** The question, "Close the Studio?" by default. */
+  title?: string;
+  /** What is lost, by default by closing. */
+  message?: string;
   onDiscard(): void;
   onCancel(): void;
 }
 
 /**
- * Asked when the Studio is closed with a creature that wasn't released (ADR 0015 §10). Saving
+ * Asked when the Studio is closed with a creature that wasn't released (ADR 0015 §10), and before
+ * Edit a copy replaces one (ADR 0023 §3), with its own title and message. Saving
  * drafts comes later, so its button is shown but disabled. Escape cancels.
  */
-export function CloseDialog({ onDiscard, onCancel }: CloseDialogProps) {
+export function CloseDialog({
+  title = "Close the Studio?",
+  message = "Your creature hasn't been released. Closing now loses it.",
+  onDiscard,
+  onCancel,
+}: CloseDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -27,8 +37,8 @@ export function CloseDialog({ onDiscard, onCancel }: CloseDialogProps) {
         onCancel();
       }}
     >
-      <h2 id="close-dialog-title">Close the Studio?</h2>
-      <p>Your creature hasn't been released. Closing now loses it.</p>
+      <h2 id="close-dialog-title">{title}</h2>
+      <p>{message}</p>
       <div className="close-dialog-buttons">
         <button type="button" onClick={onDiscard}>
           Discard

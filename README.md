@@ -29,9 +29,19 @@ The tray icon has the rest. Left-click it to hide or show the strip. Right-click
 - Its buttons are Creation Studio, Pause, **Collapse**, Reset camera, debug overlays and Full screen. It has its own camera, kept until you quit.
 - **Collapse**, the window's close button (X) or the tray's **Collapse** turns it back into the strip. Closing it doesn't quit the app. Minimizing works as usual. Left-click on the tray icon brings the window to the front.
 
+## Building a creature
+
+Build a creature from parts in the Creation Studio and release it into the diorama, where it lives as a creature of small blocks. **Open the Studio** with the pencil button on the strip or the expanded window, or **Creation Studio** in the tray menu. It opens in **Build** mode, with a torso to build on.
+
+1. **Pick a part** from the tray (torsos, legs, heads, eyes and more) and click one of the marked spots on your creature to attach it, or drag it onto one. A part that fits only one spot goes there at once. With **Mirror** on, the other side gets one too.
+2. **Shape it.** Click a part to select it. Pick one of its colours and a suggested colour, or **Any colour…** for your own. **Turn part** (R) turns it a quarter turn, **Smaller part** (−) and **Bigger part** (+ or =) resize it, and **Delete** removes it. **Smaller creature** and **Bigger creature** resize the whole creature. **Randomize** builds a whole new creature to start from, **Fill empty** puts parts on every free spot and keeps yours, and **Reset** goes back to where you started. **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) work as in drawing.
+3. **Name it, choose how it moves and release it**, as for a drawn creature below: **Next: how it moves →**, then **Release**.
+
+To change a creature you built, press **Edit a copy** on it in **My creatures**: the Studio loads a copy to edit, and releasing it adds a new creature, keeping the old one.
+
 ## Drawing a creature
 
-Draw a creature in the Creation Studio and release it into the diorama, where it walks around as a solid 3D body built from your drawing.
+Press **Draw** in the Creation Studio to draw a creature instead and release it into the diorama, where it walks around as a solid 3D body built from your drawing.
 
 <!-- TODO(v0.2 release-candidate round): screenshot of the Creation Studio, docs/screenshots/ (ADR 0016 §16). -->
 
@@ -42,9 +52,9 @@ Draw a creature in the Creation Studio and release it into the diorama, where it
 5. **Choose how it moves.** Press **Next: how it moves →**. The drawing is locked while you choose, and the preview plays the movement in place. Under **Moves**, tick **On land** (it **Walks** or **Hops**), **Swims**, or both; it must move one way at least. Its **Points** say where its body pivots: the center of gravity for moving on land, the tail for swimming. Each starts at a default; click the drawing to place it, or **Reset to default**. With both ways of moving, **Preview** switches between them. Hints say where in the world it won't fit, moving this way. **← Back** returns to the drawing; changing the drawing puts the points back at their defaults.
 6. **Release it.** The creature appears in the world, and the Studio clears for the next one. The world holds up to 20 creatures; when it is full, take one out first.
 
-**My creatures**, the panel beside the preview, lists every creature you have released, with how many are in the world. **+** adds another of that creature to the world, **−** takes the newest one out, and **Delete** (the bin) deletes it after asking. Deleting removes the creature for good, along with any in the world.
+**My creatures**, the panel at the side of the Studio (folded away in Build mode until you open it), lists every creature you have built or drawn and released, with its picture and how many are in the world. **+** adds another of that creature to the world, **−** takes the newest one out, and **Delete** (the bin) deletes it after asking. Deleting removes the creature for good, along with any in the world.
 
-Your creatures are saved in `%APPDATA%\com.livingdiorama.desktop\library` and survive a relaunch. The world is saved too, as `world.json` in `%APPDATA%\com.livingdiorama.desktop`: every minute (even while the strip is hidden), whenever a creature is added or taken out, when you hide the strip and when you quit. The next launch brings back the same creatures, yours included, with their needs, their homes and what they know. Time away counts: after a night away they wake rested and fed, and at night they are asleep at home. A saved world that can't be used is replaced by a fresh one with the three mosslings. A drawing you haven't released is not saved. Closing the Studio asks first, but quitting the app doesn't.
+Your creatures are saved in `%APPDATA%\com.livingdiorama.desktop\library` and survive a relaunch. The world is saved too, as `world.json` in `%APPDATA%\com.livingdiorama.desktop`: every minute (even while the strip is hidden), whenever a creature is added or taken out, when you hide the strip and when you quit. The next launch brings back the same creatures, yours included, with their needs, their homes and what they know. Time away counts: after a night away they wake rested and fed, and at night they are asleep at home. A saved world that can't be used is replaced by a fresh one with the three mosslings. A creature you haven't released is not saved. Closing the Studio asks first, but quitting the app doesn't.
 
 ## Development setup
 

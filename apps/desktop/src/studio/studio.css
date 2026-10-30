@@ -918,7 +918,7 @@ body,
   }
 }
 
-/* A voxel species' thumbnail until the Studio can draw voxel creatures (ADR 0022, M21): a block. */
+/* A voxel species' thumbnail until its picture is drawn, or if it can't be (ADR 0023 §19): a block. */
 .species .thumbnail.voxel-placeholder {
   background:
     linear-gradient(#e0cda6, #e0cda6) 50% 30% / 18px 6px no-repeat,

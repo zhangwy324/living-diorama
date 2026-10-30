@@ -16,3 +16,17 @@ it("offers Discard, a disabled Save draft and Cancel", () => {
     { text: "Cancel", disabled: false },
   ]);
 });
+
+it("asks its own question, e.g. before Edit a copy replaces a creature", () => {
+  const html = renderToStaticMarkup(
+    <CloseDialog
+      title="Discard your creature?"
+      message="Editing a copy of Pebble replaces it."
+      onDiscard={() => {}}
+      onCancel={() => {}}
+    />,
+  );
+  expect(html).toContain(">Discard your creature?</h2>");
+  expect(html).toContain("<p>Editing a copy of Pebble replaces it.</p>");
+  expect(html).not.toContain("Close the Studio?");
+});
