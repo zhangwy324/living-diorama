@@ -1,5 +1,5 @@
 /**
- * Mesher timings, kept out of `pnpm check`: run `pnpm tsx packages/renderer/src/voxel/mesher.bench.ts`.
+ * Mesher timings, kept out of `pnpm check`: run `pnpm tsx packages/renderer/src/voxel/mesher.timing.ts`.
  * Prints the median and worst time per case over a few hundred runs, after a warm-up.
  */
 import { MAX_PART_CUBES, meshVoxelParts, type VoxelPartGrid } from "./mesher";

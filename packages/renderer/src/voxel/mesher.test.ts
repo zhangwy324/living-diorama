@@ -237,6 +237,42 @@ describe("meshVoxelPart", () => {
     expect(trianglesUsing(top.indices, at([1, 1, 1]))).toBe(1);
     expect(trianglesUsing(top.indices, at([2, 1, 2]))).toBe(1);
     expect(trianglesUsing(top.indices, at([2, 1, 1]))).toBe(2);
+    expectOutwardWinding(m);
+  });
+
+  it("keeps the diagonal and outward faces on a mirrored part", () => {
+    // The part of the diagonal test above, reflected: z → 2 − z.
+    const m = meshVoxelPart({
+      ...part(
+        [2, 2, 2],
+        [
+          [0, 0, 0],
+          [1, 1, 0],
+          [0, 1, 1],
+        ],
+      ),
+      mirrored: true,
+    });
+    const top = quadAt(
+      m,
+      [0, 1, 0],
+      [
+        [0, 1, 2],
+        [1, 1, 2],
+        [1, 1, 1],
+        [0, 1, 1],
+      ],
+    );
+    const at = (p: Vec) => top.vertices.find((v) => position(m, v).join(",") === p.join(","))!;
+    expect(m.ao[at([1, 1, 1])]).toBe(VOXEL_AO_BYTES[0]);
+    expect(m.ao[at([0, 1, 2])]).toBe(VOXEL_AO_BYTES[3]);
+    // This quad takes the flipped diagonal: its first triangle starts at its second vertex.
+    expect(top.indices[0]).toBe(top.vertices[1]);
+    expect(trianglesUsing(top.indices, at([1, 1, 2]))).toBe(2);
+    expect(trianglesUsing(top.indices, at([0, 1, 1]))).toBe(2);
+    expect(trianglesUsing(top.indices, at([1, 1, 1]))).toBe(1);
+    expect(trianglesUsing(top.indices, at([0, 1, 2]))).toBe(1);
+    expectOutwardWinding(m);
   });
 
   it("meshes only the outside of a full 32³ part", () => {
@@ -321,6 +357,9 @@ describe("meshVoxelPart", () => {
     );
     expect(() => meshVoxelPart(part([1, 1, 1], [[0, 0, 0, 2]]))).toThrow(RangeError);
     expect(() => meshVoxelPart(part([1, 1, 1], [[0, 0, 0]], ["red"]))).toThrow(RangeError);
+    expect(() => meshVoxelPart(part([1, 1, 1], [[0, 0, 0]]), 256)).toThrow(RangeError);
+    expect(() => meshVoxelPart(part([1, 1, 1], [[0, 0, 0]]), -1)).toThrow(RangeError);
+    expect(() => meshVoxelPart(part([1, 1, 1], [[0, 0, 0]]), 1.5)).toThrow(RangeError);
   });
 });
 

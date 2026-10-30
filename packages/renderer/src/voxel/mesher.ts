@@ -72,6 +72,9 @@ export interface VoxelMesh {
 
 /** Meshes one part, tagging its vertices with `partIndex`. */
 export function meshVoxelPart(part: VoxelPartGrid, partIndex = 0): VoxelMesh {
+  if (!Number.isInteger(partIndex) || partIndex < 0 || partIndex >= MAX_MESH_PARTS) {
+    throw new RangeError(`Part index must be 0 to ${MAX_MESH_PARTS - 1}, got ${partIndex}`);
+  }
   return mesh([part], partIndex);
 }
 

@@ -92,3 +92,15 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 - The look values are starting points, not tuned (issue #200).
 - Open for M19: whether coplanar faces are culled or warned (§14); how anchors are derived (§20); whether colour index 0 means an empty cube; the run-length encoding's scan order (§15); how a socket type declares which parts fit it (§9); and whether the derived size class is stored on release or recomputed on load. Since a species keeps frozen parts (§17), recomputing gives the same answer, but M19 says which it does.
 - Next: M19 builds the part and assembly schema, the mesher and an assembled body that lives, saves and restores in the world.
+
+## As built: M19 PR 2
+
+The mesher (§7, §18, §19) is `packages/renderer/src/voxel/mesher.ts`. `meshVoxelPart(part, partIndex)` meshes one part and `meshVoxelParts(parts)` meshes a creature's parts into one set of arrays, each vertex tagged with its part's position in the list. A part is given as its size (1 to 32 cubes per axis), a `Uint8Array` of colour indices (0 is empty, i ≥ 1 is colour i − 1; x fastest, then y, then z) and its `#rrggbb` colours, plus a `mirrored` flag. The output is indexed quads in separate arrays: `Uint8` positions in the part's own cube units (0 to 32), `Int8` normals (±127, normalized), `Uint8` colour, `Uint8` ambient occlusion and `Uint8` part index, with `Uint16` indices up to 65,536 vertices and `Uint32` beyond. Faces are culled and occlusion computed within a part only.
+
+- **Occlusion** has four levels per vertex, 0.5, 0.65, 0.8 and 1 (`VOXEL_AO`), stored as the factor's bytes (128, 166, 204, 255), so the shader multiplies it in directly; retuning the levels (issue #200) means meshing again.
+- **The diagonal:** each quad is split along the diagonal whose two corners' levels differ least; on a tie, the one joining the lighter pair, so two dark opposite corners stay two corner shadows. Shading then doesn't depend on how a quad is turned.
+- **Colour** stays sRGB bytes; the shader decodes them to linear.
+- **Mirroring:** a mirrored part is reflected about its own middle plane, z → Z − z (Z its cube count along z), with its normals and triangle winding fixed so its faces stay outward; a negative-scale bone would turn them inside out. To match §16's reflection in the creature's XY plane, the assembled body must mirror the part's attach point the same way (az → Z − az, in the part's cube units) and its rest rotation, quaternion [x, y, z, w] → [−x, −y, z, w]. Measurement (bounds, size class, ground contact, centre of gravity) must use the same convention.
+- **Not here:** the bind transform (offset, cube step, rest rotation) and the slight shrink of child parts against flush faces belong to the skeleton that draws the body.
+
+Timings: 32³ parts mesh in 0.9 to 5.4 ms (solid to checkerboard, the most faces a part can have), a 9-part creature in 0.4 ms (Node 24, `packages/renderer/src/voxel/mesher.timing.ts`).
