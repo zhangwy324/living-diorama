@@ -366,11 +366,12 @@ export type SimulationMessage =
    * A request command could not be applied. Not a fault: the world keeps running. For `restore`
    * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why:
    * `invalid_save_json`, the schema's (e.g. `unsupported_save_version`), `save_world_mismatch`,
-   * `save_world_invalid` (the save's own edited world, ADR 0021 §4) or `save_inconsistent`, or `invalid_wall_clock` / `invalid_time_of_day` for the options;
-   * for `catch_up`, `invalid_gap` or `invalid_time_of_day`; for `edit`, the shape's (from
-   * `parseWorldEdit`) or why the edit doesn't fit the world (e.g. `unknown_placement`,
-   * `placement_id_in_use`, `unknown_prop`, `outside_world`, `edit_breaks_navigation`,
-   * `no_relocation`), or `edit_failed` if applying or checking it threw, which changes nothing.
+   * `save_world_invalid` (the save's own edited world, ADR 0021 §4) or `save_inconsistent`, or
+   * `invalid_wall_clock` / `invalid_time_of_day` for the options; for `catch_up`, `invalid_gap`
+   * or `invalid_time_of_day`; for `edit`, the shape's (from `parseWorldEdit`) or why the edit
+   * doesn't fit the world (e.g. `unknown_placement`, `placement_id_in_use`, `unknown_prop`,
+   * `outside_world`, `edit_breaks_navigation`, `no_relocation`), or `edit_failed` if applying or
+   * checking it threw, which changes nothing.
    */
   | {
       type: "rejected";

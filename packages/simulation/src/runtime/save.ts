@@ -18,9 +18,9 @@ import type { CreatureState } from "./world-state";
 // Checking a parsed world save against the running world before it is restored (ADR 0019 §7).
 // The schema checks each field; this checks what it can't: that the save belongs to this world
 // (or holds its own edited world whose content is registered, ADR 0021 §4), that its fields agree
-// with each other, and that its creatures' species and placements are still there. A save that doesn't belong is discarded whole; within one that does, creatures and
-// placement references that no longer fit are dropped and reported. Nothing here throws on
-// content.
+// with each other, and that its creatures' species and placements are still there. A save that
+// doesn't belong is discarded whole; within one that does, creatures and placement references
+// that no longer fit are dropped and reported. Nothing here throws on content.
 
 // The save schema repeats the simulation's state types by shape, since `content-schema` can't
 // import the simulation. These fail to compile if the two drift apart. The types must be identical,
@@ -134,11 +134,12 @@ const major = (version: string) => version.split(".")[0];
 /**
  * The world a save restores into (ADR 0019 §7, ADR 0021 §4), given the world running now. A save
  * of an edited world holds its own definition, which must resolve against what is registered (its
- * prop and structure types, surfaces and capabilities) like pack content; any registered world ID
- * and version will do then. Any other save must name the registered world the running one is (or
- * was edited from), at its version, and restores into that registered world, unedited. Fails, so
- * the caller starts a fresh world, otherwise. The definition returned is the save's own, not a
- * copy. Doesn't change `save`.
+ * prop and structure types, surfaces and capabilities) like pack content; its world ID and
+ * version need not be registered then. Any other save must name the registered world the running
+ * one is (or was edited from), at its version, and restores into that registered world, unedited;
+ * if the running world's ID isn't registered (it was built from a definition), no such save
+ * fits, since that world's own saves always hold it. Fails, so the caller starts a fresh world,
+ * otherwise. The definition returned is the save's own, not a copy. Doesn't change `save`.
  */
 export function worldOfSave(
   save: WorldSave,
@@ -156,12 +157,12 @@ export function worldOfSave(
       unresolved,
     );
   }
-  const registered = registries.worlds.get(running.id) ?? running;
-  const { id, version } = registered;
-  if (save.world.id !== id || save.world.version !== version) {
+  const registered = registries.worlds.get(running.id);
+  if (registered?.id !== save.world.id || registered.version !== save.world.version) {
+    const expected = registered ? `"${registered.id}" ${registered.version}` : "a registered world";
     return discard(
       "save_world_mismatch",
-      `The save is of world "${save.world.id}" ${save.world.version}, not "${id}" ${version}`,
+      `The save is of world "${save.world.id}" ${save.world.version}, not ${expected}`,
       ["world"],
     );
   }
@@ -188,9 +189,9 @@ export function invalidWorld(message: string, why: readonly Diagnostic[]): Resul
  * fields disagree: a creature whose species isn't in `species` at its exact version, or a
  * creature number at or above `nextCreature`. Otherwise returns copies of the creatures that
  * still fit, each at its species' registered version, with placement references the world no
- * longer has pruned. A behavior whose `forgetPlacements` throws loses that memory. A running action whose
- * action isn't registered, or whose state fails the action's `checkState` (or it throws), is
- * dropped, and the creature decides afresh on its next tick. Doesn't change `save`.
+ * longer has pruned. A behavior whose `forgetPlacements` throws loses that memory. A running
+ * action whose action isn't registered, or whose state fails the action's `checkState` (or it
+ * throws), is dropped, and the creature decides afresh on its next tick. Doesn't change `save`.
  */
 export function checkSave(
   save: WorldSave,

@@ -137,7 +137,7 @@ describe("simulation client", () => {
     expect(second.callbacks.onFailure).not.toHaveBeenCalled();
   });
 
-  it("hands on what to draw when an edit or a restored edited world changes the world", async () => {
+  it("reports the new scene after an edit and after restoring an edited world", async () => {
     const first = start();
     // Nothing in the app sends edits yet (ADR 0021, PR 6), so this goes straight to the worker.
     const edit = { ops: [{ op: "prop.add", prop: "hollow:rock", position: { x: 5, z: -5 } }] };

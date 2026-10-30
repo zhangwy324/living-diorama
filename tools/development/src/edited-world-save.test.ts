@@ -7,7 +7,7 @@ import {
   type WorldSave,
 } from "@living-diorama/content-schema";
 import { minutesAfter, type Simulation } from "@living-diorama/simulation";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSimulation } from "./simulation-run";
 
 // Saving an edited world (ADR 0021 §4, M17 PR 4): a save of an edited world holds the world
@@ -206,6 +206,45 @@ describe("a save of an edited world", () => {
     const model = into.state.model;
     const result = into.restore(save, { nowMs: SAVED_AT, minutes: save.minutes });
     expect(!result.ok && result.diagnostics[0]?.code).toBe("save_world_invalid");
+    expect(into.state.model).toBe(model);
+  });
+
+  it("is discarded, not thrown, if building its world throws", () => {
+    const save = throughDisk(edited().save(SAVED_AT));
+    const into = create(999);
+    const model = into.state.model;
+    vi.spyOn(into.state, "derive").mockImplementation(() => {
+      throw new Error("bad heights");
+    });
+    const result = into.restore(save, { nowMs: SAVED_AT, minutes: save.minutes });
+    expect(result.ok ? [] : result.diagnostics.map((d) => [d.code, d.message])).toEqual([
+      ["save_world_invalid", "The saved world could not be built: bad heights"],
+    ]);
+    expect(into.state.model).toBe(model);
+  });
+
+  it.each([
+    [
+      "a surface",
+      (save: WorldSave) => (save.world.definition!.regions[0]!.surface.type = "hollow:lava"),
+      ["regions", 0, "surface", "type"],
+    ],
+    [
+      "a capability",
+      (save: WorldSave) =>
+        (save.world.definition!.connections[0]!.requiredCapabilities[0] = "hollow:wings"),
+      ["connections", 0, "requiredCapabilities", 0],
+    ],
+  ])("is discarded if its world needs %s that isn't registered", (_, unregister, path) => {
+    const save = throughDisk(edited().save(SAVED_AT));
+    unregister(save);
+    const into = create(999);
+    const model = into.state.model;
+    const result = into.restore(save, { nowMs: SAVED_AT, minutes: save.minutes });
+    expect(result.ok ? [] : result.diagnostics.map((d) => [d.code, d.path])).toEqual([
+      ["save_world_invalid", ["world", "definition"]],
+      ["unresolved_reference", ["world", "definition", ...path]],
+    ]);
     expect(into.state.model).toBe(model);
   });
 

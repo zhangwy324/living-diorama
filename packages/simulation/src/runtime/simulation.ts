@@ -613,8 +613,8 @@ export class Simulation {
    * can't be built (`save_world_invalid`), or its fields disagree; the caller then carries on
    * with a fresh world. Otherwise creatures whose species is missing or of another major version
    * are dropped, references to placements the world no longer has are pruned, and running actions
-   * that are unknown or whose state fails their check are dropped; the report lists all three. Whatever the world held before is gone, including
-   * events not yet returned by `step`.
+   * that are unknown or whose state fails their check are dropped; the report lists all three.
+   * Whatever the world held before is gone, including events not yet returned by `step`.
    *
    * The world resumes at the saved tick, time of day and day phase; then the time of day is set
    * to `options.minutes` as `setTimeOfDay` does. After a gap of 2 minutes or more in real time
