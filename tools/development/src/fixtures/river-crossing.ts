@@ -134,7 +134,7 @@ export const plankBridge = {
 /** The fixture world's prop types. */
 export const fixtureProps = [
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "fixture:pine",
     version: "1.0.0",
     name: "Pine",
@@ -142,7 +142,7 @@ export const fixtureProps = [
     blockRadius: 0.3,
   },
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "fixture:rock",
     version: "1.0.0",
     name: "Rock",

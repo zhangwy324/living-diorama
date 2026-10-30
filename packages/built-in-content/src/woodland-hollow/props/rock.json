@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "hollow:rock",
   "version": "1.0.0",
   "name": "Rock",
   "model": "hollow:models/rock.glb",
   "blockRadius": 0.5,
-  "affordances": {}
+  "affordances": {},
+  "category": "hollow:rocks"
 }

@@ -3,7 +3,7 @@ import * as THREE from "three";
 // Pictures of props for cue bubbles (issue #110): a hungry creature's bubble shows the food it
 // heads for, drawn from that prop's own model. A model is drawn once, when a bubble first asks for
 // it, into a small texture, in a fixed daylight of its own, so the picture reads the same by day
-// and by night.
+// and by night. The editor's prop thumbnails (`prop-thumbnails.ts`) are drawn the same way.
 
 /** Prop pictures are this many pixels square. */
 export const PROP_ICON_SIZE = 128;
@@ -60,24 +60,14 @@ export class PropIcons {
   /** Draws the models asked for since the last call. Cheap when there are none. */
   render(renderer: THREE.WebGLRenderer): void {
     if (this.#wanted.size === 0) return;
-    const previous = renderer.getRenderTarget();
-    const clearColor = renderer.getClearColor(new THREE.Color());
-    const clearAlpha = renderer.getClearAlpha();
-    renderer.setClearColor(0x000000, 0);
     for (const icon of this.#wanted) {
       if (!icon.model) continue;
       const target = iconTarget();
-      const { scene, camera, dispose } = iconStage(icon.model);
-      renderer.setRenderTarget(target);
-      renderer.clear();
-      renderer.render(scene, camera);
-      dispose();
+      drawIcon(renderer, icon.model, target);
       icon.target = target;
       icon.model = undefined;
     }
     this.#wanted.clear();
-    renderer.setRenderTarget(previous);
-    renderer.setClearColor(clearColor, clearAlpha);
   }
 
   dispose(): void {
@@ -85,6 +75,43 @@ export class PropIcons {
     this.#byModel.clear();
     this.#byPlacement.clear();
     this.#wanted.clear();
+  }
+}
+
+/** What `drawIcon` uses of a renderer. A `THREE.WebGLRenderer` fits. */
+export type IconRenderer = Pick<
+  THREE.WebGLRenderer,
+  | "getRenderTarget"
+  | "setRenderTarget"
+  | "getClearColor"
+  | "getClearAlpha"
+  | "setClearColor"
+  | "clear"
+  | "render"
+>;
+
+/**
+ * Draws a picture of `model` into `target` on a clear background, as `iconStage` stages it, and
+ * leaves the renderer drawing where it did, with its clear colour back. The model is only read.
+ */
+export function drawIcon(
+  renderer: IconRenderer,
+  model: THREE.Object3D,
+  target: THREE.WebGLRenderTarget,
+): void {
+  const previous = renderer.getRenderTarget();
+  const clearColor = renderer.getClearColor(new THREE.Color());
+  const clearAlpha = renderer.getClearAlpha();
+  const { scene, camera, dispose } = iconStage(model);
+  try {
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(target);
+    renderer.clear();
+    renderer.render(scene, camera);
+  } finally {
+    dispose();
+    renderer.setRenderTarget(previous);
+    renderer.setClearColor(clearColor, clearAlpha);
   }
 }
 

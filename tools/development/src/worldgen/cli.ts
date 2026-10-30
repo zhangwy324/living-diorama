@@ -24,6 +24,7 @@ const results = [
   ...registerCoreEngine(registries),
   ...builtInAssets.map((a) => registries.assets.register(a)),
   ...builtInDefinitions.structures.map((d) => registries.structures.register(d)),
+  ...builtInDefinitions.propCategories.map((d) => registries.propCategories.register(d)),
   ...builtInDefinitions.props.map((d) => registries.props.register(d)),
   ...builtInDefinitions.species.map((d) => registries.species.register(d)),
   registries.worlds.register(world),

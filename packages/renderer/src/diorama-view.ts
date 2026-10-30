@@ -14,6 +14,7 @@ import { createLayers, type ClipPlane, type LayerName, type SceneLayers } from "
 import { createDebugOverlays, type DebugOverlays } from "./overlays";
 import { followPixelRatio } from "./pixel-ratio";
 import { PropEditing, type PropPick, type PropPreview } from "./prop-editing";
+import { canvasEncoder, PropThumbnails } from "./prop-thumbnails";
 import { loadGltf, PropSet, type AssetResolver, type ModelLoader } from "./props";
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
@@ -93,6 +94,16 @@ export interface DioramaView {
    * and is never picked.
    */
   hideProp(placementId: string | undefined): void;
+  /**
+   * A thumbnail of a prop model, e.g. for a tile of the editor's prop drawer: a PNG data URL of
+   * the model with this asset ref (as in `SceneProp`), seen from above in a three-quarter view in
+   * plain daylight on a transparent background, `size` device pixels square (rounded and capped
+   * at `MAX_THUMBNAIL_SIZE`, 1024; pass the tile's CSS size × `devicePixelRatio` for a sharp one).
+   * Drawn on first request and kept per model and size until `dispose`, so the cache grows only
+   * with the refs and sizes asked for; a ref with no model gets the fallback block, drawn once per
+   * size. Undefined once the view is disposed.
+   */
+  propThumbnail(model: string, size: number): Promise<string | undefined>;
   dispose(): void;
 }
 
@@ -308,6 +319,11 @@ export function createDioramaView(
   // Species sizes cap how high bank jumps arc.
   const snapshots = new SnapshotInterpolator(undefined, options.resolveSpecies);
   const stats = new DebugStats(container.ownerDocument);
+  const thumbnails = new PropThumbnails(
+    renderer,
+    (ref) => props.model(ref),
+    canvasEncoder(container.ownerDocument),
+  );
   container.appendChild(stats.element);
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 400);
@@ -499,8 +515,12 @@ export function createDioramaView(
       void editing.preview(preview).then(() => (moved = true));
       moved = true;
     },
+    propThumbnail(model, size) {
+      return thumbnails.thumbnail(model, size);
+    },
     dispose() {
       cancelAnimationFrame(raf);
+      thumbnails.dispose();
       editing.dispose();
       props.dispose();
       container.ownerDocument.removeEventListener("visibilitychange", onVisibilityChange);

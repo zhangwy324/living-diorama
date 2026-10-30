@@ -51,8 +51,23 @@ export const PropDefinitionSchema = z.strictObject({
   blockRadius: z.number().nonnegative(),
   /** What the prop offers, e.g. `{ "core:food": { "eatSeconds": 5 } }`. */
   affordances: AffordancesSchema,
+  /**
+   * The prop category it is listed under in the editor's prop drawer, e.g. `hollow:trees`
+   * (ADR 0021). An editor lists a prop type without one under "Other".
+   */
+  category: ContentIdSchema.optional(),
 });
 export type PropDefinition = z.output<typeof PropDefinitionSchema>;
+
+/**
+ * A registered prop category, e.g. trees or rocks: a tab of the editor's prop drawer (ADR 0021).
+ * `name` is what the tab shows. Categories are listed by ascending `order`, then by ID.
+ */
+export const PropCategoryDefinitionSchema = z.strictObject({
+  ...header("propCategory"),
+  order: z.number(),
+});
+export type PropCategoryDefinition = z.output<typeof PropCategoryDefinitionSchema>;
 
 /** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */
 export const EmptyAffordanceParamsSchema = z.strictObject({});

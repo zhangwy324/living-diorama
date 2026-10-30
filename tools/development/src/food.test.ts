@@ -944,7 +944,7 @@ function riverBerry(
     register: (r: Registries) => {
       registerRiverCrossing(r);
       r.props.register({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "test:berry-bush",
         version: "1.0.0",
         name: "Berry bush",

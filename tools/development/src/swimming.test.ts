@@ -265,7 +265,7 @@ describe("banks between land and water (ADR 0020 §4)", () => {
     const register = (r: Registries) => {
       r.assets.register({ id: "fixture:boulder.glb", version: "1.0.0", kind: "model", url: "-" });
       r.props.register({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "fixture:boulder",
         version: "1.0.0",
         name: "Boulder",

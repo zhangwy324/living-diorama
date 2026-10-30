@@ -1,6 +1,6 @@
 # @living-diorama/content-schema
 
-Versioned data contracts for worlds, terrain, regions, connections, structures, prop types and species, the files of the species library, and the world save.
+Versioned data contracts for worlds, terrain, regions, connections, structures, prop types, prop categories and species, the files of the species library, and the world save.
 
 ## Owns
 

@@ -138,7 +138,7 @@ describe("walkability", () => {
       behaviors: ["core:wander"],
     });
     registries.props.register({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "test:rock",
       version: "1.0.0",
       name: "Rock",
