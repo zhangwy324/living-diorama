@@ -6,6 +6,7 @@ import type {
   RegionPosition,
   SizeClass,
   Vec3,
+  VoxelPart,
   WorldEditCheck,
   WorldEditResult,
 } from "@living-diorama/content-schema";
@@ -25,7 +26,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -199,6 +200,18 @@ export interface PartTypeSummary {
   role?: PartRole;
 }
 
+/**
+ * A registered voxel part (ADR 0022, M20), cubes and all, so the main thread can preview it and
+ * build assemblies from it without the registries. These are library parts, not a species'
+ * assembly, which still never passes through the worker (§20).
+ */
+export interface PartSummary {
+  id: string;
+  name: string;
+  version: string;
+  part: VoxelPart;
+}
+
 /** A registered prop category: one tab of the prop editor's drawer (ADR 0021, PR 7). */
 export interface PropCategorySummary {
   id: string;
@@ -226,6 +239,8 @@ export interface WorldContent {
    * creature's tail part (ADR 0022, M19 decisions) without the registries.
    */
   partTypes: PartTypeSummary[];
+  /** Every registered voxel part, by ID (`sortedParts`). */
+  parts: PartSummary[];
 }
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */

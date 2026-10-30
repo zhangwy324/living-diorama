@@ -124,6 +124,38 @@ describe("simulation host", () => {
     for (const prop of ready.scene.props) expect(ready.assets[prop.model]).toBeDefined();
   });
 
+  it("lists the registered voxel parts by ID, cubes and all", () => {
+    const part = (id: string, name: string) => ({
+      schemaVersion: 1,
+      id,
+      version: "1.2.0",
+      name,
+      part: {
+        type: "hollow:leg",
+        size: { x: 1, y: 2, z: 1 },
+        step: 0.05,
+        colors: ["#7fae5a"],
+        voxels: [2, 1],
+        attach: { x: 0.5, y: 2, z: 0.5 },
+        sockets: [],
+      },
+    });
+    const host = startHost((registries) => [
+      ...registerBuiltInContent(registries),
+      registries.parts.register(part("test:stump-leg", "Stump leg")),
+      registries.parts.register(part("mod:long-leg", "Long leg")),
+    ]);
+    host.init();
+    const [ready] = host.take();
+    if (ready?.type !== "ready") throw new Error("Expected ready");
+    expect(ready.parts.map(({ id, name, version }) => [id, name, version])).toEqual([
+      ["mod:long-leg", "Long leg", "1.2.0"],
+      ["test:stump-leg", "Stump leg", "1.2.0"],
+    ]);
+    expect(ready.parts[1]?.part).toEqual(part("test:stump-leg", "Stump leg").part);
+    expect(structuredClone(ready.parts)).toEqual(ready.parts);
+  });
+
   it("describes the prop types with their categories, and the categories in tab order", () => {
     // A pack's tab sorts by order among the built-in ones, and a type without a category says so
     // by leaving it out (the drawer lists it under "Other").
@@ -924,8 +956,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 17, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(17);
+  it("is protocol version 18, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(18);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

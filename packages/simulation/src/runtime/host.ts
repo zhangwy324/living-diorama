@@ -10,6 +10,7 @@ import {
 } from "@living-diorama/content-schema";
 import {
   checkAssemblyTypes,
+  sortedParts,
   sortedPartTypes,
   sortedPropCategories,
   type AssetEntry,
@@ -110,6 +111,12 @@ export function describeContent({ state }: Simulation): WorldContent {
     partTypes: sortedPartTypes(registries).map(({ id, role }) => ({
       id,
       ...(role === undefined ? {} : { role }),
+    })),
+    parts: sortedParts(registries).map(({ id, name, version, part }) => ({
+      id,
+      name,
+      version,
+      part,
     })),
   };
 }

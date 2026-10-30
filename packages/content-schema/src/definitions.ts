@@ -12,6 +12,7 @@ import {
 } from "./primitives";
 import { ConnectionDefinitionSchema, RegionDefinitionSchema } from "./region";
 import { TerrainDefinitionSchema } from "./terrain";
+import { VoxelPartSchema } from "./voxel";
 
 const header = <K extends keyof typeof SCHEMA_VERSIONS>(kind: K) => ({
   schemaVersion: z.literal(SCHEMA_VERSIONS[kind]),
@@ -93,6 +94,28 @@ export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;
 /** A registered socket type, e.g. a hip or a neck (ADR 0022 §10): a kind of place parts hang from. */
 export const SocketTypeDefinitionSchema = z.strictObject({ ...header("socketType") });
 export type SocketTypeDefinition = z.output<typeof SocketTypeDefinitionSchema>;
+
+/**
+ * A registered voxel part, e.g. a starter leg (ADR 0022 §17, M20): a part a creature can be built
+ * from, held inline. An assembly that uses it holds a frozen copy of `part`, with this ID as the
+ * copy's `source`, so the part itself has none. Its part type and socket types are checked when
+ * references resolve.
+ */
+export const PartDefinitionSchema = z
+  .strictObject({
+    ...header("part"),
+    part: VoxelPartSchema,
+  })
+  .superRefine(({ part }, ctx) => {
+    if (part.source !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A registered part has no source: it is the source of the copies made from it",
+        path: ["part", "source"],
+      });
+    }
+  });
+export type PartDefinition = z.output<typeof PartDefinitionSchema>;
 
 /** Params of an affordance that takes none, e.g. `core:crossable` or `core:shelter`. */
 export const EmptyAffordanceParamsSchema = z.strictObject({});
@@ -200,6 +223,24 @@ export const BodyShapeSchema = z.strictObject({
   anchors: AnchorsSchema.default({}),
 });
 export type BodyShape = z.output<typeof BodyShapeSchema>;
+
+/**
+ * Body plan settings only a drawn body has: a voxel body's cubes give its depth and its anchors
+ * (ADR 0022, M19 decisions). A voxel species may not set them.
+ */
+export const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
+export type DrawnOnlyBodySetting = (typeof DRAWN_ONLY_BODY_SETTINGS)[number];
+
+/**
+ * The drawn-only body plan settings a species sets as written, before parsing fills in their
+ * defaults: what a voxel species must not have.
+ */
+export function writtenDrawnOnlySettings(species: unknown): DrawnOnlyBodySetting[] {
+  const record = (value: unknown) =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+  const plan = record(record(species)?.body);
+  return plan ? DRAWN_ONLY_BODY_SETTINGS.filter((setting) => setting in plan) : [];
+}
 
 /** A body plan with every default: the walk gait and default anchors (ADR 0020 §13). A fresh object. */
 export const defaultBody = (): BodyShape => BodyShapeSchema.parse({});

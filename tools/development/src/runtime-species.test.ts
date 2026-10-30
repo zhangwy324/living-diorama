@@ -271,12 +271,15 @@ describe("runtime species", () => {
       body: { locomotion: { land: { gait: "walk" } } },
     });
     expect(content.species[hollow.speciesId]?.body).toHaveProperty("thickness");
-    // A thickness set explicitly (refused in M20 outside the library) is dropped all the same.
+    // A voxel species can't set the drawn-only settings (ADR 0022, M20).
     const thick = { ...drawnSpecies("thick"), appearance: "user:thick/assembly.json" };
-    expectOk(simulation, { ...thick, body: { thickness: 0.6 } }, "voxel");
-    expect(describeContent(simulation).species["user:thick"]?.body).toEqual({
-      locomotion: { land: { gait: "walk" } },
-    });
+    const refused = simulation.registerSpecies(
+      { ...thick, body: { thickness: 0.6 } },
+      URL,
+      "voxel",
+    );
+    expect(codes(refused)).toEqual(["drawn_only_setting"]);
+    expect(simulation.state.registries.species.has("user:thick")).toBe(false);
   });
 
   it("refuses cubes in the species and appearance kinds a species can't have", () => {

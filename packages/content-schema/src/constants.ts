@@ -61,6 +61,7 @@ export const SCHEMA_VERSIONS = {
   species: 1,
   partType: 1,
   socketType: 1,
+  part: 1,
 } as const;
 
 export type DefinitionKind = keyof typeof SCHEMA_VERSIONS;

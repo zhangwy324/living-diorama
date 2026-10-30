@@ -4,6 +4,7 @@ import {
   isContentId,
   LOCOMOTION_MEDIA,
   REGION_KINDS,
+  parsePartDefinition,
   parsePartTypeDefinition,
   parsePropCategoryDefinition,
   parseSocketTypeDefinition,
@@ -12,12 +13,15 @@ import {
   parseStructureDefinition,
   parseWorldDefinition,
   validate,
+  writtenDrawnOnlySettings,
   type Affordances,
   type BodyShape,
   type ContentId,
   type Diagnostic,
   type DiagnosticPath,
+  type DrawnOnlyBodySetting,
   type LocomotionMedium,
+  type PartDefinition,
   type PartTypeDefinition,
   type PropCategoryDefinition,
   type PropDefinition,
@@ -40,6 +44,7 @@ export const REGISTRY_NAMES = [
   "propCategories",
   "partTypes",
   "socketTypes",
+  "parts",
   "species",
   "surfaces",
   "actions",
@@ -231,7 +236,7 @@ export interface AssetEntry extends CodeEntry {
 /**
  * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
  * prop types, needs, senses and traits (ADR 0018), prop categories (ADR 0021), voxel part types
- * and socket types (ADR 0022 §10).
+ * and socket types (ADR 0022 §10), and voxel parts (ADR 0022, M20).
  */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
@@ -240,6 +245,7 @@ export interface Registries {
   propCategories: Registry<PropCategoryDefinition>;
   partTypes: Registry<PartTypeDefinition>;
   socketTypes: Registry<SocketTypeDefinition>;
+  parts: Registry<PartDefinition>;
   species: Registry<SpeciesDefinition>;
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
@@ -677,6 +683,43 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
 ];
 
 /**
+ * A voxel species has no drawn-only body settings (ADR 0022, M19 decisions; M20): its cubes give
+ * its depth and anchors. They are checked as written, which `written` records when the species is
+ * validated, since parsing fills in their defaults. Whether the species is voxel is its
+ * appearance asset's kind, known only once references resolve; an unregistered asset is left to
+ * reference resolution.
+ */
+function checkVoxelBodyPlan(
+  species: SpeciesDefinition,
+  lookup: Lookup,
+  written: readonly DrawnOnlyBodySetting[],
+): Diagnostic[] {
+  if (written.length === 0) return [];
+  const appearance = lookup("assets", species.appearance) as AssetEntry | undefined;
+  if (appearance?.kind !== "voxel") return [];
+  return written.map((setting) =>
+    error(
+      "drawn_only_setting",
+      `"${species.id}" is a voxel species, which has no ${setting}: its cubes give it`,
+      ["body", setting],
+    ),
+  );
+}
+
+/**
+ * A part's type and the types of its sockets must be registered (ADR 0022 §10, M20). Fits are
+ * checked when an assembly that uses the part is released, not here.
+ */
+const partReferences = ({ part }: PartDefinition): Reference[] => [
+  { registry: "partTypes", id: part.type, path: ["part", "type"] },
+  ...part.sockets.map((socket, i) => ({
+    registry: "socketTypes",
+    id: socket.type,
+    path: ["part", "sockets", i, "type"],
+  })),
+];
+
+/**
  * A species needs a way of moving (ADR 0020 §1): at least one of its capabilities must have a
  * locomotion rule. Unregistered capabilities are left to reference resolution.
  */
@@ -741,6 +784,10 @@ const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id 
 export const sortedPartTypes = (registries: Registries): PartTypeDefinition[] =>
   registries.partTypes.values().sort(byId);
 
+/** The registered voxel parts, by ID. */
+export const sortedParts = (registries: Registries): PartDefinition[] =>
+  registries.parts.values().sort(byId);
+
 /** The registered socket types, by ID. */
 export const sortedSocketTypes = (registries: Registries): SocketTypeDefinition[] =>
   registries.socketTypes.values().sort(byId);
@@ -774,6 +821,8 @@ export const checkAssemblyTypes = (
   );
 
 export function createRegistries(): Registries {
+  // The drawn-only body settings each species set as written, by its parsed definition.
+  const writtenSettings = new WeakMap<SpeciesDefinition, readonly DrawnOnlyBodySetting[]>();
   return {
     worlds: new Registry("worlds", { validate: parseWorldDefinition, references: worldReferences }),
     structures: new Registry("structures", {
@@ -788,10 +837,18 @@ export function createRegistries(): Registries {
         partType.fits.map((id, i) => ({ registry: "socketTypes", id, path: ["fits", i] })),
     }),
     socketTypes: new Registry("socketTypes", { validate: parseSocketTypeDefinition }),
+    parts: new Registry("parts", { validate: parsePartDefinition, references: partReferences }),
     species: new Registry("species", {
-      validate: parseSpeciesDefinition,
+      validate: (input, source) => {
+        const result = parseSpeciesDefinition(input, source);
+        if (result.ok) writtenSettings.set(result.value, writtenDrawnOnlySettings(input));
+        return result;
+      },
       references: speciesReferences,
-      check: checkSpeciesLocomotion,
+      check: (species, lookup) => [
+        ...checkSpeciesLocomotion(species, lookup),
+        ...checkVoxelBodyPlan(species, lookup, writtenSettings.get(species) ?? []),
+      ],
     }),
     surfaces: new Registry<SurfaceType>("surfaces", {
       validate: validateCodeEntry<SurfaceType>((entry, source) =>
