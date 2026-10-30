@@ -3,7 +3,7 @@ import { measureAssembly } from "@living-diorama/content-schema";
 import { describeVoxelParts } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { loadContent } from "./content";
-import { partFitLookup, partRoleLookup } from "./part-types";
+import { partFitLookup, partMotionLookup, partRoleLookup } from "./part-types";
 
 // The part and socket types as the worker's `ready` lists them.
 const content = loadContent();
@@ -25,6 +25,25 @@ describe("partRoleLookup", () => {
     const without = measureAssembly(assembly);
     expect(without.tail.y).toBeCloseTo(without.height / 2);
     expect(withRoles.tail).not.toEqual(without.tail);
+  });
+});
+
+describe("partMotionLookup", () => {
+  it("gives the built-in part types their motions and the torso, nose and mouth none", () => {
+    const motionOf = partMotionLookup(partTypes);
+    expect(motionOf("hollow:leg")).toBe("swing");
+    expect(motionOf("hollow:eye")).toBe("blink");
+    expect(motionOf("hollow:tail-fin")).toBe("wag");
+    for (const still of ["hollow:torso", "hollow:nose", "hollow:mouth", "pack:unknown"]) {
+      expect(motionOf(still)).toBeUndefined();
+    }
+  });
+
+  it("agrees with the registries on every part type", () => {
+    const motionOf = partMotionLookup(partTypes);
+    for (const type of content.value.partTypes.values()) {
+      expect(motionOf(type.id)).toBe(type.motion);
+    }
   });
 });
 

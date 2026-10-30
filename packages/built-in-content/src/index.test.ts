@@ -100,6 +100,22 @@ it("registers the core part types, each fitting a registered socket type", () =>
   for (const type of registries.partTypes.values()) {
     expect([type.id, type.fits.length > 0]).toEqual([type.id, type.role !== "root"]);
   }
+  // Every type moves but the torso (the body itself), the nose and the mouth (M22).
+  expect(
+    Object.fromEntries(sortedPartTypes(registries).map((t) => [t.id, t.motion ?? null])),
+  ).toEqual({
+    "hollow:arm": "swing",
+    "hollow:ear": "flop",
+    "hollow:eye": "blink",
+    "hollow:fin": "paddle",
+    "hollow:head": "bob",
+    "hollow:leg": "swing",
+    "hollow:mouth": null,
+    "hollow:nose": null,
+    "hollow:tail": "wag",
+    "hollow:tail-fin": "wag",
+    "hollow:torso": null,
+  });
   expect(partFitsSocket(registries, "hollow:leg", "hollow:leg-mount")).toBe(true);
   expect(partFitsSocket(registries, "hollow:eye", "hollow:leg-mount")).toBe(false);
 });

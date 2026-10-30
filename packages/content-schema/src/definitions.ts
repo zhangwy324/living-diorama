@@ -82,6 +82,15 @@ export const PART_ROLES = ["tail", "root"] as const;
 export type PartRole = (typeof PART_ROLES)[number];
 
 /**
+ * How a part of a type moves when its creature is animated (M22): `swing` (legs, arms), `wag`
+ * (tails), `bob` (heads), `paddle` (fins), `flop` (ears) and `blink` (eyes). The renderer owns
+ * what each looks like; a type without one stays still. Like roles, engine code reads motions,
+ * never part type IDs.
+ */
+export const PART_MOTIONS = ["swing", "wag", "bob", "paddle", "flop", "blink"] as const;
+export type PartMotion = (typeof PART_MOTIONS)[number];
+
+/**
  * A registered voxel part type, e.g. a leg or an eye (ADR 0022 §10). A part of this type fits a
  * socket whose type is in `fits`, which may name another pack's socket types.
  */
@@ -91,6 +100,10 @@ export const PartTypeDefinitionSchema = z.strictObject({
   fits: z.array(ContentIdSchema).default([]),
   role: z
     .enum(PART_ROLES, { error: `Unknown part role (expected ${PART_ROLES.join(", ")})` })
+    .optional(),
+  /** How parts of this type move. Left out, they don't. */
+  motion: z
+    .enum(PART_MOTIONS, { error: `Unknown part motion (expected ${PART_MOTIONS.join(", ")})` })
     .optional(),
 });
 export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;

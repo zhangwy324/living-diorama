@@ -77,7 +77,7 @@ Each M22 PR adds its own paragraph here, under its own heading, so PRs landing i
 
 ### PR 1: Motion field
 
-_Not built yet._
+Built in #243. Motion names are a closed enum, `PART_MOTIONS` / `PartMotion` in `content-schema` (`definitions.ts`), beside `PART_ROLES`: `swing`, `wag`, `bob`, `paddle`, `flop`, `blink`. `PartTypeDefinition.motion` is optional, with no default. Left out, it stays out of the parsed definition and the summary, and the part doesn't move. An unknown name is refused at `motion` ("Unknown part motion (expected …)"). The field changes the part-type format, so `SCHEMA_VERSIONS.partType` is 2, with no migration. The built-in types: leg and arm `swing`, tail and tail fin `wag`, head `bob`, ear `flop`, eye `blink`, fin `paddle`. Torso, nose and mouth have none. The tail fin takes `wag`, not `paddle`, because a fish's tail fin sweeps side to side about its base, as a tail does. `paddle` is the side fins' slower stroke. `PartTypeSummary` gains `motion?: PartMotion`, filled by `describeVoxelParts` only when the type has one (protocol version 23). Library entries are unchanged. The app's `partMotionLookup(partTypes)` in `apps/desktop/src/part-types.ts`, beside `partRoleLookup`, gives a type's motion, and none for a type the summary doesn't list. It isn't injected into the renderer yet. The Studio's test fixture of built-in parts is now built with `describeVoxelParts`, so it carries motions too.
 
 ### PR 2: Motion module
 
