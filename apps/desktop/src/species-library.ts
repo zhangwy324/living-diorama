@@ -162,7 +162,7 @@ export async function openSpeciesLibrary(
   /** Registers `entry`'s species from its image, and keeps it in the list. */
   const register = async (uuid: string, entry: LibraryEntry, image: Uint8Array) => {
     const url = URL.createObjectURL(new Blob([image.slice()], { type: "image/png" }));
-    const registered = await world.registerSpecies(entry.species, url);
+    const registered = await world.registerSpecies(entry.species, url, "image");
     if (!registered.ok) {
       URL.revokeObjectURL(url);
       return registered;

@@ -306,7 +306,13 @@ describe("simulation host", () => {
       behaviors: ["core:wander"],
     };
     const appearanceUrl = "blob:http://localhost/puddle";
-    host.send({ type: "register_species", requestId: "r1", species, appearanceUrl });
+    host.send({
+      type: "register_species",
+      requestId: "r1",
+      species,
+      appearanceUrl,
+      appearanceKind: "image",
+    });
     host.send({ type: "spawn", requestId: "r2", speciesId: "user:puddle" });
     host.advance(100);
     const messages = host.take();
@@ -378,6 +384,47 @@ describe("simulation host", () => {
     expect(structuredClone(answer)).toEqual(answer);
   });
 
+  it("sends a voxel species' locomotion and its appearance's kind and URL, never its cubes", () => {
+    const host = startHost();
+    host.init();
+    host.take();
+    const species = {
+      schemaVersion: 1,
+      id: "user:cubes",
+      version: "1.0.0",
+      name: "Cubes",
+      appearance: "user:cubes/assembly.json",
+      sizeClass: "medium",
+      body: { locomotion: { land: { gait: "hop" } } },
+      capabilities: { "core:land": 1 },
+      baseSpeed: 0.5,
+      behaviors: ["core:wander"],
+    };
+    const appearanceUrl = "blob:http://localhost/assembly";
+    host.send({
+      type: "register_species",
+      requestId: "r1",
+      species,
+      appearanceUrl,
+      appearanceKind: "voxel",
+    });
+    host.advance(100);
+    const [registered] = host.take();
+    expect(registered).toEqual({
+      type: "species_registered",
+      requestId: "r1",
+      speciesId: "user:cubes",
+      species: {
+        appearance: species.appearance,
+        sizeClass: "medium",
+        // Only how it moves: no thickness or anchors, and nothing of its cubes.
+        body: { locomotion: { land: { gait: "hop" } } },
+      },
+      asset: { kind: "voxel", url: appearanceUrl },
+      limits: [],
+    });
+  });
+
   it("rejects requests it can't apply without stopping the world", () => {
     const host = startHost();
     host.init();
@@ -387,6 +434,7 @@ describe("simulation host", () => {
       requestId: "bad",
       species: { id: "user:nothing" },
       appearanceUrl: "blob:x",
+      appearanceKind: "image",
     });
     host.send({ type: "spawn", speciesId: "hollow:nobody" });
     host.advance(100);
@@ -876,8 +924,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 15, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(15);
+  it("is protocol version 16, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(16);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

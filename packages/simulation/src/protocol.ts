@@ -8,7 +8,12 @@ import type {
   WorldEditCheck,
   WorldEditResult,
 } from "@living-diorama/content-schema";
-import type { AssetKind, Cue, LocomotionRule } from "@living-diorama/extension-api";
+import type {
+  AssetKind,
+  Cue,
+  LocomotionRule,
+  SpeciesAppearanceKind,
+} from "@living-diorama/extension-api";
 import type { ActionEvent } from "./creatures/action-event";
 import type { CreatureKnowledge } from "./creatures/knowledge";
 import type { NavigationOverlay } from "./navigation/overlay";
@@ -19,7 +24,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -32,10 +37,18 @@ export type { ActionEvent } from "./creatures/action-event";
  */
 export type RequestCommand =
   /**
-   * Adds a species while the world runs, validated like pack content. Its appearance is an image
-   * asset with the ID `species.appearance` and the species' version, served from `appearanceUrl`.
+   * Adds a species while the world runs, validated like pack content. Its appearance is an asset
+   * of `appearanceKind` (a drawn body's image or a voxel body's assembly) with the ID
+   * `species.appearance` and the species' version, served from `appearanceUrl`. Only the URL
+   * crosses: the worker never sees the file (ADR 0022 §20).
    */
-  | { type: "register_species"; requestId?: string; species: unknown; appearanceUrl: string }
+  | {
+      type: "register_species";
+      requestId?: string;
+      species: unknown;
+      appearanceUrl: string;
+      appearanceKind: SpeciesAppearanceKind;
+    }
   /**
    * Adds a creature at the given spawn point, or a random one. `released`: it comes from the
    * Studio, so it gets the release grace (ADR 0018 amendments, §13).
@@ -141,13 +154,22 @@ export interface Limit extends Diagnostic {
   structure?: { id: string; name: string };
 }
 
+/**
+ * A voxel species' body plan as the main thread sees it: only how it moves. Its cubes give its
+ * shape and anchors, and they stay in its appearance asset (ADR 0022 §17, §20).
+ */
+export type VoxelBodySummary = Pick<BodyShape, "locomotion">;
+
 /** What the renderer needs of a registered species. */
 export interface SpeciesSummary {
-  /** Asset ref of the appearance image. */
+  /** Asset ref of the appearance: an image, or a voxel assembly. Its asset says which. */
   appearance: string;
   sizeClass: SizeClass;
-  /** How its body is built from the appearance. */
-  body: BodyShape;
+  /**
+   * How its body is built from the appearance: the whole body plan for a drawn species, only
+   * `locomotion` for a voxel one.
+   */
+  body: BodyShape | VoxelBodySummary;
 }
 
 /**

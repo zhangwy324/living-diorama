@@ -6,6 +6,7 @@ import {
   type WorldEditInput,
   type WorldEditResult,
 } from "@living-diorama/content-schema";
+import type { SpeciesAppearanceKind } from "@living-diorama/extension-api";
 import {
   envelope,
   isValidSpeed,
@@ -51,10 +52,16 @@ export interface RegisteredSpecies {
 
 export interface SimulationClient {
   /**
-   * Adds a species while the world runs (ADR 0012). Resolves once the worker has registered it
-   * and `onSpeciesRegistered` has run, or with the diagnostics if it was rejected.
+   * Adds a species while the world runs (ADR 0012), its appearance an asset of `appearanceKind`
+   * served from `appearanceUrl`: a drawn body's image or a voxel body's assembly. Resolves once
+   * the worker has registered it and `onSpeciesRegistered` has run, or with the diagnostics if it
+   * was rejected.
    */
-  registerSpecies(species: unknown, appearanceUrl: string): Promise<Result<RegisteredSpecies>>;
+  registerSpecies(
+    species: unknown,
+    appearanceUrl: string,
+    appearanceKind: SpeciesAppearanceKind,
+  ): Promise<Result<RegisteredSpecies>>;
   /**
    * Where creatures of this size and these capabilities wouldn't fit, without registering anything
    * (ADR 0015 §8). Errors among the limits mean such a species can't be added; the result fails
@@ -365,8 +372,8 @@ export function startSimulation(
   });
 
   return {
-    registerSpecies: (species, appearanceUrl) =>
-      request({ type: "register_species", species, appearanceUrl }),
+    registerSpecies: (species, appearanceUrl, appearanceKind) =>
+      request({ type: "register_species", species, appearanceUrl, appearanceKind }),
     checkLimits: (sizeClass, capabilities) =>
       request({ type: "check_limits", sizeClass, capabilities }),
     spawn: (speciesId, { released = false } = {}) =>

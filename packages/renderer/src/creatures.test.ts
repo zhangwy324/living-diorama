@@ -236,6 +236,29 @@ describe("CreatureBodies", () => {
     expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
   });
 
+  it("draws a voxel species as the fallback block, without reading its assembly as an image", async () => {
+    const readImage = vi.fn(async () => drawing);
+    const layer = new SceneLayer("creatures");
+    const bodies = new CreatureBodies(layer, {
+      resolveSpecies: () => ({
+        appearance: "user:v/assembly.json",
+        sizeClass: "medium",
+        // A voxel species' summary carries only its locomotion.
+        body: { locomotion: defaultBody().locomotion },
+      }),
+      resolveAsset: () => ({ kind: "voxel", url: "blob:assembly" }),
+      readImage,
+    });
+    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    await bodies.ready;
+    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
+    expect(readImage).not.toHaveBeenCalled();
+    const mesh = bodyOf(layer, "a");
+    expect(mesh.geometry.type).toBe("RoundedBoxGeometry");
+    expect(boxOf(mesh).max.y).toBeCloseTo(0.8);
+    expect(Number.isFinite(boxOf(mesh).max.z)).toBe(true);
+  });
+
   it("turns the drawing's facing (+X) to the creature's heading", () => {
     const { layer, bodies } = make();
     const facing = (heading: number) => {

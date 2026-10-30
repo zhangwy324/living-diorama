@@ -48,11 +48,17 @@ import type { AssetResolver } from "./props";
 
 /** What the renderer needs to know about a species. `SpeciesDefinition` fits. */
 export interface RenderSpecies {
-  /** Asset ref of an image drawn facing right, feet at the bottom of the drawing. */
+  /**
+   * Asset ref of the appearance: an image drawn facing right, feet at the bottom of the drawing,
+   * or a voxel assembly (ADR 0022 §17), which is drawn as the fallback block for now.
+   */
   appearance: string;
   sizeClass: SizeClass;
-  /** How the body is built from the image: how deep it is. */
-  body: BodyShape;
+  /**
+   * How the body is built from the image: how deep it is and its anchors. A voxel species has
+   * neither: its cubes give them.
+   */
+  body: Pick<BodyShape, "locomotion"> & Partial<Pick<BodyShape, "thickness" | "anchors">>;
 }
 
 export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;
@@ -425,7 +431,7 @@ export class CreatureBodies {
       body: block,
       height,
       ...reachOf(block),
-      anchors: species.body.anchors,
+      anchors: species.body.anchors ?? {},
       pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
     };
     placeAnchors(look);
@@ -433,6 +439,8 @@ export class CreatureBodies {
     this.#looks.set(speciesId, look);
 
     const asset = this.#resolveAsset(species.appearance);
+    // A voxel body keeps the fallback block until its assembly is drawn (ADR 0022 §20).
+    if (asset?.kind === "voxel") return look;
     if (asset?.kind !== "image") {
       console.warn(`No image asset for ${species.appearance}`);
       return look;

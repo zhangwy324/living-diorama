@@ -24,8 +24,8 @@ function headlessWorld() {
   if (!created.ok) throw new Error(created.diagnostics.map(formatDiagnostic).join("\n"));
   const simulation = created.value;
   const world: LibraryWorld = {
-    registerSpecies: (species, url) => {
-      const registered = simulation.registerSpecies(species, url);
+    registerSpecies: (species, url, kind) => {
+      const registered = simulation.registerSpecies(species, url, kind);
       return Promise.resolve(
         registered.ok
           ? {

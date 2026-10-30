@@ -198,8 +198,23 @@ export interface CapabilityType extends CodeEntry {
   readonly locomotion?: LocomotionRule;
 }
 
-export const ASSET_KINDS = ["image", "model"] as const;
+/**
+ * What an asset's file holds: an image (a drawn species' appearance), a 3D model (a prop) or a
+ * voxel assembly as JSON (a voxel species' appearance, ADR 0022 §17).
+ */
+export const ASSET_KINDS = ["image", "model", "voxel"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
+
+/**
+ * The kinds of asset a species' appearance may be: a drawn body's image or a voxel body's
+ * assembly. The simulation carries only the kind and the URL, never the file; the renderer reads
+ * it (ADR 0022 §20).
+ */
+export const SPECIES_APPEARANCE_KINDS = ["image", "voxel"] as const satisfies readonly AssetKind[];
+export type SpeciesAppearanceKind = (typeof SPECIES_APPEARANCE_KINDS)[number];
+
+export const isSpeciesAppearanceKind = (kind: unknown): kind is SpeciesAppearanceKind =>
+  (SPECIES_APPEARANCE_KINDS as readonly unknown[]).includes(kind);
 
 /**
  * A file content refers to, e.g. `hollow:models/pine.glb` (ADR 0007 §1). The ID is the asset ref
@@ -552,18 +567,23 @@ const dependencyReferences = (entry: CodeEntry): Reference[] =>
     path: ["dependencies", i],
   }));
 
-/** A reference to an asset, optionally of one kind (a prop needs a model). */
-function assetReference(id: string, path: DiagnosticPath, kind?: AssetKind): Reference {
-  if (kind === undefined) return { registry: "assets", id, path };
+/**
+ * A reference to an asset, optionally of given kinds (a prop needs a model; a species'
+ * appearance an image or a voxel assembly).
+ */
+function assetReference(id: string, path: DiagnosticPath, kinds?: readonly AssetKind[]): Reference {
+  if (kinds === undefined) return { registry: "assets", id, path };
   return {
     registry: "assets",
     id,
     path,
     check: (target) => {
       const actual = (target as AssetEntry).kind;
-      return actual === kind
-        ? []
-        : [error("invalid_value", `"${id}" is an asset of kind ${actual}, expected ${kind}`, path)];
+      if (kinds.includes(actual)) return [];
+      const expected = kinds.join(" or ");
+      return [
+        error("invalid_value", `"${id}" is an asset of kind ${actual}, expected ${expected}`, path),
+      ];
     },
   };
 }
@@ -645,7 +665,7 @@ const rangedReferences = (
   });
 
 const speciesReferences = (species: SpeciesDefinition): Reference[] => [
-  assetReference(species.appearance, ["appearance"]),
+  assetReference(species.appearance, ["appearance"], SPECIES_APPEARANCE_KINDS),
   ...species.behaviors.map((id, i) => ({ registry: "behaviors", id, path: ["behaviors", i] })),
   ...Object.keys(species.capabilities).map((id) => ({
     registry: "capabilities",
@@ -699,7 +719,7 @@ const structureReferences = (structure: StructureDefinition): Reference[] => [
 ];
 
 const propReferences = (prop: PropDefinition): Reference[] => [
-  assetReference(prop.model, ["model"], "model"),
+  assetReference(prop.model, ["model"], ["model"]),
   ...affordanceReferences(prop.affordances),
   ...(prop.category === undefined
     ? []
