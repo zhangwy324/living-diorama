@@ -422,28 +422,50 @@ describe("VoxelAssemblySchema", () => {
     ]);
   });
 
-  it("snaps a child to the finer grid of it and its parent", () => {
-    const OFF_GRID =
-      "The part must sit on the finer grid of it and its parent (2.5 cm cubes): move its attach point or the socket by half a cube";
+  it("snaps a child half a cube off the finer grid onto it, toward its parent's middle", () => {
+    // ADR 0022 §13, as amended by ADR 0023 (M21 PR 7): never refused, always moved.
     const assembly = creature();
+    const headAt = (input: VoxelAssemblyInput) => placeInstances(parsed(input))[5]!.offset;
+    expect(headAt(assembly)).toEqual([12, 0, -4]);
+    // An attach point on a half cube puts the head half a cube off the torso's grid along z. The
+    // neck is on the torso's middle plane, so the head moves toward +z, half a cube (2 units).
     const offGrid = { ...assembly.parts.head!, attach: { x: 0, y: 1, z: 1.5 } };
-    expect(messages(check({ ...assembly, parts: { ...assembly.parts, head: offGrid } }))).toEqual([
-      OFF_GRID,
-    ]);
-    // A finer head may sit half a torso cube off the torso's grid, on its own.
+    const snapped = { ...assembly, parts: { ...assembly.parts, head: offGrid } };
+    expect(messages(check(snapped))).toEqual([]);
+    expect(headAt(snapped)).toEqual([12, 0, -4]);
+    // A finer head may sit half a torso cube off the torso's grid, on its own: no move.
     const fine = { ...offGrid, step: 0.0125 as const, attach: { x: 0, y: 1, z: 1 } };
-    expect(messages(check({ ...assembly, parts: { ...assembly.parts, head: fine } }))).toEqual([]);
+    expect(headAt({ ...assembly, parts: { ...assembly.parts, head: fine } })).toEqual([12, 2, -2]);
     // A rotation counts: a quarter turn about Y moves the attach point's half cube from z to x.
+    // The neck now lies past the torso's middle along both x and z, so the head moves back along
+    // both, toward the middle.
     const torso = assembly.parts.torso!;
     const sockets = torso.sockets!.map((s) =>
       s.id === "neck" ? { ...s, position: { x: 7, y: 3, z: 2.5 } } : s,
     );
     const parts = { ...assembly.parts, head: offGrid, torso: { ...torso, sockets } };
-    expect(messages(check({ ...assembly, parts }))).toEqual([]);
+    expect(headAt({ ...assembly, parts })).toEqual([12, 0, -4]);
     const instances = assembly.instances.map((instance) =>
       instance.id === "head" ? { ...instance, rotation: QUARTER_TURN_Y } : instance,
     );
-    expect(messages(check({ ...assembly, parts, instances }))).toEqual([OFF_GRID]);
+    expect(messages(check({ ...assembly, parts, instances }))).toEqual([]);
+    expect(headAt({ ...assembly, parts, instances })).toEqual([4, 0, 0]);
+  });
+
+  it("snaps the two parts of a mirror pair to mirror images", () => {
+    // A leg two cubes deep on hips at z = 1.5 and 2.5: half a cube off the grid on both sides.
+    const assembly = creature();
+    const fat = {
+      ...assembly.parts.leg!,
+      size: { x: 1, y: 3, z: 2 },
+      voxels: [6, 1],
+      attach: { x: 0.5, y: 3, z: 1 },
+    };
+    const placed = placeInstances(parsed({ ...assembly, parts: { ...assembly.parts, leg: fat } }));
+    // Each moves half a cube toward the torso's middle (z = 0 here), so both span z −4 to 4.
+    expect(placed[1]!.offset).toEqual([8, -16, -4]);
+    expect(placed[2]!.offset).toEqual([8, -16, 4]);
+    expect(placed[2]!.linear).toEqual([1, 0, 0, 0, 1, 0, 0, 0, -1]);
   });
 });
 

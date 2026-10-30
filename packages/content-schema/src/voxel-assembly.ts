@@ -217,24 +217,29 @@ function isSocketBuried(
 }
 
 /**
- * §13: whether `part`, hanging from `socket` of `parentPart` with the rest rotation `turn` (a
- * `quarterTurnMatrix`) and mirrored or not, sits on the finer grid of the two.
+ * §13, as amended by ADR 0023 (M21 PR 7): how far a child moves, in units in its parent part's
+ * frame, to sit on the finer grid of it and its parent. `at` is the socket and `corner` where the
+ * child's corner would be with its attach point exactly on the socket. Sockets and attach points
+ * lie on half cubes, so along each axis the corner is either on the finer grid already (no move)
+ * or half a finer cube off it. Then the child moves half a finer cube toward the parent's middle,
+ * as seen from the socket, or toward + when the socket lies on the middle. The sockets of a mirror
+ * pair lie mirrored about the parent's middle plane, so their parts move mirrored and stay mirror
+ * images. Derived, never stored: the same parts always land in the same place.
  */
-function isOnFinerGrid(
+function finerGridShift(
   parentPart: VoxelPart,
-  socket: VoxelSocket,
+  at: Triple,
+  corner: Triple,
   part: VoxelPart,
-  turn: Matrix,
-  mirrored: boolean,
-): boolean {
+): Triple {
   const parentStep = stepUnits(parentPart.step);
   const finer = Math.min(parentStep, stepUnits(part.step));
-  const at = units(socket.position, parentStep);
-  const attach = apply(
-    mirrored ? multiply(MIRROR, turn) : turn,
-    units(part.attach, stepUnits(part.step)),
-  );
-  return at.every((value, a) => mod(value - num(attach, a), finer) === 0);
+  const twiceMiddle = units(parentPart.size, parentStep);
+  return [0, 1, 2].map((a) => {
+    const off = mod(num(corner, a), finer);
+    if (off === 0) return 0;
+    return 2 * num(at, a) <= num(twiceMiddle, a) ? finer - off : -off;
+  }) as Triple;
 }
 
 /** The structural checks (ADR 0022 §9, §11–§13, §16): they need no registered types. */
@@ -318,12 +323,6 @@ function checkAssembly(assembly: VoxelAssembly, issue: Issue): void {
         socketPath,
       );
     }
-    if (!isOnFinerGrid(parentPart, socket, part, turn, instance.mirrored)) {
-      issue(
-        `The part must sit on the finer grid of it and its parent (${centimetres(finer)} cubes): move its attach point or the socket by half a cube`,
-        [...path, "part"],
-      );
-    }
   });
 
   for (const key of Object.keys(parts)) {
@@ -398,7 +397,10 @@ const determinant = (m: Matrix): number =>
 
 /**
  * Places every instance of a valid assembly (one that `VoxelAssemblySchema` accepts) in the root
- * part's frame, in its rest pose, in the order of `assembly.instances`.
+ * part's frame, in its rest pose, in the order of `assembly.instances`. A child whose attach point
+ * on its socket would leave it half a finer cube off the finer grid of it and its parent is moved
+ * onto that grid (ADR 0022 §13, as amended by ADR 0023, M21 PR 7: `finerGridShift`), so the attach
+ * point may lie up to half a finer cube from the socket along each axis.
  */
 export function placeInstances(assembly: VoxelAssembly): InstancePlacement[] {
   const placed: InstancePlacement[] = [];
@@ -445,7 +447,13 @@ function placeInstance(
   }
   const { above } = parent;
   const at = units(parent.socket.position, stepUnits(parent.part.step));
-  const inParent = apply(above.linear, [at[0] - attach[0], at[1] - attach[1], at[2] - attach[2]]);
+  const corner: Triple = [at[0] - attach[0], at[1] - attach[1], at[2] - attach[2]];
+  const shift = finerGridShift(parent.part, at, corner, part);
+  const inParent = apply(above.linear, [
+    corner[0] + shift[0],
+    corner[1] + shift[1],
+    corner[2] + shift[2],
+  ]);
   const linear = multiply(above.linear, local);
   return {
     linear,
@@ -922,9 +930,9 @@ interface Side {
  *   socket is free or the assembly holds `MAX_ASSEMBLY_INSTANCES` parts. Every free socket gets a
  *   part when one can go there: a socket has no way to say it may stay empty.
  * - A part can go on a socket when its type fits the socket's type and every part and socket type
- *   it has is registered (`checkAssemblyFit`), the socket lies deep enough in its parent (§12), it
- *   sits on the finer grid (§13) at the identity rest rotation, and the assembly stays within
- *   `MAX_ASSEMBLY_FACES`.
+ *   it has is registered (`checkAssemblyFit`), the socket lies deep enough in its parent (§12), and the
+ *   assembly stays within `MAX_ASSEMBLY_FACES`. Parts go on at the identity rest rotation and snap
+ *   to the finer grid (§13) as `placeInstances` places them.
  * - Each socket type gets one seeded order of the library parts that fit it, and each socket of
  *   that type takes the first part in it that can go there, so a creature's hips all get the same
  *   leg where they can. A part that would make faces flush with another part's
@@ -1058,11 +1066,7 @@ export function assembleParts({ start, parts, lookup, seed }: AssembleOptions): 
 
       const canGo = ({ part }: Option) =>
         faces + facesOf(part) * free.length <= MAX_ASSEMBLY_FACES &&
-        free.every(
-          (side) =>
-            isSocketBuried(parentPart, gridOf(parentPart), side.socket, part) &&
-            isOnFinerGrid(parentPart, side.socket, part, IDENTITY_MATRIX, side.mirrored),
-        );
+        free.every((side) => isSocketBuried(parentPart, gridOf(parentPart), side.socket, part));
       const placementsOf = ({ part }: Option) =>
         free.map((side) =>
           placeInstance(
