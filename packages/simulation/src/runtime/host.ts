@@ -317,6 +317,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         return;
       }
       case "restore": {
+        const before = sim.state.model;
         const restored = restoreSave(sim, command);
         if (!restored.ok) {
           diagnostics = restored.diagnostics;
@@ -325,6 +326,10 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         // Time owed to the replaced world must not tick the restored one in a burst.
         ticks.restart();
         send({ type: "restored", ...requestId, report: restored.value });
+        if (sim.state.model !== before) {
+          const { scene, navigations } = describeContent(sim);
+          send({ type: "world_changed", scene, navigations });
+        }
         // No tick runs while paused, so the paused world shows the restored one this way.
         if (ticks.paused) sendSnapshot(sim, true);
         return;

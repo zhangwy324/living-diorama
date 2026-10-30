@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   addEntries,
   animationProfile,
+  checkReferences,
   createRegistries,
   resolveReferences,
   type Registries,
@@ -652,6 +653,23 @@ describe("resolveReferences", () => {
       "error: behaviors/test:a: Dependency cycle: behaviors/test:a → behaviors/test:b → behaviors/test:a (dependency_cycle)",
     ]);
     expect(resolution.loadOrder).toEqual([]);
+  });
+});
+
+describe("checkReferences", () => {
+  it("resolves one entry against what is registered, without registering it", () => {
+    const registries = createRegistries();
+    const flat = registries.worlds.validate({
+      ...world,
+      props: [{ id: "rock-1", prop: "test:rock", transform: { position: { x: 0, y: 0, z: 0 } } }],
+    });
+    if (!flat.ok) throw new Error("invalid world");
+    expect(checkReferences(registries, "worlds", flat.value).map(formatDiagnostic)).toEqual([
+      'error: worlds/test:flat props[0].prop: "test:rock" is not registered in props (unresolved_reference)',
+      'error: worlds/test:flat regions[0].surface.type: "core:heightfield" is not registered in surfaces (unresolved_reference)',
+    ]);
+    expect(checkReferences(registries, "worlds", flat.value, "save")[0]?.source).toBe("save");
+    expect(registries.worlds.size).toBe(0);
   });
 });
 

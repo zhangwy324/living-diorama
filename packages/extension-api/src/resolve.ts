@@ -97,17 +97,49 @@ export function addEntries(
   const find = (registry: string, id: string) =>
     staged.get(keyOf(registry, id))?.entry ?? lookup(registries, registry, id);
   for (const [source, { key, entry }] of staged) {
-    const registry = registries[key.registry] as Registry<RegistryEntry>;
-    for (const ref of registry.references(entry)) {
-      diagnostics.push(...checkReference(ref, find(ref.registry, ref.id), source));
-    }
-    for (const d of registry.check(entry, find)) diagnostics.push({ ...d, source });
+    diagnostics.push(...entryReferences(registries[key.registry], entry, find, source));
   }
   if (diagnostics.some((d) => d.severity === "error")) return { ok: false, diagnostics };
   for (const { key, input } of staged.values()) {
     (registries[key.registry] as Registry<RegistryEntry>).register(input);
   }
   return { ok: true, value: [...staged.values()].map(({ key }) => key) };
+}
+
+/**
+ * Resolves the references of `entry`, already validated by its registry (e.g. a world saved
+ * whole, ADR 0021 §4), against what is registered, as `resolveReferences` does, without
+ * registering it: its targets must exist, satisfy their version ranges and pass their checks.
+ * Returns what fails; nothing is changed.
+ */
+export function checkReferences(
+  registries: Registries,
+  registryName: RegistryName,
+  entry: RegistryEntry,
+  source = keyOf(registryName, entry.id),
+): Diagnostic[] {
+  return entryReferences(
+    registries[registryName],
+    entry,
+    (registry, id) => lookup(registries, registry, id),
+    source,
+  );
+}
+
+/** The failures of one entry's references and checks, against what `find` finds. */
+function entryReferences(
+  registry: Registries[RegistryName],
+  entry: RegistryEntry,
+  find: (registry: string, id: string) => RegistryEntry | undefined,
+  source: string,
+): Diagnostic[] {
+  const typed = registry as Registry<RegistryEntry>;
+  const diagnostics: Diagnostic[] = [];
+  for (const ref of typed.references(entry)) {
+    diagnostics.push(...checkReference(ref, find(ref.registry, ref.id), source));
+  }
+  for (const d of typed.check(entry, find)) diagnostics.push({ ...d, source });
+  return diagnostics;
 }
 
 function lookup(registries: Registries, registry: string, id: string): RegistryEntry | undefined {

@@ -82,6 +82,47 @@ function idleCreature() {
   };
 }
 
+/** A 2 × 2 m world of one land region, as an edited world is saved: every default filled in. */
+function tinyWorld() {
+  return {
+    schemaVersion: 2,
+    id: "core:meadow",
+    version: "2.0.0",
+    name: "Meadow",
+    bounds: { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } },
+    terrain: {
+      heightfield: {
+        source: "inline",
+        columns: 3,
+        rows: 3,
+        cellSize: 1,
+        heights: Array(9).fill(0),
+      },
+      materials: {
+        palette: [{ name: "grass", color: "#7fae5a" }],
+        indices: { source: "inline", values: Array(9).fill(0) },
+      },
+    },
+    regions: [
+      {
+        id: "meadow",
+        kind: "land",
+        surface: { type: "core:heightfield", params: {} },
+        footprint: [
+          { x: -1, z: -1 },
+          { x: 1, z: -1 },
+          { x: 1, z: 1 },
+          { x: -1, z: 1 },
+        ],
+      },
+    ],
+    connections: [],
+    structures: [],
+    props: [],
+    spawnPoints: [{ id: "spawn", position: { regionId: "meadow", x: 0, z: 0 }, heading: 0 }],
+  };
+}
+
 function validSave() {
   return {
     schemaVersion: WORLD_SAVE_SCHEMA_VERSION,
@@ -93,6 +134,7 @@ function validSave() {
     dayPhase: "dusk",
     rng,
     nextCreature: 3,
+    nextPropId: 1,
     introducedSpecies: ["core:mossling"],
     species: {
       "core:mossling": "1.2.0",
@@ -135,7 +177,7 @@ describe("parseWorldSave", () => {
         parseWorldSave({ ...validSave(), schemaVersion: 1, unexpected: true }, "world.json"),
       ),
     ).toEqual([
-      "error: world.json schemaVersion: World save version 1 is not supported (supported: 3) (unsupported_save_version)",
+      "error: world.json schemaVersion: World save version 1 is not supported (supported: 4) (unsupported_save_version)",
     ]);
   });
 
@@ -186,6 +228,7 @@ describe("parseWorldSave", () => {
       dayPhase: "evening",
       rng: { words: [1, 2, 3], key: 1 },
       nextCreature: 0,
+      nextPropId: 0,
       introducedSpecies: ["mossling"],
       species: { "core:mossling": "1" },
     });
@@ -197,6 +240,7 @@ describe("parseWorldSave", () => {
       ["dayPhase"],
       ["rng", "words"],
       ["nextCreature"],
+      ["nextPropId"],
       ["introducedSpecies", 0],
       ["species", "core:mossling"],
     ]);
@@ -261,6 +305,33 @@ describe("parseWorldSave", () => {
       'error: introducedSpecies[1]: Duplicate species "core:mossling" (custom)',
       'error: creatures[1]: Duplicate creature ID "creature-1" (custom)',
     ]);
+  });
+
+  it("accepts an edited world saved whole, with its ID and version", () => {
+    const save = { ...validSave(), world: { ...validSave().world, definition: tinyWorld() } };
+    expect(parseWorldSave(save)).toEqual({ ok: true, value: save });
+  });
+
+  it("rejects a saved world that isn't the one named, or isn't a valid world", () => {
+    const save = validSave();
+    expect(
+      messages(
+        parseWorldSave({
+          ...save,
+          world: { ...save.world, definition: { ...tinyWorld(), version: "2.1.0" } },
+        }),
+      ),
+    ).toEqual([
+      'error: world.definition: The saved world is "core:meadow" 2.1.0, not "core:meadow" 2.0.0 (custom)',
+    ]);
+    expect(
+      codesAndPaths(
+        parseWorldSave({
+          ...save,
+          world: { ...save.world, definition: { ...tinyWorld(), spawnPoints: [] } },
+        }),
+      ),
+    ).toEqual([{ code: "too_small", path: ["world", "definition", "spawnPoints"] }]);
   });
 
   it("rejects input that is not an object", () => {
