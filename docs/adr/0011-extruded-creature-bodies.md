@@ -20,6 +20,8 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
 
 3. **Size from the drawn content, not the image.** The body is trimmed to the bounds of the shapes it keeps: the size class's height is the height of the body, its feet touch the ground, and it is centred on the creature's position across its width. Transparent padding around a drawing no longer makes a creature float or shrink.
 
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §3 and §21 (M18) for voxel creatures:_ a voxel body is the size of its cubes and is not scaled to its size class's height, which is derived from its bounds instead; it rests on its lowest cube. Drawn bodies are unchanged.
+
 4. **Extrude with rounded edges that grow outward.** Each shape becomes its own slab (`THREE.ExtrudeGeometry`), all centred on the same plane. The body is 40% of its height thick, including the rounded edges. The rounded edge is 4% of the height, in 3 segments, and grows outward from the outline: the drawing's outline is the edge of the front and back faces, and the silhouette is that much larger than the drawing. Growing outward can't break on thin strokes, where shrinking the faces to keep the silhouette exact would turn them inside out.
 
    _Amended by [ADR 0017](0017-hollow-bodies-and-fill.md) §2:_ the bevel is removed. Each wall is a single vertical step between the two faces, the depth stays 40%, and the body's outline is the traced picture; the bevel folded over itself in narrow openings.
@@ -36,6 +38,8 @@ This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still
      - Artistic questions this rule leaves open, such as whether a thick coloured rim is an outline or the creature's skin, belong to epic #61.
 
 6. **Lit, with some of its own colour as emission.** `MeshStandardMaterial` (roughness 0.9, like props), with the texture also as the emissive map at intensity 0.35, so a body in shade keeps the drawing's brightness. Geometry, textures and materials are built once per species and shared by its creatures.
+
+   _Amended by [ADR 0022](0022-voxel-creatures.md) §6 (M18):_ voxel creatures glow at 0.15 instead of 0.35.
 
 7. **Orientation by heading.** The drawing faces +x in the body's own frame; the body turns about the vertical axis to the creature's heading. The camera-facing turn and the mirroring are gone.
 
