@@ -17,7 +17,7 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 **Refined by [ADR 0023](0023-creature-assembly-studio.md)** (M21, the Creature Assembly Studio): suggested colours are pack content listed in `ready` (§4); the Studio rotates a part only in quarter turns about its socket's Y axis (§9); recolouring copies a part on write when the copy is shared beyond a mirror pair; mirroring is a Studio toggle, on by default; part types gain a `root` role, and the built-in fits are tightened to one part type per socket type (the torso fits nothing, `hollow:hip` becomes `hollow:leg-mount`, the fish gets a tail fin); and voxel thumbnails become asynchronous, cached by `id@version`. See the notes below.
 
-**Amended by [ADR 0024](0024-per-part-animation.md)** (M22, per-part animation, which it specifies): the animation layer may put a small scale on a bone ("Joints, for M22" below).
+**Amended by [ADR 0024](0024-per-part-animation.md)** (M22: per-part animation): the animation layer may put a small scale on a bone ("Joints, for M22" below).
 
 ## Decisions
 
