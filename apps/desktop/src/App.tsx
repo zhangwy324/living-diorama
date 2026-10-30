@@ -23,6 +23,7 @@ import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
 import { attachEditorInput } from "./editor-input";
+import { partRoleLookup } from "./part-roles";
 import { PropDrawer } from "./PropDrawer";
 import { drawerShown, drawerTabs, PropThumbnails, TILE_THUMBNAIL_PX } from "./prop-drawer";
 import { PropEditor, type EditorState } from "./prop-editor";
@@ -231,6 +232,8 @@ export function App() {
           created = createDioramaView(element, scene, {
             resolveAsset: (ref) => assets.get(ref),
             resolveSpecies: (id) => species.get(id),
+            // Voxel bodies find their tail part by its role (ADR 0022, M19 decisions).
+            partRole: partRoleLookup(content.partTypes),
             ...(navigation ? { navigation } : {}),
           });
         } catch (error) {

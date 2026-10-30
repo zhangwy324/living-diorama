@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
 import type { ImageReader } from "./body/pixels";
-import { CreatureBodies, type SpeciesResolver } from "./creatures";
+import { CreatureBodies, type AssemblyReader, type SpeciesResolver } from "./creatures";
 import { PropIcons } from "./cue-icons";
 import { CueVisibility } from "./cue-visibility";
 import { DebugStats } from "./debug-stats";
@@ -18,6 +18,7 @@ import { canvasEncoder, PropThumbnails } from "./prop-thumbnails";
 import { loadGltf, PropSet, type AssetResolver, type ModelLoader } from "./props";
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
+import type { PartRoleResolver } from "./voxel/body";
 import { baseMeshes, structureMeshes, terrainMesh, waterSurfaceMeshes } from "./world-meshes";
 
 /** Horizontal field of view kept constant, so the default view always spans the world's width. */
@@ -33,6 +34,9 @@ export interface DioramaViewOptions {
   /** Looks up species to draw creatures. Without it no creature is drawn. */
   resolveSpecies?: SpeciesResolver;
   readImage?: ImageReader;
+  readAssembly?: AssemblyReader;
+  /** Part types' roles, for voxel bodies' tail anchors. Without it no part has a role. */
+  partRole?: PartRoleResolver;
   /** Walkability, region graph and portals for the debug overlays (ADR 0007 §10). */
   navigation?: NavigationOverlay;
 }
@@ -243,6 +247,8 @@ export function buildDioramaScene(
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
     readImage: options.readImage,
+    readAssembly: options.readAssembly,
+    partRole: options.partRole,
     // The terrain and structures hide the cues of creatures they hide; props never do (#93).
     visibility: new CueVisibility(scene, layers),
     propIcon: (placementId) => propIcons.icon(placementId),

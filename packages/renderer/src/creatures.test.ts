@@ -236,27 +236,184 @@ describe("CreatureBodies", () => {
     expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
   });
 
-  it("draws a voxel species as the fallback block, without reading its assembly as an image", async () => {
-    const readImage = vi.fn(async () => drawing);
-    const layer = new SceneLayer("creatures");
-    const bodies = new CreatureBodies(layer, {
-      resolveSpecies: () => ({
-        appearance: "user:v/assembly.json",
-        sizeClass: "medium",
-        // A voxel species' summary carries only its locomotion.
-        body: { locomotion: defaultBody().locomotion },
-      }),
-      resolveAsset: () => ({ kind: "voxel", url: "blob:assembly" }),
-      readImage,
+  describe("voxel species", () => {
+    /** A torso of 8 × 4 × 4 cubes of 2.5 cm on one leg of 2 × 4 × 2, 3 cubes below: 17.5 cm tall. */
+    const assembly = {
+      parts: {
+        torso: {
+          type: "test:torso",
+          size: { x: 8, y: 4, z: 4 },
+          step: 0.025,
+          colors: ["#7fae5a"],
+          voxels: [128, 1],
+          attach: { x: 4, y: 2, z: 2 },
+          sockets: [{ id: "hip", type: "test:hip", position: { x: 4, y: 1, z: 2 } }],
+        },
+        leg: {
+          type: "test:leg",
+          size: { x: 2, y: 4, z: 2 },
+          step: 0.025,
+          colors: ["#5a4a3a"],
+          voxels: [16, 1],
+          attach: { x: 1, y: 4, z: 1 },
+        },
+      },
+      instances: [
+        { id: "torso", part: "torso" },
+        { id: "leg", part: "leg", parent: { instance: "torso", socket: "hip" } },
+      ],
+    };
+    const make = (
+      read: (url: string) => Promise<unknown> = async () => assembly,
+      partRole?: (partType: string) => "tail" | undefined,
+    ) => {
+      const readImage = vi.fn(async () => drawing);
+      const readAssembly = vi.fn(read);
+      const layer = new SceneLayer("creatures");
+      const bodies = new CreatureBodies(layer, {
+        resolveSpecies: (id) => ({
+          appearance: `${id}/assembly.json`,
+          sizeClass: "tiny",
+          // A voxel species' summary carries only its locomotion.
+          body: { locomotion: defaultBody().locomotion },
+        }),
+        resolveAsset: (ref) => ({ kind: "voxel", url: `blob:${ref}` }),
+        readImage,
+        readAssembly,
+        ...(partRole ? { partRole } : {}),
+      });
+      return { layer, bodies, readImage, readAssembly };
+    };
+    const of = (id: string, speciesId = "test:voxel") => ({
+      ...creature(id, { x: 0, y: 0, z: 0 }),
+      speciesId,
     });
-    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    await bodies.ready;
-    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    expect(readImage).not.toHaveBeenCalled();
-    const mesh = bodyOf(layer, "a");
-    expect(mesh.geometry.type).toBe("RoundedBoxGeometry");
-    expect(boxOf(mesh).max.y).toBeCloseTo(0.8);
-    expect(Number.isFinite(boxOf(mesh).max.z)).toBe(true);
+
+    it("shows the block until the assembly is read and meshed, then a skinned body", async () => {
+      const { layer, bodies, readImage, readAssembly } = make();
+      bodies.update([of("a"), of("b")]);
+      expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
+      await bodies.ready;
+      bodies.update([of("a"), of("b")]);
+      expect(readImage).not.toHaveBeenCalled();
+      expect(readAssembly).toHaveBeenCalledTimes(1);
+      expect(readAssembly).toHaveBeenCalledWith("blob:test:voxel/assembly.json");
+      const a = bodyOf(layer, "a") as THREE.SkinnedMesh;
+      const b = bodyOf(layer, "b") as THREE.SkinnedMesh;
+      expect(a).toBeInstanceOf(THREE.SkinnedMesh);
+      expect(a.geometry).toBe(b.geometry); // meshed once per species
+      expect(a.material).toBe(b.material);
+      expect(a.skeleton).not.toBe(b.skeleton); // posed per creature
+      expect(a.skeleton.bones).toHaveLength(2);
+      expect(a.frustumCulled).toBe(false);
+      expect(a.castShadow).toBe(true);
+      expect(a.receiveShadow).toBe(false);
+      expect(layer.group.children.filter((child) => child.name === "a")).toHaveLength(1);
+    });
+
+    it("sizes the body by its cubes, not its size class", async () => {
+      const { layer, bodies } = make();
+      bodies.update([of("a")]);
+      await bodies.ready;
+      bodies.update([of("a")]);
+      const mesh = bodyOf(layer, "a") as THREE.SkinnedMesh;
+      mesh.skeleton.update();
+      const position = mesh.geometry.getAttribute("position");
+      const part = mesh.geometry.getAttribute("skinIndex");
+      let top = -Infinity;
+      let bottom = Infinity;
+      const p = new THREE.Vector3();
+      for (let v = 0; v < position.count; v++) {
+        p.fromBufferAttribute(position, v).applyMatrix4(
+          mesh.skeleton.bones[part.getX(v)]!.matrixWorld,
+        );
+        top = Math.max(top, p.y);
+        bottom = Math.min(bottom, p.y);
+      }
+      expect(top).toBeCloseTo(0.175, 3);
+      expect(bottom).toBeCloseTo(0, 3); // the leg, shrunk by its tiny inset
+    });
+
+    it("meshes about one waiting species per frame", async () => {
+      const { layer, bodies } = make();
+      const poses = [of("a", "test:one"), of("b", "test:two")];
+      bodies.update(poses);
+      await bodies.ready;
+      bodies.update(poses);
+      const skinned = () =>
+        ["a", "b"].filter((id) => bodyOf(layer, id) instanceof THREE.SkinnedMesh).length;
+      expect(skinned()).toBe(1);
+      bodies.update(poses);
+      expect(skinned()).toBe(2);
+    });
+
+    it("keeps the block for an assembly that fails to load or check", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const broken = { ...assembly, instances: [] };
+      const { layer, bodies } = make(async (url) =>
+        url.includes("broken") ? broken : Promise.reject(new Error("gone")),
+      );
+      const poses = [of("a", "test:broken"), of("b", "test:gone")];
+      bodies.update(poses);
+      await bodies.ready;
+      bodies.update(poses);
+      bodies.update(poses);
+      for (const id of ["a", "b"]) {
+        expect(bodyOf(layer, id).geometry.type).toBe("RoundedBoxGeometry");
+      }
+      expect(warn).toHaveBeenCalledTimes(2);
+      warn.mockRestore();
+    });
+
+    it("keeps the block when building the body throws", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { layer, bodies } = make(undefined, () => {
+        throw new Error("no roles");
+      });
+      bodies.update([of("a")]);
+      await bodies.ready;
+      bodies.update([of("a")]);
+      bodies.update([of("a")]);
+      expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
+      expect(warn).toHaveBeenCalledWith(
+        "Could not build the voxel body of test:voxel",
+        expect.any(Error),
+      );
+      warn.mockRestore();
+    });
+
+    it("builds nothing from an assembly read that finishes after dispose", async () => {
+      let finish: (json: unknown) => void = () => undefined;
+      const { layer, bodies } = make(() => new Promise((resolve) => (finish = resolve)));
+      bodies.update([of("a")]);
+      bodies.dispose();
+      finish(assembly);
+      await bodies.ready;
+      // Had the read queued the assembly, this update would mesh it and skin "a".
+      bodies.update([of("a")]);
+      expect(bodyOf(layer, "a")).not.toBeInstanceOf(THREE.SkinnedMesh);
+    });
+
+    it("frees a departed creature's skeleton, and the species' body on dispose", async () => {
+      const { layer, bodies } = make();
+      bodies.update([of("a"), of("b")]);
+      await bodies.ready;
+      bodies.update([of("a"), of("b")]);
+      const a = bodyOf(layer, "a") as THREE.SkinnedMesh;
+      const b = bodyOf(layer, "b") as THREE.SkinnedMesh;
+      const freeA = vi.spyOn(a.skeleton, "dispose");
+      const freeB = vi.spyOn(b.skeleton, "dispose");
+      const freeGeometry = vi.spyOn(a.geometry, "dispose");
+      const freeMaterial = vi.spyOn(a.material as THREE.Material, "dispose");
+      bodies.update([of("b")]);
+      expect(freeA).toHaveBeenCalledTimes(1);
+      expect(freeGeometry).not.toHaveBeenCalled(); // b still uses it
+      bodies.dispose();
+      expect(freeB).toHaveBeenCalledTimes(1);
+      expect(freeGeometry).toHaveBeenCalledTimes(1);
+      expect(freeMaterial).toHaveBeenCalledTimes(1);
+      expect(layer.group.getObjectByName("b")).toBeUndefined();
+    });
   });
 
   it("turns the drawing's facing (+X) to the creature's heading", () => {
