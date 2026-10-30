@@ -605,3 +605,21 @@ it("ends a run of picker colours on change, focus and another slot", async () =>
   // Placing the head, then four runs.
   expect(await undoSteps()).toBe(5);
 });
+
+it("loads a creature that arrives during a release once the release is done", async () => {
+  const kit = partsKit(builtInParts());
+  if (!kit) throw new Error("No kit");
+  const { releaseVoxel, load } = await setup();
+  let finish: (released: Released) => void = () => {};
+  releaseVoxel.mockReturnValueOnce(new Promise<Released>((resolve) => (finish = resolve)));
+  await click(button("Next"));
+  await click(button("Release"));
+  const loaded = randomize(startBuild(kit), kit, 5).history.present;
+  await load({ key: 7, assembly: loaded, name: "Fern copy" });
+  // Not while the release is on its way.
+  expect(shown()).not.toBe(loaded);
+  await act(async () => finish({ speciesId: "user:x", name: "Fern" }));
+  expect(shown()).toBe(loaded);
+  expect(nameField().value).toBe("Fern copy");
+  expect(button("Reset").disabled).toBe(true);
+});
