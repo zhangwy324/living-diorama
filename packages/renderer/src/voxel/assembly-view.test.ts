@@ -303,12 +303,29 @@ describe("the assembly view's probe, ghost and life cycle", () => {
     expect(collapsed(body!.skeleton.bones)).toEqual(["left-arm", "left-hand"]);
     // The hidden part's tint goes with it.
     expect(tint!.visible).toBe(false);
-    // And it can't be picked: the pick's bounds and bones follow.
-    expect(body!.boundingSphere).toBeNull();
     view.setGhost(undefined);
     runFrames(1);
     expect(collapsed(drawn().body!.skeleton.bones)).toEqual([]);
     expect(drawn().tint!.visible).toBe(true);
+
+    // Hidden parts can't be picked: the right arm and hand, here, are seen and picked until a
+    // ghost takes their place, and found again once it goes.
+    const picked = () => {
+      const found = new Set<string>();
+      for (let x = 0; x <= RECT.width; x += 20) {
+        for (let y = 0; y <= RECT.height; y += 20) {
+          const pick = view.pick(RECT.left + x, RECT.top + y);
+          if (pick?.kind === "part") found.add(pick.instance);
+        }
+      }
+      return found;
+    };
+    const right = (found: Set<string>) => [...found].filter((id) => id.startsWith("right-"));
+    expect(right(picked())).not.toEqual([]);
+    view.setGhost({ part: assembly.parts.arm!, sockets: [{ instance: "torso", socket: "right" }] });
+    expect(right(picked())).toEqual([]);
+    view.setGhost(undefined);
+    expect(right(picked())).not.toEqual([]);
     view.dispose();
   });
 

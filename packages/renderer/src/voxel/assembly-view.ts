@@ -150,6 +150,8 @@ interface Built {
   indexById: Map<string, number>;
   look: LocomotionBody;
   radius: number;
+  /** Whether the bones changed since the body's bounds, which picking tests first, were taken. */
+  boundsStale: boolean;
 }
 
 /**
@@ -305,8 +307,7 @@ export function createAssemblyView(
     // Picking reads the bone matrices, and the bounds it keeps from them; rendering updates the
     // matrices itself.
     mesh.skeleton.update();
-    mesh.boundingSphere = null;
-    mesh.boundingBox = null;
+    built.boundsStale = true;
   };
 
   const showGhost = () => {
@@ -455,6 +456,10 @@ export function createAssemblyView(
     },
     pick(clientX, clientY) {
       if (disposed || !built || !aim(clientX, clientY)) return undefined;
+      if (built.boundsStale) {
+        built.mesh.computeBoundingSphere();
+        built.boundsStale = false;
+      }
       scaleMarkers();
       scene.updateMatrixWorld();
       return pickAssembly(raycaster, built.mesh, built.assembly, markers);
@@ -546,6 +551,7 @@ function build(
     indexById: new Map(assembly.instances.map((instance, i) => [instance.id, i])),
     look,
     radius: Math.max(MIN_RADIUS, size.length() / 2),
+    boundsStale: true,
   };
 }
 
