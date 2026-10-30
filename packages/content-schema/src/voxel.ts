@@ -77,7 +77,7 @@ export type VoxelPoint = z.output<typeof VoxelPointSchema>;
 export const VoxelSocketSchema = z.strictObject({
   /** Unique within the part, e.g. `left-hip`. */
   id: LocalIdSchema,
-  /** The socket type, e.g. `hollow:hip`. A part fits it if its part type lists this type. */
+  /** The socket type, e.g. `hollow:leg-mount`. A part fits it if its part type lists this type. */
   type: ContentIdSchema,
   position: VoxelPointSchema,
   /** The ID of the socket of the same part and type this one mirrors. */

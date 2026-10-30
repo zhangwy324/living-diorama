@@ -434,7 +434,7 @@ describe("building voxel creatures", () => {
     const PARTS: StudioParts = {
       parts: [{ id: "hollow:pebble", name: "Pebble", version: "1.0.0", part }],
       partTypes: [{ id: "hollow:torso", name: "Torso", fits: [] }],
-      socketTypes: ["hollow:hip"],
+      socketTypes: ["hollow:leg-mount"],
       suggestedColors: ["#479571"],
     };
 

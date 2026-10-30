@@ -796,21 +796,14 @@ export const sortedPalettes = (registries: Registries): PaletteDefinition[] =>
   registries.palettes.values().sort(byId);
 
 /**
- * The suggested colours the Studio offers (ADR 0023 §11): every registered palette's colours, the
- * palettes by ID and each in its own order, a colour listed by two palettes kept only where it
- * first appears (ignoring case). One list for now; choosing a palette by theme or world can come
- * later.
+ * The suggested colours the Studio offers (ADR 0023 §11), as lower-case `#rrggbb`: every
+ * registered palette's colours, the palettes by ID and each in its own order, a colour listed by
+ * two palettes kept only where it first appears. One list for now; choosing a palette by theme or
+ * world can come later.
  */
 export function suggestedColors(registries: Registries): string[] {
-  const seen = new Set<string>();
-  return sortedPalettes(registries)
-    .flatMap(({ colors }) => colors)
-    .filter((color) => {
-      const key = color.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  const colors = sortedPalettes(registries).flatMap((p) => p.colors.map((c) => c.toLowerCase()));
+  return [...new Set(colors)];
 }
 
 /**

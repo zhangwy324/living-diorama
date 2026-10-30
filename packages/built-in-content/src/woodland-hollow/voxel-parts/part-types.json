@@ -19,7 +19,7 @@
     "id": "hollow:leg",
     "version": "1.0.0",
     "name": "Leg",
-    "fits": ["hollow:hip"]
+    "fits": ["hollow:leg-mount"]
   },
   {
     "schemaVersion": 1,

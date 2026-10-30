@@ -100,8 +100,8 @@ it("registers the core part types, each fitting a registered socket type", () =>
   for (const type of registries.partTypes.values()) {
     expect([type.id, type.fits.length > 0]).toEqual([type.id, type.role !== "root"]);
   }
-  expect(partFitsSocket(registries, "hollow:leg", "hollow:hip")).toBe(true);
-  expect(partFitsSocket(registries, "hollow:eye", "hollow:hip")).toBe(false);
+  expect(partFitsSocket(registries, "hollow:leg", "hollow:leg-mount")).toBe(true);
+  expect(partFitsSocket(registries, "hollow:eye", "hollow:leg-mount")).toBe(false);
 });
 
 it("fits each part type to the sockets it is meant for, and no others (#225)", () => {
@@ -116,7 +116,7 @@ it("fits each part type to the sockets it is meant for, and no others (#225)", (
       "hollow:eye": ["hollow:eye-mount"],
       "hollow:fin": ["hollow:fin-mount"],
       "hollow:head": ["hollow:neck"],
-      "hollow:leg": ["hollow:hip"],
+      "hollow:leg": ["hollow:leg-mount"],
       "hollow:mouth": ["hollow:mouth-mount"],
       "hollow:nose": ["hollow:nose-mount"],
       "hollow:tail": ["hollow:tail-base"],

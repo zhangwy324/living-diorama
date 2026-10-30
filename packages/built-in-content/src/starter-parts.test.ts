@@ -192,9 +192,9 @@ describe("assembled at random from each torso", () => {
   );
 
   it("puts only plausible parts on each torso's sockets (#225)", () => {
-    // Over fixed seeds, the part types each torso's sockets get: legs on hips, arms on an upright
-    // torso's shoulders, fins on a fish's sides and a tail fin behind it, never side fins as arms
-    // or a bushy tail on a fish.
+    // Over fixed seeds, the part types each torso's sockets get: legs on leg mounts, arms on an
+    // upright torso's shoulders, fins on a fish's sides and a tail fin behind it, never side fins
+    // as arms or a bushy tail on a fish.
     const used = (id: string) => {
       const start = torsos.find((t) => t.id === id);
       if (!start) throw new Error(id);

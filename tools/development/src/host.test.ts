@@ -173,7 +173,7 @@ describe("simulation host", () => {
     expect(ready.partTypes).toContainEqual({
       id: "hollow:leg",
       name: "Leg",
-      fits: ["hollow:hip"],
+      fits: ["hollow:leg-mount"],
     });
     expect(ready.partTypes).toContainEqual({
       id: "hollow:torso",
@@ -187,7 +187,7 @@ describe("simulation host", () => {
       fits: ["hollow:tail-base"],
       role: "tail",
     });
-    expect(ready.socketTypes).toContain("hollow:hip");
+    expect(ready.socketTypes).toContain("hollow:leg-mount");
     expect(ready.socketTypes).toEqual([...ready.socketTypes].sort());
   });
 

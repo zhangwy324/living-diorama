@@ -544,7 +544,7 @@ describe("simulation client", () => {
     const misfit = sampleVoxelAssembly();
     const leg = misfit.parts.leg;
     if (!leg) throw new Error("No leg");
-    // Arms fit shoulders, not the four legs' hips.
+    // Arms fit shoulders, not the four legs' mounts.
     leg.type = "hollow:arm";
     const checks = [
       client.checkAssembly(sampleVoxelAssembly()),

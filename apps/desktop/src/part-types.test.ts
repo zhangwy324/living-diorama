@@ -31,13 +31,13 @@ describe("partRoleLookup", () => {
 describe("partFitLookup", () => {
   it("gives a registered part type's fits, and none for one the summary doesn't list", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
-    expect(lookup.fitsOf("hollow:leg")).toEqual(["hollow:hip"]);
+    expect(lookup.fitsOf("hollow:leg")).toEqual(["hollow:leg-mount"]);
     expect(lookup.fitsOf("pack:unknown")).toBeUndefined();
   });
 
   it("knows the registered socket types only", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
-    expect(lookup.isSocketType("hollow:hip")).toBe(true);
+    expect(lookup.isSocketType("hollow:leg-mount")).toBe(true);
     expect(lookup.isSocketType("hollow:leg")).toBe(false);
     expect(lookup.isSocketType("pack:unknown")).toBe(false);
   });

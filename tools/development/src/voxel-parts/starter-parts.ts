@@ -134,7 +134,7 @@ const BACK = { axis: "x", sign: -1 } as const;
 
 // Torsos ------------------------------------------------------------------------------------------
 
-/** A four-legged body, 45 × 30 × 35 cm: four hips (legs go on hips), a neck and a tail base. */
+/** A four-legged body, 45 × 30 × 35 cm: four leg mounts below, a neck and a tail base. */
 const fourLeggedTorso = part(
   "four-legged-torso",
   "Four-legged torso",
@@ -142,8 +142,8 @@ const fourLeggedTorso = part(
   LARGE,
   at(4.5, 0, 3.5),
   [
-    ...sockets("front-left", "hip", at(6, 1, 2.5), { id: "front-right", z: 4.5 }),
-    ...sockets("back-left", "hip", at(3, 1, 2.5), { id: "back-right", z: 4.5 }),
+    ...sockets("front-left", "leg-mount", at(6, 1, 2.5), { id: "front-right", z: 4.5 }),
+    ...sockets("back-left", "leg-mount", at(3, 1, 2.5), { id: "back-right", z: 4.5 }),
     ...sockets("neck", "neck", at(6, 5, 3.5)),
     ...sockets("tail-base", "tail-base", at(1, 3, 3.5)),
   ],
@@ -165,7 +165,7 @@ const uprightTorso = part(
   LARGE,
   at(3.5, 0, 3.5),
   [
-    ...sockets("left-hip", "hip", at(3, 1, 2.5), { id: "right-hip", z: 4.5 }),
+    ...sockets("left-hip", "leg-mount", at(3, 1, 2.5), { id: "right-hip", z: 4.5 }),
     ...sockets("left-arm", "shoulder", at(3, 5, 1), { id: "right-arm", z: 6 }),
     ...sockets("neck", "neck", at(4, 6, 3.5)),
     ...sockets("tail-base", "tail-base", at(1, 2, 3.5)),
@@ -459,7 +459,7 @@ const mosslingTorso = part(
   LARGE,
   at(5, 0, 4.5),
   [
-    ...sockets("left-hip", "hip", at(6, 1, 3), { id: "right-hip", z: 6 }),
+    ...sockets("left-hip", "leg-mount", at(6, 1, 3), { id: "right-hip", z: 6 }),
     ...sockets("neck", "neck", at(5, 2, 4.5)),
   ],
   () =>

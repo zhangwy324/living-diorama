@@ -866,13 +866,15 @@ describe("palettes", () => {
     expect(paths(palette("test:twice", ["#479571", "#47957A", "#47957a"]))).toEqual(["colors.2"]);
   });
 
-  it("suggests every palette's colours in one list, by palette ID, each colour once", () => {
+  it("suggests every palette's colours in one lower-case list, by palette ID, each once", () => {
     const registries = createRegistries();
     expect(suggestedColors(registries)).toEqual([]);
     expectOk(registries.palettes.register(palette("test:woods", ["#479571", "#bf7e45"])));
     expectOk(registries.palettes.register(palette("mod:sea", ["#5d939a", "#BF7E45"])));
     expect(sortedPalettes(registries).map((p) => p.id)).toEqual(["mod:sea", "test:woods"]);
-    expect(suggestedColors(registries)).toEqual(["#5d939a", "#BF7E45", "#479571"]);
+    expect(suggestedColors(registries)).toEqual(["#5d939a", "#bf7e45", "#479571"]);
+    expectOk(registries.palettes.register(palette("zz:upper", ["#ABCDEF"])));
+    expect(suggestedColors(registries).at(-1)).toBe("#abcdef");
   });
 });
 

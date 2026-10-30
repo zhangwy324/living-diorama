@@ -21,7 +21,7 @@ import { meshVoxelParts } from "./mesher";
 export interface SocketPoint extends SocketRef {
   /** The socket's position, in metres in the body frame. */
   position: THREE.Vector3;
-  /** Its socket type, e.g. `hollow:hip`. */
+  /** Its socket type, e.g. `hollow:leg-mount`. */
   type: string;
   /** Whether a part hung from it is mirrored: it is the mirrored socket of a pair (ADR 0022 §16). */
   mirrors: boolean;
