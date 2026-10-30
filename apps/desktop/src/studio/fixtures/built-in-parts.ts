@@ -1,4 +1,9 @@
-import { sortedParts, sortedPartTypes, sortedSocketTypes } from "@living-diorama/extension-api";
+import {
+  sortedParts,
+  sortedPartTypes,
+  sortedSocketTypes,
+  suggestedColors,
+} from "@living-diorama/extension-api";
 import { loadContent } from "../../content";
 import type { StudioParts } from "../../studio-protocol";
 
@@ -21,7 +26,6 @@ export function builtInParts(): StudioParts {
       ...(role ? { role } : {}),
     })),
     socketTypes: sortedSocketTypes(content.value).map(({ id }) => id),
-    // Recolouring is PR 5b's.
-    suggestedColors: [],
+    suggestedColors: suggestedColors(content.value),
   };
 }

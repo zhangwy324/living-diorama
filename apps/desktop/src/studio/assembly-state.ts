@@ -1,14 +1,20 @@
 import {
+  assembleParts,
   attachPart,
   compatibleSockets,
   measureAssembly,
   mirrorImage,
+  recolorPart,
   recordEdit,
   redoEdit,
   removePart,
   replacePart,
+  rotatePart,
   startHistory,
+  stepAssembly,
+  stepPart,
   undoEdit,
+  VOXEL_STEPS,
   type AssemblyEditResult,
   type AssemblyHistory,
   type AssemblyMeasure,
@@ -25,6 +31,16 @@ import type { PartsKit } from "./parts-kit";
 
 export interface BuildState {
   history: AssemblyHistory;
+  /**
+   * What Reset goes back to, and what closing compares against (ADR 0023 §21): the default torso,
+   * or an assembly loaded to edit a copy of.
+   */
+  baseline: VoxelAssembly;
+  /**
+   * A run of live recolours from the colour picker: they make one undo step while the history is
+   * still the one the run left and the same colour slot is being changed.
+   */
+  recolorRun?: { history: AssemblyHistory; key: string } | undefined;
   /** The global Mirror toggle (ADR 0023 §6). */
   mirror: boolean;
   /** The tray part picked to place, by part ID. */
@@ -35,9 +51,13 @@ export interface BuildState {
   notice?: string | undefined;
 }
 
-/** A fresh creature: the kit's default torso alone, Mirror on. */
-export const startBuild = (kit: PartsKit): BuildState => ({
-  history: startHistory(kit.start),
+/**
+ * A fresh creature, Mirror on: the kit's default torso alone, or `baseline`, e.g. a released
+ * creature's assembly loaded to edit a copy of (ADR 0023 §3), with nothing to undo.
+ */
+export const startBuild = (kit: PartsKit, baseline: VoxelAssembly = kit.start): BuildState => ({
+  history: startHistory(baseline),
+  baseline,
   mirror: true,
 });
 
@@ -142,9 +162,31 @@ function settle(
 export const droppedText = (count: number, partName: string) =>
   `${count} ${count === 1 ? "part" : "parts"} didn't fit the new ${partName.toLowerCase()}.`;
 
-/** A refused edit in the player's words. Codes the Studio's own checks rule out get a general line. */
-export function refusalText(code: string): string {
+/**
+ * A refused edit in the player's words. Codes the Studio's own checks rule out get a general line.
+ * `edit` says what was tried, where the same code means something else: growing or shrinking a
+ * part's cubes (`grow`, `shrink`), the whole creature's (`grow-all`, `shrink-all`), or turning.
+ */
+export function refusalText(
+  code: string,
+  edit?: "grow" | "shrink" | "grow-all" | "shrink-all" | "turn",
+): string {
+  if (code === "ladder_end") {
+    const all = edit === "grow-all" || edit === "shrink-all";
+    const bigger = edit === "grow" || edit === "grow-all";
+    return all
+      ? `A part's cubes are as ${bigger ? "big" : "small"} as they go, so the creature can't ${bigger ? "grow" : "shrink"} any more.`
+      : `Its cubes are as ${bigger ? "big" : "small"} as they go.`;
+  }
+  if (code === "root" && edit === "turn") return "The torso can't turn: everything hangs from it.";
+  if (code === "invalid" && edit !== undefined) {
+    return edit === "turn"
+      ? "It can't turn there: it would stick out of its joint or off the grid."
+      : `It can't ${edit.startsWith("grow") ? "grow" : "shrink"}: a part would come out of its joint or off the grid.`;
+  }
   switch (code) {
+    case "no_turn":
+      return "No other way round fits there.";
     case "too_many_parts":
       return "That's as many parts as a creature can have.";
     case "not_root":
@@ -173,15 +215,7 @@ export function pickPart(state: BuildState, kit: PartsKit, partId: string | unde
   const library = kit.byId.get(partId);
   if (!library) return cleared;
   const assembly = state.history.present;
-  if (kit.roots.has(library.part.type)) {
-    const root = assembly.instances.find((instance) => !instance.parent);
-    if (!root || assembly.parts[root.part]?.source === partId) return cleared;
-    return settle(
-      cleared,
-      replacePart(assembly, root.id, library, kit.lookup, { mirror: state.mirror }),
-      library.name,
-    );
-  }
+  if (kit.roots.has(library.part.type)) return replaceRoot(cleared, kit, partId);
   const { free, occupied } = targetsFor(kit, assembly, partId, state.mirror);
   const [first] = free;
   if (first && occupied.length === 0) {
@@ -198,6 +232,29 @@ export function pickPart(state: BuildState, kit: PartsKit, partId: string | unde
   return { ...cleared, picked: partId, selected: undefined };
 }
 
+/**
+ * Swaps the torso for the root-type part `partId`, keeping what still fits; the same torso again
+ * changes nothing. The pick and the notice are dropped.
+ */
+export function replaceRoot(state: BuildState, kit: PartsKit, partId: string): BuildState {
+  const cleared = { ...state, picked: undefined, notice: undefined };
+  const library = kit.byId.get(partId);
+  const assembly = state.history.present;
+  const root = assembly.instances.find((instance) => !instance.parent);
+  if (!library || !root || assembly.parts[root.part]?.source === partId) return cleared;
+  return settle(
+    cleared,
+    replacePart(assembly, root.id, library, kit.lookup, { mirror: state.mirror }),
+    library.name,
+  );
+}
+
+/** Whether `partId` is of a type a creature is built on, which goes in the torso's place. */
+export const isRootPart = (kit: PartsKit, partId: string): boolean => {
+  const type = kit.byId.get(partId)?.part.type;
+  return type !== undefined && kit.roots.has(type);
+};
+
 /** Whether the placement `result` filled every one of `sockets`. */
 function covers(result: AssemblyEditResult & { ok: true }, sockets: readonly SocketRef[]): boolean {
   const placed = new Set(
@@ -208,9 +265,17 @@ function covers(result: AssemblyEditResult & { ok: true }, sockets: readonly Soc
   return sockets.every(({ instance, socket }) => placed.has(`${instance}/${socket}`));
 }
 
-/** Puts the picked part on a marked socket: placed on a free one, replacing on a taken one. */
-export function placeAt(state: BuildState, kit: PartsKit, at: SocketRef): BuildState {
-  const { picked } = state;
+/**
+ * Puts the picked part, or `partId` (a part dragged from the tray), on a marked socket: placed on
+ * a free one, replacing on a taken one.
+ */
+export function placeAt(
+  state: BuildState,
+  kit: PartsKit,
+  at: SocketRef,
+  partId: string | undefined = state.picked,
+): BuildState {
+  const picked = partId;
   if (picked === undefined) return state;
   const replacing = holderOf(state.history.present, at) !== undefined;
   return settle(
@@ -221,15 +286,16 @@ export function placeAt(state: BuildState, kit: PartsKit, at: SocketRef): BuildS
 }
 
 /**
- * The picked part see-through where a click on `at` would put it, with its mirror image while
- * mirroring: the sockets the edit would fill. Undefined when it can't go there.
+ * The picked part, or `partId`, see-through where a click or drop on `at` would put it, with its
+ * mirror image while mirroring: the sockets the edit would fill. Undefined when it can't go there.
  */
 export function ghostAt(
   state: BuildState,
   kit: PartsKit,
   at: SocketRef,
+  partId: string | undefined = state.picked,
 ): AssemblyGhost | undefined {
-  const { picked } = state;
+  const picked = partId;
   const library = picked === undefined ? undefined : kit.byId.get(picked);
   if (!library || picked === undefined) return undefined;
   const result = editAt(kit, state.history.present, picked, at, state.mirror);
@@ -299,20 +365,189 @@ export const canRedo = (state: BuildState) => state.history.future.length > 0;
 export const clearNotice = (state: BuildState): BuildState =>
   state.notice === undefined ? state : { ...state, notice: undefined };
 
-/**
- * Whether `assembly` is the default start, so closing the Studio loses nothing (ADR 0023 §21).
- * Compared by content, so a part placed and removed again leaves it the start.
- */
-export function isStart(assembly: VoxelAssembly, kit: PartsKit): boolean {
-  if (assembly === kit.start) return true;
+/** Whether two assemblies are the same by content. */
+export function sameAssembly(a: VoxelAssembly, b: VoxelAssembly): boolean {
+  if (a === b) return true;
   // Cheap checks first: most edited creatures differ in their parts' count or root.
-  const [root] = assembly.instances;
-  const [startRoot] = kit.start.instances;
-  if (assembly.instances.length !== kit.start.instances.length || !root || !startRoot) {
-    return false;
+  const [root] = a.instances;
+  const [otherRoot] = b.instances;
+  if (a.instances.length !== b.instances.length || !root || !otherRoot) return false;
+  if (a.parts[root.part]?.source !== b.parts[otherRoot.part]?.source) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Whether the creature is its baseline, the default start or the loaded assembly, so closing the
+ * Studio loses nothing (ADR 0023 §21). Compared by content, so a part placed and removed again
+ * leaves it the baseline.
+ */
+export const atBaseline = (state: BuildState): boolean =>
+  sameAssembly(state.history.present, state.baseline);
+
+/** `state` after an edit to the creature as a whole: recorded, pick and selection dropped. */
+function settleWhole(state: BuildState, assembly: VoxelAssembly): BuildState {
+  return {
+    ...state,
+    history: recordEdit(state.history, assembly),
+    picked: undefined,
+    selected: undefined,
+    notice: undefined,
+  };
+}
+
+/** Back to the baseline (ADR 0023, M21 PR 5b), as one undo step; nothing when it is there. */
+export function reset(state: BuildState): BuildState {
+  if (atBaseline(state)) return { ...state, picked: undefined, notice: undefined };
+  return settleWhole(state, state.baseline);
+}
+
+/**
+ * A new random creature (ADR 0023 §9): a root part picked by `seed` among the parts of a root type,
+ * then every socket filled by `assembleParts` with `seed`. The same seed and parts give the same
+ * creature; the Studio passes a fresh random seed each time. One undo step.
+ */
+export function randomize(state: BuildState, kit: PartsKit, seed: number): BuildState {
+  const root = kit.rootParts[seed % kit.rootParts.length];
+  if (!root) return state;
+  return settleWhole(
+    state,
+    assembleParts({ start: root, parts: kit.parts, lookup: kit.lookup, seed }),
+  );
+}
+
+/** Said when Fill empty has nothing to fill. */
+export const NOTHING_TO_FILL = "Every place that can take a part has one.";
+
+/**
+ * Fills the creature's free sockets and keeps its parts (ADR 0023 §9), by `assembleParts` with
+ * `seed`. One undo step; says so when no socket could take a part.
+ */
+export function fillEmpty(state: BuildState, kit: PartsKit, seed: number): BuildState {
+  const assembly = state.history.present;
+  const filled = assembleParts({ start: assembly, parts: kit.parts, lookup: kit.lookup, seed });
+  if (filled.instances.length === assembly.instances.length) {
+    return { ...state, picked: undefined, notice: NOTHING_TO_FILL };
   }
-  if (assembly.parts[root.part]?.source !== kit.start.parts[startRoot.part]?.source) return false;
-  return JSON.stringify(assembly) === JSON.stringify(kit.start);
+  return { ...settleWhole(state, filled), selected: state.selected };
+}
+
+/** A fresh seed for Randomize and Fill empty: random, unlike the edits, which stay seeded. */
+export const randomSeed = (): number => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+
+/**
+ * `state` after an edit of the selected part (or the whole creature): recorded, the selection
+ * kept, or the refusal said as `edit` makes it.
+ */
+function settleSelected(
+  state: BuildState,
+  result: AssemblyEditResult,
+  edit: Parameters<typeof refusalText>[1],
+): BuildState {
+  if (!result.ok) return { ...state, notice: refusalText(result.refusal.code, edit) };
+  return {
+    ...state,
+    history: recordEdit(state.history, result.assembly),
+    picked: undefined,
+    notice: undefined,
+  };
+}
+
+/** Whether the selected part can turn: anything but the torso, which hangs from no socket. */
+export const canRotate = (state: BuildState): boolean => canRemove(state);
+
+/** Turns the selected part a quarter turn about its socket's Y axis, with its image (ADR 0023 §7). */
+export function rotateSelected(state: BuildState): BuildState {
+  if (state.selected === undefined) return state;
+  return settleSelected(
+    state,
+    rotatePart(state.history.present, state.selected, { mirror: state.mirror }),
+    "turn",
+  );
+}
+
+/**
+ * Moves the selected part's cubes one rung up (+1, bigger) or down the step ladder, with its image
+ * while mirroring (ADR 0023 §8).
+ */
+export function stepSelected(state: BuildState, direction: 1 | -1): BuildState {
+  if (state.selected === undefined) return state;
+  return settleSelected(
+    state,
+    stepPart(state.history.present, state.selected, direction, { mirror: state.mirror }),
+    direction > 0 ? "grow" : "shrink",
+  );
+}
+
+/** Moves every part's cubes one rung up or down together, keeping their ratios (ADR 0023 §8). */
+export const stepCreature = (state: BuildState, direction: 1 | -1): BuildState =>
+  settleSelected(
+    state,
+    stepAssembly(state.history.present, direction),
+    direction > 0 ? "grow-all" : "shrink-all",
+  );
+
+/** The selected part's colours, one per colour slot, or undefined with nothing selected. */
+export function colorsOf(state: BuildState): readonly string[] | undefined {
+  const assembly = state.history.present;
+  const instance = assembly.instances.find((i) => i.id === state.selected);
+  return instance && assembly.parts[instance.part]?.colors;
+}
+
+/**
+ * Sets colour slot `index` of the selected part to `color`, with its image's while mirroring,
+ * copying the part first when it is shared beyond them (ADR 0023 §12). A `live` recolour, from
+ * the colour picker as it moves, joins the run of live recolours of the same slot before it in one
+ * undo step; `endRecolorRun` ends the run when the picker closes.
+ */
+export function recolorSelected(
+  state: BuildState,
+  index: number,
+  color: string,
+  { live = false }: { live?: boolean } = {},
+): BuildState {
+  if (state.selected === undefined) return state;
+  const { history } = state;
+  const result = recolorPart(history.present, state.selected, index, color.toLowerCase(), {
+    mirror: state.mirror,
+  });
+  if (!result.ok) return { ...state, notice: refusalText(result.refusal.code) };
+  if (result.assembly === history.present) return state;
+  const key = `${state.selected}|${index}|${state.mirror}`;
+  const run = state.recolorRun;
+  const joins = live && run?.history === history && run.key === key;
+  const next = joins
+    ? { past: history.past, present: result.assembly, future: [] }
+    : recordEdit(history, result.assembly);
+  return {
+    ...state,
+    history: next,
+    recolorRun: live ? { history: next, key } : undefined,
+    picked: undefined,
+    notice: undefined,
+  };
+}
+
+/** Ends a run of live recolours, so the next makes an undo step of its own. */
+export const endRecolorRun = (state: BuildState): BuildState =>
+  state.recolorRun === undefined ? state : { ...state, recolorRun: undefined };
+
+/** Said while a part's cubes are two or more steps from the torso's (ADR 0022 §2): a hint only. */
+export const STEP_SPREAD_HINT =
+  "Some parts' cubes are much bigger or smaller than the torso's, so they may look out of place.";
+
+/**
+ * Whether a part's step is two or more rungs of the ladder from the creature's main step, its
+ * root's (ADR 0022 §2, ADR 0023 §14). A hint, never a block.
+ */
+export function stepSpread(assembly: VoxelAssembly): boolean {
+  const root = assembly.instances.find((instance) => !instance.parent);
+  const main = root && assembly.parts[root.part]?.step;
+  if (main === undefined) return false;
+  const rung = VOXEL_STEPS.indexOf(main);
+  return assembly.instances.some((instance) => {
+    const step = assembly.parts[instance.part]?.step;
+    return step !== undefined && Math.abs(VOXEL_STEPS.indexOf(step) - rung) >= 2;
+  });
 }
 
 const measures = new WeakMap<VoxelAssembly, AssemblyMeasure>();
