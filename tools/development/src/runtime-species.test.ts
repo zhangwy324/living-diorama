@@ -1,5 +1,6 @@
 import { registerBuiltInContent } from "@living-diorama/built-in-content";
 import { formatDiagnostic, type SizeClass } from "@living-diorama/content-schema";
+import type { SpeciesAppearanceKind } from "@living-diorama/extension-api";
 import { describeContent, type Simulation, type SimulationEvent } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { registerRiverCrossing } from "./index";
@@ -35,8 +36,8 @@ function drawnSpecies(name: string, sizeClass: SizeClass = "medium") {
 
 const URL = "blob:http://localhost/drawing";
 
-function expectOk(simulation: Simulation, input: unknown) {
-  const result = simulation.registerSpecies(input, URL, "image");
+function expectOk(simulation: Simulation, input: unknown, kind: SpeciesAppearanceKind = "image") {
+  const result = simulation.registerSpecies(input, URL, kind);
   expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([]);
 }
 
@@ -270,6 +271,12 @@ describe("runtime species", () => {
       body: { locomotion: { land: { gait: "walk" } } },
     });
     expect(content.species[hollow.speciesId]?.body).toHaveProperty("thickness");
+    // A thickness set explicitly (refused in M20 outside the library) is dropped all the same.
+    const thick = { ...drawnSpecies("thick"), appearance: "user:thick/assembly.json" };
+    expectOk(simulation, { ...thick, body: { thickness: 0.6 } }, "voxel");
+    expect(describeContent(simulation).species["user:thick"]?.body).toEqual({
+      locomotion: { land: { gait: "walk" } },
+    });
   });
 
   it("refuses cubes in the species and appearance kinds a species can't have", () => {
