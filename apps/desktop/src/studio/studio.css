@@ -1089,9 +1089,12 @@ body,
   color: rgb(238 243 232 / 75%);
 }
 
+/* The left padding leaves room for a selected swatch's outline (2px, offset 2px) and focus rings,
+   which the panel's scrolling would otherwise clip at its left edge. */
 .side-panel.build-panel {
   width: 200px;
   padding-top: 12px;
+  padding-left: 4px;
 }
 
 /* Build mode's tools beyond placing (M21 PR 5b): recolouring the selected part and dragging a
