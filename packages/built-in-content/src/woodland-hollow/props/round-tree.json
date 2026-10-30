@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "hollow:round-tree",
   "version": "1.0.0",
   "name": "Round tree",
   "model": "hollow:models/round-tree.glb",
   "blockRadius": 0.35,
-  "affordances": { "core:shelter": {} }
+  "affordances": { "core:shelter": {} },
+  "category": "hollow:trees"
 }

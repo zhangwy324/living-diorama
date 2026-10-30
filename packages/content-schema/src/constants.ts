@@ -56,7 +56,8 @@ export const jumpClearance = (horizontal: number, radius = MAX_SIZE_CLASS_RADIUS
 export const SCHEMA_VERSIONS = {
   world: 2,
   structure: 2,
-  prop: 1,
+  prop: 2,
+  propCategory: 1,
   species: 1,
 } as const;
 

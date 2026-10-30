@@ -76,7 +76,7 @@ export const navBoundariesWorld = {
 };
 
 export const fixturePost = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:post",
   version: "1.0.0",
   name: "Post",

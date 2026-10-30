@@ -1,10 +1,12 @@
 import type { z } from "zod";
 import { SCHEMA_VERSIONS, WORLD_SAVE_SCHEMA_VERSION, type DefinitionKind } from "./constants";
 import {
+  PropCategoryDefinitionSchema,
   PropDefinitionSchema,
   SpeciesDefinitionSchema,
   StructureDefinitionSchema,
   WorldDefinitionSchema,
+  type PropCategoryDefinition,
   type PropDefinition,
   type SpeciesDefinition,
   type StructureDefinition,
@@ -61,6 +63,12 @@ export const parseStructureDefinition = (
 
 export const parsePropDefinition = (input: unknown, source?: string): Result<PropDefinition> =>
   parseDefinition("prop", PropDefinitionSchema, input, source);
+
+export const parsePropCategoryDefinition = (
+  input: unknown,
+  source?: string,
+): Result<PropCategoryDefinition> =>
+  parseDefinition("propCategory", PropCategoryDefinitionSchema, input, source);
 
 export const parseSpeciesDefinition = (
   input: unknown,

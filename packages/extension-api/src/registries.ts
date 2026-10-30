@@ -3,6 +3,7 @@ import {
   isContentId,
   LOCOMOTION_MEDIA,
   REGION_KINDS,
+  parsePropCategoryDefinition,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
@@ -14,6 +15,7 @@ import {
   type Diagnostic,
   type DiagnosticPath,
   type LocomotionMedium,
+  type PropCategoryDefinition,
   type PropDefinition,
   type RegionKind,
   type Result,
@@ -29,6 +31,7 @@ export const REGISTRY_NAMES = [
   "worlds",
   "structures",
   "props",
+  "propCategories",
   "species",
   "surfaces",
   "actions",
@@ -204,12 +207,13 @@ export interface AssetEntry extends CodeEntry {
 
 /**
  * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
- * prop types, needs, senses and traits (ADR 0018).
+ * prop types, needs, senses and traits (ADR 0018), prop categories (ADR 0021).
  */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
   structures: Registry<StructureDefinition>;
   props: Registry<PropDefinition>;
+  propCategories: Registry<PropCategoryDefinition>;
   species: Registry<SpeciesDefinition>;
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
@@ -686,7 +690,21 @@ const structureReferences = (structure: StructureDefinition): Reference[] => [
 const propReferences = (prop: PropDefinition): Reference[] => [
   assetReference(prop.model, ["model"], "model"),
   ...affordanceReferences(prop.affordances),
+  ...(prop.category === undefined
+    ? []
+    : [{ registry: "propCategories", id: prop.category, path: ["category"] }]),
 ];
+
+/**
+ * The registered prop categories in the order an editor shows them (ADR 0021): ascending `order`,
+ * then by ID, so packs that pick the same order still list the same way every time. Prop types
+ * without a category belong to none of them; an editor lists those under "Other".
+ */
+export function sortedPropCategories(registries: Registries): PropCategoryDefinition[] {
+  return registries.propCategories
+    .values()
+    .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
 
 export function createRegistries(): Registries {
   return {
@@ -696,6 +714,7 @@ export function createRegistries(): Registries {
       references: structureReferences,
     }),
     props: new Registry("props", { validate: parsePropDefinition, references: propReferences }),
+    propCategories: new Registry("propCategories", { validate: parsePropCategoryDefinition }),
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,

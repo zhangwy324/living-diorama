@@ -9,6 +9,7 @@ import {
   DRAWING_SIZE,
   formatDiagnostic,
   parseContentId,
+  parsePropCategoryDefinition,
   parsePropDefinition,
   parseSpeciesDefinition,
   parseStructureDefinition,
@@ -478,7 +479,7 @@ describe("StructureDefinition", () => {
 
 describe("PropDefinition", () => {
   const mushroom = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "test:mushroom",
     version: "1.0.0",
     name: "Mushroom",
@@ -501,5 +502,42 @@ describe("PropDefinition", () => {
       parsePropDefinition({ ...mushroom, blockRadius: -1, affordances: { food: {} } }),
     );
     expect(found.map((d) => d.path)).toEqual([["blockRadius"], ["affordances", "food"]]);
+  });
+
+  it("may name a category, which must be a content ID", () => {
+    const listed = { ...mushroom, category: "test:mushrooms" };
+    expect(parsePropDefinition(listed)).toMatchObject({ ok: true, value: listed });
+    const loose = parsePropDefinition(mushroom);
+    expect(loose.ok && "category" in loose.value).toBe(false);
+    const found = diagnostics(parsePropDefinition({ ...mushroom, category: "mushrooms" }));
+    expect(found.map((d) => d.path)).toEqual([["category"]]);
+  });
+
+  it("rejects a prop type of schema version 1", () => {
+    expect(
+      diagnostics(parsePropDefinition({ ...mushroom, schemaVersion: 1 })).map((d) => d.code),
+    ).toEqual(["unsupported_schema_version"]);
+  });
+});
+
+describe("PropCategoryDefinition", () => {
+  const trees = {
+    schemaVersion: 1,
+    id: "test:trees",
+    version: "1.0.0",
+    name: "Trees",
+    order: 10,
+  };
+
+  it("accepts a category with a display name and an order", () => {
+    expect(parsePropCategoryDefinition(trees)).toEqual({ ok: true, value: trees });
+    expect(parsePropCategoryDefinition({ ...trees, order: -2.5 }).ok).toBe(true);
+  });
+
+  it("requires a name and a finite order, and allows nothing else", () => {
+    const found = diagnostics(
+      parsePropCategoryDefinition({ ...trees, name: "", order: Infinity, icon: "tree.png" }),
+    );
+    expect(found.map((d) => d.path.join("."))).toEqual(["name", "order", ""]);
   });
 });

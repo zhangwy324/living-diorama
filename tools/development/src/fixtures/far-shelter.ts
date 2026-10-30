@@ -78,7 +78,7 @@ export const farShelterWorld = {
 };
 
 export const fixtureRoundTree = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:round-tree",
   version: "1.0.0",
   name: "Round tree",

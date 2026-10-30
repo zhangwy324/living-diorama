@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "hollow:pine",
   "version": "1.0.0",
   "name": "Pine",
   "model": "hollow:models/pine.glb",
   "blockRadius": 0.3,
-  "affordances": {}
+  "affordances": {},
+  "category": "hollow:trees"
 }

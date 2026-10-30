@@ -11,6 +11,7 @@ import {
   checkReferences,
   createRegistries,
   resolveReferences,
+  sortedPropCategories,
   type Registries,
 } from "./index";
 
@@ -359,7 +360,7 @@ describe("resolveReferences", () => {
 
     expectOk(registries.assets.register(sprite));
     const prop = (id: string, model: string) => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id,
       version: "1.0.0",
       name: id,
@@ -389,7 +390,7 @@ describe("resolveReferences", () => {
     expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
     expectOk(
       registries.props.register({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "test:pine",
         version: "1.0.0",
         name: "Pine",
@@ -418,7 +419,7 @@ describe("resolveReferences", () => {
     expectOk(registries.assets.register({ ...sprite, id: "test:bush.glb", kind: "model" }));
     expectOk(
       registries.props.register({
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: "test:bush",
         version: "1.0.0",
         name: "Bush",
@@ -653,6 +654,67 @@ describe("resolveReferences", () => {
       "error: behaviors/test:a: Dependency cycle: behaviors/test:a → behaviors/test:b → behaviors/test:a (dependency_cycle)",
     ]);
     expect(resolution.loadOrder).toEqual([]);
+  });
+});
+
+describe("prop categories", () => {
+  const category = (id: string, name: string, order: number) => ({
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    name,
+    order,
+  });
+  const prop = (id: string, categoryId?: string) => ({
+    schemaVersion: 2,
+    id,
+    version: "1.0.0",
+    name: id,
+    model: "test:pine.glb",
+    blockRadius: 0,
+    ...(categoryId === undefined ? {} : { category: categoryId }),
+  });
+
+  it("checks that a prop type's category is registered", () => {
+    const registries = createRegistries();
+    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(registries.propCategories.register(category("test:trees", "Trees", 10)));
+    expectOk(registries.props.register(prop("test:pine", "test:trees")));
+    expectOk(registries.props.register(prop("test:loose")));
+    expectOk(registries.props.register(prop("test:lost", "test:gone")));
+    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
+      'error: props/test:lost category: "test:gone" is not registered in propCategories (unresolved_reference)',
+    ]);
+  });
+
+  it("checks a prop type added with its category, and one whose category is missing", () => {
+    const registries = createRegistries();
+    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(
+      addEntries(registries, [
+        { registry: "props", input: prop("test:pine", "test:trees") },
+        { registry: "propCategories", input: category("test:trees", "Trees", 10) },
+      ]),
+    );
+    const lost = addEntries(registries, [{ registry: "props", input: prop("test:fir", "test:x") }]);
+    expect(lost.ok ? [] : lost.diagnostics.map((d) => d.code)).toEqual(["unresolved_reference"]);
+    const fir = registries.props.validate(prop("test:fir", "test:x"));
+    if (!fir.ok) throw new Error("invalid prop type");
+    expect(checkReferences(registries, "props", fir.value).map((d) => d.path)).toEqual([
+      ["category"],
+    ]);
+  });
+
+  it("lists categories by order, then by ID", () => {
+    const registries = createRegistries();
+    expectOk(registries.propCategories.register(category("test:rocks", "Rocks", 20)));
+    expectOk(registries.propCategories.register(category("mod:shrubs", "Shrubs", 20)));
+    expectOk(registries.propCategories.register(category("test:trees", "Trees", 10)));
+    expect(sortedPropCategories(registries).map((c) => c.id)).toEqual([
+      "test:trees",
+      "mod:shrubs",
+      "test:rocks",
+    ]);
   });
 });
 
