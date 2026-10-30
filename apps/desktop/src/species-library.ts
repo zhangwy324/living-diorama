@@ -250,7 +250,7 @@ export async function openSpeciesLibrary(
       const registered = await register(ids.uuid, entry.value, image);
       if (!registered.ok) return registered;
       try {
-        await store.save(ids.uuid, entry.value, drawing.value, image);
+        await store.save(ids.uuid, entry.value, { drawing: drawing.value, image });
       } catch (cause) {
         // Registered but not kept: unseen until the next launch, as after a delete.
         URL.revokeObjectURL(entries.get(ids.speciesId)?.url ?? "");
