@@ -23,4 +23,16 @@ export {
   type ThumbnailEncoder,
   type ThumbnailRenderer,
 } from "./prop-thumbnails";
-export { VoxelThumbnails } from "./voxel/thumbnails";
+export {
+  VoxelThumbnails,
+  type AssemblyThumbnailSource,
+  type PartThumbnailSource,
+  type VoxelThumbnailOptions,
+} from "./voxel/thumbnails";
+export {
+  createAssemblyView,
+  type AssemblyGhost,
+  type AssemblyPick,
+  type AssemblyView,
+  type AssemblyViewOptions,
+} from "./voxel/assembly-view";

@@ -1,4 +1,4 @@
-import type { Vec3, VoxelAssembly, VoxelPart } from "@living-diorama/content-schema";
+import type { Vec3 } from "@living-diorama/content-schema";
 import type { NavigationOverlay, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -19,7 +19,11 @@ import { loadGltf, PropSet, type AssetResolver, type ModelLoader } from "./props
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
 import type { PartRoleResolver } from "./voxel/body";
-import { VoxelThumbnails } from "./voxel/thumbnails";
+import {
+  VoxelThumbnails,
+  type AssemblyThumbnailSource,
+  type PartThumbnailSource,
+} from "./voxel/thumbnails";
 import { baseMeshes, structureMeshes, terrainMesh, waterSurfaceMeshes } from "./world-meshes";
 
 /** Horizontal field of view kept constant, so the default view always spans the world's width. */
@@ -110,14 +114,15 @@ export interface DioramaView {
    */
   propThumbnail(model: string, size: number): Promise<string | undefined>;
   /**
-   * A thumbnail of a voxel part alone, e.g. for a tile of the Studio's part picker: a PNG data
-   * URL of the part at rest, drawn like `propThumbnail` (the same view, daylight and sizes) with
-   * the material voxel creatures have in the world. Kept per part object and size (by identity,
-   * weakly, so pass the same object to reuse it) until `dispose`. Undefined once disposed.
+   * A thumbnail of a voxel part alone, e.g. for a tile of the Studio's parts tray: a PNG data URL
+   * of the part at rest, drawn like `propThumbnail` (the same view, daylight and sizes) with the
+   * material voxel creatures have in the world. Drawn a few a frame, so many asked for at once
+   * don't stall one, and kept per `id@version` and size until `dispose` (ADR 0023 §20).
+   * Undefined once disposed.
    */
-  partThumbnail(part: VoxelPart, size: number): string | undefined;
-  /** As `partThumbnail`, of a whole voxel assembly in its rest pose. */
-  assemblyThumbnail(assembly: VoxelAssembly, size: number): string | undefined;
+  partThumbnail(source: PartThumbnailSource, size: number): Promise<string | undefined>;
+  /** As `partThumbnail`, of a whole voxel assembly in its rest pose, by its `id@version`. */
+  assemblyThumbnail(source: AssemblyThumbnailSource, size: number): Promise<string | undefined>;
   dispose(): void;
 }
 
@@ -535,11 +540,11 @@ export function createDioramaView(
     propThumbnail(model, size) {
       return thumbnails.thumbnail(model, size);
     },
-    partThumbnail(part, size) {
-      return voxelThumbnails.part(part, size);
+    partThumbnail(source, size) {
+      return voxelThumbnails.part(source, size);
     },
-    assemblyThumbnail(assembly, size) {
-      return voxelThumbnails.assembly(assembly, size);
+    assemblyThumbnail(source, size) {
+      return voxelThumbnails.assembly(source, size);
     },
     dispose() {
       cancelAnimationFrame(raf);

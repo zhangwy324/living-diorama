@@ -122,6 +122,28 @@ describe("prop icons", () => {
     expect(freed).not.toHaveBeenCalled();
   });
 
+  it("reuses kept material copies across stages and leaves them to their owner", () => {
+    const { group, material } = model();
+    const kept = new Map<THREE.Material, THREE.Material>();
+    const copiesOf = (scene: THREE.Scene) => {
+      const found: THREE.Material[] = [];
+      scene.traverse((o) => {
+        if (o instanceof THREE.Mesh) found.push(o.material as THREE.Material);
+      });
+      return found;
+    };
+    const first = iconStage(group, kept);
+    const [copy] = copiesOf(first.scene);
+    expect(kept.get(material)).toBe(copy);
+    const freed = vi.fn();
+    copy!.addEventListener("dispose", freed);
+    first.dispose();
+    const second = iconStage(group, kept);
+    expect(copiesOf(second.scene)[0]).toBe(copy);
+    second.dispose();
+    expect(freed).not.toHaveBeenCalled();
+  });
+
   it("frames the model whole and centred, from above", () => {
     const bounds = new THREE.Box3(new THREE.Vector3(4, 0, -4), new THREE.Vector3(6, 2, -2));
     const camera = frameIcon(bounds);
