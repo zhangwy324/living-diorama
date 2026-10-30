@@ -1,7 +1,7 @@
 # ADR 0022: Voxel creatures
 
 - **Status:** Accepted
-- **Date:** 2026-10-29
+- **Date:** 2026-10-29 (M20 decisions added 2026-10-30)
 - **Context:** Roadmap §3.2: after M17, creatures are built from voxel parts (M18–M24). A drawn body (ADR 0011, ADR 0017) is one extruded slab: it has no parts to move, its thickness is the same everywhere, and its real size is set by stretching the drawing to its size class's height. Voxel parts give a creature real parts that can be animated one by one (M22), a size measured from its cubes, and a format that a drawing (M23) and a block editor (M24) can both produce. M18 is a look spike and this ADR. The spike, in a throwaway branch, put hand-made voxel parts in today's world at their true size and compared cube sizes, colours and lighting in day and night screenshots at close-up and strip size, and a benchmark timed meshing. It found:
   - **Cube sizes.** Tiny, large and house-sized objects side by side read well with four cube sizes, each twice the last. A step coarser than 10 cm makes a roof too blocky. The finest step is under a pixel at strip size on a tiny creature, which is accepted: it still shows close up.
   - **Colour.** Saturated creature colours clash with the world's softer ones. Keeping the creature's hues but toning them toward the world's looks best.
@@ -70,6 +70,8 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 19. **The mesher is a pure function over typed arrays, run on the main thread.** It takes a part's voxels and colours as typed arrays and returns vertex and index arrays, with no three.js, so it is tested in Vitest and can move to a worker unchanged. At the 32³ cap it meshes a creature in a few milliseconds on the main thread; if the cap is raised (64³ costs 10–52 ms per part), it moves to a worker. When many creatures appear at once (startup, a restore), their meshing is spread over frames. It culls hidden faces and doesn't greedy-mesh; vertex size is kept small instead (for example `Uint8` positions within a part).
 
 20. **A voxel body frame replaces drawing pixels.** ADR 0020 §10's anchors, the centre of gravity and the tail, are points in the body's frame (metres, axes as §16) and come from the assembly instead of from a drawing. M19 fixes how they are derived from the assembly. The simulation is unchanged: it sees a species' size class and capabilities, never its cubes. The assembly must not travel through the simulation worker. Today `species.body` does (the worker's content summary hands it back to the main thread), so the assembly is kept beside the species data the simulation gets, and the renderer receives it on a path that doesn't go through the worker. M19 picks the mechanism.
+
+    _Amended in M20 (see "M20 decisions"):_ the rule against cubes in the worker covers species assemblies. Library parts that a pack registers, the starter parts among them, are registered in the worker like other content and listed in its content summary; the simulation still never simulates cubes.
 
 21. **A creature rests on its lowest cube.** The bottom of the assembly's lowest cube in the rest pose is the body's ground contact, which replaces ADR 0011 §3's feet for voxel bodies.
 
@@ -210,3 +212,32 @@ Voxel creatures in the headless tools (`tools/development`):
 - **The full soak** (32 seeds × one simulated day at 10 Hz, 3 mosslings, the two amphibians and the swimmer of `fixtures/hollow-creatures.ts` and the two voxel creatures, 4 restores each), with the sample at its final size (`medium`): 32 of 32 seeds clean in 202 s on 16 logical cores (16 at a time), 128 restores (122 of an edited world), 576,000 ticks compared with unbroken runs. The voxel amphibian jumped a bank 1,108 times, was on land and in water in every seed and spent 15% of its time in water (4–38% per seed). `applyEdit` took 34.1 ms at the median, 92.3 ms at p95. A navigation profile is a size class and a set of capabilities, so the two medium voxel creatures share the profiles of the medium amphibians and hopper the soak world already builds, and add none.
   - _History:_ a first full soak, with the sample at its first size (2.5 cm cubes, `small`), was also clean: 32 of 32 seeds in 217 s. Its two small voxel creatures each needed a profile of their own, so the soak built two more than now and the quick soak took about 57 s instead of about 40 s.
 - **The sample, doubled.** Too small at strip size (owner), `sampleVoxelAssembly()` now has 5 cm cubes and 2.5 cm eyes, with the same cube counts, sockets, mirroring and colours: about 72 cm long and 45 cm tall, size class `medium`. Socket and attach points are in each part's own cubes, so they carry over; it still passes the validator and `checkAssemblyFit` with no flush-face warnings.
+
+## M20 decisions
+
+Agreed with the owner on 2026-10-30 for M20 (roadmap §3.2: starter parts, the `.vox` importer and the mossling rebuilt in voxels; research roadmap V2). Its exit: every starter part loads, validates and previews. The Studio's assembly UI (M21), per-part motion (M22), drawing a part (M23), the block editor (M24) and importing a player's own `.vox` files (M28) are not part of it.
+
+### Owner decisions
+
+- **First-pass art in code.** The starter parts are made by code from simple shapes (boxes, ellipsoids, capsules) and written out as `.vox` files with their sidecars (below), so the owner can refine them in MagicaVoxel later. They are judged from screenshots and marked as a first pass.
+- **The voxel mossling looks like today's:** a round green critter, built from mossling parts of its own that also join the starter set. Its size class is `medium` and its main step 5 cm.
+- **The starter set** is about 22–25 parts: three torsos (four-legged, with two hips, two shoulders, a neck and a tail base; upright, with two hips, two arms and a neck; a fish or blob, with fins and a tail base and no legs), three heads, each with mounts for ears, eyes, a nose and a mouth, and two each of ears, eyes, noses, mouths, legs, arms, tails and fins.
+- **One size per part.** Parts aren't made in sizes to suit each torso. Large parts use the 5 cm step; eyes, noses and mouths 2.5 cm.
+- **One colour list per part.** Alternative palettes wait. Colours follow §4 and §5: creature hues toned toward the world's, no pure black or white, dark details about `#1d1d1d`.
+- **Face features are small parts.** Eyes, noses and mouths are thin raised parts on their mount sockets, with no new kind of stamp and nothing sunk into the head; a mouth is a dark raised part.
+- **Starter parts are for development in M20.** They are reached from a development console hook; the voxel mossling is the only change a player sees.
+- **The drawn mossling goes.** `mossling.svg` and the drawn mossling are deleted, with no fallback, and the README's screenshots are taken again.
+
+### Engineering decisions
+
+- **A `parts` registry.** A pack registers part definitions, `{ schemaVersion, id, version, name, part }` with the part inline, and `extension-api` validates each once at registration: its structure, steps on the ladder (§1) and registered part and socket types. The worker's `ready` summary lists the parts for the main thread, which bumps the protocol version. This is the §20 amendment: the rule against cubes in the worker covers species assemblies, not library parts.
+- **A sidecar per `.vox`.** What a `.vox` file doesn't hold, the part type, cube step, attach point, sockets and name, is in a JSON file beside it.
+- **The importer is a development tool.** `pnpm parts` in `tools/development` turns the `.vox` files and sidecars into JSON committed in `built-in-content`, and a test fails when the committed JSON drifts from its sources. The `.vox` parser is a pure function, so it can move to `content-schema` when players import their own files (M28).
+- **Axes.** A cube at `.vox` (x, y, z) goes to the part's x = x, y = z and z = Y − 1 − y, with Y the model's size along `.vox` y, so `.vox`'s z up becomes §16's y up without a reflection. A test checks it with an asymmetric fixture.
+- **What a `.vox` may hold.** One model per file. Materials are ignored. A scene transform other than the identity is refused. The palette is compacted to the colours used, and `.vox` index 0 stays empty.
+- **The mossling's assembly is a frozen asset.** A script builds it from starter part IDs and writes it as assembly JSON in the format of a library entry's, with a drift test.
+- **Pack species are checked like library ones.** `extension-api` refuses the drawn-only body settings on a species whose appearance is a `voxel` asset (M19's "Voxel species keep their gait"). `built-in-content`'s tests check the mossling's measured size class against the declared one, its fits and its flush-face warnings.
+- **Previews.** A development console hook assembles a creature from starter parts and adds it to the world, and the renderer draws part thumbnails the way it draws prop thumbnails (`prop-thumbnails.ts`).
+- **A pure assembler.** `voxel-assembly.ts` in `content-schema` takes a root part and fills its free sockets with parts that fit, mirroring pairs, the same way for the same seed. M21's Randomize reuses it.
+
+_Each M20 pull request adds its "As built: M20 PR n" section below._
