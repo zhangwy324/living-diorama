@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "name": "Fan fin",
   "part": {
-    "type": "hollow:fin",
+    "type": "hollow:tail-fin",
     "size": {
       "x": 3,
       "y": 5,

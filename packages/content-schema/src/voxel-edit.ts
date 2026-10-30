@@ -50,6 +50,8 @@ export type AssemblyEditRefusalCode =
   | "too_many_parts"
   /** The root hangs from no socket, so it can't be removed or turned. */
   | "root"
+  /** Only a part whose type has the `root` role can replace the root (ADR 0023 §10). */
+  | "not_root"
   /** No quarter turn about the socket's Y axis leaves the assembly valid. */
   | "no_turn"
   /** The step is at the end of the ladder (`VOXEL_STEPS`) already. */
@@ -299,7 +301,7 @@ export function compatibleSockets(
  * twin's too, both or neither. The instances keep their IDs. Each child of a replaced instance
  * hangs again, with everything below it, from the new part's socket of the same ID, if it has
  * one, the child fits its type and the assembly stays valid; the rest are removed. The root can be
- * replaced too: it hangs from no socket, so any part may go there for now.
+ * replaced only by a part whose type has the `root` role (ADR 0023 §10), such as another torso.
  */
 export function replacePart(
   assembly: VoxelAssembly,
@@ -312,8 +314,10 @@ export function replacePart(
   if (!target) return refuse("unknown_instance", `No instance "${id}"`);
   const targets = withTwin(assembly, target, options);
   for (const { parent } of targets) {
-    // TODO(M21 PR 4): check the part type's `root` role (ADR 0023 §10) when replacing the root.
-    if (!parent) continue;
+    if (!parent) {
+      if (lookup.roleOf(part.part.type) === "root") continue;
+      return refuse("not_root", `Part "${part.id}" isn't of a root type, so it can't be the root`);
+    }
     const holder = findInstance(assembly, parent.instance);
     const socket = holder && partOf(assembly, holder).sockets.find((s) => s.id === parent.socket);
     if (socket && !fits(lookup, part.part, socket.type)) {

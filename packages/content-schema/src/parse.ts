@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { SCHEMA_VERSIONS, WORLD_SAVE_SCHEMA_VERSION, type DefinitionKind } from "./constants";
 import {
+  PaletteDefinitionSchema,
   PartDefinitionSchema,
   PartTypeDefinitionSchema,
   PropCategoryDefinitionSchema,
@@ -9,6 +10,7 @@ import {
   SpeciesDefinitionSchema,
   StructureDefinitionSchema,
   WorldDefinitionSchema,
+  type PaletteDefinition,
   type PartDefinition,
   type PartTypeDefinition,
   type SocketTypeDefinition,
@@ -95,6 +97,11 @@ export const parseSocketTypeDefinition = (
 
 export const parsePartDefinition = (input: unknown, source?: string): Result<PartDefinition> =>
   parseDefinition("part", PartDefinitionSchema, input, source);
+
+export const parsePaletteDefinition = (
+  input: unknown,
+  source?: string,
+): Result<PaletteDefinition> => parseDefinition("palette", PaletteDefinitionSchema, input, source);
 
 /**
  * Validates a world save. A save of another schema version gets one clear diagnostic

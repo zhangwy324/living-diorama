@@ -1,4 +1,4 @@
-import { registerBuiltInContent } from "@living-diorama/built-in-content";
+import { builtInDefinitions, registerBuiltInContent } from "@living-diorama/built-in-content";
 import {
   defaultBody,
   parseWorldSave,
@@ -173,7 +173,13 @@ describe("simulation host", () => {
     expect(ready.partTypes).toContainEqual({
       id: "hollow:leg",
       name: "Leg",
-      fits: ["hollow:hip", "hollow:shoulder"],
+      fits: ["hollow:leg-mount"],
+    });
+    expect(ready.partTypes).toContainEqual({
+      id: "hollow:torso",
+      name: "Torso",
+      fits: [],
+      role: "root",
     });
     expect(ready.partTypes).toContainEqual({
       id: "hollow:tail",
@@ -181,8 +187,27 @@ describe("simulation host", () => {
       fits: ["hollow:tail-base"],
       role: "tail",
     });
-    expect(ready.socketTypes).toContain("hollow:hip");
+    expect(ready.socketTypes).toContain("hollow:leg-mount");
     expect(ready.socketTypes).toEqual([...ready.socketTypes].sort());
+  });
+
+  it("lists the suggested colours of every palette, by palette ID, each colour once", () => {
+    const host = startHost((registries) => [
+      ...registerBuiltInContent(registries),
+      registries.palettes.register({
+        schemaVersion: 1,
+        id: "test:sea",
+        version: "1.0.0",
+        name: "Sea",
+        colors: ["#2f5d8a", "#479571"],
+      }),
+    ]);
+    host.init();
+    const [ready] = host.take();
+    if (ready?.type !== "ready") throw new Error("Expected ready");
+    const [woodland] = builtInDefinitions.palettes;
+    // The built-in palette first (`hollow:` before `test:`), then the pack's colour it lacks.
+    expect(ready.suggestedColors).toEqual([...woodland.colors, "#2f5d8a"]);
   });
 
   it("describes the prop types with their categories, and the categories in tab order", () => {
@@ -985,8 +1010,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 20, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(20);
+  it("is protocol version 21, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(21);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

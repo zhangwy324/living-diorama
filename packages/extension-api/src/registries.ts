@@ -4,6 +4,7 @@ import {
   isContentId,
   LOCOMOTION_MEDIA,
   REGION_KINDS,
+  parsePaletteDefinition,
   parsePartDefinition,
   parsePartTypeDefinition,
   parsePropCategoryDefinition,
@@ -20,6 +21,7 @@ import {
   type Diagnostic,
   type DiagnosticPath,
   type LocomotionMedium,
+  type PaletteDefinition,
   type PartDefinition,
   type PartTypeDefinition,
   type PropCategoryDefinition,
@@ -44,6 +46,7 @@ export const REGISTRY_NAMES = [
   "partTypes",
   "socketTypes",
   "parts",
+  "palettes",
   "species",
   "surfaces",
   "actions",
@@ -235,7 +238,8 @@ export interface AssetEntry extends CodeEntry {
 /**
  * The registries: roadmap M1 task 4, capabilities and affordances (ADR 0005), assets (ADR 0007),
  * prop types, needs, senses and traits (ADR 0018), prop categories (ADR 0021), voxel part types
- * and socket types (ADR 0022 §10), and voxel parts (ADR 0022, M20).
+ * and socket types (ADR 0022 §10), voxel parts (ADR 0022, M20) and palettes of suggested colours
+ * (ADR 0023 §11).
  */
 export interface Registries {
   worlds: Registry<WorldDefinition>;
@@ -245,6 +249,7 @@ export interface Registries {
   partTypes: Registry<PartTypeDefinition>;
   socketTypes: Registry<SocketTypeDefinition>;
   parts: Registry<PartDefinition>;
+  palettes: Registry<PaletteDefinition>;
   species: Registry<SpeciesDefinition>;
   surfaces: Registry<SurfaceType>;
   actions: Registry<ActionType>;
@@ -786,6 +791,21 @@ export const sortedParts = (registries: Registries): PartDefinition[] =>
 export const sortedSocketTypes = (registries: Registries): SocketTypeDefinition[] =>
   registries.socketTypes.values().sort(byId);
 
+/** The registered palettes, by ID. */
+export const sortedPalettes = (registries: Registries): PaletteDefinition[] =>
+  registries.palettes.values().sort(byId);
+
+/**
+ * The suggested colours the Studio offers (ADR 0023 §11), as lower-case `#rrggbb`: every
+ * registered palette's colours, the palettes by ID and each in its own order, a colour listed by
+ * two palettes kept only where it first appears. One list for now; choosing a palette by theme or
+ * world can come later.
+ */
+export function suggestedColors(registries: Registries): string[] {
+  const colors = sortedPalettes(registries).flatMap((p) => p.colors.map((c) => c.toLowerCase()));
+  return [...new Set(colors)];
+}
+
 /**
  * Whether a part of type `partType` fits a socket of type `socketType` (ADR 0022 §9): the part
  * type is registered and lists the socket type.
@@ -830,6 +850,7 @@ export function createRegistries(): Registries {
     }),
     socketTypes: new Registry("socketTypes", { validate: parseSocketTypeDefinition }),
     parts: new Registry("parts", { validate: parsePartDefinition, references: partReferences }),
+    palettes: new Registry("palettes", { validate: parsePaletteDefinition }),
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,

@@ -18,8 +18,10 @@ import {
   resolveReferences,
   sortedParts,
   sortedPartTypes,
+  sortedPalettes,
   sortedPropCategories,
   sortedSocketTypes,
+  suggestedColors,
   type Registries,
 } from "./index";
 
@@ -759,7 +761,7 @@ describe("part types and socket types", () => {
     for (const id of ["test:hip", "test:neck", "test:tail-root"]) {
       expectOk(registries.socketTypes.register(socketType(id)));
     }
-    expectOk(registries.partTypes.register(partType("test:torso", [])));
+    expectOk(registries.partTypes.register(partType("test:torso", [], "root")));
     expectOk(registries.partTypes.register(partType("test:leg", ["test:hip"])));
     expectOk(registries.partTypes.register(partType("test:tail", ["test:tail-root"], "tail")));
     // Another pack's part may fit this pack's socket.
@@ -771,6 +773,7 @@ describe("part types and socket types", () => {
     const registries = registered();
     expect(resolveReferences(registries).diagnostics).toEqual([]);
     expect(registries.partTypes.get("test:tail")?.role).toBe("tail");
+    expect(registries.partTypes.get("test:torso")?.role).toBe("root");
     expect(registries.partTypes.get("test:leg")?.role).toBeUndefined();
     const role = registries.partTypes.validate(partType("test:ear", [], "antenna"));
     expect(role.ok ? [] : role.diagnostics.map((d) => d.path.join("."))).toEqual(["role"]);
@@ -838,6 +841,40 @@ describe("part types and socket types", () => {
     expect(checkAssemblyTypes(registries, assembly("test:wing")).map((d) => d.code)).toEqual([
       "unknown_part_type",
     ]);
+  });
+});
+
+describe("palettes", () => {
+  const palette = (id: string, colors: string[]) => ({
+    schemaVersion: 1,
+    id,
+    version: "1.0.0",
+    name: id,
+    colors,
+  });
+
+  it("registers palettes of plain sRGB colours, each colour once", () => {
+    const registries = createRegistries();
+    expectOk(registries.palettes.register(palette("test:woods", ["#479571", "#bf7e45"])));
+    expect(registries.palettes.get("test:woods")?.colors).toEqual(["#479571", "#bf7e45"]);
+    const paths = (input: unknown) => {
+      const result = registries.palettes.validate(input);
+      return result.ok ? [] : result.diagnostics.map((d) => d.path.join("."));
+    };
+    expect(paths(palette("test:empty", []))).toEqual(["colors"]);
+    expect(paths(palette("test:named", ["green"]))).toEqual(["colors.0"]);
+    expect(paths(palette("test:twice", ["#479571", "#47957A", "#47957a"]))).toEqual(["colors.2"]);
+  });
+
+  it("suggests every palette's colours in one lower-case list, by palette ID, each once", () => {
+    const registries = createRegistries();
+    expect(suggestedColors(registries)).toEqual([]);
+    expectOk(registries.palettes.register(palette("test:woods", ["#479571", "#bf7e45"])));
+    expectOk(registries.palettes.register(palette("mod:sea", ["#5d939a", "#BF7E45"])));
+    expect(sortedPalettes(registries).map((p) => p.id)).toEqual(["mod:sea", "test:woods"]);
+    expect(suggestedColors(registries)).toEqual(["#5d939a", "#bf7e45", "#479571"]);
+    expectOk(registries.palettes.register(palette("zz:upper", ["#ABCDEF"])));
+    expect(suggestedColors(registries).at(-1)).toBe("#abcdef");
   });
 });
 

@@ -2,7 +2,7 @@
   "id": "hollow:fan-fin",
   "version": "1.0.0",
   "name": "Fan fin",
-  "type": "hollow:fin",
+  "type": "hollow:tail-fin",
   "step": 0.05,
   "attach": {
     "x": 3,

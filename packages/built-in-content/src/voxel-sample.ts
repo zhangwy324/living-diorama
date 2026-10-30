@@ -39,11 +39,11 @@ function box(
 
 /**
  * A four-legged creature of 5 cm cubes, about 72 cm long and 45 cm tall (the `medium`
- * size class), facing +X: a torso (the root) with two front legs on shoulders and two back legs on
- * hips, the right-hand ones mirrored; a head on the neck with two 2.5 cm eyes on eye mounts, the
- * right one mirrored; and a tail on the tail base, of the built-in `hollow:tail` type, which has
- * the tail role. Its parts are of the built-in pack's part and socket types, so it passes
- * `checkAssemblyFit` against them. A fresh copy on each call.
+ * size class), facing +X: a torso (the root) with four legs on leg mounts, the right-hand ones
+ * mirrored; a head on the neck with two 2.5 cm eyes on eye mounts, the right one mirrored; and a
+ * tail on the tail base, of the built-in `hollow:tail` type, which has the tail role. Its parts
+ * are of the built-in pack's part and socket types, so it passes `checkAssemblyFit` against them.
+ * A fresh copy on each call.
  */
 export function sampleVoxelAssembly(): VoxelAssembly {
   const torso = box(
@@ -53,17 +53,17 @@ export function sampleVoxelAssembly(): VoxelAssembly {
     [COAT, CREAM],
     { x: 4, y: 0, z: 3 },
     [
-      { id: "front-left", type: "hollow:shoulder", position: { x: 6, y: 1, z: 1.5 } },
+      { id: "front-left", type: "hollow:leg-mount", position: { x: 6, y: 1, z: 1.5 } },
       {
         id: "front-right",
-        type: "hollow:shoulder",
+        type: "hollow:leg-mount",
         position: { x: 6, y: 1, z: 4.5 },
         mirrors: "front-left",
       },
-      { id: "back-left", type: "hollow:hip", position: { x: 2, y: 1, z: 1.5 } },
+      { id: "back-left", type: "hollow:leg-mount", position: { x: 2, y: 1, z: 1.5 } },
       {
         id: "back-right",
-        type: "hollow:hip",
+        type: "hollow:leg-mount",
         position: { x: 2, y: 1, z: 4.5 },
         mirrors: "back-left",
       },

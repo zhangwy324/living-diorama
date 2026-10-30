@@ -21,7 +21,7 @@
       "sockets": [
         {
           "id": "left-hip",
-          "type": "hollow:hip",
+          "type": "hollow:leg-mount",
           "position": {
             "x": 6,
             "y": 1,
@@ -30,7 +30,7 @@
         },
         {
           "id": "right-hip",
-          "type": "hollow:hip",
+          "type": "hollow:leg-mount",
           "position": {
             "x": 6,
             "y": 1,

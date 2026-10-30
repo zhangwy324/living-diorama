@@ -147,14 +147,13 @@ export interface StarterParts {
 }
 
 /**
- * The parts a starter creature can be built on: those no part in the set has a socket for, such as
- * the torsos. Read from fits and sockets, not from IDs, so a pack's parts work the same. Sorted by
- * ID, so the root a seed picks doesn't depend on the order the parts come in.
+ * The parts a starter creature can be built on: those whose part type has the `root` role, such as
+ * the torsos (ADR 0023 §10). Read from roles, not from IDs, so a pack's parts work the same.
+ * Sorted by ID, so the root a seed picks doesn't depend on the order the parts come in.
  */
 export function starterRoots({ parts, lookup }: StarterParts): PartSummary[] {
-  const offered = new Set(parts.flatMap(({ part }) => part.sockets.map((s) => s.type)));
   return parts
-    .filter(({ part }) => !(lookup.fitsOf(part.type) ?? []).some((t) => offered.has(t)))
+    .filter(({ part }) => lookup.roleOf(part.type) === "root")
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 

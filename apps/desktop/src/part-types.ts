@@ -14,9 +14,10 @@ export function partRoleLookup(
 }
 
 /**
- * What `assembleParts` needs of the registered types, from the worker's content summary, so the
- * main thread assembles parts (ADR 0022, M20 decisions) without the registries. A part type the
- * summary doesn't list has no fits, and a socket type it doesn't list isn't registered.
+ * What `assembleParts` and the edit operations need of the registered types, from the worker's
+ * content summary, so the main thread assembles parts (ADR 0022, M20 decisions) without the
+ * registries. A part type the summary doesn't list has no fits and no role, and a socket type it
+ * doesn't list isn't registered.
  */
 export function partFitLookup(
   partTypes: readonly PartTypeSummary[],
@@ -27,5 +28,6 @@ export function partFitLookup(
   return {
     fitsOf: (partType) => fits.get(partType),
     isSocketType: (socketType) => sockets.has(socketType),
+    roleOf: partRoleLookup(partTypes),
   };
 }

@@ -1,6 +1,6 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import { measureAssembly } from "@living-diorama/content-schema";
-import { sortedPartTypes, sortedSocketTypes } from "@living-diorama/extension-api";
+import { describeVoxelParts } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { loadContent } from "./content";
 import { partFitLookup, partRoleLookup } from "./part-types";
@@ -8,18 +8,13 @@ import { partFitLookup, partRoleLookup } from "./part-types";
 // The part and socket types as the worker's `ready` lists them.
 const content = loadContent();
 if (!content.ok) throw new Error("The built-in content doesn't load");
-const partTypes = sortedPartTypes(content.value).map(({ id, name, fits, role }) => ({
-  id,
-  name,
-  fits: [...fits],
-  ...(role ? { role } : {}),
-}));
-const socketTypes = sortedSocketTypes(content.value).map(({ id }) => id);
+const { partTypes, socketTypes } = describeVoxelParts(content.value);
 
 describe("partRoleLookup", () => {
-  it("gives the built-in tail its role and other types none", () => {
+  it("gives the built-in tail and torso their roles and other types none", () => {
     const roleOf = partRoleLookup(partTypes);
     expect(roleOf("hollow:tail")).toBe("tail");
+    expect(roleOf("hollow:torso")).toBe("root");
     expect(roleOf("hollow:leg")).toBeUndefined();
     expect(roleOf("pack:unknown")).toBeUndefined();
   });
@@ -36,13 +31,13 @@ describe("partRoleLookup", () => {
 describe("partFitLookup", () => {
   it("gives a registered part type's fits, and none for one the summary doesn't list", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
-    expect(lookup.fitsOf("hollow:leg")).toEqual(["hollow:hip", "hollow:shoulder"]);
+    expect(lookup.fitsOf("hollow:leg")).toEqual(["hollow:leg-mount"]);
     expect(lookup.fitsOf("pack:unknown")).toBeUndefined();
   });
 
   it("knows the registered socket types only", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
-    expect(lookup.isSocketType("hollow:hip")).toBe(true);
+    expect(lookup.isSocketType("hollow:leg-mount")).toBe(true);
     expect(lookup.isSocketType("hollow:leg")).toBe(false);
     expect(lookup.isSocketType("pack:unknown")).toBe(false);
   });
@@ -51,6 +46,7 @@ describe("partFitLookup", () => {
     const lookup = partFitLookup(partTypes, socketTypes);
     for (const type of content.value.partTypes.values()) {
       expect(lookup.fitsOf(type.id)).toEqual(type.fits);
+      expect(lookup.roleOf(type.id)).toBe(type.role);
     }
     for (const type of content.value.socketTypes.values()) {
       expect(lookup.isSocketType(type.id)).toBe(true);

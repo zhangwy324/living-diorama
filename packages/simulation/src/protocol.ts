@@ -26,7 +26,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -190,7 +190,8 @@ export interface PropSummary {
 
 /**
  * A registered voxel part type: its name, the socket types it fits (ADR 0022 §9) and its role if it
- * has one (§10). The name heads the type's parts in the Studio's tray (ADR 0023 §18).
+ * has one (§10). The name heads the type's parts in the Studio's tray (ADR 0023 §18), which lists
+ * the `root` types first (§10).
  */
 export interface PartTypeSummary {
   id: string;
@@ -243,6 +244,11 @@ export interface WorldContent {
   socketTypes: string[];
   /** Every registered voxel part, by ID (`sortedParts`). */
   parts: PartSummary[];
+  /**
+   * The colours the Studio suggests for recolouring parts, as `#rrggbb` (ADR 0023 §11): every
+   * registered palette's, in one list (`suggestedColors`).
+   */
+  suggestedColors: string[];
 }
 
 /** The part of a remaining route inside one region, with world positions of its waypoints. */

@@ -192,6 +192,7 @@ const lookup = (parts = PART_TYPES) => ({
 const fitLookup = (parts = PART_TYPES): PartFitLookup => ({
   fitsOf: (id) => parts.get(id)?.fits,
   isSocketType: (id) => SOCKET_TYPES.has(id),
+  roleOf: (id) => parts.get(id)?.role,
 });
 
 const assemble = (seed: number, parts = LIBRARY, start: LibraryPart | VoxelAssembly = TORSO) =>
