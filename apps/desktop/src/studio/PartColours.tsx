@@ -16,7 +16,7 @@ export function PartColours(props: {
    * step.
    */
   onColor(color: string, live: boolean): void;
-  /** The picker closed: its run of live colours is over. */
+  /** The picker opened, closed or lost focus: a run of live colours is over. */
   onColorDone(): void;
 }) {
   const { colors, slot, onColorDone } = props;
@@ -70,6 +70,10 @@ export function PartColours(props: {
           type="color"
           value={current ?? "#000000"}
           onChange={(event) => props.onColor(event.target.value, true)}
+          // The change event may not come when the dialog is cancelled, so opening (focus) and
+          // leaving (blur) end a run too: two openings never make one undo step.
+          onFocus={onColorDone}
+          onBlur={onColorDone}
         />
         <span>Any colour…</span>
       </label>

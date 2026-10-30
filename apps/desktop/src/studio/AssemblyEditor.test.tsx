@@ -4,7 +4,7 @@ import type { AssemblyGhost, AssemblyPick, AssemblyView } from "@living-diorama/
 import type { CheckedLimits } from "@living-diorama/simulation";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LibrarySnapshot, ReleaseVoxelParams, Released } from "../studio-protocol";
 import { AssemblyEditor, type BuildClient, type LoadRequest } from "./AssemblyEditor";
 import {
@@ -397,17 +397,24 @@ it("loads a creature to edit afresh, and Reset and closing compare against it", 
   expect(labelled("Undo (Ctrl+Z)").disabled).toBe(true);
 });
 
-it("drags a tray part onto the socket it points at, showing the ghost there first", async () => {
-  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
-    setTimeout(() => run(0), 0),
-  );
-  vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-  try {
-    await setup();
+describe("drag-to-socket", () => {
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
+      setTimeout(() => run(0), 0),
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  /**
+   * Build mode with a 400 px view whose pointer at (100, 100) points straight at the back-left
+   * hip; each pixel turns it a little.
+   */
+  async function dragSetup() {
+    const editor = await setup();
     const stage = container.querySelector<HTMLDivElement>(".assembly-stage");
     if (!stage) throw new Error("No stage");
     stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 400 }) as DOMRect;
-    // The pointer at (100, 100) points straight at the back-left hip; each pixel turns it a little.
     const [backLeft] = scoreSockets(
       shown(),
       [{ instance: "four-legged-torso", socket: "back-left" }],
@@ -423,26 +430,62 @@ it("drags a tray part onto the socket it points at, showing the ghost there firs
         z: backLeft.position.z - from.z,
       },
     });
-    const pointer = (type: string, x: number, y: number, target: EventTarget = window) =>
-      act(async () => {
-        target.dispatchEvent(
-          // jsdom has no PointerEvent; a mouse event carries what the drag reads.
-          new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true }),
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      });
+    return editor;
+  }
+
+  /** A pointer event at (x, y), the button held for a press or a move. */
+  const pointer = (type: string, x: number, y: number, target: EventTarget = window) =>
+    act(async () => {
+      const held = type === "pointerdown" || type === "pointermove";
+      target.dispatchEvent(
+        // jsdom has no PointerEvent; a mouse event carries what the drag reads.
+        new MouseEvent(type, {
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: held ? 1 : 0,
+          bubbles: true,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
+  /** Presses a tray part and drags it to (x, y), not yet released. */
+  async function dragTo(part: string, x: number, y: number) {
+    await pointer("pointerdown", 20, 300, trayPart(part));
+    await pointer("pointermove", x, y);
+  }
+
+  /** Releases over a tray part, and the click the browser sends straight after it. */
+  const releaseOn = (part: string) =>
+    act(async () => {
+      const target = trayPart(part);
+      target.dispatchEvent(
+        new MouseEvent("pointerup", { clientX: 20, clientY: 300, bubbles: true }),
+      );
+      target.click();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
+  it("drops a tray part on the socket it points at, showing the ghost there first", async () => {
+    await dragSetup();
     await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
     // Not yet a drag: nothing marked.
     await pointer("pointermove", 22, 300);
     expect(view.highlighted).toEqual([]);
     await pointer("pointermove", 100, 101);
     expect(view.highlighted).toHaveLength(4);
-    expect(container.querySelector(".drag-token")?.textContent).toBe("Paw leg");
+    const token = container.querySelector<HTMLElement>(".drag-token");
+    expect(token?.textContent).toBe("Paw leg");
+    expect(token?.style.left).toBe("100px");
     expect(view.ghost?.sockets).toEqual([
       { instance: "four-legged-torso", socket: "back-left" },
       { instance: "four-legged-torso", socket: "back-right" },
     ]);
-    await pointer("pointerup", 100, 101);
+    // The token follows the pointer.
+    await pointer("pointermove", 101, 100);
+    expect(token?.style.left).toBe("101px");
+    await pointer("pointerup", 101, 100);
     expect(shown().instances.map((i) => i.id)).toEqual([
       "four-legged-torso",
       "back-left",
@@ -452,11 +495,113 @@ it("drags a tray part onto the socket it points at, showing the ghost there firs
     expect(container.querySelector(".drag-token")).toBeNull();
 
     // Dropped away from every socket: nothing placed.
-    await pointer("pointerdown", 20, 300, trayPart("Round head"));
-    await pointer("pointermove", 380, 20);
+    await dragTo("Round head", 380, 20);
     await pointer("pointerup", 380, 20);
     expect(shown().instances).toHaveLength(3);
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  });
+
+  it("swaps the torso for one dropped anywhere on the view", async () => {
+    await dragSetup();
+    await dragTo("Upright torso", 300, 300);
+    expect(container.querySelector(".stage-hint")?.textContent).toContain("swap the torso");
+    await pointer("pointerup", 300, 300);
+    const root = shown().instances[0];
+    expect(root && shown().parts[root.part]?.source).toBe("hollow:upright-torso");
+  });
+
+  it("cancels with Escape, and the release over the part it began on doesn't pick it", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    await key({ key: "Escape" });
+    expect(container.querySelector(".drag-token")).toBeNull();
+    expect(view.ghost).toBeUndefined();
+    // Moving on and letting go does nothing.
+    await pointer("pointermove", 100, 100);
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("false");
+    expect(shown().instances).toHaveLength(1);
+    // The next plain click picks as usual.
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("doesn't pick the part a drag ends on, but a later click does", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    await pointer("pointermove", 20, 300);
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("false");
+    expect(view.highlighted).toEqual([]);
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    await releaseOn("Paw leg");
+    expect(trayPart("Paw leg").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("drops a press whose release was missed, and a drag when the window loses focus", async () => {
+    await dragSetup();
+    await pointer("pointerdown", 20, 300, trayPart("Paw leg"));
+    // A move with no button down: the release happened elsewhere.
+    await act(async () =>
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 100, clientY: 101 })),
+    );
+    await pointer("pointermove", 100, 101);
+    expect(container.querySelector(".drag-token")).toBeNull();
+
+    await dragTo("Paw leg", 100, 101);
+    expect(container.querySelector(".drag-token")).not.toBeNull();
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(container.querySelector(".drag-token")).toBeNull();
+    await pointer("pointerup", 100, 101);
+    expect(shown().instances).toHaveLength(1);
+  });
+
+  it("stops listening when unmounted mid-drag", async () => {
+    await dragSetup();
+    await dragTo("Paw leg", 100, 101);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    act(() => root?.unmount());
+    root = undefined;
+    await pointer("pointermove", 120, 120);
+    await pointer("pointerup", 120, 120);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+});
+
+it("ends a run of picker colours on change, focus and another slot", async () => {
+  await setup();
+  await click(trayPart("Round head"));
+  const picker = container.querySelector<HTMLInputElement>('.colour-picker input[type="color"]');
+  if (!picker) throw new Error("No picker");
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  /** The picker moves to `color`, as React hears it. */
+  const move = (color: string) =>
+    act(async () => {
+      setValue?.call(picker, color);
+      picker.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const fire = (type: string) => act(async () => picker.dispatchEvent(new Event(type)));
+  const undoSteps = async () => {
+    let steps = 0;
+    while (!labelled("Undo (Ctrl+Z)").disabled && steps < 20) {
+      await click(labelled("Undo (Ctrl+Z)"));
+      steps++;
+    }
+    return steps;
+  };
+  // One opening, many moves: one step, then the change as it closes ends it.
+  await move("#111111");
+  await move("#222222");
+  await fire("change");
+  await move("#333333");
+  // A cancelled dialog sends no change, but the next opening focuses the picker.
+  await act(async () => picker.focus());
+  await move("#444444");
+  await move("#555555");
+  // Another slot ends a run too.
+  await click(container.querySelectorAll<HTMLButtonElement>(".colour-slots .swatch")[1] ?? picker);
+  await move("#666666");
+  // Placing the head, then four runs.
+  expect(await undoSteps()).toBe(5);
 });

@@ -82,7 +82,9 @@ export type BuildClient = Pick<ReturnType<typeof studioClient>, "parts" | "relea
 /**
  * A creature to edit, e.g. a released one's assembly for Edit a copy (ADR 0023 §3). Each new `key`
  * loads it once: a fresh history from it under `name`, in the build step, and it becomes what
- * Reset goes back to and what closing compares against.
+ * Reset goes back to and what closing compares against. A key that arrives while a release is on
+ * its way waits for it to finish, so the release's fresh start doesn't wipe the loaded creature;
+ * only the latest key is loaded then. Loading drops a drag, the hovered socket and the colour slot.
  */
 export interface LoadRequest {
   key: number;
@@ -96,6 +98,13 @@ const centimetres = (metres: number) => `${Math.round(metres * 100)} cm`;
 const typing = (event: KeyboardEvent) =>
   event.target instanceof HTMLElement &&
   (event.target.isContentEditable || ["INPUT", "TEXTAREA"].includes(event.target.tagName));
+
+/** Puts the drag token at a page point. */
+const placeToken = (token: HTMLElement | null, x: number, y: number) => {
+  if (!token) return;
+  token.style.left = `${x}px`;
+  token.style.top = `${y}px`;
+};
 
 /** Whether a page point lies inside an element's box. */
 const inside = (element: Element | null, x: number, y: number) => {
@@ -123,8 +132,8 @@ export function AssemblyEditor({
   const [view, setView] = useState<AssemblyView>();
   // The socket a click or drop would put a part on, which shows that part there see-through.
   const [hovered, setHover] = useState<{ at: SocketRef; part: string }>();
-  // A tray part being dragged, and where the pointer is.
-  const [drag, setDrag] = useState<{ part: string; x: number; y: number }>();
+  // A tray part being dragged; the pointer's place is kept in a ref (`dragAt`).
+  const [drag, setDrag] = useState<{ part: string }>();
   // The colour slot being recoloured, of the part it was chosen on; another part starts at its first.
   const [colorSlot, setColorSlot] = useState<{ part: string | undefined; slot: number }>({
     part: undefined,
@@ -192,20 +201,6 @@ export function AssemblyEditor({
   // Made once per creature and kept while its assembly, name and plan are unchanged, so retrying a
   // release whose answer was lost can't save it twice (ADR 0023 §17); any edit makes a new one.
   const releaseId = useRef<string>(undefined);
-
-  // A creature to edit, once per key, as soon as the parts are here (ADR 0023 §3).
-  const loadedKey = useRef<number>(undefined);
-  useEffect(() => {
-    if (!kit || !loadRequest || loadRequest.key === loadedKey.current) return;
-    loadedKey.current = loadRequest.key;
-    setBuild(startBuild(kit, loadRequest.assembly));
-    typeName(loadRequest.name);
-    setLocomotion(defaultPlan().locomotion);
-    setPreviewMode(undefined);
-    setReleaseError(undefined);
-    setStep("build");
-    releaseId.current = undefined;
-  }, [kit, loadRequest, typeName]);
 
   const assembly = build?.history.present;
   const picked = step === "build" ? build?.picked : undefined;
@@ -296,7 +291,11 @@ export function AssemblyEditor({
   const press = useRef<{ part: string; x: number; y: number }>(undefined);
   const dragging = useRef(false);
   const dragFrame = useRef<number>(undefined);
-  // A drag ending on the part it started from would also click it.
+  // Where the pointer is while dragging; the token beside it follows by ref, not by render.
+  const dragAt = useRef({ x: 0, y: 0 });
+  const dragToken = useRef<HTMLDivElement>(null);
+  // A drag that ended (dropped, cancelled or lost) with the button still down would also click
+  // the part it began on when released over it. Cleared after that release and by the next press.
   const dropClick = useRef(false);
   // What the window's pointer listeners read: the latest of each, without listening anew per edit.
   const latest = useRef({ build, kit, view });
@@ -321,23 +320,49 @@ export function AssemblyEditor({
     dragFrame.current = undefined;
     if (!dragging.current) return;
     dragging.current = false;
+    dropClick.current = true;
     setDrag(undefined);
     setHover(undefined);
   }, []);
+
+  // A creature to edit, once per key, as soon as the parts are here and no release is on its way
+  // (ADR 0023 §3; see `LoadRequest`).
+  const loadedKey = useRef<number>(undefined);
+  useEffect(() => {
+    if (!kit || !loadRequest || releasing || loadRequest.key === loadedKey.current) return;
+    loadedKey.current = loadRequest.key;
+    endDrag();
+    setHover(undefined);
+    setColorSlot({ part: undefined, slot: 0 });
+    setBuild(startBuild(kit, loadRequest.assembly));
+    typeName(loadRequest.name);
+    setLocomotion(defaultPlan().locomotion);
+    setPreviewMode(undefined);
+    setReleaseError(undefined);
+    setStep("build");
+    releaseId.current = undefined;
+  }, [kit, loadRequest, releasing, typeName, endDrag]);
 
   useEffect(() => {
     if (step !== "build") return;
     const onMove = (event: PointerEvent) => {
       const pressed = press.current;
       if (!pressed) return;
+      // No button down: the release was missed, e.g. outside the window.
+      if (event.buttons === 0) {
+        endDrag();
+        return;
+      }
       const { clientX: x, clientY: y } = event;
+      dragAt.current = { x, y };
       if (!dragging.current) {
         if (Math.hypot(x - pressed.x, y - pressed.y) < DRAG_START_PX) return;
         dragging.current = true;
+        setDrag({ part: pressed.part });
         // The drag takes over from a click's pick.
         setBuild((state) => state && { ...state, picked: undefined, notice: undefined });
       }
-      setDrag({ part: pressed.part, x, y });
+      placeToken(dragToken.current, x, y);
       // Picking costs about 1.5 ms, so the pointer is followed at most once a frame.
       if (dragFrame.current !== undefined) cancelAnimationFrame(dragFrame.current);
       dragFrame.current = requestAnimationFrame(() => {
@@ -358,11 +383,11 @@ export function AssemblyEditor({
       const pressed = press.current;
       const wasDragging = dragging.current;
       endDrag();
-      if (!pressed || !wasDragging) return;
-      dropClick.current = true;
+      // After the click this release may fire on the part the drag began on.
       setTimeout(() => {
         dropClick.current = false;
       });
+      if (!pressed || !wasDragging) return;
       const { clientX: x, clientY: y } = event;
       const { kit: k } = latest.current;
       if (!k || !inside(stage.current, x, y)) return;
@@ -374,13 +399,20 @@ export function AssemblyEditor({
       const at = dropTarget(pressed.part, x, y);
       if (at) edit((state, kk) => placeAt(state, kk, at, pressed.part));
     };
+    const onDown = () => {
+      dropClick.current = false;
+    };
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", endDrag);
+    window.addEventListener("blur", endDrag);
     return () => {
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", endDrag);
+      window.removeEventListener("blur", endDrag);
       endDrag();
     };
     // `edit` reads `kit` through the state setter; the rest are refs or stable.
@@ -766,7 +798,10 @@ export function AssemblyEditor({
                 <PartColours
                   colors={colors}
                   slot={slot}
-                  onSlot={(next) => setColorSlot({ part: selected, slot: next })}
+                  onSlot={(next) => {
+                    setColorSlot({ part: selected, slot: next });
+                    setBuild((s) => s && endRecolorRun(s));
+                  }}
                   suggested={kit.suggestedColors}
                   onColor={(color, live) =>
                     edit((state) => recolorSelected(state, slot, color, { live }))
@@ -797,7 +832,14 @@ export function AssemblyEditor({
         </aside>
       </div>
       {drag && placingPart && (
-        <div className="drag-token" style={{ left: drag.x, top: drag.y }} aria-hidden="true">
+        <div
+          className="drag-token"
+          ref={(element) => {
+            dragToken.current = element;
+            placeToken(element, dragAt.current.x, dragAt.current.y);
+          }}
+          aria-hidden="true"
+        >
           {placingPart.name}
         </div>
       )}

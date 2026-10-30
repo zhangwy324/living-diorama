@@ -138,11 +138,14 @@ describe("ladder steps", () => {
     const finest = stepSelected(stepSelected(selectInstance(withEyes(), "left-eye"), -1), -1);
     expect(finest.notice).toBe(refusalText("ladder_end", "shrink"));
     expect(finest.notice).toBe("Its cubes are as small as they go.");
-    // The torso's attach point and sockets leave the finer grid at 10 cm cubes.
+    // At 10 cm cubes the head no longer sits on the finer grid of the torso's socket, so the
+    // torso can't grow on its own.
     const eyes = withEyes();
     const torso = stepSelected(selectInstance(eyes, ROOT), 1);
     expect(present(torso)).toBe(present(eyes));
     expect(torso.notice).toBe("It can't grow: a part would come out of its joint or off the grid.");
+    // The bare torso grows: it is the head that would leave the grid.
+    expect(present(stepSelected(selectInstance(legged(), ROOT), 1))).not.toBe(LEGGED);
   });
 
   it("steps the whole creature, keeping the selection, until a part is at the ladder's end", () => {
@@ -170,6 +173,16 @@ describe("ladder steps", () => {
         const state = { ...startBuild(kit), history: startHistory(randomAt(root.id, seed)) };
         const grown = stepCreature(state, 1);
         expect(measureOf(present(grown), kit).sizeClass).toBe("large");
+        // Nor does turning any part, one to three quarter turns, with Mirror on or off.
+        for (const mirror of [true, false]) {
+          for (const { id } of present(grown).instances.slice(1)) {
+            let turned: BuildState = { ...grown, mirror, selected: id };
+            for (let turn = 1; turn < 4; turn++) {
+              turned = rotateSelected(turned);
+              expect(measureOf(present(turned), kit).sizeClass).toBe("large");
+            }
+          }
+        }
       }
     }
   });

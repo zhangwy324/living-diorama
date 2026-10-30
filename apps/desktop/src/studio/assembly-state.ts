@@ -306,10 +306,11 @@ export function ghostAt(
   return { part: library.part, sockets };
 }
 
-/** Selects a part instance, or nothing; drops the tray pick. */
+/** Selects a part instance, or nothing; drops the tray pick and ends a run of live recolours. */
 export const selectInstance = (state: BuildState, id: string | undefined): BuildState => ({
   ...state,
   picked: undefined,
+  recolorRun: undefined,
   selected: id,
   notice: undefined,
 });
