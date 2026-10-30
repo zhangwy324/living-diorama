@@ -47,13 +47,20 @@ export const VoxelInstanceSchema = z.strictObject({
    */
   rotation: QuaternionSchema.default(IDENTITY_QUATERNION),
   /**
-   * True for the part on the mirrored socket of a pair, and only there (§16): it is drawn as the
-   * mirror image, in the creature's XY plane, of the same part with the same rotation on the
-   * socket's pair. The stored part, attach point and rotation are the unmirrored ones; a consumer
+   * True for the part on the mirrored socket of a pair, and only there (§16): draw this part
+   * reflected in the creature's XY plane. The two parts of a pair may differ (a crab's big left
+   * claw and small right one), in part and rotation; nothing checks that they match, though the
+   * Studio uses the same part on both sides by default. The stored part, attach point and
+   * rotation are the unmirrored ones, as they would be on the pair's other socket; a consumer
    * derives the mirrored ones: the part reflected about its own middle plane (z → Z − z in its
    * cubes), its attach point likewise (z → Z − z), and its rotation `[x, y, z, w]` →
    * `[−x, −y, z, w]`. Placed, that is `M · R · (p − attach) + socket` with `M` the reflection
    * z → −z, as `placeInstances` does.
+   *
+   * The reflection carries down the tree: a part hanging from a mirrored part (a hand on a
+   * mirrored arm) is reflected too, though its own flag is false, and a mirrored part on a
+   * mirrored part (a mirror inside a mirror) is not. Whether a part is drawn reflected is
+   * `InstancePlacement.mirrored`, never this flag alone.
    */
   mirrored: z.boolean().default(false),
 });
@@ -103,6 +110,7 @@ function partOf(assembly: VoxelAssembly, instance: VoxelInstance): VoxelPart {
   if (!part) throw new Error(`Unknown part "${instance.part}"`);
   return part;
 }
+
 /** A 3×3 matrix, row-major. */
 type Matrix = readonly number[];
 
@@ -318,7 +326,42 @@ export interface InstancePlacement {
   /** Row-major 3×3 whole numbers: the rest rotation and mirroring of the part and its parents. */
   linear: readonly number[];
   offset: readonly [number, number, number];
+  /**
+   * Whether the part is drawn reflected: an odd number of the instances on its path from the root,
+   * itself included, are mirrored (`linear` has a negative determinant). A mesher reflects such a
+   * part about its middle plane (z → Z − z in its cubes), and its sockets' positions likewise.
+   */
+  mirrored: boolean;
+  /** How many instances it hangs below the root: 0 for the root (`instanceInset`). */
+  depth: number;
 }
+
+/**
+ * Where a part's mesh goes, its bone's rest transform: a point `q` of the mesh, in
+ * `VOXEL_UNIT`s from the part's corner (cubes × `stepUnits`), reflected about the part's middle
+ * plane when `placement.mirrored`, is at `rotation · q + offset` in the root's frame.
+ * `rotation` is `linear · (mirrored ? M : I)` with `M` the reflection z → −z: a proper
+ * rotation, whole numbers, row-major.
+ */
+export function boneTransform(
+  placement: InstancePlacement,
+  part: VoxelPart,
+): { rotation: number[]; offset: [number, number, number] } {
+  const { linear, offset, mirrored } = placement;
+  if (!mirrored) return { rotation: [...linear], offset: [offset[0], offset[1], offset[2]] };
+  // q = M · p + (0, 0, Z), so linear · p + offset = linear · M · q + linear · (0, 0, Z) + offset.
+  const depth = part.size.z * stepUnits(part.step);
+  const shift = apply(linear, [0, 0, depth]);
+  return {
+    rotation: multiply(linear, MIRROR),
+    offset: [offset[0] + shift[0], offset[1] + shift[1], offset[2] + shift[2]],
+  };
+}
+
+const determinant = (m: Matrix): number =>
+  num(m, 0) * (num(m, 4) * num(m, 8) - num(m, 5) * num(m, 7)) -
+  num(m, 1) * (num(m, 3) * num(m, 8) - num(m, 5) * num(m, 6)) +
+  num(m, 2) * (num(m, 3) * num(m, 7) - num(m, 4) * num(m, 6));
 
 /**
  * Places every instance of a valid assembly (one that `VoxelAssemblySchema` accepts) in the root
@@ -334,7 +377,12 @@ export function placeInstances(assembly: VoxelAssembly): InstancePlacement[] {
     const local = instance.mirrored ? multiply(MIRROR, turn) : turn;
     const attach = apply(local, units(part.attach, stepUnits(part.step)));
     if (!instance.parent) {
-      placed.push({ linear: local, offset: [-attach[0], -attach[1], -attach[2]] });
+      placed.push({
+        linear: local,
+        offset: [-attach[0], -attach[1], -attach[2]],
+        mirrored: determinant(local) < 0,
+        depth: 0,
+      });
       continue;
     }
     const { parent } = instance;
@@ -345,13 +393,16 @@ export function placeInstances(assembly: VoxelAssembly): InstancePlacement[] {
     if (!above || !parentPart || !socket) throw new Error(`Instance "${instance.id}" is not valid`);
     const at = units(socket.position, stepUnits(parentPart.step));
     const inParent = apply(above.linear, [at[0] - attach[0], at[1] - attach[1], at[2] - attach[2]]);
+    const linear = multiply(above.linear, local);
     placed.push({
-      linear: multiply(above.linear, local),
+      linear,
       offset: [
         inParent[0] + above.offset[0],
         inParent[1] + above.offset[1],
         inParent[2] + above.offset[2],
       ],
+      mirrored: determinant(linear) < 0,
+      depth: above.depth + 1,
     });
   }
   return placed;
@@ -565,6 +616,11 @@ export function checkAssemblyFit(
 /** A voxel body measured in its rest pose (ADR 0022 §3, §20, §21), in metres in the body frame. */
 export interface AssemblyMeasure {
   /**
+   * The body frame's origin in the root part's frame, in `VOXEL_UNIT`s, as `placeInstances`
+   * places parts: a point `p` there is at `(p − origin) · VOXEL_UNIT` metres in the body frame.
+   */
+  origin: readonly [number, number, number];
+  /**
    * The bounds of every cube. The body frame's origin is the middle of the bounds across X and Z,
    * with the bottom of the lowest cube at y = 0; axes as ADR 0022 §16.
    */
@@ -675,6 +731,7 @@ export function measureAssembly(
   }
 
   return {
+    origin,
     bounds: { min: toBody(lo), max: toBody(hi) },
     height,
     footprintRadius,

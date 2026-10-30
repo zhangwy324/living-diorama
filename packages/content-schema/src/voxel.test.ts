@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   assemblyWarnings,
+  boneTransform,
+  CHILD_PART_INSET,
+  instanceInset,
   checkAssemblyFit,
   decodeVoxels,
   encodeVoxels,
@@ -14,6 +17,7 @@ import {
   visibleFaces,
   VoxelAssemblySchema,
   VoxelPartSchema,
+  type InstancePlacement,
   type PartTypeDefinition,
   type Quaternion,
   type Result,
@@ -141,6 +145,11 @@ describe("run-length encoding", () => {
     expect(visibleFaces(solid, { x: 2, y: 2, z: 2 })).toBe(24);
     expect(visibleFaces(Uint8Array.from([1, 0, 0, 1]), { x: 2, y: 2, z: 1 })).toBe(12);
     expect(visibleFaces(new Uint8Array(8), { x: 2, y: 2, z: 2 })).toBe(0);
+  });
+
+  it("shrinks parts more the deeper they hang", () => {
+    expect(instanceInset(0)).toBe(0);
+    expect(instanceInset(2)).toBe(2 * CHILD_PART_INSET);
   });
 
   it("encodes an empty grid as nothing", () => {
@@ -479,14 +488,127 @@ describe("the face cap", () => {
 });
 
 describe("placeInstances", () => {
+  const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const MIRROR = [1, 0, 0, 0, 1, 0, 0, 0, -1];
+
   it("puts the root's attach point at the origin and each child's at its socket", () => {
     const placed = placeInstances(parsed());
-    expect(placed[0]).toEqual({ linear: [1, 0, 0, 0, 1, 0, 0, 0, 1], offset: [-16, -8, -8] });
+    expect(placed[0]).toEqual({
+      linear: IDENTITY,
+      offset: [-16, -8, -8],
+      mirrored: false,
+      depth: 0,
+    });
     // The front left hip at torso cube (6.5, 1, 1.5) is 26, 4, 6 units from the torso's corner;
     // the leg's attach point 2, 12, 2 from its own.
-    expect(placed[1]).toEqual({ linear: [1, 0, 0, 0, 1, 0, 0, 0, 1], offset: [8, -16, -4] });
+    expect(placed[1]).toEqual({
+      linear: IDENTITY,
+      offset: [8, -16, -4],
+      mirrored: false,
+      depth: 1,
+    });
     // Its mirror image flips z about its attach point.
-    expect(placed[2]).toEqual({ linear: [1, 0, 0, 0, 1, 0, 0, 0, -1], offset: [8, -16, 4] });
+    expect(placed[2]).toEqual({ linear: MIRROR, offset: [8, -16, 4], mirrored: true, depth: 1 });
+  });
+
+  /**
+   * A torso with an arm on each side, the right one mirrored, and on each arm a hand of 1.25 cm
+   * cubes on socket `a` and one on its mirror `b`. A hand's one cube sits at its left (−z).
+   */
+  function arms() {
+    return parsed({
+      parts: {
+        torso: box(4, 2, 4, {
+          sockets: [
+            { id: "left", type: "test:shoulder", position: { x: 2.5, y: 1, z: 1.5 } },
+            {
+              id: "right",
+              type: "test:shoulder",
+              position: { x: 2.5, y: 1, z: 2.5 },
+              mirrors: "left",
+            },
+          ],
+        }),
+        arm: box(1, 2, 2, {
+          attach: { x: 0.5, y: 2, z: 1.5 },
+          sockets: [
+            { id: "a", type: "test:wrist", position: { x: 0.5, y: 1, z: 0.5 } },
+            { id: "b", type: "test:wrist", position: { x: 0.5, y: 1, z: 1.5 }, mirrors: "a" },
+          ],
+        }),
+        hand: box(1, 1, 2, { step: 0.0125, voxels: [1, 1, 1, 0], attach: { x: 0, y: 0, z: 0 } }),
+      },
+      instances: [
+        { id: "torso", part: "torso" },
+        { id: "left", part: "arm", parent: { instance: "torso", socket: "left" } },
+        {
+          id: "right",
+          part: "arm",
+          parent: { instance: "torso", socket: "right" },
+          mirrored: true,
+        },
+        { id: "left-a", part: "hand", parent: { instance: "left", socket: "a" } },
+        { id: "left-b", part: "hand", parent: { instance: "left", socket: "b" }, mirrored: true },
+        { id: "right-a", part: "hand", parent: { instance: "right", socket: "a" } },
+        { id: "right-b", part: "hand", parent: { instance: "right", socket: "b" }, mirrored: true },
+      ],
+    });
+  }
+
+  /** The root-frame box of a hand's one cube, in units, as [min, max]. */
+  const handCube = (placement: InstancePlacement) => {
+    const a = [0, 1, 2].map((r) => placement.offset[r]!);
+    const b = [0, 1, 2].map(
+      (r) =>
+        2 *
+          (placement.linear[r * 3]! + placement.linear[r * 3 + 1]! + placement.linear[r * 3 + 2]!) +
+        placement.offset[r]!,
+    );
+    return [a.map((v, i) => Math.min(v, b[i]!)), a.map((v, i) => Math.max(v, b[i]!))];
+  };
+  const reflected = ([min, max]: number[][]) => [
+    [min![0], min![1], -max![2]!],
+    [max![0], max![1], -min![2]!],
+  ];
+
+  it("reflects a part hanging from a mirrored part, and a mirror inside a mirror back", () => {
+    const placed = placeInstances(arms());
+    expect(placed.map((p) => p.mirrored)).toEqual([false, false, true, false, true, true, false]);
+    expect(placed.map((p) => p.depth)).toEqual([0, 1, 1, 2, 2, 2, 2]);
+    // A hand on the mirrored arm is its pair's mirror image across the creature's XY plane (the
+    // torso's middle is at z = 0), whether it hangs from the plain socket or its mirror.
+    const [, , , leftA, leftB, rightA, rightB] = placed.map(handCube);
+    expect(rightA).toEqual(reflected(leftA!));
+    expect(rightB).toEqual(reflected(leftB!));
+    expect(measureAssembly(arms()).centerOfGravity.z).toBeCloseTo(0);
+  });
+
+  it("gives each part's mesh a bone with a proper rotation", () => {
+    const assembly = arms();
+    const placed = placeInstances(assembly);
+    assembly.instances.forEach((instance, i) => {
+      const placement = placed[i]!;
+      const part = assembly.parts[instance.part]!;
+      const bone = boneTransform(placement, part);
+      const [r0, r1, r2, r3, r4, r5, r6, r7, r8] = bone.rotation;
+      expect(
+        r0! * (r4! * r8! - r5! * r7!) -
+          r1! * (r3! * r8! - r5! * r6!) +
+          r2! * (r3! * r7! - r4! * r6!),
+      ).toBe(1);
+      // A corner of the part's last cube along z, where a mesher reflecting it puts it at the
+      // first, lands where the placement puts it.
+      const step = stepUnits(part.step);
+      const corner = [0, 0, part.size.z * step];
+      const mesh = placement.mirrored ? [0, 0, 0] : corner;
+      const at = (m: readonly number[], p: number[], o: readonly number[]) =>
+        [0, 1, 2].map(
+          (r) => m[r * 3]! * p[0]! + m[r * 3 + 1]! * p[1]! + m[r * 3 + 2]! * p[2]! + o[r]!,
+        );
+      expect(at(bone.rotation, mesh, bone.offset)).toEqual(
+        at(placement.linear, corner, placement.offset),
+      );
+    });
   });
 });
 
@@ -647,6 +769,13 @@ describe("measureAssembly", () => {
     // The tail socket at torso cube (1, 2.5, 2): 2 cubes in from the tail's tip and 4.5 cubes
     // above the feet.
     close(measure.tail, { x: measure.bounds.min.x + 2 * 0.025, y: 4.5 * 0.025, z: 0 });
+  });
+
+  it("gives the body frame's origin in the root's frame", () => {
+    const measure = measureAssembly(parsed());
+    // In units: the tail from x = -1 cube, the head to 10, from the torso's attach point (4, 2, 2);
+    // the feet 2 cubes below the torso.
+    expect(measure.origin).toEqual([(-4 + 40) / 2 - 16, -8 - 8, 0]);
   });
 
   it("puts the tail at the middle of the rear end without a tail part", () => {

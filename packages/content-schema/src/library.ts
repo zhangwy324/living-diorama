@@ -30,8 +30,8 @@ const DRAWING_MIGRATIONS: Readonly<Record<number, Migration>> = {
 };
 
 // Version 3 adds the body plan (ADR 0020 §13); version 4 drops its template (ADR 0020, Follow-up:
-// no body templates); version 5 adds the body, drawn or voxel (ADR 0022 §17). Older entries are not migrated: no backward compatibility is required yet
-// (AGENTS.md), so they fail to load.
+// no body templates); version 5 adds the body, drawn or voxel (ADR 0022 §17). Older entries are
+// not migrated: no backward compatibility is required yet (AGENTS.md), so they fail to load.
 const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
 
 /** Values per stroke point: x and y in canvas pixels, then pressure. */

@@ -29,11 +29,19 @@ export const MAX_ASSEMBLY_INSTANCES = 32;
 export const MAX_ASSEMBLY_FACES = 131_072;
 
 /**
- * How far a renderer shrinks each part other than the root toward its own centre, in metres, so
- * the flush faces of overlapping parts never share a plane: 1% of the finest step. Measuring
- * (`measureAssembly`) ignores it.
+ * How far a renderer shrinks a part toward its own centre per level of depth in the assembly's
+ * tree, in metres: 1% of the finest step (`instanceInset`). The root isn't shrunk, a part on it
+ * by this much, a part on that one by twice as much, so the flush faces of a part and its parent
+ * never share a plane. Two parts at the same depth still may, which `assemblyWarnings` reports.
+ * Measuring (`measureAssembly`) ignores it.
  */
 export const CHILD_PART_INSET = 0.01 * VOXEL_STEPS[0];
+
+/**
+ * How far a renderer shrinks a part `depth` levels below the root toward its own centre, in
+ * metres (`CHILD_PART_INSET`); `InstancePlacement.depth` gives the depth.
+ */
+export const instanceInset = (depth: number): number => CHILD_PART_INSET * depth;
 
 /** `values[i]`, known to be there. */
 const num = (values: ArrayLike<number>, i: number): number => values[i] ?? 0;
