@@ -162,6 +162,10 @@ function describe(e: SimulationEvent): string {
       return `new home ${e.placementId}${e.previous === null ? "" : ` (was ${e.previous})`}`;
     case "day_phase_changed":
       return `${e.from} → ${e.to}`;
+    case "creature_relocated":
+      return `moved by a world edit to ${e.to.regionId} (${e.to.x.toFixed(1)}, ${e.to.z.toFixed(1)})`;
+    case "world_edited":
+      return `world edited: ${e.edit.ops.map((op) => `${op.op} ${op.id}`).join(", ")}`;
   }
 }
 

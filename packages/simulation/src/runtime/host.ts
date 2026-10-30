@@ -1,5 +1,6 @@
 import {
   error,
+  parseWorldEdit,
   parseWorldSave,
   type Diagnostic,
   type Result,
@@ -79,6 +80,21 @@ export function describeContent({ state }: Simulation): WorldContent {
       registries.species.values().map((s) => [s.id, summarizeSpecies(s)]),
     ),
   };
+}
+
+/**
+ * Runs an edit or a dry run, turning a throw (a bug, or a pack hook that throws while the edit is
+ * planned) into a rejection with `edit_failed`.
+ */
+function guardEdit<T extends { ok: boolean }>(
+  run: () => T,
+): T | { ok: false; diagnostics: Diagnostic[] } {
+  try {
+    return run();
+  } catch (cause) {
+    const message = `The edit failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return { ok: false, diagnostics: [error("edit_failed", message, [], "world edit")] };
+  }
 }
 
 /** Checks the options and the untrusted save text, then restores; never throws on either. */
@@ -213,6 +229,8 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
       case "save":
       case "restore":
       case "catch_up":
+      case "edit":
+      case "validate_edit":
         request(sim, ticks, command);
         break;
       case "shutdown":
@@ -327,6 +345,32 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
         if (report.applied) ticks.restart();
         send({ type: "caught_up", ...requestId, report });
         if (ticks.paused) sendSnapshot(sim, true);
+        return;
+      }
+      case "edit": {
+        const parsed = parseWorldEdit(command.edit, "world edit");
+        // `applyEdit` throws only while planning, before anything changed (`#reconcile` never
+        // throws), so a throw is a rejection and the world goes on as it was.
+        const result = parsed.ok ? guardEdit(() => sim.applyEdit(parsed.value)) : parsed;
+        if (!result.ok) {
+          diagnostics = [...result.diagnostics];
+          break;
+        }
+        send({ type: "edited", ...requestId, result });
+        const { scene, navigations } = describeContent(sim);
+        send({ type: "world_changed", scene, navigations });
+        // No tick runs while paused, so the paused world shows the edit this way.
+        if (ticks.paused) sendSnapshot(sim, true);
+        return;
+      }
+      case "validate_edit": {
+        const parsed = parseWorldEdit(command.edit, "world edit");
+        const check = parsed.ok ? guardEdit(() => sim.validateEdit(parsed.value)) : parsed;
+        if (!check.ok && check.diagnostics.some((d) => d.code === "edit_failed")) {
+          diagnostics = [...check.diagnostics];
+          break;
+        }
+        send({ type: "edit_checked", ...requestId, check });
         return;
       }
     }

@@ -1,6 +1,6 @@
 import type { RegionPosition } from "@living-diorama/content-schema";
 import type { Route } from "../navigation/pathfinder";
-import type { ActionProvider, PathPoint, PathState } from "./contracts";
+import type { ActionContext, ActionProvider, PathPoint, PathState } from "./contracts";
 import { isIntFrom, isPathState, isRecord } from "./shared";
 
 // `core:idle` and `core:follow_path` (roadmap M3 task 6). Preconditions are checked in `start`,
@@ -34,6 +34,22 @@ export function pathFromRoute({ legs }: Route): PathState {
     });
   });
   return { points, next: 0 };
+}
+
+/**
+ * Plans the rest of `path` again from where the creature stands to its last waypoint, as after a
+ * world edit (`ActionProvider.replan`, ADR 0021 §6), and replaces its waypoints. True if there was
+ * nothing left to walk or a new route was found; false, leaving `path` as it was, if none was.
+ */
+export function replanPath(path: PathState, context: ActionContext): boolean {
+  const goal = path.next < path.points.length ? path.points.at(-1) : undefined;
+  if (!goal) return true;
+  const result = context.planRoute({ regionId: goal.regionId, x: goal.x, z: goal.z });
+  if (!result.ok) return false;
+  const replanned = pathFromRoute(result.route);
+  path.points = replanned.points;
+  path.next = 0;
+  return true;
 }
 
 /** Stands still for `params.seconds`, rounded to whole ticks (at least one). */
@@ -79,6 +95,7 @@ export const followPathAction: ActionProvider = {
       ? { status: "done" }
       : { status: "running" };
   },
+  replan: (state, context) => replanPath(state as PathState, context),
   checkState: isPathState,
 };
 

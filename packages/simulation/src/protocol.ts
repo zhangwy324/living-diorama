@@ -1,9 +1,12 @@
 import type {
+  AppliedWorldEdit,
   BodyShape,
   Diagnostic,
   RegionPosition,
   SizeClass,
   Vec3,
+  WorldEditCheck,
+  WorldEditResult,
 } from "@living-diorama/content-schema";
 import type { AssetKind, Cue, LocomotionRule } from "@living-diorama/extension-api";
 import type { ActionEvent } from "./creatures/action-event";
@@ -16,7 +19,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -24,8 +27,8 @@ export type { ActionEvent } from "./creatures/action-event";
 
 /**
  * Commands that may fail in normal use (ADR 0012). Their outcome comes back as a reply with the
- * same `requestId`: `species_registered`, `limits`, `spawned`, `despawned`, `saved`, `restored`
- * or `caught_up`, or `rejected`.
+ * same `requestId`: `species_registered`, `limits`, `spawned`, `despawned`, `saved`, `restored`,
+ * `caught_up`, `edited` or `edit_checked`, or `rejected`.
  */
 export type RequestCommand =
   /**
@@ -79,7 +82,20 @@ export type RequestCommand =
    * same gap would. `minutes` is the present local time of day, set first as `set_time_of_day`
    * sets it. Applied while paused too, though the main thread sends none then.
    */
-  | { type: "catch_up"; requestId?: string; gapMs: number; minutes: number };
+  | { type: "catch_up"; requestId?: string; gapMs: number; minutes: number }
+  /**
+   * Edits the world (ADR 0021), answered by `edited`, then followed by `world_changed`. `edit` is a
+   * `WorldEdit`, untrusted: the worker checks its shape (`parseWorldEdit`) and then whether it
+   * fits the world. Applied between ticks like every command, while paused too, when a snapshot
+   * of the edited world follows. An edit that fails either check is answered by `rejected` and
+   * changes nothing.
+   */
+  | { type: "edit"; requestId?: string; edit: unknown }
+  /**
+   * What an edit would do, without doing it (ADR 0021 §10), answered by `edit_checked`, also when
+   * the edit would be refused. Answered by `rejected` (`edit_failed`) only if checking it threw.
+   */
+  | { type: "validate_edit"; requestId?: string; edit: unknown };
 
 export type SimulationCommand =
   /**
@@ -247,6 +263,11 @@ export type CreatureEvent =
       reason: string;
     })
   | (CreatureEventBase & { type: "creature_stuck"; position: RegionPosition; ticksStuck: number })
+  /**
+   * A world edit left the creature where it couldn't stand, so it was moved to the nearest place it
+   * can (ADR 0021 §7). Follows the edit's `world_edited`.
+   */
+  | (CreatureEventBase & { type: "creature_relocated"; from: RegionPosition; to: RegionPosition })
   /** The creature took `placementId` as its home (ADR 0018 §14); `previous` is the old one. */
   | (CreatureEventBase & {
       type: "new_home_selected";
@@ -261,7 +282,12 @@ export type WorldEvent =
    * The day phase changed. Not emitted for the time of day the world starts at. A jump across
    * several phases emits one event, from the phase before the jump to the one after it.
    */
-  WorldEventBase & { type: "day_phase_changed"; from: DayPhase; to: DayPhase };
+  | (WorldEventBase & { type: "day_phase_changed"; from: DayPhase; to: DayPhase })
+  /**
+   * The world was edited (ADR 0021): `edit` as applied, with every new placement's ID. Emitted
+   * between ticks, with the tick that runs next, before the edit's `creature_relocated` events.
+   */
+  | (WorldEventBase & { type: "world_edited"; edit: AppliedWorldEdit });
 
 export type SimulationEvent = CreatureEvent | WorldEvent;
 
@@ -322,11 +348,27 @@ export type SimulationMessage =
    */
   | { type: "caught_up"; requestId?: string; report: CatchUpReport }
   /**
+   * The answer to `edit`: the edit was applied. `result` holds the edit as applied (every new
+   * placement's ID), its inverse for undo, the footprints, blocked ways out of the water, warnings
+   * and moved creatures. `world_changed` follows with what to draw.
+   */
+  | { type: "edited"; requestId?: string; result: Extract<WorldEditResult, { ok: true }> }
+  /** The answer to `validate_edit`: what the edit would do, or why it would be refused. */
+  | { type: "edit_checked"; requestId?: string; check: WorldEditCheck }
+  /**
+   * The world's content changed, after an applied edit (ADR 0021): the new scene data and the
+   * navigation overlay of every profile, for the renderer's `replaceProps`.
+   */
+  | { type: "world_changed"; scene: SceneData; navigations: NavigationOverlay[] }
+  /**
    * A request command could not be applied. Not a fault: the world keeps running. For `restore`
    * the save is unusable and the world is unchanged, so start fresh. The diagnostics say why:
    * `invalid_save_json`, the schema's (e.g. `unsupported_save_version`), `save_world_mismatch`
    * or `save_inconsistent`, or `invalid_wall_clock` / `invalid_time_of_day` for the options;
-   * for `catch_up`, `invalid_gap` or `invalid_time_of_day`.
+   * for `catch_up`, `invalid_gap` or `invalid_time_of_day`; for `edit`, the shape's (from
+   * `parseWorldEdit`) or why the edit doesn't fit the world (e.g. `unknown_placement`,
+   * `placement_id_in_use`, `unknown_prop`, `outside_world`, `edit_breaks_navigation`,
+   * `no_relocation`), or `edit_failed` if applying or checking it threw, which changes nothing.
    */
   | {
       type: "rejected";

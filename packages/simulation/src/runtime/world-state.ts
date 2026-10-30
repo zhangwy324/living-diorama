@@ -3,6 +3,7 @@ import {
   type Diagnostic,
   type RegionPosition,
   type Result,
+  type WorldDefinition,
 } from "@living-diorama/content-schema";
 import type { Registries } from "@living-diorama/extension-api";
 import type { ActionResult, BehaviorMemory } from "../creatures/contracts";
@@ -12,7 +13,7 @@ import { Pathfinder } from "../navigation/pathfinder";
 import { profileForSpecies, type NavProfile } from "../navigation/profile";
 import type { Navigation } from "../navigation/region-graph";
 import { checkNavigation, checkWorld } from "../world/integrity";
-import type { WorldModel } from "../world/world-model";
+import { buildWorldModel, type WorldModel } from "../world/world-model";
 import { creaturePhaseAt, settleDay, type CreatureDay } from "./creature-day";
 import { Rng, type RngState } from "./rng";
 import { dayPhaseAt, wrapMinutes, type DayPhase } from "./time-of-day";
@@ -76,13 +77,31 @@ export interface CreatureState {
   releasedAtTick?: number;
 }
 
-export interface WorldStateOptions {
-  worldId: string;
+/**
+ * The world to build: a registered one by ID, or a definition, e.g. one derived by edits (ADR
+ * 0021). A definition must have passed `parseWorld`, with its references resolved like pack
+ * content.
+ */
+export type WorldSource =
+  { worldId: string; world?: never } | { world: WorldDefinition; worldId?: never };
+
+export type WorldStateOptions = WorldSource & {
   seed: number;
   /** Most creatures the world holds at once. No limit if omitted. */
   maxCreatures?: number;
   /** The time of day the world starts at, in minutes since local midnight. Default noon. */
   minutes?: number;
+};
+
+/**
+ * Everything derived from a world definition (ADR 0021 §1): its model, and per navigation profile
+ * key a pathfinder and where its creatures don't fit. Built whole and never changed, so an edit
+ * builds a new one and swaps it in (`WorldState.replaceWorld`).
+ */
+export interface DerivedWorld {
+  model: WorldModel;
+  pathfinders: ReadonlyMap<string, Pathfinder>;
+  limits: ReadonlyMap<string, Diagnostic[]>;
 }
 
 /** Everything `WorldState.load` replaces. */
@@ -142,9 +161,11 @@ export class WorldState {
    */
   dayPhase: DayPhase;
   readonly maxCreatures: number;
-  readonly #pathfinders: Map<string, Pathfinder>;
+  /** The world now: the registered one, or one derived from it by edits (ADR 0021). */
+  #model: WorldModel;
+  #pathfinders: Map<string, Pathfinder>;
   /** Per profile key, where its creatures don't fit (ADR 0013). */
-  readonly #limits: Map<string, Diagnostic[]>;
+  #limits: Map<string, Diagnostic[]>;
   /** Per profile key, the errors of a profile that does not work in this world. */
   readonly #failed = new Map<string, Diagnostic[]>();
   /** The seed the root stream comes from; a restored world keeps its saved one (ADR 0019 §8). */
@@ -154,36 +175,41 @@ export class WorldState {
   /** The world's own stream, e.g. for picking spawn points. */
   #rng: Rng;
   #nextCreature = 1;
+  /**
+   * The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). Not saved yet
+   * (M17 PR 4), so a restored or relaunched world counts from 1 again, skipping IDs in use.
+   */
+  #nextPropId = 1;
 
   private constructor(
     readonly registries: Registries,
-    readonly model: WorldModel,
-    pathfinders: Map<string, Pathfinder>,
-    limits: Map<string, Diagnostic[]>,
+    derived: DerivedWorld,
     seed: number,
     maxCreatures: number,
     minutes: number,
   ) {
     this.minutes = wrapMinutes(minutes);
     this.dayPhase = dayPhaseAt(this.minutes);
-    this.#pathfinders = pathfinders;
-    this.#limits = limits;
+    this.#model = derived.model;
+    this.#pathfinders = new Map(derived.pathfinders);
+    this.#limits = new Map(derived.limits);
     this.maxCreatures = maxCreatures;
     this.#seed = seed;
     this.#root = Rng.fromSeed(seed);
     this.#rng = this.#root.fork("world");
   }
 
-  /** Builds the state for a registered world. Expects `resolveReferences` to have passed. */
-  static create(
-    registries: Registries,
-    { worldId, seed, maxCreatures = Infinity, minutes = 12 * 60 }: WorldStateOptions,
-  ): Result<WorldState> {
-    const world = registries.worlds.get(worldId);
+  /**
+   * Builds the state for a registered world, or for a world definition. Expects
+   * `resolveReferences` to have passed.
+   */
+  static create(registries: Registries, options: WorldStateOptions): Result<WorldState> {
+    const { seed, maxCreatures = Infinity, minutes = 12 * 60 } = options;
+    const world = options.world ?? registries.worlds.get(options.worldId);
     if (!world) {
       return {
         ok: false,
-        diagnostics: [error("unknown_world", `World "${worldId}" is not registered`)],
+        diagnostics: [error("unknown_world", `World "${options.worldId}" is not registered`)],
       };
     }
     const check = checkWorld(world, registries);
@@ -193,18 +219,66 @@ export class WorldState {
     const pathfinders = new Map(
       check.navigations.map((nav) => [nav.profile.key, new Pathfinder(model, nav)]),
     );
-    return {
-      ok: true,
-      value: new WorldState(
-        registries,
-        model,
-        pathfinders,
-        new Map(check.limits),
-        seed,
-        maxCreatures,
-        minutes,
-      ),
-    };
+    const derived = { model, pathfinders, limits: check.limits };
+    return { ok: true, value: new WorldState(registries, derived, seed, maxCreatures, minutes) };
+  }
+
+  /** The world model now. Replaced, never changed, by an edit (ADR 0021 §1). */
+  get model(): WorldModel {
+    return this.#model;
+  }
+
+  /**
+   * Builds everything derived from `world` as if it had just loaded (ADR 0021 §1): the world
+   * model and, for every navigation profile this world has navigation for (the species' and any
+   * added since), the navigation, checked as at creation, and its pathfinder. Changes nothing;
+   * `replaceWorld` swaps the result in. Fails with the errors that would keep a profile out of
+   * the world, e.g. no spawn point left walkable for it.
+   */
+  derive(world: WorldDefinition): Result<DerivedWorld> {
+    const built = buildWorldModel(world, this.registries);
+    if (!built.ok) return built;
+    const model = built.value;
+    const pathfinders = new Map<string, Pathfinder>();
+    const limits = new Map<string, Diagnostic[]>();
+    const errors: Diagnostic[] = [];
+    for (const [key, { navigation }] of this.#pathfinders) {
+      const check = checkNavigation(world, model, navigation.profile);
+      errors.push(...check.diagnostics.filter((d) => d.severity === "error"));
+      pathfinders.set(key, new Pathfinder(model, check.navigation));
+      limits.set(key, check.limits);
+    }
+    if (errors.length > 0) return { ok: false, diagnostics: errors };
+    return { ok: true, value: { model, pathfinders, limits } };
+  }
+
+  /**
+   * Swaps in a world from `derive` (ADR 0021 §1). Profiles that failed in the old world are
+   * forgotten, so they are checked again in the new one. Creatures are left as they are; the
+   * simulation reconciles them.
+   */
+  replaceWorld(derived: DerivedWorld): void {
+    this.#model = derived.model;
+    this.#pathfinders = new Map(derived.pathfinders);
+    this.#limits = new Map(derived.limits);
+    this.#failed.clear();
+  }
+
+  /** Per navigation profile key, where its creatures don't fit (ADR 0013). */
+  get limits(): ReadonlyMap<string, readonly Diagnostic[]> {
+    return this.#limits;
+  }
+
+  /** The number the next generated placement ID tries (`prop-<n>`, ADR 0021 §2). */
+  get nextPropId(): number {
+    return this.#nextPropId;
+  }
+
+  set nextPropId(next: number) {
+    if (!Number.isInteger(next) || next < 1) {
+      throw new RangeError(`The next placement number must be a whole number from 1, got ${next}`);
+    }
+    this.#nextPropId = next;
   }
 
   /** The seed the world's random streams come from. */
@@ -260,7 +334,7 @@ export class WorldState {
    * The navigation for a profile, whether a species has it or not, and where its creatures don't
    * fit. If the world has none for the profile yet, it is built and checked like the profiles of
    * the species registered when the world was created (ADR 0012), and errors are returned (and
-   * kept, since the world doesn't change). New navigation is only used once passed to
+   * kept until the world is replaced). New navigation is only used once passed to
    * `addNavigation`.
    */
   planNavigation(profile: NavProfile): Result<PlannedNavigation> {

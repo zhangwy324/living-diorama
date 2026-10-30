@@ -175,11 +175,7 @@ export function checkSave(
     }
   }
 
-  const placements = new Set([
-    ...model.propsById.keys(),
-    ...model.definition.structures.map((s) => s.id),
-  ]);
-  const exists = (placementId: string) => placements.has(placementId);
+  const exists = placementExists(model);
   const creatures: CreatureState[] = [];
   const droppedCreatures: DroppedCreature[] = [];
   const prunedPlacements: PrunedPlacement[] = [];
@@ -202,22 +198,7 @@ export function checkSave(
     // The same major version is the same species (ADR 0003 §5), so the creature now is of the
     // registered version; otherwise its next save would list two versions of one species.
     creature.speciesVersion = species.version;
-    const pruned = (placementId: string, where: PrunedReference) =>
-      prunedPlacements.push({ creatureId, placementId, where });
-    if (creature.home !== null && !exists(creature.home)) {
-      pruned(creature.home, "home");
-      creature.home = null;
-    }
-    for (const [affordance, known] of Object.entries(creature.knowledge.places)) {
-      creature.knowledge.places[affordance] = known.filter(({ placementId }) => {
-        if (!exists(placementId)) pruned(placementId, "knowledge");
-        return exists(placementId);
-      });
-    }
-    creature.usedStructures = creature.usedStructures.filter((placementId) => {
-      if (!exists(placementId)) pruned(placementId, "used_structures");
-      return exists(placementId);
-    });
+    prunedPlacements.push(...forgetMissingPlacements(creature, exists, behaviors));
     const action = creature.action;
     const reason = action && checkAction(action, actions.get(action.id), exists);
     if (action && reason) {
@@ -227,20 +208,61 @@ export function checkSave(
       creature.decideAtTick = save.tick;
       creature.asleep = false;
     }
-    // A behavior that fails on a saved memory loses that memory rather than failing the restore.
-    creature.memory = Object.fromEntries(
-      Object.entries(creature.memory).filter(([behavior, memory]) => {
-        try {
-          behaviors.get(behavior)?.forgetPlacements?.(memory, exists);
-          return true;
-        } catch {
-          return false;
-        }
-      }),
-    );
     creatures.push(creature);
   }
   return { ok: true, value: { creatures, droppedCreatures, prunedPlacements, droppedActions } };
+}
+
+/**
+ * Prunes, in place, the creature's references to placements for which `exists` is false (ADR
+ * 0019 §7, ADR 0021 §8): its home, the places it knows and the structures it has used, which are
+ * returned, and its behaviors' memory, through each behavior's `forgetPlacements`. A behavior
+ * that throws loses that memory. Leaves its running action alone. Used by a restore and by a
+ * world edit that removes placements.
+ */
+export function forgetMissingPlacements(
+  creature: CreatureState,
+  exists: (placementId: string) => boolean,
+  behaviors: ReadonlyMap<string, BehaviorProvider>,
+): PrunedPlacement[] {
+  const prunedPlacements: PrunedPlacement[] = [];
+  const pruned = (placementId: string, where: PrunedReference) =>
+    prunedPlacements.push({ creatureId: creature.id, placementId, where });
+  if (creature.home !== null && !exists(creature.home)) {
+    pruned(creature.home, "home");
+    creature.home = null;
+  }
+  for (const [affordance, known] of Object.entries(creature.knowledge.places)) {
+    creature.knowledge.places[affordance] = known.filter(({ placementId }) => {
+      if (!exists(placementId)) pruned(placementId, "knowledge");
+      return exists(placementId);
+    });
+  }
+  creature.usedStructures = creature.usedStructures.filter((placementId) => {
+    if (!exists(placementId)) pruned(placementId, "used_structures");
+    return exists(placementId);
+  });
+  // A behavior that fails on a memory loses that memory rather than failing the restore or edit.
+  creature.memory = Object.fromEntries(
+    Object.entries(creature.memory).filter(([behavior, memory]) => {
+      try {
+        behaviors.get(behavior)?.forgetPlacements?.(memory, exists);
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return prunedPlacements;
+}
+
+/** Whether a placement (a prop or a structure) is in the world. */
+export function placementExists(model: WorldModel): (placementId: string) => boolean {
+  const placements = new Set([
+    ...model.propsById.keys(),
+    ...model.definition.structures.map((s) => s.id),
+  ]);
+  return (placementId) => placements.has(placementId);
 }
 
 /** Why a saved running action can't carry on, or undefined if it can. */
