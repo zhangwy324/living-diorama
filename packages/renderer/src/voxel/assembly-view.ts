@@ -1,4 +1,4 @@
-import type { Quaternion, VoxelAssembly, VoxelPart } from "@living-diorama/content-schema";
+import type { Quaternion, Vec3, VoxelAssembly, VoxelPart } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PreviewMotion } from "../body/preview";
@@ -50,6 +50,17 @@ export interface AssemblyGhost {
   rotation?: Quaternion;
 }
 
+/**
+ * Where a pointer points, in the body frame (metres, feet at y = 0, facing +X), however the test
+ * walk has moved the body: a ray from the camera through the pointer. It is the shape of
+ * `scoreSockets`' probe, for drag-to-socket (ADR 0023 §4).
+ */
+export interface AssemblyProbe {
+  origin: Vec3;
+  /** A unit vector. */
+  direction: Vec3;
+}
+
 export interface AssemblyViewOptions {
   /** Part types' roles, for the tail pivot of the test walk. */
   roleOf?: PartRoleResolver;
@@ -67,7 +78,12 @@ export interface AssemblyView {
   setHighlightedSockets(sockets: readonly SocketRef[]): void;
   /** Tints these part instances, e.g. the selected one and its mirror twin. */
   setSelection(instances: readonly string[]): void;
-  /** Shows a part see-through at sockets, or none. */
+  /**
+   * Shows a part see-through at sockets, or none. A part already on one of those sockets is
+   * hidden, with everything hanging from it, while the ghost is there, as a replacement would take
+   * it away. It meshes the part anew, so call it when the part, sockets or rotation change, not on
+   * every pointer move.
+   */
   setGhost(ghost: AssemblyGhost | undefined): void;
   /**
    * What is under a pointer at `clientX`, `clientY` (CSS pixels of the page, as a pointer event
@@ -75,6 +91,11 @@ export interface AssemblyView {
    * part, else undefined. Ghosts are never picked.
    */
   pick(clientX: number, clientY: number): AssemblyPick | undefined;
+  /**
+   * The ray under a pointer at `clientX`, `clientY` in the body frame, e.g. to score sockets while
+   * a part is dragged; undefined while the canvas has no size.
+   */
+  probe(clientX: number, clientY: number): AssemblyProbe | undefined;
   /**
    * Walks the creature in place with a locomotion profile (M16, ADR 0020 §8), as the body
    * preview's `setMotion` does; undefined stands it still.
@@ -85,6 +106,7 @@ export interface AssemblyView {
    * second WebGL context. Freed with the view.
    */
   readonly thumbnails: VoxelThumbnails;
+  /** Frees everything; every call after it does nothing, and `pick` and `probe` find nothing. */
   dispose(): void;
 }
 
@@ -112,7 +134,10 @@ const SELECTION_COLOUR = "#ffd84a";
 const SELECTION_OPACITY = 0.45;
 const GHOST_OPACITY = 0.5;
 
-/** A bone matrix that collapses its part to a point, so the selection tint leaves it out. */
+/**
+ * A bone matrix that collapses its part to a point: so the selection tint leaves a part out, and
+ * the body hides a part a ghost replaces.
+ */
 const COLLAPSED = new THREE.Matrix4().makeScale(0, 0, 0);
 
 interface Built {
@@ -192,7 +217,10 @@ export function createAssemblyView(
     opacity: 0.9,
   });
 
-  const camera = new THREE.PerspectiveCamera(FOV, 1, 0.005, 100);
+  // The container's shape if it has one yet, so the first body is framed for it.
+  const { clientWidth, clientHeight } = container;
+  const aspect = clientWidth > 0 && clientHeight > 0 ? clientWidth / clientHeight : 1;
+  const camera = new THREE.PerspectiveCamera(FOV, aspect, 0.005, 100);
   camera.position.copy(START_DIRECTION).multiplyScalar(2);
   const controls = new OrbitControls(camera, canvas);
   controls.enablePan = false;
@@ -205,6 +233,9 @@ export function createAssemblyView(
   let ghost: AssemblyGhost | undefined;
   let motion: PreviewMotion | undefined;
   let dirty = true;
+  let disposed = false;
+  /** Whether the canvas has had its size, so a body framed before it is framed again. */
+  let sized = false;
 
   /** How far away the camera must be to see a ball of `radius` whole. */
   const fitDistance = (radius: number) => {
@@ -256,14 +287,26 @@ export function createAssemblyView(
     for (const marker of markers.children) marker.scale.setScalar(scale);
   };
 
-  const showSelection = () => {
+  /** Sets the body's and the tint's bones: hidden parts collapsed, the tint on selected ones. */
+  const showBones = () => {
     if (!built) return;
-    const { tint, body, indexById } = built;
+    const { mesh, tint, body, indexById } = built;
+    const hidden = hiddenParts(built, ghost);
     const chosen = new Set(selection.map((id) => indexById.get(id)));
-    tint.skeleton.bones.forEach((bone, i) => {
-      bone.matrixWorld.copy(chosen.has(i) ? (body.bones[i] ?? COLLAPSED) : COLLAPSED);
+    let tinted = false;
+    body.bones.forEach((rest, i) => {
+      const shown = !hidden.has(i);
+      mesh.skeleton.bones[i]?.matrixWorld.copy(shown ? rest : COLLAPSED);
+      const lit = shown && chosen.has(i);
+      tinted ||= lit;
+      tint.skeleton.bones[i]?.matrixWorld.copy(lit ? rest : COLLAPSED);
     });
-    tint.visible = selection.some((id) => indexById.has(id));
+    tint.visible = tinted;
+    // Picking reads the bone matrices, and the bounds it keeps from them; rendering updates the
+    // matrices itself.
+    mesh.skeleton.update();
+    mesh.boundingSphere = null;
+    mesh.boundingBox = null;
   };
 
   const showGhost = () => {
@@ -346,6 +389,8 @@ export function createAssemblyView(
     renderer.setSize(box.width, box.height, false);
     camera.aspect = box.width / box.height;
     camera.updateProjectionMatrix();
+    if (!sized && built) frame(built, undefined);
+    sized = true;
     dirty = true;
   });
   resizer.observe(canvas);
@@ -356,11 +401,24 @@ export function createAssemblyView(
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  /** Aims `raycaster` through a pointer; false while the canvas has no size. */
+  const aim = (clientX: number, clientY: number): boolean => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    pointer.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(pointer, camera);
+    return true;
+  };
+  const toBody = new THREE.Matrix4();
+  const bodyRay = new THREE.Ray();
 
   return {
     thumbnails,
     setAssembly(assembly) {
-      if (assembly === built?.assembly) return;
+      if (disposed || assembly === built?.assembly) return;
       const previous = built;
       if (!assembly) {
         if (previous) disposeBuilt(previous);
@@ -372,39 +430,47 @@ export function createAssemblyView(
         frame(built, previous);
       }
       showMarkers();
-      showSelection();
       showGhost();
+      showBones();
       dirty = true;
     },
     setHighlightedSockets(sockets) {
+      if (disposed) return;
       highlighted = sockets.map(({ instance, socket }) => ({ instance, socket }));
       showMarkers();
       dirty = true;
     },
     setSelection(instances) {
+      if (disposed) return;
       selection = [...instances];
-      showSelection();
+      showBones();
       dirty = true;
     },
     setGhost(next) {
+      if (disposed) return;
       ghost = next && { ...next, sockets: [...next.sockets] };
       showGhost();
+      showBones();
       dirty = true;
     },
     pick(clientX, clientY) {
-      if (!built) return undefined;
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return undefined;
-      pointer.set(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(pointer, camera);
+      if (disposed || !built || !aim(clientX, clientY)) return undefined;
       scaleMarkers();
       scene.updateMatrixWorld();
       return pickAssembly(raycaster, built.mesh, built.assembly, markers);
     },
+    probe(clientX, clientY) {
+      if (disposed || !aim(clientX, clientY)) return undefined;
+      // The rig is the scene's child, so its matrix is the body frame in the world.
+      toBody.copy(rig.matrix).invert();
+      const { origin, direction } = bodyRay.copy(raycaster.ray).applyMatrix4(toBody);
+      return {
+        origin: { x: origin.x, y: origin.y, z: origin.z },
+        direction: { x: direction.x, y: direction.y, z: direction.z },
+      };
+    },
     setTestWalk(next) {
+      if (disposed) return;
       motion = next && { ...next };
       travelled = 0;
       clock = 0;
@@ -414,6 +480,8 @@ export function createAssemblyView(
       dirty = true;
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       cancelAnimationFrame(request);
       controls.removeEventListener("change", onChange);
       controls.dispose();
@@ -446,8 +514,6 @@ function build(
 ): Built {
   const body = buildVoxelBody(assembly, roleOf);
   const mesh = skinVoxelBody(body, material);
-  // For picking, which reads the bones' matrices; rendering updates them itself.
-  mesh.skeleton.update();
   const tint = skinVoxelBody(body, tintMaterial);
   tint.castShadow = false;
   tint.renderOrder = 1;
@@ -505,4 +571,26 @@ export function pickAssembly(
   const index = mesh.geometry.getAttribute("skinIndex").getX(hit.face.a);
   const instance = assembly.instances[index];
   return instance && { kind: "part", instance: instance.id };
+}
+
+/**
+ * The parts a ghost takes the place of, by index: those on the sockets it is shown at, and
+ * everything hanging from them.
+ */
+export function hiddenParts(
+  built: Pick<Built, "assembly" | "body">,
+  ghost: Pick<AssemblyGhost, "sockets"> | undefined,
+): Set<number> {
+  const hidden = new Set<number>();
+  if (!ghost) return hidden;
+  const { assembly, body } = built;
+  assembly.instances.forEach(({ parent }, i) => {
+    const under = body.parents[i] ?? -1;
+    // Parents come before their children, so a parent's state is known here.
+    const replaced =
+      parent !== undefined &&
+      ghost.sockets.some((s) => s.instance === parent.instance && s.socket === parent.socket);
+    if (replaced || hidden.has(under)) hidden.add(i);
+  });
+  return hidden;
 }

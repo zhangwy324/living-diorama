@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { drawIcon, type IconRenderer } from "./cue-icons";
+import { drawIcon, type IconMaterialCopies, type IconRenderer } from "./cue-icons";
 import type { PropModel } from "./props";
 
 // Thumbnails of prop models for the editor's prop drawer (ADR 0021): the same three-quarter
@@ -84,12 +84,14 @@ export function thumbnailSize(size: number): number {
 /**
  * Draws `model` `size` pixels square as `drawIcon` does, on a transparent background, and reads
  * it back as an image URL. The model is only read; the render target is freed before returning.
+ * `kept` keeps the material copies across draws (`iconStage`).
  */
 export function drawThumbnail(
   renderer: ThumbnailRenderer,
   model: THREE.Object3D,
   size: number,
   encode: ThumbnailEncoder,
+  kept?: IconMaterialCopies,
 ): string {
   const target = new THREE.WebGLRenderTarget(size, size, {
     samples: 4,
@@ -97,7 +99,7 @@ export function drawThumbnail(
     colorSpace: THREE.SRGBColorSpace,
   });
   try {
-    drawIcon(renderer, model, target);
+    drawIcon(renderer, model, target, kept);
     const raw = new Uint8Array(size * size * 4);
     renderer.readRenderTargetPixels(target, 0, 0, size, size, raw);
     return encode(thumbnailPixels(raw, size), size);

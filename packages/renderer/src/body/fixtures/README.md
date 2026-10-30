@@ -14,3 +14,5 @@ Drawings made in the Creation Studio for the body tests: holes (`outline.test.ts
 `mossling.png` is the drawn mossling the built-in pack had until M20 (its `mossling.svg`) as `readImage` reads it: drawn into a 256 px canvas in a browser and saved with `toBlob`. The mossling is now made of voxels, but the drawing stays here as a test case for drawn bodies: a body with thin hairs and gaps under them.
 
 To add a case, draw and release it in the dev app, then copy its `drawing.json` and `appearance.png` from the library folder. The tests read the PNG through `load.ts`, so they don't depend on the Studio's code; the JSON is kept to redraw it. Add its stroke colours to the palette in `load.ts`.
+
+`voxel-creature.ts` is a voxel assembly in code for the voxel body's and the assembly view's tests: a torso with a mirror pair of arms turned a quarter turn, a hand on each (the right one reflected through its arm), and a tail with a mirror pair of fins, so rotations and mirroring meet.

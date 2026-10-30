@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { ghostPlacement, partGeometry, socketKey, socketPoints } from "./assembly-points";
 import { pickAssembly } from "./assembly-view";
 import { buildVoxelBody, createVoxelMaterial, skinVoxelBody } from "./body";
-import { creature } from "./test-creature";
+import { creature } from "../body/fixtures/voxel-creature";
 
 const parsed = (): VoxelAssembly => VoxelAssemblySchema.parse(creature());
 

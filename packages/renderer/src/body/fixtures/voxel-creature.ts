@@ -1,6 +1,6 @@
 import type { VoxelAssemblyInput, VoxelPartInput } from "@living-diorama/content-schema";
 
-// Test fixtures shared by the voxel body's and the assembly view's tests.
+// A voxel creature for the voxel body's and the assembly view's tests (see README.md).
 
 /** A box of `x × y × z` cubes of 2.5 cm, all of one colour. */
 export function box(

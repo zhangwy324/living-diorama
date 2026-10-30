@@ -14,7 +14,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { boneMatrix, buildVoxelBody, createVoxelMaterial, skinVoxelBody } from "./body";
 import { meshVoxelParts } from "./mesher";
-import { creature } from "./test-creature";
+import { creature } from "../body/fixtures/voxel-creature";
 
 function parsed(input: VoxelAssemblyInput = creature()): VoxelAssembly {
   const result = validate(VoxelAssemblySchema, input);

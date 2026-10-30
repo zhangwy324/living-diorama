@@ -10,6 +10,7 @@ import {
   type ThumbnailEncoder,
   type ThumbnailRenderer,
 } from "../prop-thumbnails";
+import type { IconMaterialCopies } from "../cue-icons";
 import { buildVoxelBody, createVoxelMaterial, skinVoxelBody } from "./body";
 
 // Thumbnails of voxel parts and assemblies (ADR 0022, M20 decisions; ADR 0023 §20), e.g. for the
@@ -88,8 +89,10 @@ interface Job {
  * again. The cache grows only with the sources and sizes asked for, an image URL each.
  *
  * GPU resources: each thumbnail's body (geometry and skeleton) and render target are freed as
- * soon as it is read back, so only the image URLs are kept. `dispose` forgets the thumbnails and
- * frees the material; thumbnails still queued, and any asked for after it, resolve to undefined.
+ * soon as it is read back, so only the image URLs are kept. The material and its staged copy are
+ * kept, so the shader program is compiled once, not per thumbnail (#224). `dispose` forgets the
+ * thumbnails and frees both; thumbnails still queued, and any asked for after it, resolve to
+ * undefined.
  */
 export class VoxelThumbnails {
   readonly #renderer: ThumbnailRenderer;
@@ -99,8 +102,10 @@ export class VoxelThumbnails {
   readonly #cache = new Map<string, Promise<string | undefined>>();
   #queue: Job[] = [];
   #scheduled = false;
-  /** Shared by every thumbnail; `drawIcon` draws with copies of it. */
+  /** Shared by every thumbnail. */
   #material: THREE.MeshStandardMaterial | undefined;
+  /** The copy of it `drawIcon` draws with, kept so its program is too. */
+  readonly #copies: IconMaterialCopies = new Map();
   #disposed = false;
 
   constructor(
@@ -177,7 +182,7 @@ export class VoxelThumbnails {
       const body = buildVoxelBody(assembly());
       const mesh = skinVoxelBody(body, (this.#material ??= createVoxelMaterial()));
       try {
-        resolve(drawThumbnail(this.#renderer, mesh, pixels, this.#encode));
+        resolve(drawThumbnail(this.#renderer, mesh, pixels, this.#encode, this.#copies));
       } finally {
         mesh.skeleton.dispose();
         body.dispose();
@@ -193,6 +198,8 @@ export class VoxelThumbnails {
     for (const job of this.#queue) job.resolve(undefined);
     this.#queue = [];
     this.#cache.clear();
+    for (const copy of this.#copies.values()) copy.dispose();
+    this.#copies.clear();
     this.#material?.dispose();
     this.#material = undefined;
   }

@@ -78,6 +78,9 @@ export class PropIcons {
   }
 }
 
+/** Material copies kept across icon draws by their original (`iconStage`). */
+export type IconMaterialCopies = Map<THREE.Material, THREE.Material>;
+
 /** What `drawIcon` uses of a renderer. A `THREE.WebGLRenderer` fits. */
 export type IconRenderer = Pick<
   THREE.WebGLRenderer,
@@ -93,16 +96,18 @@ export type IconRenderer = Pick<
 /**
  * Draws a picture of `model` into `target` on a clear background, as `iconStage` stages it, and
  * leaves the renderer drawing where it did, with its clear colour back. The model is only read.
+ * `kept`, if given, keeps the material copies across draws (see `iconStage`).
  */
 export function drawIcon(
   renderer: IconRenderer,
   model: THREE.Object3D,
   target: THREE.WebGLRenderTarget,
+  kept?: IconMaterialCopies,
 ): void {
   const previous = renderer.getRenderTarget();
   const clearColor = renderer.getClearColor(new THREE.Color());
   const clearAlpha = renderer.getClearAlpha();
-  const { scene, camera, dispose } = iconStage(model);
+  const { scene, camera, dispose } = iconStage(model, kept);
   try {
     renderer.setClearColor(0x000000, 0);
     renderer.setRenderTarget(target);
@@ -134,8 +139,16 @@ function iconTarget(): THREE.WebGLRenderTarget {
  * skeleton, posed as it is), with material copies free of any clipping planes but keeping their
  * shader patches, lit in plain daylight, and a camera framing it in a three-quarter view from
  * slightly above. `dispose` frees the material copies only.
+ *
+ * With `kept`, a material's copy is taken from it, or made and put there, and `dispose` leaves it
+ * to the map's owner, who frees the copies when done. A renderer frees a shader program once no
+ * material uses it, so a copy made and freed per draw compiles the program anew every time; a
+ * kept copy keeps it (issue #224).
  */
-export function iconStage(model: THREE.Object3D): {
+export function iconStage(
+  model: THREE.Object3D,
+  kept?: IconMaterialCopies,
+): {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   dispose: () => void;
@@ -151,12 +164,15 @@ export function iconStage(model: THREE.Object3D): {
   scene.add(key, fill);
   const copies: THREE.Material[] = [];
   const copy = (material: THREE.Material) => {
+    const known = kept?.get(material);
+    if (known) return known;
     const c = material.clone();
     c.clippingPlanes = null;
     // `clone` drops these, e.g. a voxel body's colour and occlusion decoding (`voxel/body.ts`).
     c.onBeforeCompile = material.onBeforeCompile;
     c.customProgramCacheKey = material.customProgramCacheKey;
-    copies.push(c);
+    if (kept) kept.set(material, c);
+    else copies.push(c);
     return c;
   };
   const bounds = new THREE.Box3();

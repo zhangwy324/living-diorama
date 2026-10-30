@@ -1,8 +1,9 @@
 import { VoxelAssemblySchema, type VoxelAssembly } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAssemblyView, type AssemblyView } from "./assembly-view";
-import { creature } from "./test-creature";
+import { createAssemblyView, hiddenParts, type AssemblyView } from "./assembly-view";
+import { buildVoxelBody } from "./body";
+import { creature } from "../body/fixtures/voxel-creature";
 
 // The assembly view without WebGL or a DOM: three's renderer and the browser's frame loop, resize
 // observer and window are faked, and each rendered frame's scene is kept.
@@ -36,6 +37,10 @@ vi.mock("three", async (importOriginal) => {
 });
 
 let frames: FrameRequestCallback[] = [];
+/** The resize observers' callbacks, to resize the canvas. */
+let resizers: ((entries: { contentRect: { width: number; height: number } }[]) => void)[] = [];
+const resize = (width: number, height: number) =>
+  resizers.forEach((callback) => callback([{ contentRect: { width, height } }]));
 let now = 0;
 /** Runs the frame loop for `count` frames of 1/60 s. */
 const runFrames = (count: number) => {
@@ -49,6 +54,7 @@ const runFrames = (count: number) => {
 
 beforeEach(() => {
   rendered.length = 0;
+  resizers = [];
   frames = [];
   vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
   vi.stubGlobal("cancelAnimationFrame", () => {
@@ -57,6 +63,11 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(
+        callback: (entries: { contentRect: { width: number; height: number } }[]) => void,
+      ) {
+        resizers.push(callback);
+      }
       observe() {}
       disconnect() {}
     },
@@ -219,5 +230,132 @@ describe("the assembly view", () => {
     // The body's, the tint's, the ghost's, the markers', the grid's and the water's.
     expect(materials).toHaveBeenCalledTimes(6);
     materials.mockRestore();
+  });
+});
+
+/** A probe's ray as three.js vectors. */
+const ray = (probe: { origin: THREE.Vector3Like; direction: THREE.Vector3Like }) =>
+  new THREE.Ray(new THREE.Vector3().copy(probe.origin), new THREE.Vector3().copy(probe.direction));
+const MIDDLE = [RECT.left + RECT.width / 2, RECT.top + RECT.height / 2] as const;
+const RIGHT_EDGE = [RECT.left + RECT.width, RECT.top + RECT.height / 2] as const;
+
+describe("the assembly view's probe, ghost and life cycle", () => {
+  it("probes from the camera in the body frame, however the walk moves the body", () => {
+    const view = createAssemblyView(container);
+    view.setAssembly(parsed());
+    const still = ray(view.probe(...MIDDLE)!);
+    expect(still.direction.length()).toBeCloseTo(1, 9);
+    view.setTestWalk({ profile: "walk", submersion: 0, speed: 0.6 });
+    runFrames(10);
+    const rig = drawn().rig!.matrix;
+    expect(rig.equals(new THREE.Matrix4())).toBe(false);
+    const walking = ray(view.probe(...MIDDLE)!);
+    // The same world ray, taken into the moved body's frame.
+    const expected = still.clone().applyMatrix4(rig.clone().invert());
+    expect(walking.origin.distanceTo(expected.origin)).toBeLessThan(1e-9);
+    expect(walking.direction.distanceTo(expected.direction)).toBeLessThan(1e-9);
+    view.dispose();
+  });
+
+  /** The angle between the probes through the middle and the right edge: half the view's width. */
+  const halfWidth = (view: AssemblyView) =>
+    ray(view.probe(...MIDDLE)!).direction.angleTo(ray(view.probe(...RIGHT_EDGE)!).direction);
+  const halfWidthAt = (aspect: number) =>
+    Math.atan(Math.tan(THREE.MathUtils.degToRad(15)) * aspect);
+
+  it("takes its first shape from the container, and frames again on the first resize", () => {
+    const wide = { ...container, clientWidth: 800, clientHeight: 200 } as unknown as HTMLElement;
+    const shaped = createAssemblyView(wide);
+    expect(halfWidth(shaped)).toBeCloseTo(halfWidthAt(4), 6);
+    shaped.dispose();
+
+    const view = createAssemblyView(container);
+    view.setAssembly(parsed());
+    const distance = () => ray(view.probe(...MIDDLE)!).origin.length();
+    const square = distance();
+    // A tall, narrow canvas needs the camera further out to see the body whole.
+    resize(100, 400);
+    expect(halfWidth(view)).toBeCloseTo(halfWidthAt(0.25), 6);
+    const narrow = distance();
+    expect(narrow).toBeGreaterThan(square * 1.5);
+    // Later resizes keep the camera where the player put it.
+    resize(400, 400);
+    expect(distance()).toBeCloseTo(narrow, 9);
+    view.dispose();
+  });
+
+  it("hides the part a ghost would replace, and what hangs from it, while it is there", () => {
+    const view = createAssemblyView(container);
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    view.setSelection(["left-arm"]);
+    view.setGhost({
+      part: assembly.parts.arm!,
+      sockets: [{ instance: "torso", socket: "left" }],
+      rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+    });
+    runFrames(1);
+    const { body, tint } = drawn();
+    const collapsed = (bones: THREE.Bone[]) =>
+      bones.flatMap((bone, i) =>
+        bone.matrixWorld.determinant() === 0 ? [assembly.instances[i]!.id] : [],
+      );
+    expect(collapsed(body!.skeleton.bones)).toEqual(["left-arm", "left-hand"]);
+    // The hidden part's tint goes with it.
+    expect(tint!.visible).toBe(false);
+    // And it can't be picked: the pick's bounds and bones follow.
+    expect(body!.boundingSphere).toBeNull();
+    view.setGhost(undefined);
+    runFrames(1);
+    expect(collapsed(drawn().body!.skeleton.bones)).toEqual([]);
+    expect(drawn().tint!.visible).toBe(true);
+    view.dispose();
+  });
+
+  it("does nothing once disposed", () => {
+    const view = createAssemblyView(container);
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    view.dispose();
+    const count = rendered.length;
+    view.setAssembly(parsed());
+    view.setHighlightedSockets([{ instance: "torso", socket: "left" }]);
+    view.setSelection(["torso"]);
+    view.setGhost({ part: assembly.parts.arm!, sockets: [{ instance: "torso", socket: "left" }] });
+    view.setTestWalk({ profile: "walk", submersion: 0, speed: 1 });
+    expect(view.pick(...MIDDLE)).toBeUndefined();
+    expect(view.probe(...MIDDLE)).toBeUndefined();
+    view.dispose();
+    runFrames(3);
+    expect(rendered.length).toBe(count);
+  });
+});
+
+describe("the parts a ghost replaces", () => {
+  it("are those on its sockets and their subtrees", () => {
+    const assembly = parsed();
+    const built = { assembly, body: buildVoxelBody(assembly) };
+    const ids = (hidden: Set<number>) => [...hidden].map((i) => assembly.instances[i]!.id);
+    expect(ids(hiddenParts(built, undefined))).toEqual([]);
+    expect(
+      ids(
+        hiddenParts(built, {
+          sockets: [
+            { instance: "torso", socket: "right" },
+            { instance: "tail", socket: "a" },
+          ],
+        }),
+      ),
+    ).toEqual(["right-arm", "right-hand", "fin-a"]);
+    // A free socket hides nothing.
+    const freed = creature();
+    freed.instances = freed.instances.filter((i) => i.id !== "fin-b");
+    const fewer = VoxelAssemblySchema.parse(freed);
+    expect(
+      hiddenParts(
+        { assembly: fewer, body: buildVoxelBody(fewer) },
+        { sockets: [{ instance: "tail", socket: "b" }] },
+      ).size,
+    ).toBe(0);
   });
 });

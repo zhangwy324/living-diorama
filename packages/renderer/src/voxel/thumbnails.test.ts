@@ -252,9 +252,15 @@ describe("voxel thumbnails", () => {
     expect(targets.mock.contexts).toEqual([drawn[0]!.target]);
     expect(geometries.mock.contexts).toEqual([mesh!.geometry]);
     expect(skeletons.mock.contexts).toEqual([mesh!.skeleton]);
-    // The material copy drawn with is freed at once; the material itself on `dispose`.
-    expect(materials.mock.contexts).toEqual([mesh!.material]);
+    // The material copy drawn with is kept, so its shader program is (#224); both are freed on
+    // `dispose`.
+    expect(materials).not.toHaveBeenCalled();
+    const second = thumbnails.part(legSource("2"), 32);
+    clock.run();
+    await second;
+    expect(skinned(drawn[1]!.scene)[0]!.material).toBe(mesh!.material);
     thumbnails.dispose();
+    expect(materials.mock.contexts).toContain(mesh!.material);
     expect(materials).toHaveBeenCalledTimes(2);
     for (const spy of [targets, geometries, skeletons, materials]) spy.mockRestore();
   });
