@@ -12,6 +12,7 @@ import type {
   PropSummary,
   SimulationSnapshot,
   SpeciesSummary,
+  WorldContent,
 } from "@living-diorama/simulation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ControlsOverlay } from "./ControlsOverlay";
@@ -23,7 +24,7 @@ import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
 import { attachEditorInput } from "./editor-input";
-import { partRoleLookup } from "./part-roles";
+import { partFitLookup, partRoleLookup } from "./part-types";
 import { PropDrawer } from "./PropDrawer";
 import { drawerShown, drawerTabs, PropThumbnails, TILE_THUMBNAIL_PX } from "./prop-drawer";
 import { PropEditor, type EditorState } from "./prop-editor";
@@ -197,7 +198,11 @@ export function App() {
     // world is restored only then, so its drawn creatures find their species (ADR 0019 §3). The
     // Studio reaches the library once the world is open. Development builds also reach both from
     // the console.
-    const openWorld = async () => {
+    const openWorld = async ({
+      parts,
+      partTypes,
+      socketTypes,
+    }: Pick<WorldContent, "parts" | "partTypes" | "socketTypes">) => {
       const opened = await openSpeciesLibrary(
         libraryStore,
         {
@@ -215,7 +220,10 @@ export function App() {
       library = opened;
       pushLibrary();
       if (import.meta.env.DEV) {
-        installLibraryDevHook(opened);
+        installLibraryDevHook(opened, {
+          parts,
+          lookup: partFitLookup(partTypes, socketTypes),
+        });
         uninstallWorldHook = installWorldDevHook(world, {
           history,
           validateEdit: client.validateEdit,
@@ -264,7 +272,7 @@ export function App() {
         setEditorState(propEditor.state);
         if (import.meta.env.DEV) uninstallTimeHook = installTimeDevHook(client);
         worldReady();
-        void openWorld();
+        void openWorld(content);
       },
       // The restored world's ticks may be behind the empty world's, or far ahead after catch-up,
       // as are those of a world caught up in place (issue #113).

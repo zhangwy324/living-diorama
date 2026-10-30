@@ -156,6 +156,24 @@ describe("simulation host", () => {
     expect(structuredClone(ready.parts)).toEqual(ready.parts);
   });
 
+  it("lists the part types with their fits and roles, and the socket types, by ID", () => {
+    const host = startHost();
+    host.init();
+    const [ready] = host.take();
+    if (ready?.type !== "ready") throw new Error("Expected ready");
+    expect(ready.partTypes).toContainEqual({
+      id: "hollow:leg",
+      fits: ["hollow:hip", "hollow:shoulder"],
+    });
+    expect(ready.partTypes).toContainEqual({
+      id: "hollow:tail",
+      fits: ["hollow:tail-base"],
+      role: "tail",
+    });
+    expect(ready.socketTypes).toContain("hollow:hip");
+    expect(ready.socketTypes).toEqual([...ready.socketTypes].sort());
+  });
+
   it("describes the prop types with their categories, and the categories in tab order", () => {
     // A pack's tab sorts by order among the built-in ones, and a type without a category says so
     // by leaving it out (the drawer lists it under "Other").
@@ -956,8 +974,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 18, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(18);
+  it("is protocol version 19, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(19);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,
