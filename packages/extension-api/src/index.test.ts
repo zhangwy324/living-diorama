@@ -381,6 +381,24 @@ describe("resolveReferences", () => {
     ]);
   });
 
+  it("lets a species' appearance be an image or a voxel assembly, not a model", () => {
+    for (const kind of ["image", "voxel", "model"]) {
+      const registries = createRegistries();
+      withActions(registries);
+      expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
+      const appearance = `test:pebble.${kind}`;
+      expectOk(registries.assets.register({ ...sprite, id: appearance, kind }));
+      expectOk(registries.species.register({ ...species, appearance }));
+      expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual(
+        kind === "model"
+          ? [
+              'error: species/test:pebble appearance: "test:pebble.model" is an asset of kind model, expected image or voxel (invalid_value)',
+            ]
+          : [],
+      );
+    }
+  });
+
   it("checks that every prop placement names a registered prop type", () => {
     const registries = createRegistries();
     const at = { position: { x: 0, y: 0, z: 0 } };

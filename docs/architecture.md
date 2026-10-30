@@ -138,7 +138,7 @@ Tray → Quit asks the page to stop first: the app saves the world, sends `shutd
 
 ### Main thread ↔ worker
 
-Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 15; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
+Defined in [`packages/simulation/src/protocol.ts`](../packages/simulation/src/protocol.ts). Every message is wrapped in an envelope with `PROTOCOL_VERSION`, which is 16; the worker rejects a command with another version, and the app treats a message with another version as fatal. Commands carry only IDs and settings, plus species registered while the app runs: the worker loads content by itself, and `ready` sends back what the main thread draws.
 
 Request commands (`register_species`, `spawn`, `despawn`, `check_limits`, `save`, `restore`, `catch_up`, `edit`, `validate_edit`) can fail in normal use. They carry a request ID and get a reply with it. `SimulationClient` turns each into a promise of a `Result` ([ADR 0012](adr/0012-runtime-species.md) §1, §8): `save` resolves with the save's JSON text, `restore` with the restore report, `catch_up` with the catch-up report, `edit` with the edit result (or its rejection) and `validate_edit` with the dry run's check ([ADR 0021](adr/0021-live-prop-editing.md)).
 
@@ -147,7 +147,7 @@ The client sends `catch_up` itself when the running world lost wall-clock time, 
 | Direction     | Message                        | Meaning                                                                                                                                                                |
 | ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | main → worker | `init`                         | World ID, seed, tick rate, creature cap and the local time of day. Always first.                                                                                       |
-|               | `register_species`             | Add a species and the URL of its appearance image, checked like pack content.                                                                                          |
+|               | `register_species`             | Add a species and the URL and kind (image or voxel) of its appearance, checked like pack content.                                                                      |
 |               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out. `released` marks a Studio release.                                                    |
 |               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.                                                                           |
 |               | `save`                         | Save the world between ticks, also while paused; `savedAt` is the wall-clock time.                                                                                     |
@@ -227,7 +227,7 @@ Content is data registered into typed registries, and the engine refers to it on
 
 Drawn species go through the same schemas, registries and checks as pack content, and no engine code tells them apart ([ADR 0012](adr/0012-runtime-species.md)).
 
-1. `register_species` builds an image asset whose ID is the species' `appearance` and whose version is the species' version.
+1. `register_species` builds an asset of the kind it is sent (`image` for a drawn body, `voxel` for a voxel assembly) whose ID is the species' `appearance`, whose version is the species' version and whose URL it is sent. The worker keeps only the URL and kind, never the file ([ADR 0022](adr/0022-voxel-creatures.md) §20).
 2. `addEntries()` validates the species and its asset, resolves their references against what is registered, and registers both only if everything passes.
 3. If the species brings a new navigation profile, `checkNavigation()` builds that profile's navigation and runs the per-profile world checks. Errors reject the species; the profile is kept only if registration succeeds.
 4. The world holds at most `maxCreatures` creatures (20, from `startup.ts`). A spawn beyond that is rejected with `world_full`.

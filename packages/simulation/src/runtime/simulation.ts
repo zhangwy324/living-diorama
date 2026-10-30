@@ -23,6 +23,7 @@ import {
   type LocomotionRule,
   type NeedType,
   type Registries,
+  type SpeciesAppearanceKind,
 } from "@living-diorama/extension-api";
 import {
   isActionProvider,
@@ -314,13 +315,19 @@ export class Simulation {
   }
 
   /**
-   * Registers a species and its appearance image while the world runs (ADR 0012), validated and
-   * resolved like pack content. The image asset has the ID `species.appearance` and the species'
-   * version. A species with a new navigation profile gets its navigation built and checked like
+   * Registers a species and its appearance while the world runs (ADR 0012), validated and
+   * resolved like pack content. The appearance asset, of `appearanceKind` (a drawn body's image
+   * or a voxel body's assembly), has the ID `species.appearance` and the species' version. Only
+   * its URL is kept: the simulation never reads the file, so a voxel species' cubes never reach
+   * it (ADR 0022 §20). A species with a new navigation profile gets its navigation built and checked like
    * the world's at creation. Nothing is registered if anything fails. On success, `limits` says
    * where its creatures don't fit, e.g. a bridge too narrow for them (ADR 0013).
    */
-  registerSpecies(input: unknown, appearanceUrl: string): Result<RegisteredSpecies> {
+  registerSpecies(
+    input: unknown,
+    appearanceUrl: string,
+    appearanceKind: SpeciesAppearanceKind,
+  ): Result<RegisteredSpecies> {
     const { registries } = this.state;
     const checked = registries.species.validate(input);
     if (!checked.ok) return checked;
@@ -338,7 +345,7 @@ export class Simulation {
         input: {
           id: species.appearance,
           version: species.version,
-          kind: "image",
+          kind: appearanceKind,
           url: appearanceUrl,
         },
       },

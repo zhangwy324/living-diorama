@@ -68,11 +68,21 @@ const summarizeAsset = ({ kind, url, scale }: AssetEntry): AssetSummary => ({
   ...(scale === undefined ? {} : { scale }),
 });
 
-const summarizeSpecies = ({ appearance, sizeClass, body }: SpeciesDefinition): SpeciesSummary => ({
-  appearance,
-  sizeClass,
-  body: { ...body },
-});
+/**
+ * A species as the main thread draws it. A voxel species' body plan is only how it moves: its
+ * shape is in its assembly, which the renderer reads from the appearance asset (ADR 0022 §20).
+ */
+function summarizeSpecies(
+  { appearance, sizeClass, body }: SpeciesDefinition,
+  registries: Registries,
+): SpeciesSummary {
+  const kind = registries.assets.get(appearance)?.kind;
+  return {
+    appearance,
+    sizeClass,
+    body: kind === "voxel" ? { locomotion: body.locomotion } : { ...body },
+  };
+}
 
 /** The world as the main thread draws it, as plain data so it survives `postMessage`. */
 export function describeContent({ state }: Simulation): WorldContent {
@@ -82,7 +92,7 @@ export function describeContent({ state }: Simulation): WorldContent {
     navigations: state.navigations.map((navigation) => describeNavigation(model, navigation)),
     assets: Object.fromEntries(registries.assets.values().map((a) => [a.id, summarizeAsset(a)])),
     species: Object.fromEntries(
-      registries.species.values().map((s) => [s.id, summarizeSpecies(s)]),
+      registries.species.values().map((s) => [s.id, summarizeSpecies(s, registries)]),
     ),
     props: Object.fromEntries(
       registries.props
@@ -263,7 +273,11 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
     let diagnostics: Diagnostic[];
     switch (command.type) {
       case "register_species": {
-        const registered = sim.registerSpecies(command.species, command.appearanceUrl);
+        const registered = sim.registerSpecies(
+          command.species,
+          command.appearanceUrl,
+          command.appearanceKind,
+        );
         if (!registered.ok) {
           diagnostics = registered.diagnostics;
           break;
@@ -275,7 +289,7 @@ export function runSimulationHost(port: HostPort, options: HostOptions): void {
           type: "species_registered",
           ...requestId,
           speciesId: species.id,
-          species: summarizeSpecies(species),
+          species: summarizeSpecies(species, sim.state.registries),
           asset: summarizeAsset(asset),
           limits,
         });

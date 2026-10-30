@@ -254,7 +254,7 @@ describe("simulation client", () => {
 
   it("registers a species, then spawns and despawns its creature", async () => {
     const { client, callbacks, tick } = start();
-    const registering = client.registerSpecies(drawn, "blob:http://localhost/puddle");
+    const registering = client.registerSpecies(drawn, "blob:http://localhost/puddle", "image");
     tick();
     await expect(registering).resolves.toEqual({
       ok: true,
@@ -278,7 +278,7 @@ describe("simulation client", () => {
 
   it("resolves rejected requests with diagnostics instead of failing", async () => {
     const { client, callbacks, tick } = start();
-    const registering = client.registerSpecies({ ...drawn, behaviors: [] }, "blob:x");
+    const registering = client.registerSpecies({ ...drawn, behaviors: [] }, "blob:x", "image");
     const despawning = client.despawn("creature-404");
     tick();
     const registered = await registering;
