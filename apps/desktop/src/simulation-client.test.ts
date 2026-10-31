@@ -120,19 +120,21 @@ describe("simulation client", () => {
       "Plants",
       "Mushrooms",
     ]);
-    // So are the voxel part types, with their names, fits, roles and motions, and the socket types.
+    // So are the voxel part types, with their names, fits, roles, motions and drawing recipes, and the socket types.
     expect(content?.partTypes).toContainEqual({
       id: "hollow:tail",
       name: "Tail",
       fits: ["hollow:tail-base"],
       role: "tail",
       motion: "wag",
+      drawing: { view: "side", rule: "tube" },
     });
     expect(content?.partTypes).toContainEqual({
       id: "hollow:torso",
       name: "Torso",
       fits: [],
       role: "root",
+      drawing: { view: "side", rule: "puffy" },
     });
     expect(content?.socketTypes).toContain("hollow:tail-fin-mount");
     // And the suggested colours.

@@ -17,6 +17,8 @@ import {
   parseSpeciesDefinition,
   parseStructureDefinition,
   parseWorldDefinition,
+  PART_DRAWING_RULES,
+  PART_DRAWING_VIEWS,
   PART_MOTIONS,
   drawnOnlySettings,
   type Diagnostic,
@@ -541,7 +543,7 @@ describe("PropCategoryDefinition", () => {
 });
 
 describe("PartTypeDefinition", () => {
-  const torso = { schemaVersion: 2, id: "test:torso", version: "1.0.0", name: "Torso" };
+  const torso = { schemaVersion: 3, id: "test:torso", version: "1.0.0", name: "Torso" };
 
   it("has the tail and root roles, and fits nothing by default", () => {
     expect(parsePartTypeDefinition({ ...torso, role: "root" })).toEqual({
@@ -570,6 +572,34 @@ describe("PartTypeDefinition", () => {
     expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
       ["motion", "Unknown part motion (expected swing, wag, bob, paddle, flop, blink)"],
     ]);
+  });
+
+  it("takes a drawing recipe of a view and a rule, and none by default", () => {
+    const drawing = { view: "front", rule: "tube" };
+    expect(parsePartTypeDefinition({ ...torso, drawing })).toEqual({
+      ok: true,
+      value: { ...torso, fits: [], drawing },
+    });
+    for (const view of PART_DRAWING_VIEWS) {
+      for (const rule of PART_DRAWING_RULES) {
+        expect(parsePartTypeDefinition({ ...torso, drawing: { view, rule } }).ok).toBe(true);
+      }
+    }
+    const parsed = parsePartTypeDefinition(torso);
+    if (!parsed.ok) throw new Error("The torso doesn't parse");
+    expect("drawing" in parsed.value).toBe(false);
+    const found = diagnostics(
+      parsePartTypeDefinition({ ...torso, drawing: { view: "top", rule: "round" } }),
+    );
+    expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
+      ["drawing.view", "Unknown drawing view (expected side, front)"],
+      ["drawing.rule", "Unknown drawing rule (expected puffy, tube, flat)"],
+    ]);
+    // Both halves are needed, and nothing else is taken.
+    const partial = diagnostics(parsePartTypeDefinition({ ...torso, drawing: { view: "side" } }));
+    expect(partial.map((d) => d.path.join("."))).toEqual(["drawing.rule"]);
+    const extra = parsePartTypeDefinition({ ...torso, drawing: { ...drawing, chubby: 2 } });
+    expect(extra.ok).toBe(false);
   });
 });
 

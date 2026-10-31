@@ -92,12 +92,13 @@ export function describeVoxelParts(
   registries: Registries,
 ): Pick<WorldContent, "partTypes" | "socketTypes" | "parts" | "suggestedColors"> {
   return {
-    partTypes: sortedPartTypes(registries).map(({ id, name, fits, role, motion }) => ({
+    partTypes: sortedPartTypes(registries).map(({ id, name, fits, role, motion, drawing }) => ({
       id,
       name,
       fits: [...fits],
       ...(role === undefined ? {} : { role }),
       ...(motion === undefined ? {} : { motion }),
+      ...(drawing === undefined ? {} : { drawing: { ...drawing } }),
     })),
     socketTypes: sortedSocketTypes(registries).map(({ id }) => id),
     parts: sortedParts(registries).map(({ id, name, version, starter, part }) => ({

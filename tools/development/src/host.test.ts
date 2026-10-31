@@ -169,7 +169,7 @@ describe("simulation host", () => {
     ]);
   });
 
-  it("lists the part types with their names, fits, roles and motions, and the socket types, by ID", () => {
+  it("lists the part types with their names, fits, roles, motions and drawing recipes, and the socket types, by ID", () => {
     const host = startHost();
     host.init();
     const [ready] = host.take();
@@ -179,12 +179,14 @@ describe("simulation host", () => {
       name: "Leg",
       fits: ["hollow:leg-mount"],
       motion: "swing",
+      drawing: { view: "side", rule: "tube" },
     });
     expect(ready.partTypes).toContainEqual({
       id: "hollow:torso",
       name: "Torso",
       fits: [],
       role: "root",
+      drawing: { view: "side", rule: "puffy" },
     });
     expect(ready.partTypes).toContainEqual({
       id: "hollow:tail",
@@ -192,6 +194,7 @@ describe("simulation host", () => {
       fits: ["hollow:tail-base"],
       role: "tail",
       motion: "wag",
+      drawing: { view: "side", rule: "tube" },
     });
     expect(ready.socketTypes).toContain("hollow:leg-mount");
     expect(ready.socketTypes).toEqual([...ready.socketTypes].sort());
@@ -1016,8 +1019,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 23, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(23);
+  it("is protocol version 24, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(24);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

@@ -1,4 +1,10 @@
-import type { PartFitLookup, PartMotion, PartRole } from "@living-diorama/content-schema";
+import {
+  DEFAULT_PART_DRAWING,
+  type PartDrawing,
+  type PartFitLookup,
+  type PartMotion,
+  type PartRole,
+} from "@living-diorama/content-schema";
 import type { PartTypeSummary } from "@living-diorama/simulation";
 
 /**
@@ -23,6 +29,18 @@ export function partMotionLookup(
 ): (partType: string) => PartMotion | undefined {
   const motions = new Map(partTypes.map(({ id, motion }) => [id, motion]));
   return (partType) => motions.get(partType);
+}
+
+/**
+ * Looks up part types' drawing recipes from the worker's content summary, so Draw mode starts a
+ * part's drawing in its type's view and depth rule (M23). A type the summary doesn't list, or one
+ * without a recipe, is drawn flat from the side (`DEFAULT_PART_DRAWING`).
+ */
+export function partDrawingLookup(
+  partTypes: readonly PartTypeSummary[],
+): (partType: string) => Readonly<PartDrawing> {
+  const drawings = new Map(partTypes.map(({ id, drawing }) => [id, drawing]));
+  return (partType) => drawings.get(partType) ?? DEFAULT_PART_DRAWING;
 }
 
 /**

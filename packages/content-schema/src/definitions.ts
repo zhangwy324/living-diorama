@@ -91,6 +91,38 @@ export const PART_MOTIONS = ["swing", "wag", "bob", "paddle", "flop", "blink"] a
 export type PartMotion = (typeof PART_MOTIONS)[number];
 
 /**
+ * The view a player draws a part of a type in (M23): `side` (the creature seen from its side) or
+ * `front` (seen from the front). The voxelizer owns how each maps onto the part's axes.
+ */
+export const PART_DRAWING_VIEWS = ["side", "front"] as const;
+export type PartDrawingView = (typeof PART_DRAWING_VIEWS)[number];
+
+/**
+ * How a drawing of a part is given depth (M23): `puffy` (rounded, thickest away from its edges,
+ * e.g. a body), `tube` (as deep as it is wide, e.g. a leg) or `flat` (one cube deep, e.g. an
+ * ear). The player may switch rules while drawing.
+ */
+export const PART_DRAWING_RULES = ["puffy", "tube", "flat"] as const;
+export type PartDrawingRule = (typeof PART_DRAWING_RULES)[number];
+
+/** How a player draws a part of a type (M23): the view and the depth rule a drawing starts with. */
+export const PartDrawingSchema = z.strictObject({
+  view: z.enum(PART_DRAWING_VIEWS, {
+    error: `Unknown drawing view (expected ${PART_DRAWING_VIEWS.join(", ")})`,
+  }),
+  rule: z.enum(PART_DRAWING_RULES, {
+    error: `Unknown drawing rule (expected ${PART_DRAWING_RULES.join(", ")})`,
+  }),
+});
+export type PartDrawing = z.output<typeof PartDrawingSchema>;
+
+/** The drawing recipe of a part type that doesn't set one: flat, drawn from the side. */
+export const DEFAULT_PART_DRAWING: Readonly<PartDrawing> = Object.freeze({
+  view: "side",
+  rule: "flat",
+});
+
+/**
  * A registered voxel part type, e.g. a leg or an eye (ADR 0022 §10). A part of this type fits a
  * socket whose type is in `fits`, which may name another pack's socket types.
  */
@@ -105,6 +137,8 @@ export const PartTypeDefinitionSchema = z.strictObject({
   motion: z
     .enum(PART_MOTIONS, { error: `Unknown part motion (expected ${PART_MOTIONS.join(", ")})` })
     .optional(),
+  /** How a player draws a part of this type. Left out, `DEFAULT_PART_DRAWING`. */
+  drawing: PartDrawingSchema.optional(),
 });
 export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;
 

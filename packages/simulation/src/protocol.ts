@@ -2,6 +2,7 @@ import type {
   AppliedWorldEdit,
   BodyShape,
   Diagnostic,
+  PartDrawing,
   PartMotion,
   PartRole,
   RegionPosition,
@@ -27,7 +28,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -191,7 +192,8 @@ export interface PropSummary {
 
 /**
  * A registered voxel part type: its name, the socket types it fits (ADR 0022 §9), its role if it
- * has one (§10) and its motion if it has one (M22). The name heads the type's parts in the Studio's
+ * has one (§10), its motion if it has one (M22) and its drawing recipe if it has one (M23). The
+ * name heads the type's parts in the Studio's
  * tray (ADR 0023 §18), which lists the `root` types first (§10).
  */
 export interface PartTypeSummary {
@@ -200,6 +202,7 @@ export interface PartTypeSummary {
   fits: string[];
   role?: PartRole;
   motion?: PartMotion;
+  drawing?: PartDrawing;
 }
 
 /**
