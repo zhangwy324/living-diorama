@@ -117,7 +117,7 @@ _To be written by PR 2._
 
 ### PR 3: Drawn Studio and library removed
 
-_To be written by PR 3._
+Draw mode is gone, along with what only it used. The Studio is Build-only for now. `StudioMode` is `"build"` and `STUDIO_MODES` lists the modes. The mode switch shows nothing while there is only one mode, so PR 6 re-adds `"draw"` and restores the Edit-a-copy test of switching modes, which can't be written with one mode. A library entry is version 6, voxel-only and flat: `{ schemaVersion, species, assembly, createdAt }`, with no `body` wrapper. Its appearance is `libraryAppearance(speciesId)`, `<speciesId>/assembly.json`. An older entry, a drawn one included, fails with `missing_migration` and is skipped with a warning. Its files stay on disk: Rust lists the folder by its `entry.json` and ignores `drawing.json` and `appearance.png`. A skipped entry isn't listed, so it can't be deleted from My creatures. `load_library_drawing` and `load_library_image` are gone, and `save_library_entry` takes only the entry. The released-creature behaviour test now uses the voxel sample at small, medium and large; the sample can't reach tiny. It checks when each creature sets off for bed (its rest behaviour starts) within two minutes of the grace ending, not when it falls asleep, which measured how far its spawn point was from a shelter. It runs on seed 5. Seeds 3 and 4 (the large creature sleeps in the open) and 7 (the medium one sleeps at another shelter after eating) fail on simulation behaviour, tracked in #254.
 
 ### PR 4: Drawn bodies dropped from the engine
 
