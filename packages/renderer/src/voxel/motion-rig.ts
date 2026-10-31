@@ -1,4 +1,4 @@
-import { VOXEL_UNIT } from "@living-diorama/content-schema";
+import { PART_MOTIONS, VOXEL_UNIT, type PartMotion } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import type { VoxelBody } from "./body";
 
@@ -8,15 +8,8 @@ import type { VoxelBody } from "./body";
 // one rhythm per creature and each part's swing fits its size. A later IK pass reuses it: the
 // chains are `parent` links, the attach points `origin`s.
 
-/**
- * The motions a part type may name. Mirrors the content-schema enum of motion names (M22); the
- * wiring PR swaps this for the schema's type once that lands.
- */
-export const MOTION_NAMES = ["swing", "wag", "bob", "paddle", "flop", "blink"] as const;
-export type MotionName = (typeof MOTION_NAMES)[number];
-
 /** Gives a part instance's motion by its index in the assembly, or undefined for none. */
-export type MotionLookup = (partIndex: number) => MotionName | undefined;
+export type MotionLookup = (partIndex: number) => PartMotion | undefined;
 
 /**
  * Which side of the root part's middle plane a part hangs on: left (−Z) or right (+Z), by its
@@ -42,7 +35,7 @@ export interface RigPart {
   /** The instance it hangs from, or −1 for the root. */
   readonly parent: number;
   /** Its motion; undefined for none, an unknown name, and the root, which the body's own motion moves. */
-  readonly motion: MotionName | undefined;
+  readonly motion: PartMotion | undefined;
   /** Drawn reflected: its motion is mirrored, quaternion [x, y, z, w] → [−x, −y, z, w]. */
   readonly mirrored: boolean;
   readonly side: RigSide;
@@ -86,8 +79,8 @@ const GROUNDED_WITHIN = VOXEL_UNIT;
 /** A point this close to the middle plane, in metres, is on it. */
 const MIDDLE_PLANE = 1e-6;
 
-const isMotion = (name: unknown): name is MotionName =>
-  typeof name === "string" && (MOTION_NAMES as readonly string[]).includes(name);
+const isMotion = (name: unknown): name is PartMotion =>
+  typeof name === "string" && (PART_MOTIONS as readonly string[]).includes(name);
 
 const vertex = new THREE.Vector3();
 const point = new THREE.Vector3();

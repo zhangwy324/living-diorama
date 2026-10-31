@@ -4,12 +4,12 @@
  * composing for 20 creatures of 15 bones each, the M22 budget case, over a few thousand frames
  * after a warm-up, and prints the median and worst.
  */
-import { VoxelAssemblySchema, validate } from "@living-diorama/content-schema";
+import { VoxelAssemblySchema, validate, type PartMotion } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { box } from "../body/fixtures/voxel-creature";
 import { buildVoxelBody } from "./body";
 import { composePose } from "./compose-pose";
-import { buildMotionRig, type MotionName } from "./motion-rig";
+import { buildMotionRig } from "./motion-rig";
 import { createMotionPose, writeMotion, type MotionInput } from "./part-motion";
 
 const CREATURES = 20;
@@ -73,7 +73,7 @@ const result = validate(VoxelAssemblySchema, {
 });
 if (!result.ok) throw new Error(result.diagnostics.map((d) => d.message).join("\n"));
 const assembly = result.value;
-const motions: Record<string, MotionName> = {
+const motions: Record<string, PartMotion> = {
   "t:leg": "swing",
   "t:head": "bob",
   "t:ear": "flop",

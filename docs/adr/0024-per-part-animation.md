@@ -121,7 +121,7 @@ In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compos
   - `blink`: about every 4 s for 0.16 s, squashed to 0.15. Shut asleep.
   - `paddle` (fins): scull only in water, 0.35 rad over 1.6 s, at 40% at rest.
 - **Purity (§1, §14).** Idle events come from a hash of the period's index and the creature's phase, with a stream per motion, at a jittered point within the first 60% of each period. Nothing reads a clock or a random number. A motion that is unknown or absent leaves the part at identity, and so does the root, which the whole-body profiles move.
-- **Motion names.** `MotionName` is a local union in `motion-rig.ts` mirroring the content-schema enum until PR 1 lands. PR 3 swaps it for `PartMotion`.
+- **Motion names.** The rig reads `PartMotion` and `PART_MOTIONS` from `content-schema` (PR 1). A name not in the list is dropped, so the part stays at rest.
 - **Cost (§15).** Headless under Node, `pnpm tsx packages/renderer/src/voxel/part-motion.timing.ts` gives about 22–25 µs per frame (median) for 20 creatures of 15 bones. That covers motion and composing, on the reference machine. PR 3 measures the in-app cost.
 
 ### PR 3: World wiring

@@ -4,6 +4,7 @@ import {
   type VoxelAssembly,
   type VoxelAssemblyInput,
   type VoxelPartInput,
+  type PartMotion,
 } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
@@ -11,13 +12,7 @@ import { box, creature } from "../body/fixtures/voxel-creature";
 import { eatingPeck, type CueWeights } from "../cues";
 import { buildVoxelBody, type VoxelBody } from "./body";
 import { composePose } from "./compose-pose";
-import {
-  MAX_SWING,
-  STRIDE_RANGE,
-  buildMotionRig,
-  type MotionName,
-  type MotionRig,
-} from "./motion-rig";
+import { MAX_SWING, STRIDE_RANGE, buildMotionRig, type MotionRig } from "./motion-rig";
 import {
   BLINK,
   SLEEP,
@@ -35,7 +30,7 @@ function parsed(input: VoxelAssemblyInput): VoxelAssembly {
   return result.value;
 }
 
-const MOTION_BY_TYPE: Record<string, MotionName> = {
+const MOTION_BY_TYPE: Record<string, PartMotion> = {
   "test:leg": "swing",
   "test:head": "bob",
   "test:ear": "flop",
@@ -329,7 +324,7 @@ describe("motion rig", () => {
   });
 
   it("drops unknown motions and the root's", () => {
-    const { rig } = build(animal(), { "test:torso": "swing", "test:leg": "sway" as MotionName });
+    const { rig } = build(animal(), { "test:torso": "swing", "test:leg": "sway" as PartMotion });
     expect(rig.parts.every((part) => part.motion === undefined)).toBe(true);
     expect(rig.legs).toEqual([]);
   });
@@ -339,7 +334,7 @@ describe("part motion", () => {
   const quadruped = build(animal());
 
   it("is identity for parts without a motion or with an unknown one", () => {
-    const { rig } = build(animal(), { "test:leg": "sway" as MotionName });
+    const { rig } = build(animal(), { "test:leg": "sway" as PartMotion });
     const pose = motion(rig, walking(0.37));
     for (let i = 0; i < rig.parts.length; i++) {
       if (rig.parts[i]!.motion !== undefined) continue;
