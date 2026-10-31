@@ -109,7 +109,27 @@ Records §1–§15 and the PR plan. ADR 0011 and ADR 0017 are marked superseded 
 
 ### PR 1: Voxelizer, base-part fit and player-part schema
 
-_To be written by PR 1._
+Built in #252, all in `content-schema` and pure. The distance transform is copied into `distance.ts` (not exported); the renderer's copy stays until PR 4.
+
+**Drawing.** `PartDrawingSchema` is `{ pixels, palette, view, rule, chubby, flatThickness, step }`. `pixels` is a plain array of 1024 colour indices (32×32, row by row from the top-left, 0 empty), not run-length encoded. `view` and `rule` use `PART_DRAWING_VIEWS` and `PART_DRAWING_RULES` from PR 2. `chubby` runs from 0.25 to 2 (default 1) and scales the depth of `puffy` and `tube`. `flatThickness` is 1 or 2 (default 1).
+
+**Voxelizer.** `voxelizeDrawing` crops to the painted pixels and keeps only the colours used. It returns `DrawnVoxels`: size, step, colours, the grid, and `origin`, the crop's top-left pixel on the canvas. An empty drawing gives `undefined`. Each pixel becomes a column of its colour along the depth axis, centred.
+
+- **Axes.** `VIEW_AXES` maps each view's canvas x, canvas y and depth onto the part's axes, one row per view (§14). A new view is one row.
+- **puffy.** A round profile over the whole shape: depth = 2·√(R² − (R − d)²) × chubby. Here d is a pixel centre's distance from the shape's edge (its distance to the nearest empty pixel centre less half a pixel), and R is the largest distance in the shape. A disc becomes roughly a ball.
+- **tube.** Measured on a grid of half pixels, so a shape of any width, odd or even, has its width exactly. The midline is where the distance to the edge is at least that of all eight neighbours. Each half pixel takes the width at its nearest midline half pixel, and a pixel the largest of its four, × chubby. A bar is as deep as it is wide all along, ends included.
+- **flat.** `flatThickness` cubes.
+- **Rounding.** Depths are rounded, at least 1 and at most 32. Each column is then rounded up to the parity (odd or even) of the deepest column, so the cubes are an exact mirror image about the middle plane and a mirror pair of sockets fits them.
+
+**Fit.** `fitDrawnPart(drawn, base, overrides?)` returns `{ part, sockets, attachOnCubes }`. The base's attach point and sockets are scaled from the base's box to the drawn box. Each then moves to the nearest half-cube point where it belongs, measured from the scaled point rounded to half cubes, with ties to the smaller offset in z, then y, then x. The attach point goes onto a filled cube.
+
+- **Depth levels.** A socket's depth is measured in levels, deepest first: `own` (every cube within one cube of it filled, so a child at the part's own step fits, as the validator's `isBuried` checks), `finer` (within half a cube; on half-cube points every smaller depth asks for the same cubes, and a part at the finest step, `VOXEL_STEPS[0]`, has no such level), `touching` (on a filled cube) and `loose` (off the cubes, only for a point the player placed).
+- **Target.** Each socket aims for the level its base socket has on the base part, measured the same way, so an eye socket half a cube inside a face aims for half a drawn cube (owner's decision; a base socket off its cubes aims for `touching`). If no point reaches the target, the socket takes the next shallower level there is. `sockets[id]` is `{ depth, target, shallow }`, `shallow` meaning shallower than the target, so Draw mode can show it. The fit never refuses, and the part is always valid.
+- **Mirror pairs.** Two sockets whose base positions mirror each other are placed together, the mirrored one at the mirror image of the other about the middle plane, at the first level both reach. Only when no mirrored place touches the cubes at all (a lopsided front view) is each placed on its own.
+- **Overrides.** `overrides` takes an attach point and sockets by ID, for dragging in Draw mode. Each given point is kept and snapped to the nearest half-cube point in the part, and its depth reported. A mirror-pair socket whose partner alone is given takes the mirror image of its partner's point.
+- **Speed.** Points are tried nearest-first from a precomputed sorted list of offsets out to 8 cubes, and the first that passes wins. Farther points are counting-sorted by distance. Whether any point reaches a level is found once per fit, so levels nothing reaches aren't searched. Filled cubes are counted from a summed-volume table. A fit takes about 2 ms for typical drawings (Ryzen 7 9700X, Node 24, warm). The slowest case measured is about 11.5 ms, a lopsided front-view torso whose mirror pair has its nearest mirrored place far away. If dragging needs it faster, the next step is to work out once per fit which points reach each level.
+
+**Player part.** `PlayerPartEntrySchema` v1 is `{ schemaVersion, id, name, version, createdAt, updatedAt, part, drawing }`. `id` is `user-part:<lowercase uuid>` (`playerPartId`), which the content-ID pattern already accepts. `version` is a whole number from 1, bumped on each edited save, rather than a semver string. The dates are ISO date-times with an offset, as in the library. The entry refuses a part with a `source` (a player part is a source itself, as a registered part is) and a part whose step isn't its drawing's. `parsePlayerPartEntry` validates without migrations. `voxel.ts` exports its step schema as `VoxelStepSchema` for the drawing.
 
 ### PR 2: Drawing recipe
 
