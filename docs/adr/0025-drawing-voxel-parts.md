@@ -113,7 +113,7 @@ _To be written by PR 1._
 
 ### PR 2: Drawing recipe
 
-_To be written by PR 2._
+Built in #251. `content-schema` (`definitions.ts`), beside `PART_MOTIONS`: the closed lists `PART_DRAWING_VIEWS` (`side`, `front`, `top`) and `PART_DRAWING_RULES` (`puffy`, `tube`, `flat`), the strict `PartDrawingRecipeSchema` / `PartDrawingRecipe` (`{ view, rule }`, both required) and `DEFAULT_PART_DRAWING_RECIPE` (`side`, `flat`). The views' doc comment gives each one's mapping of the canvas onto the part's axes (§14). `PartTypeDefinition.drawing` is optional, with no default in the schema: left out, it stays out of the parsed definition and the summary. An unknown name is refused at `drawing.view` or `drawing.rule` ("Unknown drawing view (expected …)"). The field changes the part-type format, so `SCHEMA_VERSIONS.partType` is 3, with no migration. The built-in types: torso and head `side` `puffy`; leg, arm and tail `side` `tube`; tail fin `side` `flat`; fin `top` `flat`; ear, eye, nose and mouth `front` `flat`. `PartTypeSummary` gains `drawing?: PartDrawingRecipe`, filled by `describeVoxelParts` only when the type has one (protocol version 24). The default is applied only by the app's `partDrawingRecipeLookup(partTypes)` in `apps/desktop/src/part-types.ts`, beside `partMotionLookup`, which gives `DEFAULT_PART_DRAWING_RECIPE` for a type without a recipe or one the summary doesn't list. It isn't used yet (PR 6). `docs/adding-content.md` now documents part types' `drawing`, and their `motion`, which M22 left out.
 
 ### PR 3: Drawn Studio and library removed
 

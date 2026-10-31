@@ -92,10 +92,11 @@ export type PartMotion = (typeof PART_MOTIONS)[number];
 
 /**
  * The view a player draws a part of a type in (M23), and so how the canvas maps onto the part's
- * axes, its depth always centred:
+ * axes (ADR 0025 §14), its depth always centred:
  * - `side`: the creature seen from its side. Canvas x runs along +X, canvas y going down along −Y,
  *   and depth along Z.
- * - `front`: seen from the front. Canvas x runs along Z, and depth along X.
+ * - `front`: seen from the front. Canvas x runs along −Z (its right is the creature's left),
+ *   canvas y going down along −Y, and depth along X.
  * - `top`: seen from above, e.g. a side fin. Canvas x runs along +X, canvas y going down along +Z,
  *   and depth along Y.
  */
