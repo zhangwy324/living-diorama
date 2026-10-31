@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PART_DRAWING_RULES, PART_DRAWING_VIEWS, type PartDrawingView } from "./definitions";
 import { nearest } from "./distance";
-import { HexColorSchema } from "./primitives";
+import { ContentIdSchema, HexColorSchema } from "./primitives";
 import {
   MAX_PART_COLORS,
   MAX_PART_CUBES,
@@ -56,6 +56,11 @@ export const PartDrawingSchema = z
     flatThickness: z.literal([1, 2]).default(1),
     /** The part's cube size, one of `VOXEL_STEPS`. */
     step: VoxelStepSchema,
+    /**
+     * The base part the drawing takes its attach point and sockets from (ADR 0025 §3), a pack
+     * part's ID, so a reopened drawing aims its sockets at that part's depths and shows its ghost.
+     */
+    baseId: ContentIdSchema,
   })
   .superRefine((drawing, ctx) => {
     const index = drawing.pixels.findIndex((value) => value > drawing.palette.length);
@@ -71,7 +76,6 @@ export type PartDrawing = z.output<typeof PartDrawingSchema>;
 export type PartDrawingInput = z.input<typeof PartDrawingSchema>;
 
 /** The cubes made from a drawing, before they get an attach point and sockets. */
-/** The cubes made from a drawing, before they get an attach point and sockets. */
 export interface DrawnVoxels {
   size: VoxelSize;
   step: VoxelStep;
@@ -83,19 +87,21 @@ export interface DrawnVoxels {
   origin: { left: number; top: number };
 }
 
-type Axis = "x" | "y" | "z";
+/** One of a part's axes. */
+export type PartAxis = "x" | "y" | "z";
 
 /**
  * Where a view puts the canvas's axes on the part: canvas x and canvas y (down) each along an
  * axis, `+1` the same way or `-1` the other way, and depth along the third, centred.
  */
-interface ViewAxes {
-  canvasX: readonly [Axis, 1 | -1];
-  canvasY: readonly [Axis, 1 | -1];
-  depth: Axis;
+export interface ViewAxes {
+  canvasX: readonly [PartAxis, 1 | -1];
+  canvasY: readonly [PartAxis, 1 | -1];
+  depth: PartAxis;
 }
 
-const VIEW_AXES: Readonly<Record<PartDrawingView, ViewAxes>> = {
+/** Each view's axes (ADR 0025 §14). Draw mode reads it to put the part's points on the canvas. */
+export const VIEW_AXES: Readonly<Record<PartDrawingView, ViewAxes>> = {
   side: { canvasX: ["x", 1], canvasY: ["y", -1], depth: "z" },
   front: { canvasX: ["z", -1], canvasY: ["y", -1], depth: "x" },
   top: { canvasX: ["x", 1], canvasY: ["z", 1], depth: "y" },
@@ -130,7 +136,7 @@ function pixelDepths(drawing: PartDrawing, filled: Uint8Array, width: number, he
     filled.forEach((on, i) => (depths[i] = on ? drawing.flatThickness : 0));
     return depths;
   }
-  const depthOf = (fullDepth: number) =>
+  const roundDepth = (fullDepth: number) =>
     Math.min(MAX_PART_CUBES, Math.max(1, Math.round(fullDepth * drawing.chubby)));
 
   if (drawing.rule === "puffy") {
@@ -144,7 +150,7 @@ function pixelDepths(drawing: PartDrawing, filled: Uint8Array, width: number, he
       for (let x = 0; x < width; x++) {
         if (!filled[x + width * y]) continue;
         const inside = num(distance, at(x, y)) - 0.5;
-        depths[x + width * y] = depthOf(2 * Math.sqrt(radius ** 2 - (radius - inside) ** 2));
+        depths[x + width * y] = roundDepth(2 * Math.sqrt(radius ** 2 - (radius - inside) ** 2));
       }
     }
     return depths;
@@ -179,7 +185,7 @@ function pixelDepths(drawing: PartDrawing, filled: Uint8Array, width: number, he
     for (let x = 0; x < width; x++) {
       if (!filled[x + width * y]) continue;
       const [fx, fy] = [2 * x, 2 * y];
-      depths[x + width * y] = depthOf(
+      depths[x + width * y] = roundDepth(
         Math.max(
           widthAt(fx, fy),
           widthAt(fx + 1, fy),

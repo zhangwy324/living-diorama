@@ -892,3 +892,328 @@ body,
   transform: translate(12px, 12px);
   pointer-events: none;
 }
+
+/* Draw mode (ADR 0025 §9): the colours, the 32 × 32 grid with its ruler and points, and the part's
+   panel with its 3D preview. */
+.draw-colours {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  width: 164px;
+  padding: 8px 10px 16px;
+  overflow-y: auto;
+  background: #263026;
+}
+
+.draw-colours h3 {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(238 243 232 / 75%);
+}
+
+.draw-colours .palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.draw-colours .swatch {
+  padding: 0;
+  cursor: pointer;
+}
+
+.grid-area {
+  position: relative;
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-width: 0;
+  padding: 28px 16px 56px 40px;
+  container-type: size;
+}
+
+.grid-sheet {
+  position: relative;
+  width: min(100cqw, 100cqh);
+  aspect-ratio: 1;
+}
+
+.draw-grid {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  image-rendering: pixelated;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.ruler {
+  position: absolute;
+  font-size: 10px;
+  color: rgb(238 243 232 / 65%);
+  pointer-events: none;
+}
+
+.ruler span {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.ruler-top {
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  height: 18px;
+}
+
+.ruler-top span {
+  bottom: 2px;
+  transform: translateX(-50%);
+}
+
+.ruler-top span::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  height: 4px;
+  border-left: 1px solid currentColor;
+}
+
+/* The ruler's unit, in the corner where the two rulers meet. */
+.ruler-unit {
+  position: absolute;
+  right: 100%;
+  bottom: 100%;
+  padding: 0 6px 4px 0;
+  font-size: 10px;
+  color: rgb(238 243 232 / 65%);
+}
+
+.ruler-left {
+  top: 0;
+  right: 100%;
+  width: 26px;
+  height: 100%;
+}
+
+.ruler-left span {
+  right: 6px;
+  transform: translateY(-50%);
+}
+
+/* The attach point (a diamond) and the sockets (dots, filled as deep as they sit). */
+.point {
+  position: absolute;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #1d4f6b;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.draw-mode.dragging .point {
+  cursor: grabbing;
+}
+
+.point.attach {
+  z-index: 2;
+  width: 13px;
+  height: 13px;
+  border-color: #6b3a10;
+  background: #f2a03c;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.point.socket {
+  border-radius: 50%;
+  background: #fff;
+}
+
+.point.attach.loose,
+.point.socket.depth-loose {
+  border-style: dashed;
+  border-color: #c8433a;
+  background: transparent;
+}
+
+.point.socket.depth-own,
+.key-dot.depth-own {
+  background: #2fc4ff;
+}
+
+.point.socket.depth-finer,
+.key-dot.depth-finer {
+  background: linear-gradient(to top, #2fc4ff 50%, #fff 50%);
+}
+
+.point.socket.depth-touching,
+.key-dot.depth-touching {
+  background: #fff;
+}
+
+/* Shallower than on the base part: flagged with a red ring. */
+.point.socket.shallow {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px #c8433a;
+}
+
+/* The details scroll and the buttons stay in view, however short the window. */
+.side-panel.draw-panel {
+  width: 260px;
+  padding-top: 12px;
+  overflow: hidden;
+}
+
+.part-preview {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  height: 190px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #cfe3ea;
+}
+
+.part-preview > canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.preview-empty {
+  font-size: 13px;
+  color: #263026;
+}
+
+.draw-details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 2px 4px 2px 2px;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.draw-panel .release-slot {
+  flex: none;
+}
+
+.draw-details select,
+.draw-details input[type="text"] {
+  padding: 5px 6px;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  background: #2f3b2f;
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+}
+
+.segmented button {
+  flex: 1;
+  padding: 5px 0;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+
+.segmented button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.segmented button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.segmented button[aria-checked="true"] {
+  background: rgb(110 160 90 / 80%);
+}
+
+.chubby {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.chubby input {
+  flex: 1;
+  min-width: 0;
+}
+
+.chubby output {
+  width: 40px;
+  text-align: right;
+}
+
+.points-key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.points-key p {
+  margin: 0;
+}
+
+.key-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px 0 8px;
+  border: 2px solid #1d4f6b;
+  border-radius: 50%;
+  vertical-align: -2px;
+}
+
+.key-dot:first-child {
+  margin-left: 0;
+}
+
+.text-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: #9fd2ef;
+  background: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.text-link:disabled {
+  color: rgb(238 243 232 / 40%);
+  cursor: default;
+  text-decoration: none;
+}

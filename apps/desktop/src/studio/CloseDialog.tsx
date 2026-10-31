@@ -5,6 +5,8 @@ export interface CloseDialogProps {
   title?: string;
   /** What is lost, by default by closing. */
   message?: string;
+  /** Whether to show the (disabled) Save draft button; not where there is no draft to save. */
+  drafts?: boolean;
   onDiscard(): void;
   onCancel(): void;
 }
@@ -17,6 +19,7 @@ export interface CloseDialogProps {
 export function CloseDialog({
   title = "Close the Studio?",
   message = "Your creature hasn't been released. Closing now loses it.",
+  drafts = true,
   onDiscard,
   onCancel,
 }: CloseDialogProps) {
@@ -43,9 +46,11 @@ export function CloseDialog({
         <button type="button" onClick={onDiscard}>
           Discard
         </button>
-        <button type="button" disabled title="Coming later">
-          Save draft <small>(coming later)</small>
-        </button>
+        {drafts && (
+          <button type="button" disabled title="Coming later">
+            Save draft <small>(coming later)</small>
+          </button>
+        )}
         <button type="button" ref={cancel} onClick={onCancel}>
           Cancel
         </button>

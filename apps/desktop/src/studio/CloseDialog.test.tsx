@@ -30,3 +30,11 @@ it("asks its own question, e.g. before Edit a copy replaces a creature", () => {
   expect(html).toContain("<p>Editing a copy of Pebble replaces it.</p>");
   expect(html).not.toContain("Close the Studio?");
 });
+
+it("leaves Save draft out where there is no draft to save", () => {
+  const html = renderToStaticMarkup(
+    <CloseDialog drafts={false} onDiscard={() => {}} onCancel={() => {}} />,
+  );
+  expect(html).not.toContain("Save draft");
+  expect(html).toContain("Discard");
+});

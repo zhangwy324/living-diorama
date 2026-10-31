@@ -37,6 +37,7 @@ function drawing(
     view: "side",
     rule: "flat",
     step: 0.025,
+    baseId: "test:base",
     ...rest,
   });
 }
@@ -493,6 +494,49 @@ describe("fitDrawnPart", () => {
       const fit = fitDrawnPart(drawn(), torso, { sockets: { neck: { x: 0, y: 8, z: 0 } } });
       expect(fit.sockets.neck).toMatchObject({ depth: "loose", shallow: true });
     });
+  });
+
+  it("finds a socket's place more than 8 cubes from where it scales to", () => {
+    // A 3 × 3 block at the bottom left and a thin line along the top: only the block is deep
+    // enough for the neck, which scales to the top right, about 30 cubes away.
+    const rows = ["1".repeat(30), ...Array.from({ length: 26 }, () => ""), "111", "111", "111"];
+    const fit = fitDrawnPart(
+      voxels(drawing(rows, { left: 0, top: 0, flatThickness: 2, step: 0.05 })),
+      torso,
+    );
+    expect(fit.part.size).toEqual({ x: 30, y: 30, z: 2 });
+    expect(fit.sockets.neck).toEqual({ depth: "own", target: "own", shallow: false });
+    const neck = fit.part.sockets.find((socket) => socket.id === "neck")!.position;
+    // The block's own points nearest the top right: x and y 1 or 2, on the middle plane.
+    expect(neck).toEqual({ x: 2, y: 2, z: 1 });
+  });
+
+  it("breaks a tie between equally near places by the smaller offset in z, then y, then x", () => {
+    // Two cubes with a gap: the attach point scales to the gap's middle, (1.5, 1, 0.5), half a
+    // cube from the left cube's face and from the right one's. The left one (dx −1) wins.
+    const fit = fitDrawnPart(voxels(drawing(["1.1"], { step: 0.05 })), leg(0.05));
+    expect(fit.part.size).toEqual({ x: 3, y: 1, z: 1 });
+    expect(fit.part.attach).toEqual({ x: 1, y: 1, z: 0.5 });
+  });
+
+  it("fits a top-view drawing, its mirror pairs mirrored across canvas y", () => {
+    const fit = fitDrawnPart(
+      voxels(drawing(blob, { view: "top", rule: "puffy", step: 0.025 })),
+      torso,
+    );
+    const body = fit.part;
+    // Canvas y runs along +Z, depth along Y.
+    expect(body.size.x).toBe(13);
+    expect(body.size.z).toBe(8);
+    const position = (id: string) => body.sockets.find((socket) => socket.id === id)!.position;
+    for (const [left, right] of [
+      ["front-left", "front-right"],
+      ["back-left", "back-right"],
+    ] as const) {
+      expect(position(right)).toEqual({ ...position(left), z: body.size.z - position(left).z });
+    }
+    expect(position("front-left").x).toBeGreaterThan(position("back-left").x);
+    expect(holds(body, leg(0.0125)).success).toBe(true);
   });
 
   it("gives the same part for the same drawing and base", () => {

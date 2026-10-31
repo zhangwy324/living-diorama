@@ -8,9 +8,15 @@ import { PartDrawingSchema } from "./voxel-draw";
 // was made from, so it reopens as a drawing. One file per part.
 
 /** Current data-format version of a player part entry. */
-export const PLAYER_PART_SCHEMA_VERSION = 1;
+export const PLAYER_PART_SCHEMA_VERSION = 2;
+
+// Version 2 adds the drawing's base part (`PartDrawing.baseId`). Older entries are not migrated:
+// no backward compatibility is required yet (AGENTS.md).
 
 const PLAYER_PART_ID = /^user-part:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The longest name a player part may have, as long as the Studio's name fields take. */
+export const MAX_PLAYER_PART_NAME_LENGTH = 40;
 
 /** The ID of the player part stored as `<uuid>.json`, `uuid` a lowercase UUID. */
 export const playerPartId = (uuid: string): string => `user-part:${uuid}`;
@@ -22,7 +28,7 @@ export const PlayerPartEntrySchema = z
     id: z.string().regex(PLAYER_PART_ID, {
       error: 'Expected a player part ID like "user-part:<lowercase uuid>"',
     }),
-    name: z.string().min(1),
+    name: z.string().min(1).max(MAX_PLAYER_PART_NAME_LENGTH),
     /** 1 when the part is made, one more each time it is saved after an edit. */
     version: z.int().min(1),
     createdAt: z.iso.datetime({ offset: true }),

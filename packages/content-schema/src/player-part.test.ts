@@ -21,6 +21,7 @@ function entry(): PlayerPartEntryInput {
     view: "side",
     rule: "tube",
     step: 0.025,
+    baseId: "hollow:leg",
   });
   const fit = fitDrawnPart(voxelizeDrawing(drawing)!, {
     type: "hollow:leg",
@@ -33,7 +34,7 @@ function entry(): PlayerPartEntryInput {
   });
   expect(fit.sockets).toEqual({});
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: playerPartId(UUID),
     name: "Long leg",
     version: 1,
@@ -53,6 +54,10 @@ describe("PlayerPartEntrySchema", () => {
     expect(again).toEqual(first);
   });
 
+  it("takes a name of 40 characters", () => {
+    expect(parsePlayerPartEntry({ ...entry(), name: "A".repeat(40) }).ok).toBe(true);
+  });
+
   it("has a content ID", () => {
     expect(isContentId(playerPartId(UUID))).toBe(true);
   });
@@ -60,12 +65,20 @@ describe("PlayerPartEntrySchema", () => {
   it.each([
     ["an ID that isn't user-part:<uuid>", { id: `user:${UUID}` }],
     ["an upper-case UUID", { id: playerPartId(UUID.toUpperCase()) }],
-    ["another schema version", { schemaVersion: 2 }],
+    ["another schema version", { schemaVersion: 1 }],
     ["version 0", { version: 0 }],
     ["an empty name", { name: "" }],
+    ["a name over 40 characters", { name: "A".repeat(41) }],
     ["a date without a time zone", { createdAt: "2026-10-30T12:00:00" }],
   ])("refuses %s", (_, change) => {
     expect(parsePlayerPartEntry({ ...entry(), ...change }).ok).toBe(false);
+  });
+
+  it("refuses a drawing without its base part", () => {
+    const input = entry();
+    const drawing: Record<string, unknown> = { ...input.drawing };
+    delete drawing.baseId;
+    expect(parsePlayerPartEntry({ ...input, drawing }).ok).toBe(false);
   });
 
   it("refuses a part with a source", () => {
