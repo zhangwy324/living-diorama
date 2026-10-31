@@ -8,7 +8,10 @@ import { PartDrawingSchema } from "./voxel-draw";
 // was made from, so it reopens as a drawing. One file per part.
 
 /** Current data-format version of a player part entry. */
-export const PLAYER_PART_SCHEMA_VERSION = 1;
+export const PLAYER_PART_SCHEMA_VERSION = 2;
+
+// Version 2 adds the drawing's base part (`PartDrawing.baseId`). Older entries are not migrated:
+// no backward compatibility is required yet (AGENTS.md).
 
 const PLAYER_PART_ID = /^user-part:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

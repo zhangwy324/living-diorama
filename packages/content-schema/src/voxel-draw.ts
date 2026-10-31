@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PART_DRAWING_RULES, PART_DRAWING_VIEWS, type PartDrawingView } from "./definitions";
 import { nearest } from "./distance";
-import { HexColorSchema } from "./primitives";
+import { ContentIdSchema, HexColorSchema } from "./primitives";
 import {
   MAX_PART_COLORS,
   MAX_PART_CUBES,
@@ -56,6 +56,11 @@ export const PartDrawingSchema = z
     flatThickness: z.literal([1, 2]).default(1),
     /** The part's cube size, one of `VOXEL_STEPS`. */
     step: VoxelStepSchema,
+    /**
+     * The base part the drawing takes its attach point and sockets from (ADR 0025 §3), a pack
+     * part's ID, so a reopened drawing aims its sockets at that part's depths and shows its ghost.
+     */
+    baseId: ContentIdSchema,
   })
   .superRefine((drawing, ctx) => {
     const index = drawing.pixels.findIndex((value) => value > drawing.palette.length);

@@ -18,9 +18,10 @@ import { CloseDialog } from "./CloseDialog";
 import { DeleteDialog } from "./DeleteDialog";
 import { useEditCopy } from "./edit-copy";
 import type { AskLimits } from "./limits";
-import { closeMessage, type DrawRequest, type OpenDraw, type StudioMode } from "./modes";
+import { closeMessage, type StudioMode } from "./modes";
 import { ModeSwitch } from "./ModeSwitch";
 import { MyCreatures } from "./MyCreatures";
+import { useOpenDraw } from "./open-draw";
 import { PartDrawMode } from "./PartDrawMode";
 import { describeFailure, keptMessage, releasedMessage } from "./release";
 import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
@@ -76,22 +77,9 @@ export function Studio() {
     run: (species, load) => ask(species.speciesId, load),
   });
 
-  // What Draw mode opens next, and one waiting while the Studio asks whether to drop a drawing.
-  const [drawRequest, setDrawRequest] = useState<DrawRequest>();
-  const [confirmingDraw, setConfirmingDraw] = useState<Omit<DrawRequest, "key">>();
-  const drawKey = useRef(0);
-  const startDraw = (request: Omit<DrawRequest, "key">) => {
-    setDrawRequest({ ...request, key: ++drawKey.current });
-    setMode("draw");
-  };
-  /**
-   * Draw mode on a new part of a type or a saved part (ADR 0025 §9), asking first if a drawing
-   * would be lost. PR 7: the tray's "Draw your own" tiles and My parts' Edit call it.
-   */
-  const openDraw: OpenDraw = (request) => {
-    if (unsaved.current.draw) setConfirmingDraw(request);
-    else startDraw(request);
-  };
+  // Draw mode on a new part of a type or a saved part (ADR 0025 §9), asking first if a drawing
+  // would be lost. PR 7: the tray's "Draw your own" tiles and My parts' Edit call `openDraw.open`.
+  const openDraw = useOpenDraw({ unsaved: () => unsaved.current.draw, onMode: setMode });
   // Build mode will pick the part: PR 7 passes the entry on to it.
   const onUseInBuild = useCallback((entry: PlayerPartEntry) => {
     setMode("build");
@@ -169,7 +157,7 @@ export function Studio() {
       .finally(() => setBusySpecies(undefined));
   };
 
-  const keysEnabled = !closing && !deleting && !editCopy.confirming && !confirmingDraw;
+  const keysEnabled = !closing && !deleting && !editCopy.confirming && !openDraw.confirming;
   const modeSwitch = <ModeSwitch mode={mode} onMode={setMode} />;
   return (
     <div className="studio">
@@ -192,8 +180,8 @@ export function Studio() {
         onUnsaved={onUnsavedDraw}
         client={client}
         store={partsStore}
-        request={drawRequest}
-        onNew={(partType) => openDraw({ partType })}
+        request={openDraw.request}
+        onNew={(partType) => openDraw.open({ partType })}
         onSaved={() => {}}
         onUseInBuild={onUseInBuild}
       />
@@ -241,15 +229,13 @@ export function Studio() {
           onCancel={editCopy.cancel}
         />
       )}
-      {confirmingDraw && (
+      {openDraw.confirming && (
         <CloseDialog
           title="Discard your part?"
           message="Your part hasn't been saved. Starting another one loses it."
-          onDiscard={() => {
-            setConfirmingDraw(undefined);
-            startDraw(confirmingDraw);
-          }}
-          onCancel={() => setConfirmingDraw(undefined)}
+          drafts={false}
+          onDiscard={openDraw.confirm}
+          onCancel={openDraw.cancel}
         />
       )}
       {closing && (

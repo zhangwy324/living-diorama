@@ -17,42 +17,49 @@ import {
   type PartDrawingView,
   type PlayerPartEntry,
   type VoxelAssembly,
-  type VoxelPart,
   type VoxelStep,
 } from "@living-diorama/content-schema";
 import type { PartsStore } from "@living-diorama/desktop-integration";
 import { createAssemblyView, type AssemblyView } from "@living-diorama/renderer";
+import type { PartSummary } from "@living-diorama/simulation";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { partDrawingRecipeLookup } from "../part-types";
 import type { StudioParts } from "../studio-protocol";
 import {
+  MUCH_BIGGER,
   NEW_PART,
   defaultBase,
+  defaultPartName,
   drawKey,
   drawingOf,
-  defaultPartName,
   partEntry,
   recordOf,
+  sameSnapshot,
   savePart,
+  sizeAgainst,
+  type DrawFrame,
+  type DrawLook,
   type DrawSetup,
+  type DrawSnapshot,
   type DrawnPartRecord,
 } from "./draw-entry";
 import {
   NO_PLACED_POINTS,
   dropPoint,
   overridesFor,
+  partnerOf,
   placedFrom,
   silhouette,
   toCanvas,
   type DraggedPoint,
-  type PlacedPoints,
 } from "./drawn-points";
 import {
   canRedo,
@@ -69,8 +76,8 @@ import {
   startHistory,
   undo,
   type Grid,
-  type GridHistory,
   type GridTool,
+  type History,
 } from "./grid-editor";
 import type { DrawRequest, ModeProps } from "./modes";
 import { partsKit, type PartsKit } from "./parts-kit";
@@ -87,6 +94,10 @@ const CANVAS_PX = CELL_PX * DRAWING_GRID;
 
 /** Said when the strip lists no part to draw from. */
 export const NO_DRAW_PARTS = "There are no parts to draw from.";
+
+/** Said when a part much bigger than its base part is drawn (`MUCH_BIGGER`). */
+export const MUCH_BIGGER_HINT =
+  "Much bigger than its base part: a creature built with it may be too big to release. A smaller cube size makes it smaller.";
 
 /** The colour a drawing starts with when the packs suggest none. */
 const FIRST_COLOUR = "#7fae5a";
@@ -125,13 +136,6 @@ const typing = (event: KeyboardEvent) =>
   (event.target.isContentEditable ||
     ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName));
 
-/** A base part to pick. */
-interface BaseChoice {
-  id: string;
-  name: string;
-  part: VoxelPart;
-}
-
 /** A centimetre ruler's labels along the grid: every `every` cm, at most about 8 of them. */
 export function rulerMarks(step: VoxelStep): { cells: number; label: string }[] {
   const cellCm = step * 100;
@@ -142,6 +146,26 @@ export function rulerMarks(step: VoxelStep): { cells: number; label: string }[] 
     marks.push({ cells: cm / cellCm, label: `${cm}` });
   }
   return marks;
+}
+
+/** The pack part a drawing is drawn against, if the strip still lists it as a part of `type`. */
+const packBase = (k: PartsKit, id: string, type: string): PartSummary | undefined => {
+  const found = k.byId.get(id);
+  return found?.part.type === type ? found : undefined;
+};
+
+/** Before the parts are here: no drawing yet. */
+const NO_FRAME: DrawFrame = { partType: "", baseId: "", view: "side" };
+
+/** A socket marker on the grid: one socket, or a mirror pair at the same place (side view). */
+interface SocketMarker {
+  u: number;
+  v: number;
+  /** How many markers before it share its place: it is drawn that much aside. */
+  offset: number;
+  ids: string[];
+  depth: DrawnSocketDepth;
+  shallow: boolean;
 }
 
 export interface PartDrawModeProps extends Pick<
@@ -156,7 +180,7 @@ export interface PartDrawModeProps extends Pick<
   request: DrawRequest | undefined;
   /** "New part": the Studio opens a new drawing of a type, asking first if this one isn't saved. */
   onNew(partType: string): void;
-  /** A part was saved. */
+  /** A part was saved, even one the player has since left. */
   onSaved(entry: PlayerPartEntry): void;
   /** "Use in Build": the part, saved, for Build mode to pick (ADR 0025 §9). */
   onUseInBuild(entry: PlayerPartEntry): void;
@@ -197,17 +221,20 @@ export function PartDrawMode({
     [studioParts],
   );
 
-  const [setup, setSetup] = useState<DrawSetup>();
-  const [history, setHistory] = useState<GridHistory>(() => startHistory());
+  // Undo steps: the grid, the placed points and the frame (type, base part, view) together.
+  const [history, setHistory] = useState<History<DrawSnapshot>>(() =>
+    startHistory({ grid: emptyGrid(), placed: NO_PLACED_POINTS, frame: NO_FRAME }),
+  );
+  // How the drawing gets its depth and size; undefined until a drawing has begun.
+  const [look, setLook] = useState<DrawLook>();
   const [palette, setPalette] = useState<readonly string[]>([]);
   const [tool, setTool] = useState<GridTool>("pen");
   // The colour picked to paint with; the packs' first suggested one until then.
   const [picked, setColor] = useState<string>();
   const color = picked ?? studioParts?.suggestedColors[0] ?? FIRST_COLOUR;
-  const [placed, setPlaced] = useState<PlacedPoints>(NO_PLACED_POINTS);
   const [name, setName] = useState("");
   const [record, setRecord] = useState<DrawnPartRecord>(NEW_PART);
-  // The saved part being edited, offered as its own base so its points stay where they were.
+  // The saved part being edited: its type stays, and it is what Use in Build hands on unchanged.
   const [editing, setEditing] = useState<PlayerPartEntry>();
   // The latest save, and what was drawn then; undefined for a drawing not saved yet.
   const [saved, setSaved] = useState<{ entry: PlayerPartEntry; key: string }>();
@@ -220,39 +247,58 @@ export function PartDrawMode({
   const [live, setLive] = useState<Grid>();
   // A point being dragged and where, in canvas pixels.
   const [dragging, setDragging] = useState<{ point: DraggedPoint; u: number; v: number }>();
+  // One more for each drawing begun, so a save that finishes after another has begun leaves it be.
+  const generation = useRef(0);
+
+  const present = history.present;
+  const { grid: presentGrid, placed, frame } = present;
+  const setup = useMemo((): DrawSetup | undefined => look && { ...frame, ...look }, [frame, look]);
+  /** A new undo step from the present one. */
+  const change = (edit: (snapshot: DrawSnapshot) => DrawSnapshot) =>
+    setHistory((known) => commit(known, edit(known.present), sameSnapshot));
 
   /** Starts a drawing: a new one of a type, or a saved part to edit (`DrawRequest`). */
   const begin = useCallback(
     (k: PartsKit, open: DrawRequest | undefined) => {
+      generation.current += 1;
       setLive(undefined);
       setDragging(undefined);
       setMessage(undefined);
       setSaved(undefined);
+      setSaving(false);
       const entry = open?.entry;
       if (entry) {
         const { drawing } = entry;
-        const drawn = voxelizeDrawing(drawing);
+        const type = entry.part.type;
+        // The base part it was drawn against, for its sockets' depths and its ghost; the saved
+        // part gives only where its points are.
+        const original = packBase(k, drawing.baseId, type);
+        const base = original ?? defaultBase(k.parts, type, k.roots);
+        if (!original) {
+          setNotice(
+            "Its base part is no longer there, so its sockets are checked against another.",
+          );
+        }
         const opening: DrawSetup = {
-          partType: entry.part.type,
-          baseId: entry.id,
-          step: drawing.step,
+          partType: type,
+          baseId: base?.id ?? drawing.baseId,
           view: drawing.view,
+          step: drawing.step,
           rule: drawing.rule,
           chubby: drawing.chubby,
           flatThickness: drawing.flatThickness,
         };
         const grid = Uint8Array.from(drawing.pixels);
+        const drawn = voxelizeDrawing(drawing);
         const points = drawn ? placedFrom(entry.part, drawn, drawing.view) : NO_PLACED_POINTS;
-        setSetup(opening);
-        setHistory(startHistory(grid));
+        const { partType, baseId, view, ...rest } = opening;
+        setHistory(startHistory({ grid, placed: points, frame: { partType, baseId, view } }));
+        setLook(rest);
         setPalette(drawing.palette);
-        setPlaced(points);
         setName(entry.name);
         setRecord(recordOf(entry));
         setEditing(entry);
-        setOpenedKey(
-          drawKey(entry.name, drawingOf(grid, drawing.palette, opening), entry.id, points),
-        );
+        setOpenedKey(drawKey(entry.name, drawingOf(grid, drawing.palette, opening), points));
         return;
       }
       const sections = k.sections;
@@ -260,17 +306,16 @@ export function PartDrawMode({
         sections.find((section) => section.type === open?.partType)?.type ?? sections[0]?.type;
       const base = type === undefined ? undefined : defaultBase(k.parts, type, k.roots);
       if (type === undefined || !base) return;
-      setSetup({
-        partType: type,
-        baseId: base.id,
-        step: base.part.step,
-        ...recipeOf(type),
-        chubby: 1,
-        flatThickness: 1,
-      });
-      setHistory(startHistory());
+      const { view, rule } = recipeOf(type);
+      setHistory(
+        startHistory({
+          grid: emptyGrid(),
+          placed: NO_PLACED_POINTS,
+          frame: { partType: type, baseId: base.id, view },
+        }),
+      );
+      setLook({ step: base.part.step, rule, chubby: 1, flatThickness: 1 });
       setPalette([]);
-      setPlaced(NO_PLACED_POINTS);
       setName(defaultPartName(sections.find((s) => s.type === type)?.name ?? "part"));
       setRecord(NEW_PART);
       setEditing(undefined);
@@ -291,27 +336,20 @@ export function PartDrawMode({
   const typeName = (type: string) =>
     kit?.sections.find((section) => section.type === type)?.name ?? type;
 
-  const bases = useMemo((): BaseChoice[] => {
-    if (!kit || !setup) return [];
-    const own =
-      editing && editing.part.type === setup.partType
-        ? [{ id: editing.id, name: `${editing.name} (as saved)`, part: editing.part }]
-        : [];
-    const pack = kit.parts
-      .filter(({ part }) => part.type === setup.partType)
-      .map(({ id, name: partName, part }) => ({ id, name: partName, part }));
-    return [...own, ...pack];
-  }, [kit, setup, editing]);
+  // The base parts to pick: the pack parts of the type, as the tray lists them.
+  const bases = useMemo(
+    () => (kit && setup ? kit.parts.filter(({ part }) => part.type === setup.partType) : []),
+    [kit, setup],
+  );
   const base = bases.find((choice) => choice.id === setup?.baseId) ?? bases[0];
 
-  const present = history.present;
   const drawing = useMemo(
-    (): PartDrawing | undefined => setup && drawingOf(present, palette, setup),
-    [present, palette, setup],
+    (): PartDrawing | undefined => setup && drawingOf(presentGrid, palette, setup),
+    [presentGrid, palette, setup],
   );
   // Voxelized and fitted once per stroke, not while it is drawn (a fit takes up to ~12 ms).
   const drawn = useMemo(() => drawing && voxelizeDrawing(drawing), [drawing]);
-  const view = setup?.view ?? "side";
+  const view = frame.view;
   const fit = useMemo((): DrawnPartFit | undefined => {
     if (!drawn || !base) return undefined;
     try {
@@ -323,13 +361,10 @@ export function PartDrawMode({
   }, [drawn, base, placed, view]);
 
   // What decides the saved part, for whether there is anything to save.
-  const key = useMemo(
-    () => drawing && setup && drawKey(name, drawing, setup.baseId, placed),
-    [name, drawing, setup, placed],
-  );
+  const key = useMemo(() => drawing && drawKey(name, drawing, placed), [name, drawing, placed]);
   const baselineKey = saved?.key ?? openedKey;
   const unsaved =
-    baselineKey === undefined ? !isBlank(present) : key !== undefined && key !== baselineKey;
+    baselineKey === undefined ? !isBlank(presentGrid) : key !== undefined && key !== baselineKey;
   useEffect(() => {
     onUnsaved(unsaved);
   }, [onUnsaved, unsaved]);
@@ -381,26 +416,38 @@ export function PartDrawMode({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const changeSetup = (change: Partial<DrawSetup>, resetPoints = false) => {
-    setSetup((known) => known && { ...known, ...change });
-    if (resetPoints) setPlaced(NO_PLACED_POINTS);
+  /** A new type, base part or view: an undo step, with the points back where the base has them. */
+  const changeFrame = (next: Partial<DrawFrame>) => {
+    change((snapshot) => ({
+      ...snapshot,
+      frame: { ...snapshot.frame, ...next },
+      placed: NO_PLACED_POINTS,
+    }));
+    setMessage(undefined);
+  };
+  const changeLook = (next: Partial<DrawLook>) => {
+    setLook((known) => known && { ...known, ...next });
     setMessage(undefined);
   };
 
   const pickType = (type: string) => {
-    if (!kit || !setup || type === setup.partType) return;
+    if (!kit || !setup || editing || type === setup.partType) return;
     const next = defaultBase(kit.parts, type, kit.roots);
     if (!next) return;
     // A name still the old type's default follows the type.
     if (name === defaultPartName(typeName(setup.partType))) {
       setName(defaultPartName(typeName(type)));
     }
-    changeSetup({ partType: type, baseId: next.id, step: next.part.step, ...recipeOf(type) }, true);
+    const { view: recipeView, rule } = recipeOf(type);
+    changeFrame({ partType: type, baseId: next.id, view: recipeView });
+    changeLook({ step: next.part.step, rule });
   };
 
   const pickBase = (id: string) => {
     const next = bases.find((choice) => choice.id === id);
-    if (next) changeSetup({ baseId: id, step: next.part.step }, true);
+    if (!next) return;
+    changeFrame({ baseId: id });
+    changeLook({ step: next.part.step });
   };
 
   /** The palette index to paint with, adding the colour; undefined (and says so) when full. */
@@ -429,7 +476,7 @@ export function PartDrawMode({
     const done = stroke.current;
     stroke.current = undefined;
     setLive(undefined);
-    if (done && keep) setHistory((known) => commit(known, done.grid));
+    if (done && keep) change((snapshot) => ({ ...snapshot, grid: done.grid }));
   };
   const onCanvasDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0 || !setup) return;
@@ -439,12 +486,15 @@ export function PartDrawMode({
     if (value === undefined) return;
     setMessage(undefined);
     if (tool === "fill") {
-      setHistory((known) => commit(known, floodFill(known.present, cell[0], cell[1], value)));
+      change((snapshot) => ({
+        ...snapshot,
+        grid: floodFill(snapshot.grid, cell[0], cell[1], value),
+      }));
       return;
     }
     event.currentTarget.setPointerCapture?.(event.pointerId);
     strokeValue.current = value;
-    const grid = paint(present, [cell], value);
+    const grid = paint(presentGrid, [cell], value);
     stroke.current = { grid, last: cell };
     setLive(grid);
   };
@@ -474,7 +524,7 @@ export function PartDrawMode({
     };
   };
   const onPointDown = (point: DraggedPoint, event: ReactPointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || stroke.current) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const at = pointAt(event);
@@ -489,18 +539,26 @@ export function PartDrawMode({
     const drop = dragging;
     setDragging(undefined);
     if (!drop || !drawn || !base || !fit) return;
-    setPlaced(
-      dropPoint({
-        drawn,
-        base: base.part,
-        view,
-        placed,
-        fit,
-        dragged: drop.point,
-        u: drop.u,
-        v: drop.v,
-      }),
-    );
+    const next = dropPoint({
+      drawn,
+      base: base.part,
+      view,
+      placed,
+      fit,
+      dragged: drop.point,
+      u: drop.u,
+      v: drop.v,
+    });
+    change((snapshot) => ({ ...snapshot, placed: next }));
+  };
+  /** A drag cancelled (Escape, or the pointer lost): the point goes back where it was. */
+  const cancelDrag = () => setDragging(undefined);
+
+  // Strokes and drags in progress hold undo and redo off, so neither lands mid-edit.
+  const busy = live !== undefined || dragging !== undefined;
+  const step = (move: typeof undo) => {
+    if (stroke.current) return;
+    setHistory(move);
   };
 
   // Ctrl+Z and Ctrl+Y as in Build mode; P, E and F pick the tools; Escape drops a stroke or a drag.
@@ -511,9 +569,10 @@ export function PartDrawMode({
       const keyName = event.key.toLowerCase();
       if (event.ctrlKey || event.metaKey || event.altKey) {
         if (!event.ctrlKey && !event.metaKey) return;
-        if (keyName === "z" && !event.shiftKey) setHistory(undo);
-        else if (keyName === "y" || (keyName === "z" && event.shiftKey)) setHistory(redo);
-        else return;
+        const undoing = keyName === "z" && !event.shiftKey;
+        const redoing = keyName === "y" || (keyName === "z" && event.shiftKey);
+        if (!undoing && !redoing) return;
+        if (!stroke.current && !dragging) setHistory(undoing ? undo : redo);
       } else if (keyName === "p") setTool("pen");
       else if (keyName === "e") setTool("eraser");
       else if (keyName === "f") setTool("fill");
@@ -526,15 +585,12 @@ export function PartDrawMode({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keysEnabled]);
+  }, [keysEnabled, dragging]);
 
-  // The grid, drawn: the base part's ghost, the pixels, and lines every cell.
-  const shown = live ?? present;
-  // Not for the edited part as its own base: the drawing is that shape already.
-  const ghost = useMemo(
-    () => (base && base.id !== editing?.id ? silhouette(base.part, view) : undefined),
-    [base, editing, view],
-  );
+  // The grid, drawn: the base part's ghost under the pixels, the pixels, the cell lines, and the
+  // ghost's outline over them, so it guides a trace and shows the scale while drawing.
+  const shown = live ?? presentGrid;
+  const ghost = useMemo(() => base && silhouette(base.part, view), [base, view]);
   const ghostScale = base && setup ? base.part.step / setup.step : 1;
   useEffect(() => {
     const context = canvas.current?.getContext("2d");
@@ -542,19 +598,26 @@ export function PartDrawMode({
     context.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
     context.fillStyle = "#f3f1ea";
     context.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+    const left = ghost ? (DRAWING_GRID - ghost.width * ghostScale) / 2 : 0;
+    const top = ghost ? (DRAWING_GRID - ghost.height * ghostScale) / 2 : 0;
+    const ghostAt = (x: number, y: number) =>
+      !!ghost &&
+      x >= 0 &&
+      y >= 0 &&
+      x < ghost.width &&
+      y < ghost.height &&
+      ghost.cells[x + ghost.width * y] === 1;
+    const px = (cells: number) => cells * CELL_PX;
     if (ghost) {
-      const left = (DRAWING_GRID - ghost.width * ghostScale) / 2;
-      const top = (DRAWING_GRID - ghost.height * ghostScale) / 2;
-      context.fillStyle = "rgb(60 80 60 / 16%)";
-      const size = ghostScale * CELL_PX;
+      context.fillStyle = "rgb(40 70 110 / 22%)";
       for (let y = 0; y < ghost.height; y++) {
         for (let x = 0; x < ghost.width; x++) {
-          if (!ghost.cells[x + ghost.width * y]) continue;
+          if (!ghostAt(x, y)) continue;
           context.fillRect(
-            (left + x * ghostScale) * CELL_PX,
-            (top + y * ghostScale) * CELL_PX,
-            size,
-            size,
+            px(left + x * ghostScale),
+            px(top + y * ghostScale),
+            px(ghostScale),
+            px(ghostScale),
           );
         }
       }
@@ -574,30 +637,63 @@ export function PartDrawMode({
       context.fillRect(at, 0, 2, CANVAS_PX);
       context.fillRect(0, at, CANVAS_PX, 2);
     }
+    if (ghost) {
+      // The outline: every side of a ghost cell with no ghost cell beyond it, dashed, light under
+      // dark so it shows on any colour.
+      context.beginPath();
+      for (let y = 0; y < ghost.height; y++) {
+        for (let x = 0; x < ghost.width; x++) {
+          if (!ghostAt(x, y)) continue;
+          const [x0, y0] = [px(left + x * ghostScale), px(top + y * ghostScale)];
+          const [x1, y1] = [px(left + (x + 1) * ghostScale), px(top + (y + 1) * ghostScale)];
+          if (!ghostAt(x, y - 1)) context.rect(x0, y0, x1 - x0, 0);
+          if (!ghostAt(x, y + 1)) context.rect(x0, y1, x1 - x0, 0);
+          if (!ghostAt(x - 1, y)) context.rect(x0, y0, 0, y1 - y0);
+          if (!ghostAt(x + 1, y)) context.rect(x1, y0, 0, y1 - y0);
+        }
+      }
+      context.setLineDash([]);
+      context.lineWidth = 5;
+      context.strokeStyle = "rgb(255 255 255 / 70%)";
+      context.stroke();
+      context.setLineDash([8, 6]);
+      context.lineWidth = 3;
+      context.strokeStyle = "rgb(30 60 110 / 90%)";
+      context.stroke();
+    }
   }, [shown, palette, ghost, ghostScale]);
 
-  // The points on the grid. Points at the same place, such as a mirror pair seen from the side,
-  // share one marker.
-  const markers = useMemo(() => {
-    if (!fit || !drawn) return [];
-    const at = new Map<
-      string,
-      { u: number; v: number; ids: string[]; depths: DrawnSocketDepth[]; shallow: boolean }
-    >();
+  // The sockets on the grid. A mirror pair at the same place, as seen from the side, shares one
+  // marker; any other sockets at one place each get their own, a little aside.
+  const markers = useMemo((): SocketMarker[] => {
+    if (!fit || !drawn || !base) return [];
+    const list: SocketMarker[] = [];
+    const deeper = (a: DrawnSocketDepth, b: DrawnSocketDepth) =>
+      DRAWN_SOCKET_DEPTHS.indexOf(b) > DRAWN_SOCKET_DEPTHS.indexOf(a) ? b : a;
     for (const socket of fit.part.sockets) {
       const { u, v } = toCanvas(socket.position, drawn, view);
-      const where = `${u},${v}`;
-      const known = at.get(where) ?? { u, v, ids: [], depths: [], shallow: false };
       const sits = fit.sockets[socket.id];
-      known.ids.push(socket.id);
-      if (sits) known.depths.push(sits.depth);
-      known.shallow ||= sits?.shallow ?? false;
-      at.set(where, known);
+      const depth = sits?.depth ?? "loose";
+      const shallow = sits?.shallow ?? false;
+      const partner = partnerOf(base.part, socket.id);
+      const pair = list.find(
+        (marker) =>
+          marker.u === u && marker.v === v && partner !== undefined && marker.ids.includes(partner),
+      );
+      if (pair) {
+        pair.ids.push(socket.id);
+        pair.depth = deeper(pair.depth, depth);
+        pair.shallow ||= shallow;
+        continue;
+      }
+      const offset = list.filter((marker) => marker.u === u && marker.v === v).length;
+      list.push({ u, v, offset, ids: [socket.id], depth, shallow });
     }
-    return [...at.values()];
-  }, [fit, drawn, view]);
+    return list;
+  }, [fit, drawn, base, view]);
   const attachAt = fit && drawn ? toCanvas(fit.part.attach, drawn, view) : undefined;
   const shallowCount = fit ? Object.values(fit.sockets).filter((s) => s.shallow).length : 0;
+  const hasSockets = (fit?.part.sockets.length ?? 0) > 0;
 
   const placeAt = (point: DraggedPoint, u: number, v: number) =>
     dragging &&
@@ -612,10 +708,14 @@ export function PartDrawMode({
   // A saved part with nothing changed since: there is nothing to save.
   const upToDate = record.uuid !== undefined && !unsaved;
 
-  /** Saves the part if it changed since its last save; the saved entry, or undefined if it failed. */
+  /**
+   * Saves the part if it changed since its last save: the saved entry, or undefined if it failed
+   * or another drawing began while it was saved (which the save then leaves as it is).
+   */
   const save = async (): Promise<PlayerPartEntry | undefined> => {
     if (!fit || !drawing || !key || !canSave) return undefined;
     if (upToDate) return saved?.entry ?? editing;
+    const started = generation.current;
     setSaving(true);
     setMessage(undefined);
     try {
@@ -628,31 +728,36 @@ export function PartDrawMode({
         newUuid: () => crypto.randomUUID(),
       });
       await savePart(store, entry);
+      onSaved(entry);
+      if (started !== generation.current) return undefined;
       setRecord(recordOf(entry));
       setSaved({ entry, key });
-      onSaved(entry);
       return entry;
     } catch (error) {
-      setMessage(`Your part couldn't be saved: ${String(error)}`);
+      if (started === generation.current) {
+        setMessage(`Your part couldn't be saved: ${String(error)}`);
+      }
       return undefined;
     } finally {
-      setSaving(false);
+      if (started === generation.current) setSaving(false);
     }
   };
 
   const sendToBuild = async () => {
+    const started = generation.current;
     const entry = await save();
-    if (entry) onUseInBuild(entry);
+    if (entry && started === generation.current) onUseInBuild(entry);
   };
 
   const marks = setup ? rulerMarks(setup.step) : [];
   // The colours on the grid now, in the palette's order.
-  const used = useMemo(() => compactDrawing(present, palette).palette, [present, palette]);
-  const ready = kit && setup;
+  const used = useMemo(() => compactDrawing(presentGrid, palette).palette, [presentGrid, palette]);
+  const ready = kit && setup && base;
   const sizeText =
     fit && setup
       ? `${centimetres(fit.part.size.x * setup.step)} × ${centimetres(fit.part.size.y * setup.step)} × ${centimetres(fit.part.size.z * setup.step)}`
       : undefined;
+  const against = fit && base ? sizeAgainst(fit.part, base.part) : undefined;
   const isDragging = dragging !== undefined;
 
   return (
@@ -690,22 +795,22 @@ export function PartDrawMode({
           <div className="tool-group">
             <ToolButton
               label="Undo (Ctrl+Z)"
-              disabled={!canUndo(history)}
-              onClick={() => setHistory(undo)}
+              disabled={busy || !canUndo(history)}
+              onClick={() => step(undo)}
             >
               <path className="stroke" d="M5.5 3L2.5 6l3 3M2.5 6h7a4 4 0 0 1 0 8h-3" />
             </ToolButton>
             <ToolButton
               label="Redo (Ctrl+Y)"
-              disabled={!canRedo(history)}
-              onClick={() => setHistory(redo)}
+              disabled={busy || !canRedo(history)}
+              onClick={() => step(redo)}
             >
               <path className="stroke" d="M10.5 3l3 3-3 3M13.5 6h-7a4 4 0 0 0 0 8h3" />
             </ToolButton>
             <ToolButton
               label="Clear the grid"
-              disabled={isBlank(present)}
-              onClick={() => setHistory((known) => commit(known, emptyGrid()))}
+              disabled={isBlank(presentGrid)}
+              onClick={() => change((snapshot) => ({ ...snapshot, grid: emptyGrid() }))}
             >
               <path className="stroke" d="M3.5 4.5h9M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" />
             </ToolButton>
@@ -728,15 +833,11 @@ export function PartDrawMode({
           <h3>Colours</h3>
           <div className="palette" role="group" aria-label="Suggested colours">
             {(kit?.suggestedColors ?? []).map((swatch) => (
-              <button
+              <Swatch
                 key={swatch}
-                type="button"
-                className="swatch"
-                title={swatch}
-                aria-label={`Paint with ${swatch}`}
-                aria-pressed={tool !== "eraser" && color === swatch}
-                style={{ background: swatch }}
-                onClick={() => {
+                color={swatch}
+                pressed={tool !== "eraser" && color === swatch}
+                onPick={() => {
                   setColor(swatch);
                   if (tool === "eraser") setTool("pen");
                 }}
@@ -748,15 +849,11 @@ export function PartDrawMode({
               <h3>In this part</h3>
               <div className="palette" role="group" aria-label="Colours in this part">
                 {used.map((swatch) => (
-                  <button
+                  <Swatch
                     key={swatch}
-                    type="button"
-                    className="swatch"
-                    title={swatch}
-                    aria-label={`Paint with ${swatch}`}
-                    aria-pressed={tool !== "eraser" && color === swatch}
-                    style={{ background: swatch }}
-                    onClick={() => {
+                    color={swatch}
+                    pressed={tool !== "eraser" && color === swatch}
+                    onPick={() => {
                       setColor(swatch);
                       if (tool === "eraser") setTool("pen");
                     }}
@@ -799,7 +896,6 @@ export function PartDrawMode({
                     {label}
                   </span>
                 ))}
-                <em>cm</em>
               </div>
               <div className="ruler ruler-left" aria-hidden="true">
                 {marks.map(({ cells, label }) => (
@@ -808,36 +904,38 @@ export function PartDrawMode({
                   </span>
                 ))}
               </div>
+              <span className="ruler-unit" aria-hidden="true">
+                cm
+              </span>
+              {markers.map((marker) => {
+                const first = marker.ids[0] ?? "";
+                const point: DraggedPoint = { kind: "socket", id: first };
+                return (
+                  <PointMarker
+                    key={marker.ids.join(" ")}
+                    className={`point socket depth-${marker.depth}${marker.shallow ? " shallow" : ""}`}
+                    {...placeAt(point, marker.u, marker.v)}
+                    offset={marker.offset}
+                    label={`Socket ${marker.ids.join(" and ")}: ${DEPTH_LABELS[marker.depth]}${marker.shallow ? ", shallower than on its base part" : ""}. Drag to move`}
+                    onPointerDown={(event) => onPointDown(point, event)}
+                    onPointerMove={onPointMove}
+                    onPointerUp={onPointUp}
+                    onCancel={cancelDrag}
+                  />
+                );
+              })}
               {attachAt && (
                 <PointMarker
                   className={fit?.attachOnCubes ? "point attach" : "point attach loose"}
                   {...placeAt({ kind: "attach" }, attachAt.u, attachAt.v)}
+                  offset={0}
                   label={`Attach point${fit?.attachOnCubes ? "" : ", off the part"}: drag to move`}
                   onPointerDown={(event) => onPointDown({ kind: "attach" }, event)}
                   onPointerMove={onPointMove}
                   onPointerUp={onPointUp}
+                  onCancel={cancelDrag}
                 />
               )}
-              {markers.map((marker) => {
-                const first = marker.ids[0] ?? "";
-                const point: DraggedPoint = { kind: "socket", id: first };
-                const worst = marker.depths.reduce<DrawnSocketDepth>(
-                  (a, b) =>
-                    DRAWN_SOCKET_DEPTHS.indexOf(b) > DRAWN_SOCKET_DEPTHS.indexOf(a) ? b : a,
-                  "own",
-                );
-                return (
-                  <PointMarker
-                    key={marker.ids.join(" ")}
-                    className={`point socket depth-${worst}${marker.shallow ? " shallow" : ""}`}
-                    {...placeAt(point, marker.u, marker.v)}
-                    label={`Socket ${marker.ids.join(" and ")}: ${DEPTH_LABELS[worst]}${marker.shallow ? ", shallower than its base part's" : ""}. Drag to move`}
-                    onPointerDown={(event) => onPointDown(point, event)}
-                    onPointerMove={onPointMove}
-                    onPointerUp={onPointUp}
-                  />
-                );
-              })}
             </div>
           ) : (
             <p className="stage-message" role="status">
@@ -846,9 +944,11 @@ export function PartDrawMode({
           )}
           {ready && (
             <p className="stage-hint" aria-live="polite">
-              {isBlank(present)
-                ? "Draw your part on the grid. The faint shape is its base part, to trace."
-                : "Drag the diamond (where it attaches) and the dots (where parts go)."}
+              {isBlank(presentGrid)
+                ? "Draw your part on the grid. The dashed outline is its base part, to trace."
+                : hasSockets
+                  ? "Drag the diamond (where it attaches) and the dots (where parts go)."
+                  : "Drag the diamond to move where it attaches."}
             </p>
           )}
           {notice && (
@@ -861,142 +961,153 @@ export function PartDrawMode({
           <div ref={previewBox} className="part-preview" role="img" aria-label="Your part in 3D">
             {!fit && <span className="preview-empty">Your part shows here.</span>}
           </div>
-          {setup && kit && (
-            <div className="draw-details">
-              <label className="field">
-                <span>Name</span>
-                <input
-                  type="text"
-                  value={name}
-                  placeholder="Part"
-                  maxLength={MAX_PLAYER_PART_NAME_LENGTH}
-                  spellCheck={false}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>Part type</span>
-                <select value={setup.partType} onChange={(event) => pickType(event.target.value)}>
-                  {kit.sections.map((section) => (
-                    <option key={section.type} value={section.type}>
-                      {section.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Base part (its joints and ghost)</span>
-                <select value={base?.id} onChange={(event) => pickBase(event.target.value)}>
-                  {bases.map((choice) => (
-                    <option key={choice.id} value={choice.id}>
-                      {choice.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="field-row">
+          <div className="draw-details">
+            {setup && kit && (
+              <>
                 <label className="field">
-                  <span>Cube size</span>
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    value={name}
+                    placeholder="Part"
+                    maxLength={MAX_PLAYER_PART_NAME_LENGTH}
+                    spellCheck={false}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Part type</span>
                   <select
-                    value={setup.step}
-                    onChange={(event) =>
-                      changeSetup({ step: Number(event.target.value) as VoxelStep })
-                    }
+                    value={setup.partType}
+                    disabled={editing !== undefined}
+                    title={editing ? "A saved part keeps its type" : undefined}
+                    onChange={(event) => pickType(event.target.value)}
                   >
-                    {VOXEL_STEPS.map((step) => (
-                      <option key={step} value={step}>
-                        {centimetres(step)}
+                    {kit.sections.map((section) => (
+                      <option key={section.type} value={section.type}>
+                        {section.name}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label className="field">
-                  <span>Drawn from</span>
-                  <select
-                    value={setup.view}
-                    onChange={(event) =>
-                      changeSetup({ view: event.target.value as PartDrawingView }, true)
-                    }
-                  >
-                    {PART_DRAWING_VIEWS.map((option) => (
-                      <option key={option} value={option}>
-                        {VIEW_LABELS[option]}
+                  <span>Base part (its joints and outline)</span>
+                  <select value={base?.id} onChange={(event) => pickBase(event.target.value)}>
+                    {bases.map((choice) => (
+                      <option key={choice.id} value={choice.id}>
+                        {choice.name}
                       </option>
                     ))}
                   </select>
                 </label>
-              </div>
-              <fieldset className="field">
-                <legend>Depth</legend>
-                <div className="segmented" role="radiogroup" aria-label="Depth rule">
-                  {PART_DRAWING_RULES.map((rule) => (
-                    <button
-                      key={rule}
-                      type="button"
-                      role="radio"
-                      aria-checked={setup.rule === rule}
-                      onClick={() => changeSetup({ rule })}
+                <div className="field-row">
+                  <label className="field">
+                    <span>Cube size</span>
+                    <select
+                      value={setup.step}
+                      onChange={(event) =>
+                        changeLook({ step: Number(event.target.value) as VoxelStep })
+                      }
                     >
-                      {RULE_LABELS[rule]}
-                    </button>
-                  ))}
-                </div>
-                {setup.rule === "flat" ? (
-                  <div className="segmented" role="radiogroup" aria-label="Thickness">
-                    {([1, 2] as const).map((cubes) => (
-                      <button
-                        key={cubes}
-                        type="button"
-                        role="radio"
-                        aria-checked={setup.flatThickness === cubes}
-                        onClick={() => changeSetup({ flatThickness: cubes })}
-                      >
-                        {cubes === 1 ? "1 cube" : "2 cubes"}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <label className="chubby">
-                    <span>Chubby</span>
-                    <input
-                      type="range"
-                      min={MIN_CHUBBY}
-                      max={MAX_CHUBBY}
-                      step={0.05}
-                      value={setup.chubby}
-                      onChange={(event) => changeSetup({ chubby: Number(event.target.value) })}
-                    />
-                    <output>{setup.chubby.toFixed(2)}×</output>
+                      {VOXEL_STEPS.map((option) => (
+                        <option key={option} value={option}>
+                          {centimetres(option)}
+                        </option>
+                      ))}
+                    </select>
                   </label>
-                )}
-              </fieldset>
-              {sizeText && <p className="size-readout">{sizeText}</p>}
-              {fit && (fit.part.sockets.length > 0 || !fit.attachOnCubes) && (
-                <div className="points-key">
-                  <p>
-                    <span className="key-dot depth-own" /> deep enough
-                    <span className="key-dot depth-finer" /> smaller parts only
-                    <span className="key-dot depth-touching" /> too shallow
-                  </p>
-                  {shallowCount > 0 && (
-                    <p className="release-hint blocking" role="status">
-                      {shallowCount === 1 ? "A socket sits" : `${shallowCount} sockets sit`} less
-                      deep than on the base part: drag {shallowCount === 1 ? "it" : "them"} into a
-                      thicker place or make the part deeper. Build will say which parts don't fit.
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="text-link"
-                    disabled={!placed.attach && Object.keys(placed.sockets).length === 0}
-                    onClick={() => setPlaced(NO_PLACED_POINTS)}
-                  >
-                    Put the points back where the base part has them
-                  </button>
+                  <label className="field">
+                    <span>Drawn from</span>
+                    <select
+                      value={setup.view}
+                      onChange={(event) =>
+                        changeFrame({ view: event.target.value as PartDrawingView })
+                      }
+                    >
+                      {PART_DRAWING_VIEWS.map((option) => (
+                        <option key={option} value={option}>
+                          {VIEW_LABELS[option]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-              )}
-            </div>
-          )}
+                <fieldset className="field">
+                  <legend>Depth</legend>
+                  <Segmented
+                    label="Depth rule"
+                    options={PART_DRAWING_RULES}
+                    value={setup.rule}
+                    labelOf={(rule) => RULE_LABELS[rule]}
+                    onChange={(rule) => changeLook({ rule })}
+                  />
+                  {setup.rule === "flat" ? (
+                    <Segmented
+                      label="Thickness"
+                      options={[1, 2] as const}
+                      value={setup.flatThickness}
+                      labelOf={(cubes) => (cubes === 1 ? "1 cube" : "2 cubes")}
+                      onChange={(flatThickness) => changeLook({ flatThickness })}
+                    />
+                  ) : (
+                    <label className="chubby">
+                      <span>Chubby</span>
+                      <input
+                        type="range"
+                        min={MIN_CHUBBY}
+                        max={MAX_CHUBBY}
+                        step={0.05}
+                        value={setup.chubby}
+                        onChange={(event) => changeLook({ chubby: Number(event.target.value) })}
+                      />
+                      <output>{setup.chubby.toFixed(2)}×</output>
+                    </label>
+                  )}
+                </fieldset>
+                {sizeText && against !== undefined && (
+                  <p className="size-readout">
+                    {sizeText}
+                    <br />
+                    <span className="measured">About {against.toFixed(1)}× its base part</span>
+                  </p>
+                )}
+                {against !== undefined && against > MUCH_BIGGER && (
+                  <p className="release-hint" role="status">
+                    {MUCH_BIGGER_HINT}
+                  </p>
+                )}
+                {fit && (hasSockets || !fit.attachOnCubes) && (
+                  <div className="points-key">
+                    {hasSockets && (
+                      <p>
+                        <span className="key-dot depth-own" /> deep enough
+                        <span className="key-dot depth-finer" /> smaller parts only
+                        <span className="key-dot depth-touching" /> too shallow
+                      </p>
+                    )}
+                    {shallowCount > 0 && (
+                      <p className="release-hint blocking" role="status">
+                        {shallowCount === 1 ? "A socket sits" : `${shallowCount} sockets sit`} less
+                        deep than on the base part: drag {shallowCount === 1 ? "it" : "them"} into a
+                        thicker place or make the part deeper. Build will say which parts don&apos;t
+                        fit.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      className="text-link"
+                      disabled={!placed.attach && Object.keys(placed.sockets).length === 0}
+                      onClick={() =>
+                        change((snapshot) => ({ ...snapshot, placed: NO_PLACED_POINTS }))
+                      }
+                    >
+                      Put the points back where the base part has them
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
           <div className="release-slot">
             {message && (
               <p className="release-error" role="alert">
@@ -1039,15 +1150,75 @@ export function PartDrawMode({
   );
 }
 
+/** A colour to paint with. */
+function Swatch(props: { color: string; pressed: boolean; onPick(): void }) {
+  return (
+    <button
+      type="button"
+      className="swatch"
+      title={props.color}
+      aria-label={`Paint with ${props.color}`}
+      aria-pressed={props.pressed}
+      style={{ background: props.color }}
+      onClick={props.onPick}
+    />
+  );
+}
+
+/**
+ * A row of radio buttons. Only the checked one is in the tab order, and the arrow keys move the
+ * choice along the row, as a radio group's do.
+ */
+function Segmented<T extends string | number>(props: {
+  label: string;
+  options: readonly T[];
+  value: T;
+  labelOf(option: T): string;
+  onChange(option: T): void;
+}) {
+  const { options, value, onChange } = props;
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const by = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (by === undefined) return;
+    event.preventDefault();
+    const at = (options.indexOf(value) + by + options.length) % options.length;
+    const next = options[at];
+    if (next === undefined) return;
+    onChange(next);
+    (event.currentTarget.parentElement?.children[at] as HTMLElement | undefined)?.focus();
+  };
+  return (
+    <div className="segmented" role="radiogroup" aria-label={props.label}>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          aria-checked={value === option}
+          tabIndex={value === option ? 0 : -1}
+          onClick={() => onChange(option)}
+          onKeyDown={onKeyDown}
+        >
+          {props.labelOf(option)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** A draggable point on the grid, placed in canvas pixels. */
 function PointMarker(props: {
   className: string;
   u: number;
   v: number;
+  /** Markers before it at the same place: it is drawn this many steps aside. */
+  offset: number;
   label: string;
   onPointerDown(event: ReactPointerEvent<HTMLElement>): void;
   onPointerMove(event: ReactPointerEvent<HTMLElement>): void;
   onPointerUp(): void;
+  /** The drag was cancelled or the pointer lost: the point goes back. */
+  onCancel(): void;
 }) {
   return (
     <span
@@ -1055,6 +1226,8 @@ function PointMarker(props: {
       style={{
         left: `${(props.u / DRAWING_GRID) * 100}%`,
         top: `${(props.v / DRAWING_GRID) * 100}%`,
+        marginLeft: `${props.offset * 9}px`,
+        marginTop: `${props.offset * 9}px`,
       }}
       title={props.label}
       aria-label={props.label}
@@ -1062,7 +1235,8 @@ function PointMarker(props: {
       onPointerDown={props.onPointerDown}
       onPointerMove={props.onPointerMove}
       onPointerUp={props.onPointerUp}
-      onPointerCancel={props.onPointerUp}
+      onPointerCancel={props.onCancel}
+      onLostPointerCapture={props.onCancel}
     />
   );
 }

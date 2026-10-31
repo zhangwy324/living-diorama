@@ -55,7 +55,14 @@ function drawn(
     }),
   );
   const result = voxelizeDrawing(
-    PartDrawingSchema.parse({ pixels, palette: ["#7fae5a"], view, rule, step: 0.05 }),
+    PartDrawingSchema.parse({
+      pixels,
+      palette: ["#7fae5a"],
+      view,
+      rule,
+      step: 0.05,
+      baseId: "test:torso",
+    }),
   );
   if (!result) throw new Error("Nothing drawn");
   return result;

@@ -6,11 +6,13 @@ import {
 } from "@living-diorama/content-schema";
 import { createMemoryPartsStore, type PartsStore } from "@living-diorama/desktop-integration";
 import type { AssemblyView } from "@living-diorama/renderer";
-import { act } from "react";
+import { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CloseDialog } from "./CloseDialog";
 import { builtInParts } from "./fixtures/built-in-parts";
-import type { DrawRequest } from "./modes";
+import { useOpenDraw } from "./open-draw";
+import type { DrawRequest, OpenDraw, StudioMode } from "./modes";
 import { PartDrawMode } from "./PartDrawMode";
 import { closeMessage } from "./modes";
 import { ModeSwitch } from "./ModeSwitch";
@@ -46,6 +48,9 @@ beforeEach(() => {
   view.assembly = undefined;
   // A 320 px grid at the page's top-left: 10 px a cell.
   HTMLCanvasElement.prototype.getContext = () => null;
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.open = true;
+  };
   HTMLCanvasElement.prototype.getBoundingClientRect = () =>
     ({ left: 0, top: 0, width: 320, height: 320, right: 320, bottom: 320 }) as DOMRect;
   container = document.createElement("div");
@@ -220,7 +225,10 @@ describe("Draw mode", () => {
 
     await draw.open({ key: 2, entry: saved.value });
     expect(select("Part type").value).toBe("hollow:torso");
-    expect(select("Base part").value).toBe(saved.value.id);
+    // Drawn against its original base part, its type kept.
+    expect(saved.value.drawing.baseId).toBe("hollow:four-legged-torso");
+    expect(select("Base part").value).toBe(saved.value.drawing.baseId);
+    expect(select("Part type").disabled).toBe(true);
     expect(view.assembly?.parts.drawn).toEqual(saved.value.part);
     expect(draw.onUnsaved).toHaveBeenLastCalledWith(false);
     expect(button("Saved").disabled).toBe(true);
@@ -237,6 +245,260 @@ describe("Draw mode", () => {
     expect(view.disposed).toBe(1);
     await draw.show(true);
     expect(view.created).toBe(2);
+  });
+});
+
+/** A store whose saves wait until the test lets them through. */
+function slowStore() {
+  const store = createMemoryPartsStore();
+  const waiting: (() => void)[] = [];
+  return {
+    store: {
+      ...store,
+      save: (id: string, entry: unknown) =>
+        new Promise<void>((resolve) =>
+          waiting.push(() => void store.save(id, entry).then(resolve)),
+        ),
+    } satisfies PartsStore,
+    release: () => act(async () => waiting.splice(0).forEach((go) => go())),
+    list: () => store.list(),
+  };
+}
+
+const marker = (kind: "attach" | "socket", index = 0) =>
+  container.querySelectorAll<HTMLElement>(`.point.${kind}`)[index]!;
+const key = (keyName: string, options: KeyboardEventInit = {}) =>
+  act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: keyName, ...options })));
+const pressedTool = () =>
+  container
+    .querySelector("[aria-label='Tools'] button[aria-pressed='true']")
+    ?.getAttribute("title");
+
+describe("Draw mode's points and keys", () => {
+  it("drags a point, refits it on drop, and undoes the drag", async () => {
+    await setup();
+    await paintBox(8, 8, 22, 18);
+    const before = marker("attach").style.left;
+    await act(async () => pointer(marker("attach"), "pointerdown", 150, 185));
+    await act(async () => pointer(marker("attach"), "pointermove", 200, 185));
+    // Shown where the pointer is while dragged.
+    expect(marker("attach").style.left).toBe("62.5%");
+    await act(async () => pointer(marker("attach"), "pointerup", 200, 185));
+    expect(marker("attach").style.left).toBe("62.5%");
+    expect(view.assembly?.parts.drawn?.attach.x).toBe(12);
+    await key("z", { ctrlKey: true });
+    expect(marker("attach").style.left).toBe(before);
+    await key("y", { ctrlKey: true });
+    expect(marker("attach").style.left).toBe("62.5%");
+  });
+
+  it("puts a dragged point back on Escape or a lost pointer", async () => {
+    await setup();
+    await paintBox(8, 8, 22, 18);
+    const before = marker("attach").style.left;
+    await act(async () => pointer(marker("attach"), "pointerdown", 150, 185));
+    await act(async () => pointer(marker("attach"), "pointermove", 200, 185));
+    await key("Escape");
+    expect(marker("attach").style.left).toBe(before);
+    await act(async () => pointer(marker("attach"), "pointerdown", 150, 185));
+    await act(async () => pointer(marker("attach"), "pointermove", 200, 185));
+    expect(marker("attach").style.left).toBe("62.5%");
+    await act(async () =>
+      marker("attach").dispatchEvent(new Event("lostpointercapture", { bubbles: true })),
+    );
+    expect(marker("attach").style.left).toBe(before);
+  });
+
+  it("undoes a change of view with the points it reset", async () => {
+    await setup();
+    await paintBox(8, 8, 22, 18);
+    await act(async () => pointer(marker("attach"), "pointerdown", 150, 185));
+    await act(async () => pointer(marker("attach"), "pointermove", 200, 185));
+    await act(async () => pointer(marker("attach"), "pointerup", 200, 185));
+    const moved = marker("attach").style.left;
+    expect(moved).toBe("62.5%");
+    const viewSelect = select("Drawn from");
+    await act(async () => {
+      viewSelect.value = "front";
+      viewSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(select("Drawn from").value).toBe("front");
+    await key("z", { ctrlKey: true });
+    expect(select("Drawn from").value).toBe("side");
+    expect(marker("attach").style.left).toBe(moved);
+  });
+
+  it("picks the tools with P, E and F, but not while typing", async () => {
+    await setup();
+    expect(pressedTool()).toBe("Pen (P)");
+    await key("e");
+    expect(pressedTool()).toBe("Eraser (E)");
+    await key("f");
+    expect(pressedTool()).toBe("Fill (F)");
+    await key("p");
+    expect(pressedTool()).toBe("Pen (P)");
+    const nameField = container.querySelector<HTMLInputElement>("input[type='text']")!;
+    await act(async () =>
+      nameField.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true })),
+    );
+    expect(pressedTool()).toBe("Pen (P)");
+  });
+
+  it("holds undo off during a stroke, and Escape drops the stroke", async () => {
+    await setup();
+    await paintBox(8, 8, 10, 9);
+    await act(async () => {
+      pointer(canvas(), "pointerdown", 85, 205);
+      pointer(canvas(), "pointermove", 125, 205);
+    });
+    await key("z", { ctrlKey: true });
+    // The two rows are still there: undo waited.
+    expect(view.assembly?.parts.drawn?.size.y).toBe(2);
+    await key("Escape");
+    await act(async () => pointer(canvas(), "pointerup", 125, 205));
+    expect(view.assembly?.parts.drawn?.size.y).toBe(2);
+  });
+
+  it("moves the depth rule with the arrow keys", async () => {
+    await setup();
+    const checked = () =>
+      container.querySelector<HTMLElement>("[aria-label='Depth rule'] [aria-checked='true']")!;
+    expect(checked().textContent).toBe("Puffy");
+    await act(async () =>
+      checked().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })),
+    );
+    expect(checked().textContent).toBe("Tube");
+    expect(checked().tabIndex).toBe(0);
+  });
+
+  it("keeps a shallow socket flagged when the part is opened again", async () => {
+    const draw = await setup();
+    await paintBox(8, 8, 22, 18);
+    await act(async () => button("Flat").click());
+    expect(container.querySelectorAll(".point.socket.shallow").length).toBeGreaterThan(0);
+    await act(async () => button("Save").click());
+    const saved = parsePlayerPartEntry((await draw.store.list())[0]?.entry);
+    if (!saved.ok) throw new Error("Not saved");
+    await draw.open({ key: 1, partType: "hollow:leg" });
+    await draw.open({ key: 2, entry: saved.value });
+    expect(container.querySelectorAll(".point.socket.shallow").length).toBeGreaterThan(0);
+  });
+
+  it("warns when the part is much bigger than its base part", async () => {
+    await setup();
+    await paintBox(2, 2, 29, 29);
+    expect(container.textContent).toContain("Much bigger than its base part");
+    expect(container.querySelector(".size-readout")?.textContent).toMatch(
+      /About [\d.]+× its base part/,
+    );
+  });
+
+  it("leaves a new drawing be when an earlier save finishes after it began", async () => {
+    const slow = slowStore();
+    const draw = await setup(slow.store);
+    await paintBox(8, 8, 22, 18);
+    await act(async () => void button("Use in Build →").click());
+    expect(button("Saving…")).toBeDefined();
+    await draw.open({ key: 1, partType: "hollow:leg" });
+    await slow.release();
+    // The first part is saved, but the new drawing stays new and Build gets nothing.
+    expect(await slow.list()).toHaveLength(1);
+    expect(draw.onSaved).toHaveBeenCalledTimes(1);
+    expect(draw.onUseInBuild).not.toHaveBeenCalled();
+    expect(select("Part type").value).toBe("hollow:leg");
+    expect(button("Save").disabled).toBe(true);
+    await paintBox(8, 8, 10, 20);
+    await act(async () => void button("Save").click());
+    await slow.release();
+    const stored = await slow.list();
+    expect(stored).toHaveLength(2);
+    expect(stored.map(({ entry }) => (entry as PlayerPartEntry).version)).toEqual([1, 1]);
+  });
+});
+
+/** What the Studio stand-in last rendered with. */
+const studio: { mode: StudioMode; open?: OpenDraw } = { mode: "build" };
+
+/** Draw mode with the Studio's opening and its "Discard your part?" question, as in Studio.tsx. */
+function DrawStudio() {
+  const unsaved = useRef(false);
+  const [mode, setMode] = useState<StudioMode>("build");
+  const openDraw = useOpenDraw({ unsaved: () => unsaved.current, onMode: setMode });
+  useEffect(() => {
+    studio.mode = mode;
+    studio.open = openDraw.open;
+  });
+  return (
+    <>
+      <PartDrawMode
+        active={true}
+        keysEnabled={!openDraw.confirming}
+        modeSwitch={null}
+        onUnsaved={(value) => {
+          unsaved.current = value;
+        }}
+        client={CLIENT}
+        store={STORE}
+        request={openDraw.request}
+        onNew={(partType) => openDraw.open({ partType })}
+        onSaved={() => {}}
+        onUseInBuild={() => {}}
+      />
+      {openDraw.confirming && (
+        <CloseDialog
+          title="Discard your part?"
+          drafts={false}
+          onDiscard={openDraw.confirm}
+          onCancel={openDraw.cancel}
+        />
+      )}
+    </>
+  );
+}
+const CLIENT = { parts: () => Promise.resolve(builtInParts()) };
+const STORE = createMemoryPartsStore();
+
+describe("opening Draw mode", () => {
+  const dialog = () => container.querySelector("dialog");
+  const mount = async () => {
+    root = createRoot(container);
+    await act(async () => root!.render(<DrawStudio />));
+  };
+  const open = (request: Parameters<OpenDraw>[0]) => act(async () => studio.open!(request));
+
+  it("opens straight away with nothing to lose, and switches to Draw", async () => {
+    await mount();
+    await open({ partType: "hollow:leg" });
+    expect(dialog()).toBeNull();
+    expect(studio.mode).toBe("draw");
+    expect(select("Part type").value).toBe("hollow:leg");
+  });
+
+  it("asks before openDraw drops an unsaved drawing: Cancel keeps it, Discard opens", async () => {
+    await mount();
+    await paintBox(8, 8, 22, 18);
+    await open({ partType: "hollow:leg" });
+    expect(dialog()?.textContent).toContain("Discard your part?");
+    expect(dialog()?.textContent).not.toContain("Save draft");
+    await act(async () => button("Cancel").click());
+    expect(dialog()).toBeNull();
+    expect(select("Part type").value).toBe("hollow:torso");
+    await open({ partType: "hollow:leg" });
+    await act(async () => button("Discard").click());
+    expect(dialog()).toBeNull();
+    expect(select("Part type").value).toBe("hollow:leg");
+    expect(button("Save").disabled).toBe(true);
+  });
+
+  it("asks before New part drops an unsaved drawing", async () => {
+    await mount();
+    await paintBox(8, 8, 22, 18);
+    await act(async () => button("New part").click());
+    expect(dialog()?.textContent).toContain("Discard your part?");
+    await act(async () => button("Discard").click());
+    expect(dialog()).toBeNull();
+    expect(select("Part type").value).toBe("hollow:torso");
+    expect(container.textContent).toContain("Draw your part first.");
   });
 });
 

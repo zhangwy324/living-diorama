@@ -103,38 +103,48 @@ export function floodFill(grid: Grid, x: number, y: number, value: number): Grid
   return next;
 }
 
-/** The grid's undo history: snapshots of whole grids (ADR 0025 §15), as Build mode keeps (§16). */
-export interface GridHistory {
-  past: readonly Grid[];
-  present: Grid;
-  future: readonly Grid[];
+/**
+ * Draw mode's undo history: immutable snapshots (ADR 0025 §15), as Build mode keeps (ADR 0023
+ * §16). A snapshot is the whole grid with what else an edit can change, such as the placed points.
+ */
+export interface History<T> {
+  past: readonly T[];
+  present: T;
+  future: readonly T[];
 }
 
-export const startHistory = (grid: Grid = emptyGrid()): GridHistory => ({
+export type GridHistory = History<Grid>;
+
+export const startHistory = <T = Grid>(present: T): History<T> => ({
   past: [],
-  present: grid,
+  present,
   future: [],
 });
 
 /**
- * Makes `grid` the present, one undo step after the grid before, and drops what redo had. Nothing
- * changes when it is the same as the present, so a click that paints nothing new is no step.
+ * Makes `next` the present, one undo step after the one before, and drops what redo had. Nothing
+ * changes when `same` finds it the same as the present, so a click that paints nothing new is no
+ * step.
  */
-export function commit(history: GridHistory, grid: Grid): GridHistory {
-  if (sameGrid(grid, history.present)) return history;
+export function commit<T>(
+  history: History<T>,
+  next: T,
+  same: (a: T, b: T) => boolean = Object.is,
+): History<T> {
+  if (same(next, history.present)) return history;
   return {
     past: [...history.past, history.present].slice(-MAX_GRID_HISTORY),
-    present: grid,
+    present: next,
     future: [],
   };
 }
 
-export const canUndo = (history: GridHistory) => history.past.length > 0;
-export const canRedo = (history: GridHistory) => history.future.length > 0;
+export const canUndo = <T>(history: History<T>) => history.past.length > 0;
+export const canRedo = <T>(history: History<T>) => history.future.length > 0;
 
-export function undo(history: GridHistory): GridHistory {
-  const previous = history.past.at(-1);
-  if (!previous) return history;
+export function undo<T>(history: History<T>): History<T> {
+  if (history.past.length === 0) return history;
+  const previous = history.past[history.past.length - 1] as T;
   return {
     past: history.past.slice(0, -1),
     present: previous,
@@ -142,9 +152,9 @@ export function undo(history: GridHistory): GridHistory {
   };
 }
 
-export function redo(history: GridHistory): GridHistory {
-  const [next, ...rest] = history.future;
-  if (!next) return history;
+export function redo<T>(history: History<T>): History<T> {
+  if (history.future.length === 0) return history;
+  const [next, ...rest] = history.future as [T, ...T[]];
   return { past: [...history.past, history.present], present: next, future: rest };
 }
 
@@ -176,6 +186,11 @@ export function compactDrawing(
   const remap = new Map(used.map((value, i) => [value, i + 1]));
   return {
     pixels: Array.from(grid, (value) => remap.get(value) ?? 0),
-    palette: used.map((value) => palette[value - 1] ?? "#000000"),
+    palette: used.map((value) => {
+      // The palette only grows and painting adds a colour before using it, so this is a bug.
+      const color = palette[value - 1];
+      if (color === undefined) throw new Error(`Colour index ${value} is past the palette`);
+      return color;
+    }),
   };
 }

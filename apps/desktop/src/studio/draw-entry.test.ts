@@ -15,7 +15,9 @@ import {
   drawingOf,
   partEntry,
   recordOf,
+  MUCH_BIGGER,
   savePart,
+  sizeAgainst,
   type DrawSetup,
 } from "./draw-entry";
 import { NO_PLACED_POINTS } from "./drawn-points";
@@ -60,7 +62,7 @@ describe("a drawn part's entry", () => {
     });
     expect(PlayerPartEntrySchema.safeParse(entry).success).toBe(true);
     expect(entry).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: playerPartId(UUID),
       name: "Round body",
       version: 1,
@@ -153,14 +155,31 @@ describe("a drawing's start", () => {
 
   it("has a key that changes with what decides the part, and not otherwise", () => {
     const { drawing } = drawnPart();
-    const key = drawKey("Round body", drawing, base.id, NO_PLACED_POINTS);
-    expect(drawKey(" Round body", drawing, base.id, NO_PLACED_POINTS)).toBe(key);
-    expect(drawKey("Round", drawing, base.id, NO_PLACED_POINTS)).not.toBe(key);
-    expect(drawKey("Round body", { ...drawing, rule: "flat" }, base.id, NO_PLACED_POINTS)).not.toBe(
+    const key = drawKey("Round body", drawing, NO_PLACED_POINTS);
+    expect(drawKey(" Round body", drawing, NO_PLACED_POINTS)).toBe(key);
+    expect(drawKey("Round", drawing, NO_PLACED_POINTS)).not.toBe(key);
+    expect(drawKey("Round body", { ...drawing, rule: "flat" }, NO_PLACED_POINTS)).not.toBe(key);
+    expect(drawKey("Round body", drawing, { sockets: { neck: { u: 1, v: 1, d: 0 } } })).not.toBe(
       key,
     );
     expect(
-      drawKey("Round body", drawing, base.id, { sockets: { neck: { u: 1, v: 1, d: 0 } } }),
+      drawKey("Round body", { ...drawing, baseId: "hollow:other" }, NO_PLACED_POINTS),
     ).not.toBe(key);
+  });
+
+  it("measures a part against its base part by its largest size", () => {
+    const { part } = drawnPart();
+    expect(sizeAgainst(base.part, base.part)).toBe(1);
+    const twice = {
+      ...part,
+      step: base.part.step,
+      size: { ...base.part.size, y: base.part.size.y * 2 },
+    };
+    expect(sizeAgainst(twice, base.part)).toBe(2);
+    expect(MUCH_BIGGER).toBe(2);
+  });
+
+  it("keeps its base part in the drawing", () => {
+    expect(drawnPart().drawing.baseId).toBe(base.id);
   });
 });

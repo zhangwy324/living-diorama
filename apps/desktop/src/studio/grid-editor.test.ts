@@ -14,6 +14,7 @@ import {
   lineCells,
   paint,
   redo,
+  sameGrid,
   startHistory,
   undo,
   type Grid,
@@ -109,7 +110,7 @@ describe("undo", () => {
   it("keeps each grid as a snapshot, one step an edit", () => {
     const a = gridOf(["1"]);
     const b = paint(a, [[1, 0]], 1);
-    let history = commit(commit(startHistory(), a), b);
+    let history = commit(commit(startHistory(emptyGrid()), a), b);
     expect(history.present).toBe(b);
     expect(canUndo(history)).toBe(true);
     history = undo(history);
@@ -126,19 +127,20 @@ describe("undo", () => {
   });
 
   it("makes no step for a grid like the present", () => {
-    const history = commit(startHistory(), gridOf(["1"]));
-    expect(commit(history, gridOf(["1"]))).toBe(history);
+    const history = commit(startHistory(emptyGrid()), gridOf(["1"]));
+    expect(commit(history, gridOf(["1"]), sameGrid)).toBe(history);
+    expect(commit(history, history.present)).toBe(history);
   });
 
   it("drops what redo had on a new edit", () => {
-    const history = undo(commit(startHistory(), gridOf(["1"])));
+    const history = undo(commit(startHistory(emptyGrid()), gridOf(["1"])));
     expect(canRedo(history)).toBe(true);
     const next = commit(history, gridOf([".1"]));
     expect(canRedo(next)).toBe(false);
   });
 
   it(`goes back at most ${MAX_GRID_HISTORY} steps`, () => {
-    let history = startHistory();
+    let history = startHistory(emptyGrid());
     for (let i = 0; i < MAX_GRID_HISTORY + 10; i++) {
       history = commit(history, paint(history.present, [[i % DRAWING_GRID, 0]], (i % 9) + 1));
     }
@@ -171,5 +173,11 @@ describe("the palette", () => {
     expect(palette).toEqual(["#000001", "#000003"]);
     expect(pixels.slice(0, 3)).toEqual([2, 1, 0]);
     expect(pixels).toHaveLength(DRAWING_GRID * DRAWING_GRID);
+  });
+
+  it("refuses a grid whose colour index is past the palette, which is a bug", () => {
+    expect(() => compactDrawing(paint(emptyGrid(), [[0, 0]], 2), ["#000001"])).toThrow(
+      "past the palette",
+    );
   });
 });

@@ -12,7 +12,7 @@ import {
 import type { PartSummary } from "@living-diorama/simulation";
 import type { PartsStore } from "@living-diorama/desktop-integration";
 import type { PlacedPoints } from "./drawn-points";
-import { compactDrawing, type Grid } from "./grid-editor";
+import { compactDrawing, sameGrid, type Grid } from "./grid-editor";
 
 // Saving a drawn part to the player's parts (ADR 0025 §6–§8): the entry that goes into the parts
 // store, and the choices Draw mode starts a drawing from. Pure, but for `savePart`.
@@ -72,39 +72,70 @@ export async function savePart(store: PartsStore, entry: PlayerPartEntry): Promi
   await store.save(entry.id.slice("user-part:".length), entry);
 }
 
-/** How a drawing is turned into a part, besides its pixels: what Draw mode's panel picks. */
-export interface DrawSetup {
+/**
+ * What a drawing is drawn against: its type, its base part and its view. Changing one puts the
+ * points back where the base part has them, so each change is an undo step (`DrawSnapshot`).
+ */
+export interface DrawFrame {
   partType: string;
-  /** The base part's ID: a pack part's, or the edited part's own for its saved points. */
+  /** The base part's ID, a pack part's (ADR 0025 §3). */
   baseId: string;
-  step: VoxelStep;
   view: PartDrawingView;
+}
+
+/** How a drawing gets its depth and size: changed freely, not undo steps. */
+export interface DrawLook {
+  step: VoxelStep;
   rule: PartDrawingRule;
   chubby: number;
   flatThickness: 1 | 2;
 }
 
+/** How a drawing is turned into a part, besides its pixels: what Draw mode's panel picks. */
+export type DrawSetup = DrawFrame & DrawLook;
+
+/** One undo step of Draw mode: the grid, the points the player placed and the frame. */
+export interface DrawSnapshot {
+  grid: Grid;
+  placed: PlacedPoints;
+  frame: DrawFrame;
+}
+
+/** Whether two snapshots are the same drawing, so committing one is no step. */
+export const sameSnapshot = (a: DrawSnapshot, b: DrawSnapshot) =>
+  sameGrid(a.grid, b.grid) && a.placed === b.placed && a.frame === b.frame;
+
 /** The drawing of a grid, keeping only the colours it uses (`compactDrawing`). */
 export function drawingOf(grid: Grid, palette: readonly string[], setup: DrawSetup): PartDrawing {
-  const { step, view, rule, chubby, flatThickness } = setup;
-  return { ...compactDrawing(grid, palette), view, rule, chubby, flatThickness, step };
+  const { step, view, rule, chubby, flatThickness, baseId } = setup;
+  return { ...compactDrawing(grid, palette), view, rule, chubby, flatThickness, step, baseId };
 }
 
 /**
- * What decides the saved part: its name, drawing, base part and the points the player placed. The
- * same key makes the same entry but for its dates and version, so a part whose key hasn't changed
- * since it was opened or saved has nothing to save.
+ * What decides the saved part: its name, its drawing (base part included) and the points the
+ * player placed. The same key makes the same entry but for its dates and version, so a part whose
+ * key hasn't changed since it was opened or saved has nothing to save.
  */
-export const drawKey = (
-  name: string,
-  drawing: PartDrawing,
-  baseId: string,
-  placed: PlacedPoints,
-): string => JSON.stringify({ name: name.trim(), drawing, baseId, placed });
+export const drawKey = (name: string, drawing: PartDrawing, placed: PlacedPoints): string =>
+  JSON.stringify({ name: name.trim(), drawing, placed });
+
+/**
+ * How much bigger a part is than its base part, in real size: the largest of its three sizes
+ * over the base's (2 is twice as long, tall or deep).
+ */
+export function sizeAgainst(part: VoxelPart, base: VoxelPart): number {
+  const axes = ["x", "y", "z"] as const;
+  return Math.max(
+    ...axes.map((axis) => (part.size[axis] * part.step) / (base.size[axis] * base.step)),
+  );
+}
+
+/** A part more than this many times its base part's size gets a gentle warning. */
+export const MUCH_BIGGER = 2;
 
 /**
  * The base part a drawing of `type` starts from (ADR 0025 §3): for a root type the part its pack
- * marks `starter`, else the first part of the type, in the order the strip lists them.
+ * marks `starter`, else the first part of the type as the tray lists it (by ID).
  */
 export function defaultBase(
   parts: readonly PartSummary[],

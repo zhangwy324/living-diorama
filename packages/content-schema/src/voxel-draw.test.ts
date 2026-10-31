@@ -37,6 +37,7 @@ function drawing(
     view: "side",
     rule: "flat",
     step: 0.025,
+    baseId: "test:base",
     ...rest,
   });
 }

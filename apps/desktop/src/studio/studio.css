@@ -985,11 +985,14 @@ body,
   border-left: 1px solid currentColor;
 }
 
-.ruler-top em {
+/* The ruler's unit, in the corner where the two rulers meet. */
+.ruler-unit {
   position: absolute;
-  right: -22px;
-  bottom: 2px;
-  font-style: normal;
+  right: 100%;
+  bottom: 100%;
+  padding: 0 6px 4px 0;
+  font-size: 10px;
+  color: rgb(238 243 232 / 65%);
 }
 
 .ruler-left {
@@ -1022,6 +1025,7 @@ body,
 }
 
 .point.attach {
+  z-index: 2;
   width: 13px;
   height: 13px;
   border-color: #6b3a10;
@@ -1041,11 +1045,8 @@ body,
   background: transparent;
 }
 
-.depth-own {
-  background: #2fc4ff;
-}
-
-.point.socket.depth-own {
+.point.socket.depth-own,
+.key-dot.depth-own {
   background: #2fc4ff;
 }
 
@@ -1066,9 +1067,11 @@ body,
     0 0 0 4px #c8433a;
 }
 
+/* The details scroll and the buttons stay in view, however short the window. */
 .side-panel.draw-panel {
   width: 260px;
   padding-top: 12px;
+  overflow: hidden;
 }
 
 .part-preview {
@@ -1094,9 +1097,17 @@ body,
 
 .draw-details {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
+  padding: 2px 4px 2px 2px;
+  overflow-y: auto;
   font-size: 14px;
+}
+
+.draw-panel .release-slot {
+  flex: none;
 }
 
 .draw-details select,
