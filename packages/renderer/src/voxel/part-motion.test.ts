@@ -10,9 +10,18 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { box, creature } from "../body/fixtures/voxel-creature";
 import { eatingPeck, type CueWeights } from "../cues";
+import { FULL_MOTION_SPEED, hopProgress } from "../locomotion";
 import { buildVoxelBody, type VoxelBody } from "./body";
 import { composePose } from "./compose-pose";
-import { MAX_SWING, STRIDE_RANGE, buildMotionRig, type MotionRig } from "./motion-rig";
+import {
+  MAX_SWING,
+  STRIDE_RANGE,
+  buildMotionRig,
+  instanceMotions,
+  walkLegs,
+  WALK_DIP_SAMPLES,
+  type MotionRig,
+} from "./motion-rig";
 import {
   BLINK,
   SLEEP,
@@ -401,6 +410,22 @@ describe("part motion", () => {
     expect(swingOf(best, index("leg-1-l"))).toBeCloseTo(-front, 9); // back feet tucked forward
   });
 
+  it("times the hop by the height it is given, not the body's own", () => {
+    const { rig, index } = quadruped;
+    const fl = index("leg-0-l");
+    const hop = (height: number, travelled: number) =>
+      swingOf(motion(rig, input({ speed: 1, gait: "hop", travelled, height })), fl);
+    // Metres per hop for a body `height` tall, read back from `hopProgress` early in a hop.
+    const hopLength = (height: number) => 0.01 / hopProgress(0.01, height);
+    for (const share of [0.1, 0.5, 0.8]) {
+      const small = hop(0.2, share * hopLength(0.2));
+      expect(hop(1.2, share * hopLength(1.2))).toBeCloseTo(small, 9);
+      expect(Math.abs(small)).toBeGreaterThan(0.01);
+    }
+    // At the same distance, the two heights are at different points of their hops.
+    expect(Math.abs(hop(0.2, 0.4) - hop(1.2, 0.4))).toBeGreaterThan(0.01);
+  });
+
   it("tucks the legs on a bank leap, whatever the gait", () => {
     const { rig, index } = quadruped;
     const pose = motion(rig, input({ gait: "walk", speed: 1, leap: 0.5 }));
@@ -671,7 +696,8 @@ describe("motions", () => {
     expect(still).toBeGreaterThan(0.8 * samples);
     // At a time with no flick, the walk alone wags it, once each way per stride.
     let calm = 0;
-    while (yaw(input({ time: calm })) !== 0) calm += 0.01;
+    for (let k = 0; k < 1000 && yaw(input({ time: calm })) !== 0; k++) calm += 0.01;
+    expect(yaw(input({ time: calm }))).toBe(0);
     const walk = (travelled: number) => yaw({ ...walking(travelled), time: calm });
     expect(walk(rig.stride * 0.25)).toBeCloseTo(WALK.tailWag, 9);
     expect(walk(rig.stride * 0.75)).toBeCloseTo(-WALK.tailWag, 9);
@@ -745,5 +771,53 @@ describe("two creatures' legs", () => {
     const long = sweep(build(animal({ legHeight: 6 })));
     expect(short).toBeGreaterThan(0.01);
     expect(long).toBeGreaterThan(short * 1.5);
+  });
+});
+
+describe("the world's wiring", () => {
+  it("gives each instance its part type's motion through the resolver", () => {
+    const assembly = parsed(animal());
+    const motions = instanceMotions(assembly, (type) => MOTION_BY_TYPE[type]);
+    const at = (id: string) =>
+      motions(assembly.instances.findIndex((instance) => instance.id === id));
+    expect(at("leg-0-r")).toBe("swing");
+    expect(at("ear-l")).toBe("flop");
+    expect(at("torso")).toBeUndefined();
+    expect(at("nowhere")).toBeUndefined();
+    // Without a resolver, nothing moves.
+    expect(instanceMotions(assembly, undefined)(1)).toBeUndefined();
+  });
+
+  it("steps the walk with the legs, dipping so the lowest foot stays on the ground", () => {
+    for (const shape of [{}, { frontLegHeight: 6 }, { legHeight: 2 }]) {
+      const { rig, body } = build(animal(shape));
+      const legs = walkLegs(body, rig);
+      expect(legs.step).toBeCloseTo(rig.stride / 2, 12);
+      const lowest = (pose: MotionPose) => {
+        const bones = compose(rig, pose);
+        let low = Infinity;
+        for (const i of rig.legs) {
+          if (!rig.parts[i]!.leg!.grounded) continue;
+          for (const p of vertices(body, i, bones[i]!)) low = Math.min(low, p.y);
+        }
+        return low;
+      };
+      expect(legs.dips).toHaveLength(WALK_DIP_SAMPLES);
+      expect(legs.dips[0]).toBe(0);
+      // With every leg swung out (a quarter cycle in), at full weight and at half (ease(0.5) is
+      // 0.5, so the legs swing through half their angle), lowered by the drop at that weight
+      // (raised, when it is negative), the lowest foot is back where it was at rest.
+      const rest = lowest(motion(rig, input()));
+      const quarter = rig.stride * 0.25;
+      const full = lowest(motion(rig, walking(quarter)));
+      expect(full - legs.dips[WALK_DIP_SAMPLES - 1]!).toBeCloseTo(rest, 9);
+      const half = lowest(
+        motion(rig, input({ travelled: quarter, speed: FULL_MOTION_SPEED / 2, gait: "walk" })),
+      );
+      expect(half - legs.dips[(WALK_DIP_SAMPLES - 1) / 2]!).toBeCloseTo(rest, 9);
+    }
+    // No grounded leg: no dip.
+    const { rig, body } = build(animal(), {});
+    expect(walkLegs(body, rig).dips.every((dip) => dip === 0)).toBe(true);
   });
 });

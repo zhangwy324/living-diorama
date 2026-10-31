@@ -43,15 +43,25 @@ import {
   type LocomotionMotion,
   type LocomotionPivot,
   type Movement,
+  type WalkLegs,
 } from "./locomotion";
 import type { AssetResolver } from "./props";
 import {
   buildVoxelBody,
   createVoxelMaterial,
   skinVoxelBody,
+  type PartMotionResolver,
   type PartRoleResolver,
   type VoxelBody,
 } from "./voxel/body";
+import { buildMotionRig, instanceMotions, walkLegs, type MotionRig } from "./voxel/motion-rig";
+import {
+  motionInputFrom,
+  posePartsFrame,
+  posedParts,
+  restingMotionInput,
+  type PosedParts,
+} from "./voxel/pose-parts";
 
 // Creatures as solid bodies extruded from their drawings, casting shadows from the sun (ADR 0011),
 // or assembled from voxel parts (ADR 0022), true to scale, posed and marked for their cues
@@ -96,6 +106,11 @@ export interface CreatureBodiesOptions {
    * part has a role, and the tail is the middle of the body's rear end.
    */
   partRole?: PartRoleResolver;
+  /**
+   * Part types' motions, for a voxel body's parts (ADR 0024 §8). Without it no part moves, and the
+   * body moves only as a whole.
+   */
+  partMotion?: PartMotionResolver;
   /** Hides the cues of creatures the terrain or a structure hides. Without it cues always show. */
   visibility?: CueVisibility;
   /**
@@ -111,6 +126,9 @@ interface SpeciesLook extends LocomotionBody {
   body: Body;
   /** A voxel species' assembled body once meshed; it then takes the place of `body`. */
   voxel: VoxelBody | undefined;
+  /** The voxel body's motion rig, built with it (ADR 0024 §16), and what the walk takes from it. */
+  rig: MotionRig | undefined;
+  legs: WalkLegs | undefined;
   /** The species' placed anchors; the others sit where `defaultAnchor` puts them. */
   anchors: Anchors;
   pivots: Record<LocomotionPivot, THREE.Vector3>;
@@ -132,6 +150,8 @@ interface Creature {
   mesh: THREE.Mesh;
   /** The voxel body its mesh is skinned to, if any. */
   voxel: VoxelBody | undefined;
+  /** Its parts' pose and its skeleton's bone matrices, while skinned to a body with a rig. */
+  parts: PosedParts | undefined;
   weights: CueWeights;
   /** How it has been moving, for its walk, hop or swim. */
   movement: Movement;
@@ -207,6 +227,7 @@ export class CreatureBodies {
   readonly #readImage: ImageReader;
   readonly #readAssembly: AssemblyReader;
   readonly #partRole: PartRoleResolver | undefined;
+  readonly #partMotion: PartMotionResolver | undefined;
   /** Voxel species read and checked, waiting to be meshed: about one per frame (M19 decisions). */
   readonly #toMesh: { speciesId: string; look: SpeciesLook; assembly: VoxelAssembly }[] = [];
   /** Every voxel body built, for `dispose`. */
@@ -229,7 +250,9 @@ export class CreatureBodies {
     time: 0,
     phase: 0,
     height: 0,
+    legs: undefined,
   };
+  readonly #partInput = restingMotionInput();
   readonly #scratch = {
     base: new THREE.Matrix4(),
     cue: new THREE.Matrix4(),
@@ -258,6 +281,7 @@ export class CreatureBodies {
     this.#readImage = options.readImage ?? readImage;
     this.#readAssembly = options.readAssembly ?? readAssembly;
     this.#partRole = options.partRole;
+    this.#partMotion = options.partMotion;
     this.#visibility = options.visibility;
     this.#propIcon = options.propIcon ?? (() => undefined);
     layer.group.add(this.#cues.group);
@@ -314,11 +338,18 @@ export class CreatureBodies {
       input.time = time;
       input.phase = phase;
       input.height = height;
+      input.legs = look.legs;
       // In the air on a bank jump the leap takes the profile's place; the arc is in the pose.
       const locomotion = airborne
         ? leapMotion(pose.jump ?? 0, this.#locomotion)
         : locomotionMotion(input, this.#locomotion);
       this.#place(mesh, pose, look, motion, locomotion);
+      // Its parts move with it, from the same inputs (ADR 0024). A paused world advances neither
+      // time nor distance, so the gait and idle motions stop; cue poses still fade in and out on
+      // real time, as the whole-body cue motion does.
+      if (creature.parts) {
+        posePartsFrame(creature.parts, motionInputFrom(this.#partInput, input, pose.jump, weights));
+      }
       if (!look.voxel) {
         mesh.geometry = look.body.geometry;
         mesh.material = look.body.material;
@@ -460,6 +491,7 @@ export class CreatureBodies {
     removeMesh(creature.mesh);
     creature.mesh = this.#mesh(creature.id, look);
     creature.voxel = look.voxel;
+    creature.parts = partsOf(creature.mesh, look);
   }
 
   /** Meshes the next voxel species waiting, if any, so many don't all mesh in one frame. */
@@ -477,6 +509,13 @@ export class CreatureBodies {
     this.#voxelBodies.push(voxel);
     look.voxel = voxel;
     measureLook(look, voxel);
+    // Without a rig the body still shows, and moves only as a whole.
+    try {
+      look.rig = buildMotionRig(voxel, instanceMotions(assembly, this.#partMotion));
+      look.legs = walkLegs(voxel, look.rig);
+    } catch (error) {
+      console.warn(`Could not build the motion rig of ${speciesId}`, error);
+    }
   }
 
   #add(id: string, look: SpeciesLook): Creature {
@@ -486,6 +525,7 @@ export class CreatureBodies {
       id,
       mesh,
       voxel: look.voxel,
+      parts: partsOf(mesh, look),
       weights: { eating: 0, sleeping: 0, hungry: 0 },
       movement: restingMovement(),
       phase,
@@ -534,6 +574,8 @@ export class CreatureBodies {
     const look: SpeciesLook = {
       body: block,
       voxel: undefined,
+      rig: undefined,
+      legs: undefined,
       height,
       ...reachOf(block),
       anchors: species.body.anchors ?? {},
@@ -587,6 +629,18 @@ export class CreatureBodies {
     );
     return look;
   }
+}
+
+/**
+ * A new creature's part pose for `look`'s rig, composed into its skinned `mesh`'s bones (their
+ * `matrixWorld`, which nothing else updates: `skinVoxelBody`), or undefined for a body with none.
+ */
+function partsOf(mesh: THREE.Mesh, look: SpeciesLook): PosedParts | undefined {
+  if (!look.rig || !(mesh instanceof THREE.SkinnedMesh)) return undefined;
+  return posedParts(
+    look.rig,
+    mesh.skeleton.bones.map((bone) => bone.matrixWorld),
+  );
 }
 
 /**

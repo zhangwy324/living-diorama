@@ -8,6 +8,7 @@ import {
   stepUnits,
   type AssemblyMeasure,
   type InstancePlacement,
+  type PartMotion,
   type PartRole,
   type VoxelAssembly,
   type VoxelPart,
@@ -23,6 +24,12 @@ import { meshVoxelParts, type VoxelMesh, type VoxelPartGrid } from "./mesher";
 
 /** Gives a part type's role, e.g. `tail`, or undefined for none or an unknown type. */
 export type PartRoleResolver = (partType: string) => PartRole | undefined;
+
+/**
+ * Gives a part type's motion, e.g. `swing`, or undefined for none or an unknown type (ADR 0024
+ * §8, §9).
+ */
+export type PartMotionResolver = (partType: string) => PartMotion | undefined;
 
 /** How much of its colour a voxel body glows with (ADR 0022 §6); drawn bodies glow 0.35. */
 export const VOXEL_EMISSIVE_INTENSITY = 0.15;

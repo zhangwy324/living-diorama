@@ -1,4 +1,10 @@
-import { defaultBody, type BodyShape, type Vec3 } from "@living-diorama/content-schema";
+import {
+  VoxelAssemblySchema,
+  defaultBody,
+  validate,
+  type BodyShape,
+  type Vec3,
+} from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +18,14 @@ import {
   terrainHeightAt,
 } from "./index";
 import { SceneLayer } from "./layers";
+import { buildVoxelBody } from "./voxel/body";
+import { buildMotionRig } from "./voxel/motion-rig";
+
+// Counts rigs built, passing through to the real one.
+vi.mock("./voxel/motion-rig", async (original) => {
+  const actual = await original<typeof import("./voxel/motion-rig")>();
+  return { ...actual, buildMotionRig: vi.fn(actual.buildMotionRig) };
+});
 
 /** A creature body's placement, read from its matrix (it composes more than position, rotation, scale). */
 const placed = (mesh: THREE.Object3D) => {
@@ -266,6 +280,7 @@ describe("CreatureBodies", () => {
     const make = (
       read: (url: string) => Promise<unknown> = async () => assembly,
       partRole?: (partType: string) => "tail" | undefined,
+      partMotion?: (partType: string) => "swing" | undefined,
     ) => {
       const readImage = vi.fn(async () => drawing);
       const readAssembly = vi.fn(read);
@@ -281,6 +296,7 @@ describe("CreatureBodies", () => {
         readImage,
         readAssembly,
         ...(partRole ? { partRole } : {}),
+        ...(partMotion ? { partMotion } : {}),
       });
       return { layer, bodies, readImage, readAssembly };
     };
@@ -392,6 +408,123 @@ describe("CreatureBodies", () => {
       // Had the read queued the assembly, this update would mesh it and skin "a".
       bodies.update([of("a")]);
       expect(bodyOf(layer, "a")).not.toBeInstanceOf(THREE.SkinnedMesh);
+    });
+
+    describe("posing its parts (ADR 0024)", () => {
+      const legMotion = vi.fn((type: string) => (type === "test:leg" ? "swing" : undefined));
+      /** The leg's bone matrix, after walking `frames` frames at 0.6 m/s, then holding there. */
+      const walked = async (
+        frames: number,
+        partMotion?: (partType: string) => "swing" | undefined,
+        hold = 0,
+      ) => {
+        const { layer, bodies } = make(undefined, undefined, partMotion);
+        bodies.update([of("a")]);
+        await bodies.ready;
+        bodies.update([of("a")]);
+        const at = (frame: number) => {
+          const time = frame / 60;
+          bodies.update([{ ...of("a"), world: { x: 0.6 * time, y: 0, z: 0 }, animation: "walk" }], {
+            time,
+            realTime: time,
+          });
+        };
+        for (let frame = 0; frame <= frames; frame++) at(frame);
+        const mesh = bodyOf(layer, "a") as THREE.SkinnedMesh;
+        const legs: THREE.Matrix4[] = [mesh.skeleton.bones[1]!.matrixWorld.clone()];
+        // Paused: animation time stands still while real time goes on.
+        for (let k = 1; k <= hold; k++) {
+          bodies.update(
+            [{ ...of("a"), world: { x: 0.6 * (frames / 60), y: 0, z: 0 }, animation: "walk" }],
+            { time: frames / 60, realTime: (frames + k) / 60 },
+          );
+          legs.push(mesh.skeleton.bones[1]!.matrixWorld.clone());
+        }
+        return { legs };
+      };
+      const restLeg = async () => {
+        const { layer, bodies } = make();
+        bodies.update([of("a")]);
+        await bodies.ready;
+        bodies.update([of("a")]);
+        return (bodyOf(layer, "a") as THREE.SkinnedMesh).skeleton.bones[1]!.matrixWorld.clone();
+      };
+
+      it("swings a leg whose type's motion is swing as the creature walks", async () => {
+        const rest = await restLeg();
+        const { legs } = await walked(20, legMotion);
+        expect(legs[0]!.equals(rest)).toBe(false);
+        // A rigid turn about the hip: posed = turn · rest, and the turn keeps the leg's attach
+        // point (its rest joint's origin) where it is, and its lengths.
+        const checked = validate(VoxelAssemblySchema, assembly);
+        if (!checked.ok) throw new Error("bad fixture");
+        const body = buildVoxelBody(checked.value);
+        const hip = new THREE.Vector3().setFromMatrixPosition(body.joints[1]!);
+        const turn = legs[0]!.clone().multiply(rest.clone().invert());
+        const turned = hip.clone().applyMatrix4(turn);
+        expect(turned.distanceTo(hip)).toBeLessThan(1e-9);
+        expect(turn.determinant()).toBeCloseTo(1, 9);
+        expect(new THREE.Vector3(1, 0, 0).transformDirection(turn).y).not.toBeCloseTo(0, 3);
+        body.dispose();
+      });
+
+      it("keeps every part at rest without a motion resolver", async () => {
+        const rest = await restLeg();
+        const { legs } = await walked(20);
+        expect(legs[0]!.equals(rest)).toBe(true);
+      });
+
+      it("holds the pose while paused", async () => {
+        const { legs } = await walked(20, legMotion, 5);
+        for (const leg of legs) expect(leg.equals(legs[0]!)).toBe(true);
+      });
+
+      it("builds the rig once per species, not per creature or frame", async () => {
+        legMotion.mockClear();
+        vi.mocked(buildMotionRig).mockClear();
+        const { layer, bodies } = make(undefined, undefined, legMotion);
+        const poses = [of("a"), of("b")];
+        bodies.update(poses);
+        await bodies.ready;
+        for (let k = 0; k < 5; k++) bodies.update(poses, { time: k / 60, realTime: k / 60 });
+        // One lookup per part instance of the one species: the torso is the root and isn't asked.
+        expect(legMotion).toHaveBeenCalledTimes(1);
+        expect(legMotion).toHaveBeenCalledWith("test:leg");
+        expect(bodyOf(layer, "b")).toBeInstanceOf(THREE.SkinnedMesh);
+        expect(buildMotionRig).toHaveBeenCalledTimes(1);
+      });
+
+      it("builds no rig when the body fails to build, and draws the block", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        vi.mocked(buildMotionRig).mockClear();
+        const { layer, bodies } = make(
+          undefined,
+          () => {
+            throw new Error("no roles");
+          },
+          legMotion,
+        );
+        bodies.update([of("a")]);
+        await bodies.ready;
+        for (let k = 0; k < 3; k++) bodies.update([{ ...of("a"), animation: "walk" }]);
+        expect(buildMotionRig).not.toHaveBeenCalled();
+        expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
+        warn.mockRestore();
+      });
+
+      it("keeps the body, at rest, when its rig fails to build", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        const rest = await restLeg();
+        const { legs } = await walked(20, () => {
+          throw new Error("no motions");
+        });
+        expect(legs[0]!.equals(rest)).toBe(true);
+        expect(warn).toHaveBeenCalledWith(
+          "Could not build the motion rig of test:voxel",
+          expect.any(Error),
+        );
+        warn.mockRestore();
+      });
     });
 
     it("frees a departed creature's skeleton, and the species' body on dispose", async () => {

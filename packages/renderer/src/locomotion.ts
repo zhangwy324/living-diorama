@@ -70,6 +70,23 @@ export interface LocomotionInput {
   phase: number;
   /** The body's height in metres: bigger bodies take longer steps. */
   height: number;
+  /**
+   * Set for a body whose parts move with its legs (a voxel body, ADR 0024 §5): the walk then
+   * steps with them, its roll and squash damped. Unset, the walk keeps its stride from `height`.
+   */
+  legs?: WalkLegs | undefined;
+}
+
+/** A voxel body's legs as the walk profile follows them (`walkLegs` in `voxel/motion-rig.ts`). */
+export interface WalkLegs {
+  /** Metres per step: half the legs' stride, one footfall of each pair. */
+  step: number;
+  /**
+   * Metres the body drops as the legs swing out in full, so the lowest foot stays on the ground,
+   * at gait weights evenly from 0 to 1 (the legs swing through the weight times their amplitude);
+   * negative, it rises, where a swung toe would otherwise sink.
+   */
+  dips: readonly number[];
 }
 
 /**
@@ -77,7 +94,7 @@ export interface LocomotionInput {
  * `pivot`, a point on the body; the lift moves it all.
  */
 export interface LocomotionMotion {
-  /** Rise, as a share of the body's height. Negative sinks it (only in water). */
+  /** Rise, as a share of the body's height. Negative sinks it: in water, or a voxel walk's dip. */
   lift: number;
   /** Forward tilt in radians; positive dips the drawing's front (+X). */
   pitch: number;
@@ -131,7 +148,15 @@ const WALK_ROLL = 0.07;
 const WALK_LEAN = 0.04;
 const WALK_SQUASH = 0.04;
 
+// On a voxel body the legs carry the walk (ADR 0024 §5): the roll and squash are kept to this
+// share, and the bob follows the legs' feet as they swing out, once per step.
+export const VOXEL_WALK = { roll: 0.25, squash: 0.25 } as const;
+
 const walk: Profile = (input, w, out) => {
+  if (input.legs) {
+    voxelWalk(input, input.legs, w, out);
+    return;
+  }
   const steps = input.travelled / cycle(WALK_STEP.base, WALK_STEP.perHeight, input.height);
   const stride = Math.sin(Math.PI * steps); // −1–1 over two steps
   const landing = 0.5 + 0.5 * Math.cos(TAU * steps); // 1 as each foot lands
@@ -142,6 +167,36 @@ const walk: Profile = (input, w, out) => {
   out.scaleXZ = 1 + w * WALK_SQUASH * 0.5 * landing;
   out.pivot = "centerOfGravity";
 };
+
+/** How far a body with `legs` drops at full swing at gait weight `w`, between its samples. */
+export function walkDip(legs: WalkLegs, w: number): number {
+  const { dips } = legs;
+  if (dips.length < 2) return dips[0] ?? 0;
+  const at = Math.min(1, Math.max(0, w)) * (dips.length - 1);
+  const k = Math.min(dips.length - 2, Math.floor(at));
+  const a = dips[k] ?? 0;
+  return a + ((dips[k + 1] ?? a) - a) * (at - k);
+}
+
+/**
+ * The walk of a body whose legs swing (`voxel/part-motion.ts`): the legs swing out in full twice
+ * per stride, at the half steps, which is when the feet land. There the body drops by the legs'
+ * drop at the weight's swing (`walkDip`), squashes a little, and rolls to the
+ * side, and it is back as the legs pass under it.
+ */
+function voxelWalk(input: LocomotionInput, legs: WalkLegs, w: number, out: LocomotionMotion) {
+  const steps = input.travelled / legs.step;
+  const stride = Math.sin(Math.PI * steps); // −1–1 over two steps
+  const splay = 0.5 - 0.5 * Math.cos(TAU * steps); // 1 with the legs swung out in full
+  const height = Math.max(input.height, 1e-6);
+  out.lift = (-walkDip(legs, w) * splay) / height;
+  out.roll = w * WALK_ROLL * VOXEL_WALK.roll * stride;
+  out.pitch = w * WALK_LEAN;
+  const squash = w * WALK_SQUASH * VOXEL_WALK.squash * splay;
+  out.scaleY = 1 - squash;
+  out.scaleXZ = 1 + squash * 0.5;
+  out.pivot = "centerOfGravity";
+}
 
 // The hop: on the ground the body squashes as it lands and stays low as it gathers for the next
 // jump; in the air it stretches as it leaves and as it comes down, rising and falling in an arc,

@@ -24,7 +24,7 @@ import { installTimeDevHook } from "./dev-time";
 import { installWorldDevHook } from "./dev-world";
 import { EventCounter } from "./event-counts";
 import { attachEditorInput } from "./editor-input";
-import { partFitLookup, partRoleLookup } from "./part-types";
+import { partFitLookup, partMotionLookup, partRoleLookup } from "./part-types";
 import { PropDrawer } from "./PropDrawer";
 import { drawerShown, drawerTabs, PropThumbnails, TILE_THUMBNAIL_PX } from "./prop-drawer";
 import { PropEditor, type EditorState } from "./prop-editor";
@@ -248,6 +248,8 @@ export function App() {
             resolveSpecies: (id) => species.get(id),
             // Voxel bodies find their tail part by its role (ADR 0022, M19 decisions).
             partRole: partRoleLookup(content.partTypes),
+            // Their parts move by their types' motions (ADR 0024 §8).
+            partMotion: partMotionLookup(content.partTypes),
             ...(navigation ? { navigation } : {}),
           });
         } catch (error) {
