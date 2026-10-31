@@ -81,6 +81,11 @@ const SWEEP_PER_STRIDE = 0.25;
  * so a short-legged creature takes long strides rather than pattering, and swings its legs up to
  * `MAX_SWING`. A creature moving faster or slower than `speed` steps faster or slower in
  * proportion, since the gait follows the distance travelled.
+ *
+ * `speed` mirrors the base speed of every species today: `USER_SPECIES_DEFAULTS.baseSpeed` in
+ * `apps/desktop/src/startup.ts` and the mossling's `baseSpeed` in built-in-content's
+ * `mossling.json`. The renderer isn't told a species' speed, so a species with another base
+ * speed steps proportionally faster or slower than `max`.
  */
 export const WALK_CADENCE = { speed: 0.6, min: 0.8, max: 2 } as const;
 /** Metres per second², for the pendulum. */
