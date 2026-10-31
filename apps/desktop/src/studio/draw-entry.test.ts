@@ -16,6 +16,7 @@ import {
   partEntry,
   recordOf,
   MUCH_BIGGER,
+  sameSnapshot,
   savePart,
   sizeAgainst,
   type DrawSetup,
@@ -177,6 +178,23 @@ describe("a drawing's start", () => {
     };
     expect(sizeAgainst(twice, base.part)).toBe(2);
     expect(MUCH_BIGGER).toBe(2);
+  });
+
+  it("finds snapshots with the same content the same, so they make no undo step", () => {
+    const grid = emptyGrid();
+    const frame = { partType: torsoType, baseId: base.id, view: "side" as const };
+    const placed = { sockets: { neck: { u: 1, v: 2, d: 0 } } };
+    const snapshot = { grid, placed, frame };
+    expect(
+      sameSnapshot(snapshot, {
+        grid: new Uint8Array(grid),
+        placed: { sockets: { neck: { u: 1, v: 2, d: 0 } } },
+        frame: { ...frame },
+      }),
+    ).toBe(true);
+    expect(sameSnapshot(snapshot, { ...snapshot, placed: { sockets: {} } })).toBe(false);
+    expect(sameSnapshot(snapshot, { ...snapshot, frame: { ...frame, view: "front" } })).toBe(false);
+    expect(sameSnapshot(snapshot, { ...snapshot, grid: paint(grid, [[0, 0]], 1) })).toBe(false);
   });
 
   it("keeps its base part in the drawing", () => {

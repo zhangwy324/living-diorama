@@ -13,7 +13,7 @@ import { CloseDialog } from "./CloseDialog";
 import { builtInParts } from "./fixtures/built-in-parts";
 import { useOpenDraw } from "./open-draw";
 import type { DrawRequest, OpenDraw, StudioMode } from "./modes";
-import { PartDrawMode } from "./PartDrawMode";
+import { BASE_GONE, PartDrawMode } from "./PartDrawMode";
 import { closeMessage } from "./modes";
 import { ModeSwitch } from "./ModeSwitch";
 
@@ -382,6 +382,67 @@ describe("Draw mode's points and keys", () => {
     await draw.open({ key: 1, partType: "hollow:leg" });
     await draw.open({ key: 2, entry: saved.value });
     expect(container.querySelectorAll(".point.socket.shallow").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a saved part's type while it is edited", async () => {
+    const draw = await setup();
+    await paintBox(8, 8, 22, 18);
+    await act(async () => button("Save").click());
+    const saved = parsePlayerPartEntry((await draw.store.list())[0]?.entry);
+    if (!saved.ok) throw new Error("Not saved");
+    await draw.open({ key: 1, entry: saved.value });
+    const typeSelect = select("Part type");
+    expect(typeSelect.disabled).toBe(true);
+    await act(async () => {
+      typeSelect.value = "hollow:leg";
+      typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(select("Part type").value).toBe("hollow:torso");
+    expect(view.assembly?.parts.drawn?.type).toBe("hollow:torso");
+    // A new drawing may pick its type again.
+    await draw.open({ key: 2, partType: "hollow:torso" });
+    expect(select("Part type").disabled).toBe(false);
+  });
+
+  it("draws a saved part against another base when its own is gone, and says so", async () => {
+    const draw = await setup();
+    await paintBox(8, 8, 22, 18);
+    await act(async () => button("Save").click());
+    const saved = parsePlayerPartEntry((await draw.store.list())[0]?.entry);
+    if (!saved.ok) throw new Error("Not saved");
+    const orphan = { ...saved.value, drawing: { ...saved.value.drawing, baseId: "hollow:gone" } };
+    await draw.open({ key: 1, entry: orphan });
+    expect(select("Base part").value).toBe("hollow:four-legged-torso");
+    expect(container.textContent).toContain(BASE_GONE);
+    // A note in the panel, not a passing notice: it stays.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 3100)));
+    expect(container.textContent).toContain(BASE_GONE);
+    // Saving would record the stand-in base, so there is something to save.
+    expect(draw.onUnsaved).toHaveBeenLastCalledWith(true);
+    // Another drawing has no such note.
+    await draw.open({ key: 2, entry: saved.value });
+    expect(container.textContent).not.toContain(BASE_GONE);
+  }, 10_000);
+
+  it("makes no undo step for a point dropped where it was", async () => {
+    await setup();
+    await paintBox(8, 8, 22, 18);
+    const undoButton = container.querySelector<HTMLButtonElement>("button[title='Undo (Ctrl+Z)']")!;
+    await act(async () => button("Put the points back where the base part has them").click());
+    await act(async () => pointer(marker("attach"), "pointerdown", 200, 185));
+    await act(async () => pointer(marker("attach"), "pointermove", 200, 185));
+    await act(async () => pointer(marker("attach"), "pointerup", 200, 185));
+    // Placed once: one step.
+    await key("z", { ctrlKey: true });
+    await key("y", { ctrlKey: true });
+    const left = marker("attach").style.left;
+    await act(async () => pointer(marker("attach"), "pointerdown", 200, 185));
+    await act(async () => pointer(marker("attach"), "pointerup", 200, 185));
+    expect(marker("attach").style.left).toBe(left);
+    // Undo goes back past the first drop, not to the same place again.
+    await key("z", { ctrlKey: true });
+    expect(marker("attach").style.left).not.toBe(left);
+    expect(undoButton.disabled).toBe(false);
   });
 
   it("warns when the part is much bigger than its base part", async () => {

@@ -101,9 +101,17 @@ export interface DrawSnapshot {
   frame: DrawFrame;
 }
 
-/** Whether two snapshots are the same drawing, so committing one is no step. */
+/**
+ * Whether two snapshots are the same drawing, compared by content, so committing one is no step:
+ * e.g. a point dropped where it was, or a view picked again.
+ */
 export const sameSnapshot = (a: DrawSnapshot, b: DrawSnapshot) =>
-  sameGrid(a.grid, b.grid) && a.placed === b.placed && a.frame === b.frame;
+  sameGrid(a.grid, b.grid) &&
+  (a.placed === b.placed || JSON.stringify(a.placed) === JSON.stringify(b.placed)) &&
+  (a.frame === b.frame ||
+    (a.frame.partType === b.frame.partType &&
+      a.frame.baseId === b.frame.baseId &&
+      a.frame.view === b.frame.view));
 
 /** The drawing of a grid, keeping only the colours it uses (`compactDrawing`). */
 export function drawingOf(grid: Grid, palette: readonly string[], setup: DrawSetup): PartDrawing {

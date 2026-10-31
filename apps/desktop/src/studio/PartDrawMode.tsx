@@ -99,6 +99,10 @@ export const NO_DRAW_PARTS = "There are no parts to draw from.";
 export const MUCH_BIGGER_HINT =
   "Much bigger than its base part: a creature built with it may be too big to release. A smaller cube size makes it smaller.";
 
+/** Said while a reopened part's base part is gone and another of its type stands in. */
+export const BASE_GONE =
+  "This part's base part is no longer there, so its sockets are checked against another of its type.";
+
 /** The colour a drawing starts with when the packs suggest none. */
 const FIRST_COLOUR = "#7fae5a";
 
@@ -243,6 +247,8 @@ export function PartDrawMode({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  // Said in the panel while a reopened part is drawn against another base than its own.
+  const [baseNote, setBaseNote] = useState<string>();
   // The grid during a stroke, before it becomes an undo step.
   const [live, setLive] = useState<Grid>();
   // A point being dragged and where, in canvas pixels.
@@ -274,11 +280,7 @@ export function PartDrawMode({
         // part gives only where its points are.
         const original = packBase(k, drawing.baseId, type);
         const base = original ?? defaultBase(k.parts, type, k.roots);
-        if (!original) {
-          setNotice(
-            "Its base part is no longer there, so its sockets are checked against another.",
-          );
-        }
+        setBaseNote(original ? undefined : BASE_GONE);
         const opening: DrawSetup = {
           partType: type,
           baseId: base?.id ?? drawing.baseId,
@@ -298,7 +300,9 @@ export function PartDrawMode({
         setName(entry.name);
         setRecord(recordOf(entry));
         setEditing(entry);
-        setOpenedKey(drawKey(entry.name, drawingOf(grid, drawing.palette, opening), points));
+        // Keyed by the base it was saved with, so a stand-in base is a change to save.
+        const asSaved = { ...opening, baseId: drawing.baseId };
+        setOpenedKey(drawKey(entry.name, drawingOf(grid, drawing.palette, asSaved), points));
         return;
       }
       const sections = k.sections;
@@ -320,6 +324,7 @@ export function PartDrawMode({
       setRecord(NEW_PART);
       setEditing(undefined);
       setOpenedKey(undefined);
+      setBaseNote(undefined);
     },
     [recipeOf],
   );
@@ -1064,6 +1069,11 @@ export function PartDrawMode({
                     </label>
                   )}
                 </fieldset>
+                {baseNote && (
+                  <p className="release-hint" role="status">
+                    {baseNote}
+                  </p>
+                )}
                 {sizeText && against !== undefined && (
                   <p className="size-readout">
                     {sizeText}
