@@ -18,7 +18,7 @@ import { canvasEncoder, PropThumbnails } from "./prop-thumbnails";
 import { loadGltf, PropSet, type AssetResolver, type ModelLoader } from "./props";
 import { FrameThrottle } from "./throttle";
 import { createWaterMaterial, type WaterMaterial } from "./water-material";
-import type { PartRoleResolver } from "./voxel/body";
+import type { PartMotionResolver, PartRoleResolver } from "./voxel/body";
 import {
   VoxelThumbnails,
   type AssemblyThumbnailSource,
@@ -42,6 +42,8 @@ export interface DioramaViewOptions {
   readAssembly?: AssemblyReader;
   /** Part types' roles, for voxel bodies' tail anchors. Without it no part has a role. */
   partRole?: PartRoleResolver;
+  /** Part types' motions, for voxel bodies' parts (ADR 0024 §8). Without it no part moves. */
+  partMotion?: PartMotionResolver;
   /** Walkability, region graph and portals for the debug overlays (ADR 0007 §10). */
   navigation?: NavigationOverlay;
 }
@@ -264,6 +266,7 @@ export function buildDioramaScene(
     readImage: options.readImage,
     readAssembly: options.readAssembly,
     partRole: options.partRole,
+    partMotion: options.partMotion,
     // The terrain and structures hide the cues of creatures they hide; props never do (#93).
     visibility: new CueVisibility(scene, layers),
     propIcon: (placementId) => propIcons.icon(placementId),

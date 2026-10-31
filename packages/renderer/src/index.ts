@@ -12,7 +12,7 @@ export {
   type PreviewMotion,
 } from "./body/preview";
 export { type AssemblyReader, type RenderSpecies, type SpeciesResolver } from "./creatures";
-export type { PartRoleResolver } from "./voxel/body";
+export type { PartMotionResolver, PartRoleResolver } from "./voxel/body";
 export { SnapshotInterpolator, lerpHeading, type CreaturePose } from "./interpolation";
 export { LAYER_NAMES, type ClipPlane, type LayerName } from "./layers";
 export type { AssetResolver, ModelLoader, RenderAsset } from "./props";

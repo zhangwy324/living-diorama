@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   FULL_MOTION_SPEED,
+  VOXEL_WALK,
   leapMotion,
   locomotionMotion,
   locomotionTransform,
@@ -102,6 +103,32 @@ describe("locomotionMotion", () => {
     expect(roll.max).toBeGreaterThan(0.05);
     expect(range(motions, "pitch").min).toBeGreaterThan(0); // leaning into the walk
     expect(range(motions, "scaleY").min).toBeGreaterThan(0.95);
+  });
+
+  describe("on a body whose legs swing (ADR 0024 §5)", () => {
+    const legs = { step: 0.1, dip: 0.004 };
+
+    it("damps the roll and squash, and dips as the legs swing out, once per step", () => {
+      const drawn = sweep({ profile: "walk" });
+      const voxel = sweep({ profile: "walk", legs });
+      const reach = (motions: LocomotionMotion[], key: "roll" | "scaleY") =>
+        Math.max(...motions.map((m) => Math.abs(m[key] - (key === "scaleY" ? 1 : 0))));
+      expect(reach(voxel, "roll")).toBeCloseTo(VOXEL_WALK.roll * reach(drawn, "roll"), 3);
+      expect(reach(voxel, "scaleY")).toBeCloseTo(VOXEL_WALK.squash * reach(drawn, "scaleY"), 3);
+      expect(voxel.every((m) => m.pitch === drawn[0]!.pitch && m.yaw === 0)).toBe(true);
+      // Back up as the legs pass under it, down by the dip at each half step, where they splay.
+      // In metres: at full speed (0.6 m/s), for the default 0.4 m body.
+      const at = (travelled: number) => motion({ profile: "walk", legs, travelled }).lift * 0.4;
+      expect(at(legs.step * 3)).toBeCloseTo(0, 9);
+      expect(at(legs.step * 3.5)).toBeCloseTo(-legs.dip, 9);
+      expect(range(voxel, "lift").max).toBeLessThanOrEqual(1e-12);
+    });
+
+    it("leaves the swim and the hop as they are", () => {
+      for (const profile of ["swim", "hop"]) {
+        expect(sweep({ profile, legs })).toEqual(sweep({ profile }));
+      }
+    });
   });
 
   it("takes longer steps with a bigger body", () => {

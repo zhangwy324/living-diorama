@@ -1,6 +1,12 @@
-import { PART_MOTIONS, VOXEL_UNIT, type PartMotion } from "@living-diorama/content-schema";
+import {
+  PART_MOTIONS,
+  VOXEL_UNIT,
+  type PartMotion,
+  type VoxelAssembly,
+} from "@living-diorama/content-schema";
 import * as THREE from "three";
-import type { VoxelBody } from "./body";
+import type { WalkLegs } from "../locomotion";
+import type { PartMotionResolver, VoxelBody } from "./body";
 
 // A species' motion rig (M22): what per-part motion needs to know about a voxel body, derived once
 // per species from its rest pose and kept for its creatures. It classifies the legs from where
@@ -195,4 +201,52 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
     legs,
     stride,
   };
+}
+
+/**
+ * The motion of each part instance of `assembly` by its index, from its part's type through
+ * `partMotion` (ADR 0024 §8), for `buildMotionRig`. Without a resolver no part moves.
+ */
+export function instanceMotions(
+  assembly: VoxelAssembly,
+  partMotion: PartMotionResolver | undefined,
+): MotionLookup {
+  return (i) => {
+    const instance = assembly.instances[i];
+    const part = instance ? assembly.parts[instance.part] : undefined;
+    return part ? partMotion?.(part.type) : undefined;
+  };
+}
+
+/**
+ * What the walk profile needs to keep the whole body in step with `rig`'s legs (ADR 0024 §5):
+ * metres per step, half the stride, and how far the hips should drop as the legs swing out in
+ * full, so that the lowest foot stays on the ground. A swung leg's foot rises at its heel and
+ * sinks at its toe, so this is measured on the cubes of every grounded leg of `body` (the body
+ * `rig` was built from), swung either way: it is negative, a rise, when a toe would sink more
+ * than any foot lifts. A rig with no grounded leg doesn't dip. Reads the body's vertices: once
+ * per species.
+ */
+export function walkLegs(body: VoxelBody, rig: MotionRig): WalkLegs {
+  const positions = body.geometry.getAttribute("position");
+  const skin = body.geometry.getAttribute("skinIndex");
+  const rest = new Map<number, number>();
+  const swung = new Map<number, number>();
+  for (let v = 0; v < positions.count; v++) {
+    const i = skin.getX(v);
+    const part = rig.parts[i];
+    const bone = rig.bones[i];
+    if (!part?.leg?.grounded || !bone) continue;
+    vertex.fromBufferAttribute(positions, v).applyMatrix4(bone);
+    rest.set(i, Math.min(rest.get(i) ?? Infinity, vertex.y));
+    // Turned about Z through its attach point, as `swing` turns it, either way.
+    const x = vertex.x - part.origin.x;
+    const y = vertex.y - part.origin.y;
+    const a = part.leg.amplitude;
+    const low = part.origin.y + Math.min(x * Math.sin(a), -x * Math.sin(a)) + y * Math.cos(a);
+    swung.set(i, Math.min(swung.get(i) ?? Infinity, low));
+  }
+  let drop = Infinity;
+  for (const [i, low] of swung) drop = Math.min(drop, low - (rest.get(i) ?? low));
+  return { step: rig.stride / 2, dip: Number.isFinite(drop) ? drop : 0 };
 }
