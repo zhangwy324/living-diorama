@@ -85,6 +85,8 @@ This ADR amends ADR 0011 §3 and §6, ADR 0013, ADR 0015 §7 (the size picker), 
 
 22. **Drawn, extruded creatures stay until M23, then go.** At M23 ("draw a part") a drawing becomes a voxel part instead of an extruded body, and the extruded bodies are dropped. The mossling is rebuilt in voxels at M20.
 
+    _Carried out by [ADR 0025](0025-drawing-voxel-parts.md) (M23):_ a drawing becomes a part on a 32 × 32 grid, and drawn bodies are removed from the Studio, the library, the desktop shell and the renderer (§11 there).
+
 ## Departures
 
 - **ADR 0011 §3:** a voxel body isn't scaled to its size class's height (§3), and stands on its lowest cube (§21).
@@ -133,7 +135,7 @@ Agreed with the owner on 2026-10-29 for M19 (part and assembly schema, mesher, a
 - **Library entry version 5.** The entry's body is `{ kind: "drawn" }` or `{ kind: "voxel", assembly }`. The desktop shell's entry size limit rises and the drawing and image become optional per entry, with the run-length encoding as plain JSON numbers; that amends ADR 0014 §3–§5 in a later M19 pull request.
 - **The size class is stored and checked.** A voxel species stores its size class, and loading recomputes it from the assembly and rejects a mismatch.
 - **An asset kind for assemblies.** A voxel species' appearance names its assembly, `user:<id>/assembly.json`, of a new `voxel` asset kind. The app registers the assembly's JSON as a blob URL as it does images today, the worker sees only the URL, and the renderer fetches and parses it (§20). Added in M19 PR 3a (see its As built section).
-- **Voxel species keep their gait.** They keep `body.locomotion`, which the simulation reads; the drawn-only settings (thickness, anchors) are forbidden. The library entry refuses them; the worker drops them from the species summary it sends back; refusing them for voxel species a pack registers comes in M20. The body plan is split when drawn bodies go (M23). _(amended by #223, see M20 PR 1)_
+- **Voxel species keep their gait.** They keep `body.locomotion`, which the simulation reads; the drawn-only settings (thickness, anchors) are forbidden. The library entry refuses them; the worker drops them from the species summary it sends back; refusing them for voxel species a pack registers comes in M20. The body plan is split when drawn bodies go (M23). _(amended by #223, see M20 PR 1)_ _M23 ([ADR 0025](0025-drawing-voxel-parts.md) §11) splits it by removing the drawn-only settings: `species.body` keeps only `locomotion`._
 - **Measurement is pure.** Bounds, size class, ground contact, centre of gravity and tail are pure functions in content-schema, with no three.js.
 - **Rendering (§18, §19).** A skinned mesh with one bone per part, each vertex weighted 1, the geometry shared per species and a skeleton per creature, frustum culling off. Four-level per-vertex ambient occlusion with each quad split along the more even diagonal. Emissive 0.15 from the vertex colours. A small vertex layout (`Uint8` positions within the part, packed normals, `Uint8` colour, ambient occlusion and part index). Each species is meshed once, new species queued about one per frame. Voxel bodies cast shadows but don't receive them (ADR 0011 §10). The mesher stays a pure typed-array function on the main thread, capped at 32³ per part.
 

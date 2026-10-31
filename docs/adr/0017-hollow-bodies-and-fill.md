@@ -1,8 +1,10 @@
 # ADR 0017: Hollow bodies and the fill tool
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0025](0025-drawing-voxel-parts.md) (M23)
 - **Date:** 2026-10-28
 - **Context:** Roadmap M13 (issue #58). Bodies (ADR 0011) fill in every hole of a drawing, so a ring turns into a disc and there is no way to leave an opening in a creature. Nor can a player make a region solid other than by scribbling over it. M13 turns undrawn regions into openings through the body and gives the Studio a paint bucket. The choices below were made after prototypes: the six Studio fixtures and the mossling rendered with all their openings, three ways of building the walls, two ways of colouring them, soft against hard-edged strokes, a bucket fill inside a ring, and a look at the fill tools of common painting programs. M13 lands as a series of PRs: **0** stroke edges without spikes (issue #59); **1** hollow bodies (issue #72, which adds this ADR); **2** the bitmap as the drawing (issue #73); **3** the bucket (issue #58); **4** a thickness control (issue #74). This ADR records the decisions for the whole series. PR 1 built §1–§7, PR 2 §8–§9, PR 3 §10 and PR 4 §11; where a PR departed from the plan it updated this ADR. All five landed and passed the manual Studio round on 2026-10-28.
+
+**Superseded by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): hollow extruded bodies, the 256 px drawing with its record and pixel-patch undo, the fill tool on it and the thickness setting go with drawn creatures (§11 there). A part is drawn on a 32 × 32 grid instead.
 
 This ADR amends ADR 0011 §2, §4 and §5 and its consequences, ADR 0014, and ADR 0015 §7, §9 and §11 (see _Amendments_).
 

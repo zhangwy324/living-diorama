@@ -67,6 +67,8 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 
     _Amended by [ADR 0022](0022-voxel-creatures.md) §20 (M18) for voxel creatures:_ anchors are points in a voxel body frame (metres, +X forward, Y up) and come from the assembly, not from drawing pixels.
 
+    _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ drawn bodies go, so no species has anchors placed in drawing pixels. `anchors` leaves `species.body` (§11), which keeps only `locomotion`, and every species' anchors are derived from its assembly.
+
 ### The body plan (M16)
 
 11. **The species carries its body plan.** _Amended by the owner on 2026-10-29: `template` is removed. The ways of moving alone decide behaviour, and the confirm panel starts from land movement with the walk gait (see "As built", Follow-up: no body templates)._ `species.body` (ADR 0017 §11, today only `thickness`) gains:
@@ -79,6 +81,8 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 12. **A confirm step in the Studio.** _Amended by the owner on 2026-10-29: the panel has no template; the points shown follow the ways of moving (see "As built", Follow-up: no body templates)._ Between drawing and Release, the Studio shows a panel: the template, land movement and swimming, the land gait, clicks to place the anchors, and an animated preview of the body in each way it moves. The size limits (ADR 0015 §8) are asked for the chosen capabilities, since a navigation profile is the size class plus the capabilities (ADR 0012); the gait doesn't change them. The release moment (#51) and the size suggestion (#49) stay separate issues.
 
 13. **Library entries go to version 3.** _Amended on 2026-10-29: version 4 drops the template, and a species without a body plan has the walk gait and default anchors (see "As built", Follow-up: no body templates)._ The body plan is stored with every species the library saves. An entry or a species without a body plan is read as a walker with default anchors. That is a cheap default for content with no plan, not a migration path: no backward compatibility is required (AGENTS.md), and entries of version 2 may simply fail to load.
+
+    _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ library entries are version 6, voxel species only, and a body plan no longer carries anchors.
 
 14. **The body plan replaces the drawn species' fixed capabilities.** ADR 0014 §11's `DRAWN_SPECIES_DEFAULTS` gave every drawn species `core:walk` 1. From PR 6 a drawn species takes its capabilities (`core:land`, `core:swim` or both) and its gait from its body plan, with a speed factor of 1 for each capability unless PR 1 or PR 6 tunes it. The other defaults (base speed, behaviors, senses, traits) stay app configuration until drawing release 3 reads them from the drawing (roadmap §3.2 step 8).
 

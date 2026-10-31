@@ -8,6 +8,8 @@
 
 **Amended by [ADR 0023](0023-creature-assembly-studio.md)** (M21): the Studio gains a Build mode beside drawing, for assembling voxel creatures from parts (§1 there). It holds an assembly and the parts list as well as its drawing (§4); the channel gains `parts`, `assembly` and `releaseVoxel` (§5; §17–§19 there); Build mode's preview is the renderer's assembly view (§7); the close dialog covers an unreleased assembly (§10); and a release in Build mode starts over in Build mode, while My creatures draws voxel thumbnails and offers Edit a copy (§12). Draw mode keeps this ADR until M23 removes it.
 
+**Amended by [ADR 0025](0025-drawing-voxel-parts.md)** (M23): Draw mode stays but draws a voxel part on a 32 × 32 grid, saved to the player's own parts and used in Build mode (§9 there), with undo by grid snapshots (§15 there). Drawing a creature goes, and with it this ADR's drawing decisions: the body preview and hints (§7), the 256 px drawing and its strokes (§9) and the pixel-patch editor (§11). The window, the channel and release (§1–§6, §8, §10, §12) still hold, as amended by ADR 0023.
+
 ## Decisions
 
 ### The window (PR 2)
