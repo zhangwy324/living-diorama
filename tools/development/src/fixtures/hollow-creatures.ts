@@ -75,13 +75,3 @@ export function registerHollowCreatures(registries: Registries) {
     ]),
   ];
 }
-
-/**
- * The registered mossling as the input of a test species made like it (`{ ...mosslingInput(r), id,
- * … }`): a fresh copy, so a test can change it.
- */
-export function mosslingInput(registries: Registries) {
-  const mossling = registries.species.get("hollow:mossling");
-  if (!mossling) throw new Error("The mossling isn't registered");
-  return { ...mossling };
-}

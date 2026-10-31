@@ -83,8 +83,9 @@ export interface SpeciesLibrary {
    * `MAX_ASSEMBLY_BYTES` as JSON is refused first (`assembly_too_big`). Its size class is measured
    * from its cubes, and one too large for every class is refused (`too_large`). Its parts must fit
    * the world's part and socket types, checked here, at release, and not when it loads again.
-   * `plan`'s ways of moving give it its capabilities and gait; its cubes give its anchors. `options.id` is the lowercase UUID to keep it under, a fresh one by default; one
-   * already used is refused.
+   * `plan`'s ways of moving give it its capabilities and gait; its cubes give its anchors.
+   * `options.id` is the lowercase UUID to keep it under, a fresh one by default; one already used
+   * is refused.
    */
   saveVoxel(
     assembly: unknown,

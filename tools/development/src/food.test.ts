@@ -35,7 +35,6 @@ import {
 } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { pebble, registerRiverCrossing, riverCrossingWorld } from "./index";
-import { mosslingInput } from "./fixtures/hollow-creatures";
 import { createSimulation } from "./simulation-run";
 
 // Food (ADR 0018 §10–§12, §18 and amendments, PR 4a): perception, `core:feed` and `core:eat`.
@@ -792,7 +791,7 @@ describe("feeding in Woodland Hollow", () => {
     const { simulation, events, run } = setup(3, (r) => {
       r.behaviors.register(alarm);
       r.species.register({
-        ...mosslingInput(r),
+        ...r.species.get("hollow:mossling")!,
         id: "test:alarmed-mossling",
         behaviors: ["core:wander", "core:feed", "test:alarm"],
       });
@@ -828,7 +827,7 @@ describe("feeding in Woodland Hollow", () => {
   function sluggish(seed: number, places = 2) {
     const world = setup(seed, (r) => {
       r.species.register({
-        ...mosslingInput(r),
+        ...r.species.get("hollow:mossling")!,
         id: "test:sluggish-mossling",
         baseSpeed: 0.001,
       });

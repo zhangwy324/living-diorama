@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { SCHEMA_VERSIONS } from "./constants";
 import { SpeciesDefinitionSchema } from "./definitions";
 import type { Result } from "./diagnostics";
 import { VoxelAssemblySchema, measureAssembly } from "./voxel-assembly";
@@ -22,7 +21,7 @@ export const LIBRARY_ENTRY_SCHEMA_VERSION = 7;
 const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {
   6: (entry) => ({
     ...entry,
-    species: { ...(entry.species as object), schemaVersion: SCHEMA_VERSIONS.species },
+    species: { ...(entry.species as object), schemaVersion: 2 },
   }),
 };
 

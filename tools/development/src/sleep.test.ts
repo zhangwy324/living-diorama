@@ -33,7 +33,6 @@ import {
 import type { Registries } from "@living-diorama/extension-api";
 import { beforeAll, describe, expect, it } from "vitest";
 import { registerFarShelter } from "./fixtures/far-shelter";
-import { mosslingInput } from "./fixtures/hollow-creatures";
 import { createSimulation } from "./simulation-run";
 
 // Shelter, sleep and home (ADR 0018 §13, §14 and amendments, PR 5a): `core:rest` and `core:sleep`.
@@ -1325,7 +1324,7 @@ describe("sleeping in Woodland Hollow", () => {
     function sluggish(seed: number) {
       const world = setup(seed, 21 * 60, 10, (r) =>
         r.species.register({
-          ...mosslingInput(r),
+          ...r.species.get("hollow:mossling")!,
           id: "test:sluggish-mossling",
           baseSpeed: 0.001,
         }),
@@ -1569,7 +1568,7 @@ describe("sleeping in Woodland Hollow", () => {
   it("a nocturnal creature sleeps by day and wakes at dusk", () => {
     const { run, spawn, of } = setup(9, 11 * 60, 2, (r) => {
       r.species.register({
-        ...mosslingInput(r),
+        ...r.species.get("hollow:mossling")!,
         id: "test:night-mossling",
         traits: { [NOCTURNAL]: 1 },
       });
@@ -1619,7 +1618,7 @@ describe("sleeping in Woodland Hollow", () => {
       r.actions.register(sleepwalk);
       r.behaviors.register(sleepwalker);
       r.species.register({
-        ...mosslingInput(r),
+        ...r.species.get("hollow:mossling")!,
         id: "test:sleepwalker",
         // So slow that walking never makes the watchdog's 5 cm of progress in 5 s.
         baseSpeed: 0.001,
@@ -1674,7 +1673,7 @@ describe("sleeping in Woodland Hollow", () => {
       r.actions.register(announce);
       for (const b of behaviors) r.behaviors.register(b);
       r.species.register({
-        ...mosslingInput(r),
+        ...r.species.get("hollow:mossling")!,
         id: "test:sleepy",
         behaviors: ["test:sleepy", "test:eager"],
       });

@@ -317,10 +317,10 @@ export class Simulation {
   /**
    * Registers a species and its appearance while the world runs (ADR 0012), validated and
    * resolved like pack content. The appearance asset, of `appearanceKind` (a voxel body's
-   * assembly), has the ID `species.appearance` and the species' version. Only
-   * its URL is kept: the simulation never reads the file, so a voxel species' cubes never reach
-   * it (ADR 0022 §20). A species with a new navigation profile gets its navigation built and checked like
-   * the world's at creation. Nothing is registered if anything fails. On success, `limits` says
+   * assembly), has the ID `species.appearance` and the species' version. Only its URL is kept:
+   * the simulation never reads the file, so a voxel species' cubes never reach it (ADR 0022 §20).
+   * A species with a new navigation profile gets its navigation built and checked like the
+   * world's at creation. Nothing is registered if anything fails. On success, `limits` says
    * where its creatures don't fit, e.g. a bridge too narrow for them (ADR 0013).
    */
   registerSpecies(
