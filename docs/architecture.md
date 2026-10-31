@@ -24,16 +24,16 @@ flowchart TD
   api --> schema
 ```
 
-| Package               | Owns                                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)). Also the species library entry schema and its migrations ([ADR 0014](adr/0014-species-library.md) §5–6).                                                                                                |
-| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)), and `addEntries`, which adds a batch of entries to resolved registries all or nothing ([ADR 0012](adr/0012-runtime-species.md) §3).                                                                                                               |
-| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation and size limits, actions, behaviors, needs, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md), [ADR 0013](adr/0013-size-limits.md), [ADR 0018](adr/0018-living-behavior.md)). |
-| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)). Voxel creature bodies built from their appearance assembly ([ADR 0022](adr/0022-voxel-creatures.md)), and the Studio's assembly view.                                                                                              |
-| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)), the `LibraryStore` over the species library's files, and the window channel between the Studio and the strip ([ADR 0015](adr/0015-creation-studio.md) §5).                                                                                                 |
-| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                                                                                                                                |
-| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and two React pages, the strip (`index.html`), which wires everything together, and the Creation Studio (`studio.html`).                                                                                                                                                                                                              |
-| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                                                                                                                      |
+| Package               | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `content-schema`      | The data contracts for worlds, structures and species, their schema versions, ID formats and validation with readable diagnostics ([ADR 0002](adr/0002-content-schema.md)). Also the species library entry schema and its migrations ([ADR 0014](adr/0014-species-library.md) §5–6), the voxel part and assembly formats with their edits and the seeded assembler ([ADR 0022](adr/0022-voxel-creatures.md), [ADR 0023](adr/0023-creature-assembly-studio.md)), and the drawing voxelizer and the player part entry ([ADR 0025](adr/0025-drawing-voxel-parts.md)). |
+| `extension-api`       | The registries, registration, reference resolution across entries and semver checks ([ADR 0003](adr/0003-content-versioning.md)), and `addEntries`, which adds a batch of entries to resolved registries all or nothing ([ADR 0012](adr/0012-runtime-species.md) §3).                                                                                                                                                                                                                                                                                              |
+| `simulation`          | All authoritative world and creature state: surfaces, walkability, the region graph, navigation and size limits, actions, behaviors, needs, the tick loop and the worker protocol ([ADR 0005](adr/0005-world-content-and-walkability.md), [ADR 0006](adr/0006-simulation-runtime-and-navigation.md), [ADR 0013](adr/0013-size-limits.md), [ADR 0018](adr/0018-living-behavior.md)).                                                                                                                                                                                |
+| `renderer`            | Everything drawn: terrain, water, structures, props, creatures, camera, debug overlays and render throttling ([ADR 0007](adr/0007-renderer.md)). Voxel creature bodies built from their appearance assembly ([ADR 0022](adr/0022-voxel-creatures.md)), and the Studio's assembly view.                                                                                                                                                                                                                                                                             |
+| `desktop-integration` | The frontend's OS-neutral `DesktopShell` interface and its Tauri implementation ([ADR 0008](adr/0008-desktop-shell.md)), the `LibraryStore` over the species library's files, the `PartsStore` over the player's parts, and the window channel between the Studio and the strip ([ADR 0015](adr/0015-creation-studio.md) §5).                                                                                                                                                                                                                                      |
+| `built-in-content`    | The `hollow` pack: the Woodland Hollow world, the wooden bridge, the mossling and their asset files.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `apps/desktop`        | The Tauri app: the Rust shell in `src-tauri/` and two React pages, the strip (`index.html`), which wires everything together, and the Creation Studio (`studio.html`).                                                                                                                                                                                                                                                                                                                                                                                             |
+| `tools/development`   | The world generator, the headless runner, the soak runs and test fixtures. Nothing imports it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 Each package's README lists what it owns and what it must not do.
 
@@ -47,7 +47,7 @@ The installed app is one Windows process tree: the Rust host and the WebView2 pr
 ```mermaid
 flowchart LR
   subgraph host["Rust host (src-tauri)"]
-    shell["shell: window shapes, AppBar,<br/>tray, settings, library files, log"]
+    shell["shell: window shapes, AppBar,<br/>tray, settings, library and parts files, log"]
   end
   subgraph mainwin["main window: strip or normal (index.html)"]
     subgraph mainthread["Main thread"]
@@ -60,7 +60,7 @@ flowchart LR
     end
   end
   subgraph studiowin["studio window (studio.html)"]
-    studio["Studio.tsx<br/>editor, body preview"]
+    studio["Studio.tsx<br/>Build and Draw modes"]
   end
 
   app <-- "invoke / events<br/>(DesktopShell)" --> shell
@@ -70,14 +70,14 @@ flowchart LR
   app -- "pushSnapshot" --> view
   studio -- "studio-request" --> app
   app -- "studio-response,<br/>library-changed" --> studio
-  studio -- "open_studio, load_library_image" --> shell
+  studio <-- "parts commands<br/>(PartsStore)" --> shell
 ```
 
-- **Rust host.** Owns the windows and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, switching the `main` window between its two shapes, DPI and monitor changes, focus policy, the tray menu, always-on-top, the settings file, the species library's files and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused, expanded and full-screen state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md), [ADR 0016](adr/0016-integration-and-v0.2-build.md) §1–8).
-- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). `species-library.ts` keeps the drawn and voxel species: it checks the stored entries, registers them and adds, removes and deletes them. `studio-protocol.ts` answers the Studio's requests from the library and the latest snapshot. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
-- **Simulation worker.** The only place content is registered and checked: the packs at `init` (`content.ts`), drawn species while the world runs. Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
+- **Rust host.** Owns the windows and everything OS-specific: placing the strip on the work area, reserving screen space as an AppBar, switching the `main` window between its two shapes, DPI and monitor changes, focus policy, the tray menu, always-on-top, the settings file, the species library's and the player's parts' files, the saved world and the diagnostics log. Windows calls sit behind a `Platform` trait. It owns the paused, expanded and full-screen state and tells the page when they change ([ADR 0008](adr/0008-desktop-shell.md), [ADR 0016](adr/0016-integration-and-v0.2-build.md) §1–8).
+- **Main thread.** `App.tsx` is the composition root. At startup it starts the worker on the world in `startup.ts`, creates the `DioramaView` from what the worker's `ready` message describes, and passes each snapshot to the view. It never loads content itself ([ADR 0010](adr/0010-content-startup.md)). `species-library.ts` keeps the player's species, every one a voxel species: it checks the stored entries, registers them and adds, removes and deletes them. `studio-protocol.ts` answers the Studio's requests from the library and the latest snapshot. Every failure (invalid content, a worker error, a renderer that can't start) replaces the view with the error screen ([ADR 0009](adr/0009-integration-and-v1-build.md) §2).
+- **Simulation worker.** The only place content is registered and checked: the packs at `init` (`content.ts`), the library's species while the world runs. Builds the world state and runs the fixed 10 Hz tick. The simulation never reads the wall clock or `Math.random`; time is fed in and randomness comes from a seeded RNG, so a seed reproduces a run ([ADR 0006](adr/0006-simulation-runtime-and-navigation.md)).
 - **Renderer.** Draws at the display rate while hovered or while the camera moves, about 30 fps otherwise, and nothing while the window is hidden. Creatures are drawn one tick behind the newest snapshot and interpolated between snapshots ([ADR 0007](adr/0007-renderer.md)). The renderer follows the window's pixel density when it moves between monitors.
-- **Studio page.** Build mode (the assembly view and the parts tray), the body plan step, name and size, and My creatures. It holds only the creature being built and the latest library snapshot, and asks the strip for everything else ([ADR 0015](adr/0015-creation-studio.md) §4).
+- **Studio page.** Build mode (the assembly view, the parts tray, the body plan step and the name), Draw mode (the part grid and its 3D preview, [ADR 0025](adr/0025-drawing-voxel-parts.md)), and My creatures & parts. It holds only the creature being built, the part being drawn and the latest library snapshot. It reads and writes the player's parts itself, through `PartsStore`, and asks the strip for everything else ([ADR 0015](adr/0015-creation-studio.md) §4).
 
 ### One window, two shapes
 
@@ -97,13 +97,13 @@ Expanding doesn't open a window: the `main` window changes its style and size ([
 
 Rust creates the `studio` window on demand, from the overlay's pencil button (`open_studio`) or the tray, one at a time. Closing it destroys it and frees its WebGL context; the world doesn't notice ([ADR 0015](adr/0015-creation-studio.md) §1). Its capability file, `capabilities/studio.json`, grants only targeted events, closing itself and the log.
 
-The Studio never creates a `DesktopShell` and never hears the shell's events. Rust sends those to `main` only, and accepts `quit_ready` only from `main` ([ADR 0015](adr/0015-creation-studio.md) §6). Quitting closes the Studio with the app, and an unreleased drawing is lost.
+The Studio never creates a `DesktopShell` and never hears the shell's events. Rust sends those to `main` only, and accepts `quit_ready` only from `main` ([ADR 0015](adr/0015-creation-studio.md) §6). Quitting closes the Studio with the app, and a creature not released or a part not saved is lost.
 
 ### The species library
 
 Rust stores, TypeScript checks ([ADR 0014](adr/0014-species-library.md)).
 
-- **Rust** (`src-tauri/src/library.rs`) keeps one folder per species in `%APPDATA%\com.livingdiorama.desktop\library`, named by the species' UUID: `entry.json` and, for a drawn species, `drawing.json` (the record of how it was drawn) and `appearance.png` (the drawing itself). A voxel species holds its assembly inline in `entry.json` and has no other files. It saves and deletes atomically through a `.tmp` folder, accepts only lowercase UUIDs as IDs, limits each file's size, and never interprets the contents. Development builds use `LIVING_DIORAMA_DEV_DATA_DIR` instead when it is set.
+- **Rust** (`src-tauri/src/library.rs`) keeps one folder per species in `%APPDATA%\com.livingdiorama.desktop\library`, named by the species' UUID, holding only `entry.json`: the species with its assembly inline ([ADR 0025](adr/0025-drawing-voxel-parts.md) §11). A drawn species' entry from before M23 no longer loads and is skipped; its old `drawing.json` and `appearance.png` are left alone. It saves and deletes atomically through a `.tmp` folder, accepts only lowercase UUIDs as IDs, limits each file's size, and never interprets the contents. Development builds use `LIVING_DIORAMA_DEV_DATA_DIR` instead when it is set.
 - **TypeScript** (`species-library.ts`) reads the entries through `LibraryStore`, migrates and validates them with `content-schema`, and checks that each holds the species its folder names. An entry that fails is skipped with a diagnostic, and its files are left alone.
 - At launch, once the world is ready, the library registers every stored species, one at a time, and spawns none. A species the world rejects stays in the list as unavailable. Deleting a species takes its creatures out of the world and deletes its files; it stays registered, unreachable, until the next launch.
 
@@ -143,7 +143,7 @@ The client sends `catch_up` itself when the running world lost wall-clock time, 
 | Direction     | Message                        | Meaning                                                                                                                                                                                              |
 | ------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | main → worker | `init`                         | World ID, seed, tick rate, creature cap and the local time of day. Always first.                                                                                                                     |
-|               | `register_species`             | Add a species and the URL and kind (image or voxel) of its appearance, checked like pack content.                                                                                                    |
+|               | `register_species`             | Add a species and the URL and kind (`voxel`, the only kind) of its appearance, checked like pack content.                                                                                            |
 |               | `spawn`, `despawn`             | Add a creature of a species, optionally at a named spawn point, or take one out. `released` marks a Studio release.                                                                                  |
 |               | `check_limits`                 | Where creatures of a size class and capabilities wouldn't fit, without registering anything.                                                                                                         |
 |               | `check_assembly`               | A voxel assembly being released: its structure, then its part and socket types against the registered ones. Checked and dropped, never kept ([ADR 0022](adr/0022-voxel-creatures.md)).               |
@@ -187,23 +187,25 @@ The window channel in [`packages/desktop-integration/src/channel.ts`](../package
 - `main` pushes `library-changed` with a library snapshot whenever the library changes, or the count of a species in the world does.
 - Each side listens with its own window label as the target, so it never hears events sent to the other window.
 
-| Request          | What the strip does                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `snapshot`       | Returns the library now: each species with its library UUID and count in the world, the world's total and its cap.                 |
-| `limits`         | Runs `check_limits` for a size class with the drawn species' capabilities; the Studio's preview moves by the rules that come back. |
-| `release`        | Saves the drawing as a species and adds one creature. Repeating a `releaseId` gets the first answer.                               |
-| `addCreature`    | Adds a creature of a library species, unless the world is full.                                                                    |
-| `removeCreature` | Takes the newest creature of a species out of the world.                                                                           |
-| `deleteSpecies`  | Deletes a species from the library; its creatures leave the world.                                                                 |
+| Request          | What the strip does                                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `snapshot`       | Returns the library now: each species with its library UUID and count in the world, the world's total and its cap.                        |
+| `limits`         | Runs `check_limits` for a size class and ways of moving; the confirm step's preview moves by the rules that come back.                    |
+| `parts`          | Returns the registered voxel parts, part types (with their roles, motions and drawing recipes) and socket types, from the latest `ready`. |
+| `assembly`       | Returns a library species' assembly, for its picture in My creatures or to edit a copy.                                                   |
+| `releaseVoxel`   | Saves an assembly as a species (`SpeciesLibrary.saveVoxel`) and adds one creature. Repeating a `releaseId` gets the first answer.         |
+| `addCreature`    | Adds a creature of a library species, unless the world is full.                                                                           |
+| `removeCreature` | Takes the newest creature of a species out of the world.                                                                                  |
+| `deleteSpecies`  | Deletes a species from the library; its creatures leave the world.                                                                        |
 
-Images don't travel in snapshots. The Studio loads each species' PNG itself with `load_library_image` and makes its own `blob:` URL.
+Pictures don't travel in snapshots. The Studio draws them itself with the renderer's `VoxelThumbnails`: a species' from its `assembly`, a part's from the `parts` answer or, for the player's own parts, from `PartsStore`. The player's parts never travel over the channel.
 
 ### Page ↔ Rust host
 
-Defined by `DesktopShell` and `LibraryStore` in [`packages/desktop-integration/src`](../packages/desktop-integration/src/) and the commands registered in `apps/desktop/src-tauri/src/lib.rs`.
+Defined by `DesktopShell`, `LibraryStore`, `PartsStore` and `WorldStore` in [`packages/desktop-integration/src`](../packages/desktop-integration/src/) and the commands registered in `apps/desktop/src-tauri/src/lib.rs`.
 
 - Commands from the strip: set the strip height, pause, expand or collapse, enter or leave full screen, hide, open the Studio, confirm it is ready to quit, and record event counts.
-- Library commands: list, load the drawing, load the image, save and delete entries ([ADR 0014](adr/0014-species-library.md)). The image comes back as raw bytes.
+- Library commands: list, save and delete entries ([ADR 0014](adr/0014-species-library.md)). Parts commands, from the Studio: list, save and delete the player's parts ([ADR 0025](adr/0025-drawing-voxel-parts.md) §6). World commands: load and save the world ([ADR 0019](adr/0019-world-saving.md)).
 - Events from the host, sent to `main` only: paused changed, expanded changed, full screen changed, quit requested.
 - Log lines from either page: `desktop-integration` forwards every `console.warn` and `console.error` through `tauri-plugin-log`, and the app logs each failure the error screen shows. The host writes them, with its own lines, to `%LOCALAPPDATA%\com.livingdiorama.desktop\logs`; the tray's **Open log folder** opens it ([ADR 0009](adr/0009-integration-and-v1-build.md) §13–15).
 
@@ -223,14 +225,14 @@ Content is data registered into typed registries, and the engine refers to it on
 
 ### Species added while the world runs
 
-Drawn species go through the same schemas, registries and checks as pack content, and no engine code tells them apart ([ADR 0012](adr/0012-runtime-species.md)).
+The player's species, from the library, go through the same schemas, registries and checks as pack content, and no engine code tells them apart ([ADR 0012](adr/0012-runtime-species.md)).
 
 1. `register_species` builds an asset of the kind it is sent (`voxel`, a voxel assembly: the only kind since drawn bodies went, [ADR 0025](adr/0025-drawing-voxel-parts.md) §11) whose ID is the species' `appearance`, whose version is the species' version and whose URL it is sent. The worker keeps only the URL and kind, never the file ([ADR 0022](adr/0022-voxel-creatures.md) §20).
 2. `addEntries()` validates the species and its asset, resolves their references against what is registered, and registers both only if everything passes.
 3. If the species brings a new navigation profile, `checkNavigation()` builds that profile's navigation and runs the per-profile world checks. Errors reject the species; the profile is kept only if registration succeeds.
 4. The world holds at most `maxCreatures` creatures (20, from `startup.ts`). A spawn beyond that is rejected with `world_full`.
 
-The `user:` namespace for drawn species is the app's convention (`user-species.ts`). The engine doesn't reserve it.
+The `user:` namespace for the player's species, and `user-part:` for the player's parts, are the app's conventions (`user-species.ts`, `content-schema`'s `playerPartId`). The engine doesn't reserve them.
 
 ### Size limits
 
@@ -240,6 +242,24 @@ A creature only goes where it fits ([ADR 0013](adr/0013-size-limits.md)). For ea
 - **Broken geometry stays an error**: a portal whose surfaces don't meet, two regions walkable at the same place and height (`ambiguous_overlap`), or no usable spawn point at all (`no_spawn_point`).
 
 This holds for pack species at startup too. Each profile's limits come back with `species_registered` and `limits` as `Limit`s, diagnostics that name the structure they are about, and the Studio turns them into the player's words. In the Woodland Hollow, large creatures can't cross the wooden bridge; the other sizes go everywhere.
+
+## Voxel creatures
+
+Every creature is built from voxel parts ([ADR 0022](adr/0022-voxel-creatures.md)). A **voxel part** (`voxel.ts` in `content-schema`) is at most 32 cubes along each axis at one step of the ladder (1.25, 2.5, 5 or 10 cm), with a palette, an attach point, sockets for other parts and a part type. An **assembly** (`voxel-assembly.ts`) is a creature: copies of the parts it uses and the instances that place them, each on a socket of its parent with a rotation and an optional mirror. Part and socket types (fits, roles such as `root` and `tail`, motions, drawing recipes) are pack content the worker registers; the strip learns the registered parts from `ready` and hands them to the Studio with the `parts` request.
+
+### How a species gets its body
+
+1. **Assembly.** A pack ships its species' assemblies as `voxel` assets (the mossling's frozen `assets/voxels/mossling.json`). The player's come from the Studio's Build mode, whose edits (`voxel-edit.ts`) only ever return valid assemblies, or from the seeded assembler `assembleParts` (Randomize, Fill empty and the development hooks). Each assembly holds frozen copies of its parts, so editing or deleting a part later never changes a released creature (ADR 0022 §17).
+2. **Species.** Releasing sends the assembly to the strip (`releaseVoxel`). `SpeciesLibrary.saveVoxel` measures it (`measureAssembly`: size class, ground contact, center of gravity and tail, all from the cubes), has the worker check its part and socket types (`check_assembly`), and saves the species with the assembly inline. The species' `appearance` is a `voxel` asset; registering it sends the worker a `blob:` URL of the assembly's JSON, and the worker keeps only the URL and kind.
+3. **Body.** The renderer (`creatures.ts`) shows a fallback block the size of the species' size class, reads the assembly from the asset's URL and checks it. `buildVoxelBody` (`voxel/body.ts`) meshes every part's cubes (`voxel/mesher.ts`) into one geometry per species with one bone per instance, so a creature is one skinned mesh. `buildMotionRig` (`voxel/motion-rig.ts`) gives each bone its part type's motion, scaled by the part's size, on one rhythm per creature ([ADR 0024](adr/0024-per-part-animation.md)). The Studio's assembly view and the part and species pictures (`VoxelThumbnails`) use the same body code.
+
+### How a drawn part becomes a voxel part
+
+1. **Draw mode** (`studio/PartDrawMode.tsx`, [ADR 0025](adr/0025-drawing-voxel-parts.md)). The player draws on a 32 × 32 grid, one cell a cube, for a part type and against a base part of that type. The part type's drawing recipe (`partDrawingRecipeLookup`) gives the starting view (side, front or top) and depth rule (puffy, tube or flat). Undo keeps snapshots of the grid (`grid-editor.ts`).
+2. **Voxelizer.** `voxelizeDrawing` (`voxel-draw.ts` in `content-schema`, pure) maps the canvas to the part's axes by the view (`VIEW_AXES`), gives each cell its depth by the rule (from a distance transform for puffy and tube) and crops to the drawn cells.
+3. **Fit.** `fitDrawnPart` scales the base part's attach point and sockets to the drawing and snaps each to the depth its base socket has (the validator's `isBuried`), reporting each socket's depth and flagging the shallow ones. Points the player drags are kept in canvas terms (`drawn-points.ts`) and override the fit's.
+4. **Parts store.** Save makes a player part entry (`draw-entry.ts`: ID `user-part:<uuid>`, version, the voxel part and the drawing it came from, checked against its schema) and writes it through `PartsStore` to `parts/<uuid>.json` (see "The player's parts"). An edit saves in place with the version raised.
+5. **Build tray.** `player-parts.ts` reads and checks the entries, and `withPlayerParts` adds them to Build mode's kit after the pack parts of their type. Picking one puts a frozen copy in the assembly, and from there it is an ordinary part (above). Player parts are never registered with the worker: the world checks an assembly's fits by part and socket type only.
 
 ## Boundary rules
 

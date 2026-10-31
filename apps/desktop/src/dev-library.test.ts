@@ -1,16 +1,25 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
-import { checkAssemblyFit, formatDiagnostic } from "@living-diorama/content-schema";
+import {
+  checkAssemblyFit,
+  error,
+  formatDiagnostic,
+  measureAssembly,
+} from "@living-diorama/content-schema";
 import { describeVoxelParts, type PartSummary } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
 import {
   assembleStarter,
+  assembleVoxelSample,
   listStarterParts,
   randomSeed,
   saveStarterCreature,
   saveVoxelSample,
+  saveVoxelSamples,
   starterRoots,
   type StarterParts,
+  VOXEL_SAMPLE_PLANS,
+  VOXEL_SAMPLES,
 } from "./dev-library";
 import { partFitLookup } from "./part-types";
 import type { SpeciesLibrary } from "./species-library";
@@ -194,5 +203,94 @@ describe("starter creatures", () => {
       name: "leg",
       type: "hollow:leg",
     });
+  });
+});
+
+describe("the performance samples", () => {
+  const content = loadContent();
+  if (!content.ok) throw new Error("The built-in content doesn't load");
+  const ready = describeVoxelParts(content.value);
+  const starter: StarterParts = {
+    parts: ready.parts,
+    lookup: partFitLookup(ready.partTypes, ready.socketTypes),
+  };
+  const typeLookup = {
+    partType: (id: string) => content.value.partTypes.get(id),
+    socketType: (id: string) => content.value.socketTypes.get(id),
+  };
+  const built = VOXEL_SAMPLES.map((sample) => {
+    const assembly = assembleVoxelSample(starter, sample);
+    if (!assembly.ok) throw new Error(assembly.diagnostics.map(formatDiagnostic).join("\n"));
+    const root = assembleStarter(starter, { seed: sample.seed });
+    return { ...sample, assembly: assembly.value, root: root.ok ? root.value.root : undefined };
+  });
+
+  it("are twenty differently named species that fit the built-in types", () => {
+    expect(new Set(VOXEL_SAMPLES.map((s) => s.name)).size).toBe(20);
+    for (const { assembly } of built) expect(checkAssemblyFit(assembly, typeLookup)).toEqual([]);
+    // The same every time.
+    expect(VOXEL_SAMPLES.map((s) => assembleVoxelSample(starter, s))).toEqual(
+      built.map(({ assembly }) => ({ ok: true, value: assembly })),
+    );
+  });
+
+  it("vary in root, size and way of moving, and only fish swim", () => {
+    const count = (values: (string | undefined)[]) =>
+      Object.fromEntries(
+        [...new Set(values)].map((v) => [v, values.filter((x) => x === v).length]),
+      );
+    expect(count(built.map((s) => s.root))).toEqual({
+      "hollow:fish-torso": 4,
+      "hollow:four-legged-torso": 6,
+      "hollow:mossling-torso": 5,
+      "hollow:upright-torso": 5,
+    });
+    expect(count(built.map((s) => measureAssembly(s.assembly).sizeClass))).toEqual({
+      small: 8,
+      medium: 9,
+      large: 3,
+    });
+    expect(count(built.map((s) => s.plan))).toEqual({
+      walk: 11,
+      hop: 5,
+      swim: 2,
+      "land+swim": 2,
+    });
+    for (const { plan, root } of built) {
+      expect(VOXEL_SAMPLE_PLANS[plan].swim).toBe(root === "hollow:fish-torso");
+    }
+  });
+
+  it("are saved in order without adding creatures", async () => {
+    const saveVoxel = vi.fn(() => Promise.resolve({ ok: true as const, value: {} }));
+    const addCreature = vi.fn();
+    const lib = { saveVoxel, addCreature } as unknown as SpeciesLibrary;
+    await expect(saveVoxelSamples(lib, starter)).resolves.toEqual([]);
+    expect(saveVoxel.mock.calls).toEqual(
+      built.map(({ assembly, name, plan }) => [
+        assembly,
+        name,
+        { locomotion: VOXEL_SAMPLE_PLANS[plan] },
+      ]),
+    );
+    expect(addCreature).not.toHaveBeenCalled();
+  });
+
+  it("say which could not be saved and why", async () => {
+    const saveVoxel = vi.fn((_assembly: unknown, name: string) =>
+      Promise.resolve(
+        name === "Pip"
+          ? { ok: false as const, diagnostics: [error("too_large", "Pip is too large")] }
+          : { ok: true as const, value: {} },
+      ),
+    );
+    const lib = { saveVoxel } as unknown as SpeciesLibrary;
+    const failed = await saveVoxelSamples(lib, starter);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatch(/^Pip: .*too_large/);
+    // Nothing to build on: every sample fails, and nothing is saved.
+    saveVoxel.mockClear();
+    expect(await saveVoxelSamples(lib, { ...starter, parts: [] })).toHaveLength(20);
+    expect(saveVoxel).not.toHaveBeenCalled();
   });
 });

@@ -5,11 +5,11 @@ The Tauri 2 desktop shell and React UI host. This is the composition root: the o
 ## Owns
 
 - The Tauri window configuration, Rust entry point and capabilities (`src-tauri/`).
-- The Rust shell: the one main window, switched between the strip and a normal window with full screen (ADR 0016), the tray, settings, the species library's files (ADR 0014) and the Studio window (ADR 0015).
+- The Rust shell: the one main window, switched between the strip and a normal window with full screen (ADR 0016), the tray, settings, the species library's files (ADR 0014), the player's parts (ADR 0025 §6), the saved world (ADR 0019) and the Studio window (ADR 0015).
 - The React controls overlay, the normal window's keys (`shortcuts.ts`) and cameras (`shape-cameras.ts`), and the app startup sequence.
 - The species library's frontend (`src/species-library.ts`), which checks, registers and manages the player's voxel species, and the strip's answers to the Studio (`src/studio-protocol.ts`).
 - Keeping the world across launches (`src/world-saving.ts`, ADR 0019): restoring the save at startup, or spawning the starting creatures, and saving every minute, after creatures come and go, and on quit.
-- The Creation Studio page (`studio.html`, `src/studio/`): Build mode (ADR 0023), with its parts tray, assembly view, name, measured size and hints, the confirm step with the body plan (ways of moving and land gait, an animated preview; ADR 0020 §12), release, My creatures and the dialogs (ADR 0015). It never starts a simulation.
+- The Creation Studio page (`studio.html`, `src/studio/`): Build mode (ADR 0023), with its parts tray, assembly view, name, measured size and hints, the confirm step with the body plan (ways of moving and land gait, an animated preview; ADR 0020 §12), release, and its tray's player parts; Draw mode (ADR 0025), which draws a part on a grid and saves it to the player's parts store; My creatures & parts, with My parts (rename, edit, delete); and the dialogs (ADR 0015). It never starts a simulation.
 - The player's species' body plan defaults and the capabilities behind them (`src/body-plan.ts`, ADR 0020 §14), shared by the Studio and the species library.
 - The simulation Web Worker entry (`src/simulation.worker.ts`), which runs `runSimulationHost` from `simulation` on the built-in content, and the main-thread side that starts it (`src/simulation-client.ts`).
 

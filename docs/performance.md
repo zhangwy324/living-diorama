@@ -1,8 +1,8 @@
 # Performance
 
-The measured cost of the running app, the starting budget for later changes (ADR 0009 §7). Measure with `pnpm measure` on a release build; [development.md](development.md) explains how, and how to measure with many creatures, drawn ones too.
+The measured cost of the running app, the starting budget for later changes (ADR 0009 §7). Measure with `pnpm measure` on a release build; [development.md](development.md) explains how, and how to measure with many creatures of different species.
 
-The numbers below are for v0.1. v0.2's (20 creatures, drawn species, an 8-hour soak with them) are not measured yet: issue #68.
+The numbers below are for v0.1. v0.2's (20 creatures of different voxel species, an 8-hour soak with them) are not measured yet: issue #68.
 
 ## Reference machine
 
@@ -51,7 +51,7 @@ Version 0.0.0 with 3 creatures, 5 minutes per state, sampled once a second. Mean
 
 ## Living behavior (step 5)
 
-Not measured in the app yet. Step 5 (ADR 0018) adds needs, perception, eating and sleeping to the simulation, night lighting and cue sprites to the renderer, and debug labels. The app measurement with 20 creatures belongs with issue #68: run "Measuring with many creatures" in [development.md](development.md) (20 mosslings, then 20 drawn species) on a release build of `main`, by day and again with the strip at night, when the creatures sleep and the z's show, and compare against the baseline above.
+Not measured in the app yet. Step 5 (ADR 0018) adds needs, perception, eating and sleeping to the simulation, night lighting and cue sprites to the renderer, and debug labels. The app measurement with 20 creatures belongs with issue #68: run "Measuring with many creatures" in [development.md](development.md) (20 mosslings, then 20 sample voxel species) on a release build of `main`, by day and again with the strip at night, when the creatures sleep and the z's show, and compare against the baseline above.
 
 Headless, the simulation alone got dearer but stays tiny. Woodland Hollow with 20 mosslings at noon, one simulated hour at 10 Hz after a 5-minute warm-up, ticking and taking a snapshot each tick, seeds 1–3, on the reference machine under Node:
 
