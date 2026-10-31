@@ -1,9 +1,14 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
-import { measureAssembly } from "@living-diorama/content-schema";
+import { DEFAULT_PART_DRAWING_RECIPE, measureAssembly } from "@living-diorama/content-schema";
 import { describeVoxelParts } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { loadContent } from "./content";
-import { partFitLookup, partMotionLookup, partRoleLookup } from "./part-types";
+import {
+  partDrawingRecipeLookup,
+  partFitLookup,
+  partMotionLookup,
+  partRoleLookup,
+} from "./part-types";
 
 // The part and socket types as the worker's `ready` lists them.
 const content = loadContent();
@@ -43,6 +48,29 @@ describe("partMotionLookup", () => {
     const motionOf = partMotionLookup(partTypes);
     for (const type of content.value.partTypes.values()) {
       expect(motionOf(type.id)).toBe(type.motion);
+    }
+  });
+});
+
+describe("partDrawingRecipeLookup", () => {
+  it("gives the built-in part types their drawing recipes", () => {
+    const recipeOf = partDrawingRecipeLookup(partTypes);
+    expect(recipeOf("hollow:torso")).toEqual({ view: "side", rule: "puffy" });
+    expect(recipeOf("hollow:leg")).toEqual({ view: "side", rule: "tube" });
+    expect(recipeOf("hollow:eye")).toEqual({ view: "front", rule: "flat" });
+  });
+
+  it("draws a type without a recipe, or one the summary doesn't list, flat from the side", () => {
+    const recipeOf = partDrawingRecipeLookup([{ id: "pack:antenna", name: "Antenna", fits: [] }]);
+    expect(DEFAULT_PART_DRAWING_RECIPE).toEqual({ view: "side", rule: "flat" });
+    expect(recipeOf("pack:antenna")).toBe(DEFAULT_PART_DRAWING_RECIPE);
+    expect(recipeOf("pack:unknown")).toBe(DEFAULT_PART_DRAWING_RECIPE);
+  });
+
+  it("agrees with the registries on every part type", () => {
+    const recipeOf = partDrawingRecipeLookup(partTypes);
+    for (const type of content.value.partTypes.values()) {
+      expect(recipeOf(type.id)).toEqual(type.drawing ?? DEFAULT_PART_DRAWING_RECIPE);
     }
   });
 });

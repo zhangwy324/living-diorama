@@ -749,7 +749,7 @@ describe("prop categories", () => {
 describe("part types and socket types", () => {
   const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
   const partType = (id: string, fits: string[], role?: string) => ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     id,
     version: "1.0.0",
     name: id,
@@ -786,6 +786,21 @@ describe("part types and socket types", () => {
     expect(registries.partTypes.get("test:leg")?.motion).toBeUndefined();
     const motion = registries.partTypes.validate({ ...partType("test:eye", []), motion: "spin" });
     expect(motion.ok ? [] : motion.diagnostics.map((d) => d.path.join("."))).toEqual(["motion"]);
+  });
+
+  it("registers a part type's drawing recipe and refuses one it doesn't know", () => {
+    const registries = registered();
+    const drawing = { view: "front", rule: "flat" } as const;
+    expectOk(registries.partTypes.register({ ...partType("test:ear", []), drawing }));
+    expect(registries.partTypes.get("test:ear")?.drawing).toEqual(drawing);
+    expect(registries.partTypes.get("test:leg")?.drawing).toBeUndefined();
+    const refused = registries.partTypes.validate({
+      ...partType("test:eye", []),
+      drawing: { view: "side", rule: "spiky" },
+    });
+    expect(refused.ok ? [] : refused.diagnostics.map((d) => d.path.join("."))).toEqual([
+      "drawing.rule",
+    ]);
   });
 
   it("checks that the socket types a part type fits are registered", () => {
@@ -890,7 +905,7 @@ describe("palettes", () => {
 describe("parts", () => {
   const socketType = (id: string) => ({ schemaVersion: 1, id, version: "1.0.0", name: id });
   const partType = (id: string, fits: string[]) => ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     id,
     version: "1.0.0",
     name: id,

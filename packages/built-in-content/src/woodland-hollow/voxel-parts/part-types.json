@@ -1,90 +1,101 @@
 [
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:torso",
     "version": "1.0.0",
     "name": "Torso",
     "fits": [],
-    "role": "root"
+    "role": "root",
+    "drawing": { "view": "side", "rule": "puffy" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:head",
     "version": "1.0.0",
     "name": "Head",
     "fits": ["hollow:neck"],
-    "motion": "bob"
+    "motion": "bob",
+    "drawing": { "view": "side", "rule": "puffy" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:leg",
     "version": "1.0.0",
     "name": "Leg",
     "fits": ["hollow:leg-mount"],
-    "motion": "swing"
+    "motion": "swing",
+    "drawing": { "view": "side", "rule": "tube" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:arm",
     "version": "1.0.0",
     "name": "Arm",
     "fits": ["hollow:shoulder"],
-    "motion": "swing"
+    "motion": "swing",
+    "drawing": { "view": "side", "rule": "tube" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:tail",
     "version": "1.0.0",
     "name": "Tail",
     "fits": ["hollow:tail-base"],
     "role": "tail",
-    "motion": "wag"
+    "motion": "wag",
+    "drawing": { "view": "side", "rule": "tube" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:ear",
     "version": "1.0.0",
     "name": "Ear",
     "fits": ["hollow:ear-mount"],
-    "motion": "flop"
+    "motion": "flop",
+    "drawing": { "view": "front", "rule": "flat" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:eye",
     "version": "1.0.0",
     "name": "Eye",
     "fits": ["hollow:eye-mount"],
-    "motion": "blink"
+    "motion": "blink",
+    "drawing": { "view": "front", "rule": "flat" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:nose",
     "version": "1.0.0",
     "name": "Nose",
-    "fits": ["hollow:nose-mount"]
+    "fits": ["hollow:nose-mount"],
+    "drawing": { "view": "front", "rule": "flat" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:mouth",
     "version": "1.0.0",
     "name": "Mouth",
-    "fits": ["hollow:mouth-mount"]
+    "fits": ["hollow:mouth-mount"],
+    "drawing": { "view": "front", "rule": "flat" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:fin",
     "version": "1.0.0",
     "name": "Fin",
     "fits": ["hollow:fin-mount"],
-    "motion": "paddle"
+    "motion": "paddle",
+    "drawing": { "view": "top", "rule": "flat" }
   },
   {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "id": "hollow:tail-fin",
     "version": "1.0.0",
     "name": "Tail fin",
     "fits": ["hollow:tail-fin-mount"],
     "role": "tail",
-    "motion": "wag"
+    "motion": "wag",
+    "drawing": { "view": "side", "rule": "flat" }
   }
 ]

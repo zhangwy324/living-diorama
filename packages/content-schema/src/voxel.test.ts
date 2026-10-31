@@ -669,7 +669,7 @@ describe("assemblyWarnings", () => {
 
 describe("checkAssemblyFit", () => {
   const partType = (id: string, fits: string[]): PartTypeDefinition => ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     id,
     version: "1.0.0",
     name: id,
