@@ -9,12 +9,15 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PreviewMotion } from "../body/preview";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
+import type { CueWeights } from "../cues";
 import {
   locomotionMotion,
   locomotionTransform,
   placePivots,
   restingLocomotion,
   type LocomotionBody,
+  type LocomotionInput,
+  type WalkLegs,
 } from "../locomotion";
 import { followPixelRatio } from "../pixel-ratio";
 import { canvasEncoder } from "../prop-thumbnails";
@@ -29,15 +32,25 @@ import {
   buildVoxelBody,
   createVoxelMaterial,
   skinVoxelBody,
+  type PartMotionResolver,
   type PartRoleResolver,
   type VoxelBody,
 } from "./body";
+import { buildMotionRig, instanceMotions, walkLegs } from "./motion-rig";
+import {
+  motionInputFrom,
+  posedParts,
+  posePartsFrame,
+  restingMotionInput,
+  type PosedParts,
+} from "./pose-parts";
 import { VoxelThumbnails } from "./thumbnails";
 
 // The Creation Studio's assembly view (ADR 0023 §4, §13): one voxel assembly on a ground grid,
 // lit like the body preview, seen through an orbit camera. It marks the sockets the Studio asks
 // for, tints the selected parts, shows a see-through part at sockets, picks parts and sockets
-// under the pointer and can walk the creature in place. It only draws: edits are the Studio's.
+// under the pointer and can walk the creature in place, its parts moving as in the strip (ADR 0024
+// §7). It only draws: edits are the Studio's.
 
 /** What is under the pointer: a marked socket, or a part instance. */
 export type AssemblyPick =
@@ -58,6 +71,11 @@ export interface AssemblyGhost {
 export interface AssemblyViewOptions {
   /** Part types' roles, for the tail pivot of the test walk. */
   roleOf?: PartRoleResolver;
+  /**
+   * Part types' motions, for the parts' motion in the test walk (ADR 0024 §7). Without it no part
+   * moves: the creature walks only as a whole.
+   */
+  motionOf?: PartMotionResolver;
 }
 
 export interface AssemblyView {
@@ -94,7 +112,9 @@ export interface AssemblyView {
   probe(clientX: number, clientY: number): SocketProbe | undefined;
   /**
    * Walks the creature in place with a locomotion profile (M16, ADR 0020 §8), as the body
-   * preview's `setMotion` does; undefined stands it still.
+   * preview's `setMotion` does, its parts moving with it as in the strip (ADR 0024 §7): legs with
+   * the gait, and blinks, twitches and flicks even with no profile or at no speed. Undefined
+   * stands it still with its parts at rest, where Build mode places and picks them.
    */
   setTestWalk(motion: PreviewMotion | undefined): void;
   /**
@@ -153,7 +173,23 @@ interface Built {
   radius: number;
   /** Whether the bones changed since the body's bounds, which picking tests first, were taken. */
   boundsStale: boolean;
+  /**
+   * The parts' pose for the test walk, composed into matrices of its own, which `writeBones`
+   * copies into the body's bones under collapse and tint; undefined if the rig couldn't be built.
+   */
+  parts: PosedParts | undefined;
+  /** The legs the walk steps with (`walkLegs`), with the rig. */
+  legs: WalkLegs | undefined;
+  /**
+   * Per part: whether it is drawn (not replaced by a ghost), and whether it is tinted. Filled by
+   * `showBones`, which must run after every rebuild before `writeBones` reads them.
+   */
+  shown: boolean[];
+  lit: boolean[];
 }
+
+/** The test walk's cues: none, so the parts move only with the gait and their idle motions. */
+const NO_CUES: CueWeights = { eating: 0, sleeping: 0, hungry: 0 };
 
 /**
  * Starts an assembly view in a canvas of its own inside `container`, filling it. Dragging orbits
@@ -304,24 +340,39 @@ export function createAssemblyView(
     for (const marker of markers.children) marker.scale.setScalar(scale);
   };
 
-  /** Sets the body's and the tint's bones: hidden parts collapsed, the tint on selected ones. */
+  /** Works out which parts are drawn and which tinted, then sets the bones (`writeBones`). */
   const showBones = () => {
     if (!built) return;
-    const { mesh, tint, body, indexById } = built;
+    const { body, indexById, shown, lit } = built;
     const hidden = hiddenParts(built, ghost);
     const chosen = new Set(selection.map((id) => indexById.get(id)));
     let tinted = false;
-    body.bones.forEach((rest, i) => {
-      const shown = !hidden.has(i);
-      mesh.skeleton.bones[i]?.matrixWorld.copy(shown ? rest : COLLAPSED);
-      const lit = shown && chosen.has(i);
-      tinted ||= lit;
-      tint.skeleton.bones[i]?.matrixWorld.copy(lit ? rest : COLLAPSED);
+    body.bones.forEach((_, i) => {
+      shown[i] = !hidden.has(i);
+      lit[i] = shown[i] && chosen.has(i);
+      tinted ||= lit[i];
     });
-    tint.visible = tinted;
-    // Picking reads the bone matrices, and the bounds it keeps from them; rendering updates the
-    // matrices itself.
-    mesh.skeleton.update();
+    built.tint.visible = tinted;
+    writeBones();
+  };
+
+  /**
+   * Sets the body's and the tint's bones to the parts' pose while the test walk plays, else to
+   * the rest pose: hidden parts collapsed, the tint on selected ones, both over the same pose.
+   * Allocates nothing, as it runs every frame of the walk.
+   */
+  const writeBones = () => {
+    if (!built) return;
+    const { mesh, tint, body, shown, lit } = built;
+    const posed = motion ? built.parts?.bones : undefined;
+    for (let i = 0; i < body.bones.length; i++) {
+      const bone = posed?.[i] ?? body.bones[i];
+      if (!bone) continue;
+      mesh.skeleton.bones[i]?.matrixWorld.copy(shown[i] ? bone : COLLAPSED);
+      tint.skeleton.bones[i]?.matrixWorld.copy(lit[i] ? bone : COLLAPSED);
+    }
+    // Picking takes the skeleton and the bounds afresh from these; rendering updates the skeleton
+    // itself.
     built.boundsStale = true;
   };
 
@@ -353,31 +404,38 @@ export function createAssemblyView(
   };
 
   // The test walk, as the body preview plays it (ADR 0020 §8–§10): the whole body about its
-  // pivots, lowered by its submersion.
+  // pivots, lowered by its submersion, stepping with its legs (ADR 0024 §5), and its parts posed
+  // from the same input, through the strip's own `posePartsFrame` (§7).
   const pose = restingLocomotion();
   const moveMatrix = new THREE.Matrix4();
-  let travelled = 0;
-  let clock = 0;
+  const walkInput: LocomotionInput = {
+    profile: undefined,
+    speed: 0,
+    travelled: 0,
+    time: 0,
+    phase: 0,
+    height: 0,
+    legs: undefined,
+  };
+  const partInput = restingMotionInput();
   const placeRig = (dt: number) => {
     if (!built || !motion) {
       rig.matrix.identity();
     } else {
       const { look } = built;
-      travelled += motion.speed * dt;
-      clock += dt;
-      locomotionMotion(
-        {
-          profile: motion.profile,
-          speed: motion.speed,
-          travelled,
-          time: clock,
-          phase: 0,
-          height: look.height,
-        },
-        pose,
-      );
+      walkInput.profile = motion.profile;
+      walkInput.speed = motion.speed;
+      walkInput.travelled += motion.speed * dt;
+      walkInput.time += dt;
+      walkInput.height = look.height;
+      walkInput.legs = built.legs;
+      locomotionMotion(walkInput, pose);
       const lift = locomotionTransform(pose, look, moveMatrix) - motion.submersion * look.height;
       rig.matrix.makeTranslation(0, lift, 0).multiply(moveMatrix);
+      if (built.parts) {
+        posePartsFrame(built.parts, motionInputFrom(partInput, walkInput, undefined, NO_CUES));
+        writeBones();
+      }
     }
     rig.matrixWorldNeedsUpdate = true;
   };
@@ -442,7 +500,7 @@ export function createAssemblyView(
         if (previous) disposeBuilt(previous);
         built = undefined;
       } else {
-        built = build(assembly, material, tintMaterial, options.roleOf);
+        built = build(assembly, material, tintMaterial, options);
         if (previous) disposeBuilt(previous);
         rig.add(built.mesh, built.tint);
         frame(built, previous);
@@ -474,6 +532,7 @@ export function createAssemblyView(
     pick(clientX, clientY) {
       if (disposed || !built || !aim(clientX, clientY)) return undefined;
       if (built.boundsStale) {
+        built.mesh.skeleton.update();
         built.mesh.computeBoundingSphere();
         built.boundsStale = false;
       }
@@ -497,11 +556,13 @@ export function createAssemblyView(
     setTestWalk(next) {
       if (disposed) return;
       motion = next && { ...next };
-      travelled = 0;
-      clock = 0;
+      walkInput.travelled = 0;
+      walkInput.time = 0;
       water.visible = (next?.submersion ?? 0) > 0;
       grid.visible = !water.visible;
       placeRig(0);
+      // Back at rest when it stops, where Build mode places and picks.
+      if (!motion) writeBones();
       dirty = true;
     },
     dispose() {
@@ -530,12 +591,15 @@ export function createAssemblyView(
   };
 }
 
-/** Builds the body of `assembly` with its selection tint, socket points and walk measurements. */
+/**
+ * Builds the body of `assembly` with its selection tint, socket points, walk measurements and the
+ * rig its parts move by.
+ */
 function build(
   assembly: VoxelAssembly,
   material: THREE.Material,
   tintMaterial: THREE.Material,
-  roleOf: PartRoleResolver | undefined,
+  { roleOf, motionOf }: AssemblyViewOptions,
 ): Built {
   const body = buildVoxelBody(assembly, roleOf);
   const mesh = skinVoxelBody(body, material);
@@ -562,6 +626,20 @@ function build(
     bounds.max.y - bounds.min.y,
     bounds.max.z - bounds.min.z,
   );
+  // As in the strip (`CreatureBodies`): without a rig the body still walks, as a whole.
+  let parts: PosedParts | undefined;
+  let legs: WalkLegs | undefined;
+  try {
+    const motionRig = buildMotionRig(body, instanceMotions(assembly, motionOf));
+    // At rest until the first frame of a walk poses them.
+    parts = posedParts(
+      motionRig,
+      body.bones.map((rest) => rest.clone()),
+    );
+    legs = walkLegs(body, motionRig);
+  } catch (error) {
+    console.warn("Could not build the motion rig of the assembly", error);
+  }
   return {
     assembly,
     body,
@@ -572,6 +650,10 @@ function build(
     look,
     radius: Math.max(MIN_RADIUS, size.length() / 2),
     boundsStale: true,
+    parts,
+    legs,
+    shown: body.bones.map(() => true),
+    lit: body.bones.map(() => false),
   };
 }
 
