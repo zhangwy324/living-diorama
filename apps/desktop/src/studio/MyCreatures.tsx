@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 
 // The player's species, beside the Studio's modes (roadmap M11 task 6, ADR 0023 §19): each with
@@ -20,10 +21,15 @@ export interface MyCreaturesProps {
   onDelete(species: StudioSpecies): void;
   /** Loads a copy of a voxel species into Build mode (ADR 0023 §3). */
   onEditCopy(species: StudioSpecies): void;
+  /** Shown below the species while the panel is open: My parts (ADR 0025 §9). */
+  children?: ReactNode;
 }
 
 const reasonsOf = (species: StudioSpecies) =>
   species.available ? "" : species.reasons.map((reason) => reason.message).join(" ");
+
+/** The panel's name: My creatures, and My parts below them when the Studio gives it (ADR 0025 §9). */
+export const PANEL_NAME = "My creatures & parts";
 
 export function MyCreatures(props: MyCreaturesProps) {
   const { library } = props;
@@ -37,20 +43,21 @@ export function MyCreatures(props: MyCreaturesProps) {
           aria-expanded={false}
           onClick={props.onToggle}
         >
-          My creatures{count ? ` (${count})` : ""}
+          {PANEL_NAME}
+          {count ? ` (${count})` : ""}
         </button>
       </aside>
     );
   }
   return (
-    <aside className="my-creatures" aria-label="My creatures">
+    <aside className="my-creatures" aria-label={PANEL_NAME}>
       <div className="my-creatures-header">
         <h2>My creatures</h2>
         <button
           type="button"
           className="my-creatures-toggle"
           aria-expanded={true}
-          aria-label="Hide My creatures"
+          aria-label={`Hide ${PANEL_NAME}`}
           title="Hide"
           onClick={props.onToggle}
         >
@@ -141,6 +148,7 @@ export function MyCreatures(props: MyCreaturesProps) {
           );
         })}
       </ul>
+      {props.children}
     </aside>
   );
 }
