@@ -59,6 +59,7 @@ import {
   canUndo,
   colourIndex,
   commit,
+  compactDrawing,
   emptyGrid,
   floodFill,
   isBlank,
@@ -568,8 +569,10 @@ export function PartDrawMode({
     }
     for (let i = 0; i <= DRAWING_GRID; i++) {
       context.fillStyle = i % 8 === 0 ? "rgb(0 0 0 / 22%)" : "rgb(0 0 0 / 8%)";
-      context.fillRect(i * CELL_PX - (i === DRAWING_GRID ? 1 : 0), 0, 1, CANVAS_PX);
-      context.fillRect(0, i * CELL_PX - (i === DRAWING_GRID ? 1 : 0), CANVAS_PX, 1);
+      // Two canvas pixels wide, so a line survives the canvas being shown smaller.
+      const at = Math.min(Math.max(i * CELL_PX - 1, 0), CANVAS_PX - 2);
+      context.fillRect(at, 0, 2, CANVAS_PX);
+      context.fillRect(0, at, CANVAS_PX, 2);
     }
   }, [shown, palette, ghost, ghostScale]);
 
@@ -643,6 +646,8 @@ export function PartDrawMode({
   };
 
   const marks = setup ? rulerMarks(setup.step) : [];
+  // The colours on the grid now, in the palette's order.
+  const used = useMemo(() => compactDrawing(present, palette).palette, [present, palette]);
   const ready = kit && setup;
   const sizeText =
     fit && setup
@@ -738,11 +743,11 @@ export function PartDrawMode({
               />
             ))}
           </div>
-          {palette.length > 0 && (
+          {used.length > 0 && (
             <>
               <h3>In this part</h3>
               <div className="palette" role="group" aria-label="Colours in this part">
-                {palette.map((swatch) => (
+                {used.map((swatch) => (
                   <button
                     key={swatch}
                     type="button"
