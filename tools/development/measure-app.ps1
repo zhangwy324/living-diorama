@@ -40,7 +40,7 @@ $instructions = @{
     hovered  = 'Show the compact strip and rest the cursor on it without moving it.'
     expanded = 'Expand the window, then move the cursor onto the taskbar or another monitor.'
     hidden   = 'Hide the window from the tray.'
-    soak     = 'Show the compact strip with the creatures to soak (v0.2: 3 mosslings and 17 drawn species) and move the cursor off it.'
+    soak     = 'Show the compact strip with the creatures to soak (v0.2: 3 mosslings and 17 sample voxel species) and move the cursor off it.'
 }
 $countsFile = Join-Path $env:LOCALAPPDATA 'com.livingdiorama.desktop\event-counts.json'
 # How often the process tree is looked up again, since WebView2 can start or end processes.

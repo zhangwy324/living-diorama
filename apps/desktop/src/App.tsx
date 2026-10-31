@@ -200,7 +200,7 @@ export function App() {
       return result;
     };
     // The library registers its species once the world is ready (ADR 0014 §8), and the saved
-    // world is restored only then, so its drawn creatures find their species (ADR 0019 §3). The
+    // world is restored only then, so the player's creatures find their species (ADR 0019 §3). The
     // Studio reaches the library once the world is open. Development builds also reach both from
     // the console.
     const openWorld = async ({

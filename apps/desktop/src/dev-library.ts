@@ -2,6 +2,7 @@ import {
   assembleParts,
   error,
   formatDiagnostic,
+  stepAssembly,
   type PartFitLookup,
   type Result,
   type VoxelAssembly,
@@ -19,6 +20,7 @@ import type { LibrarySpecies, SpeciesLibrary } from "./species-library";
 //   await livingDiorama.library.addCreature(livingDiorama.library.list()[0].speciesId)
 //   livingDiorama.library.starterParts()   // the registered voxel parts, as a table
 //   await livingDiorama.library.saveStarterCreature({ seed: 42 })   // assembled from them, added
+//   await livingDiorama.library.saveVoxelSamples()   // the twenty species measurements use
 //
 // `dev-time.ts` adds `livingDiorama.time`, and `dev-world.ts` `livingDiorama.world`.
 
@@ -179,14 +181,92 @@ export async function saveStarterCreature(
   return added.ok ? { ok: true, value: { ...added.value, root, seed } } : added;
 }
 
+/** One of the performance samples: a starter creature, how it moves and how far it is stepped. */
+export interface VoxelSample {
+  name: string;
+  /** Picks the root (`assembleStarter`) and the parts on it. */
+  seed: number;
+  plan: VoxelSamplePlan;
+  /** Steps along the ladder for the whole creature (`stepAssembly`): −1 finer, 1 coarser. */
+  step: -1 | 0 | 1;
+}
+
+/**
+ * Twenty voxel species for measuring the app with many different bodies (ADR 0016 §11, ADR 0025
+ * §12), saved in this order. With the built-in parts a seed's remainder by 4 picks the root, as
+ * `starterRoots` sorts them: 0 the fish torso (which these let swim), 1 the four-legged torso,
+ * 2 the mossling torso and 3 the upright one. The starter creatures are medium-sized; one step
+ * finer makes them small and one coarser large. The finest step of the face parts keeps them from
+ * going tiny.
+ */
+export const VOXEL_SAMPLES: readonly VoxelSample[] = [
+  { name: "Bramble", seed: 1, plan: "walk", step: 0 },
+  { name: "Pip", seed: 2, plan: "hop", step: -1 },
+  { name: "Dewdrop", seed: 4, plan: "swim", step: -1 },
+  { name: "Thistle", seed: 5, plan: "walk", step: 1 },
+  { name: "Cobble", seed: 9, plan: "walk", step: 0 },
+  { name: "Fennel", seed: 13, plan: "walk", step: -1 },
+  { name: "Wisp", seed: 3, plan: "walk", step: -1 },
+  { name: "Marrow", seed: 7, plan: "walk", step: 1 },
+  { name: "Tumble", seed: 6, plan: "hop", step: -1 },
+  { name: "Quill", seed: 11, plan: "walk", step: 0 },
+  { name: "Ember", seed: 15, plan: "walk", step: -1 },
+  { name: "Sorrel", seed: 8, plan: "swim", step: 0 },
+  { name: "Pebble", seed: 12, plan: "land+swim", step: -1 },
+  { name: "Juniper", seed: 19, plan: "walk", step: 0 },
+  { name: "Nettle", seed: 10, plan: "hop", step: 0 },
+  { name: "Clover", seed: 14, plan: "hop", step: 0 },
+  { name: "Saffron", seed: 17, plan: "walk", step: -1 },
+  { name: "Burdock", seed: 21, plan: "walk", step: 1 },
+  { name: "Tansy", seed: 18, plan: "hop", step: 0 },
+  { name: "Hazel", seed: 16, plan: "land+swim", step: 0 },
+];
+
+/** Assembles a performance sample: its starter creature, stepped as it says. */
+export function assembleVoxelSample(
+  starter: StarterParts,
+  { seed, step }: Pick<VoxelSample, "seed" | "step">,
+): Result<VoxelAssembly> {
+  const assembled = assembleStarter(starter, { seed });
+  if (!assembled.ok) return assembled;
+  const { assembly } = assembled.value;
+  if (step === 0) return { ok: true, value: assembly };
+  const stepped = stepAssembly(assembly, step);
+  return stepped.ok
+    ? { ok: true, value: stepped.assembly }
+    : failure(stepped.refusal.code, stepped.refusal.message);
+}
+
+/**
+ * Saves the twenty performance samples (`VOXEL_SAMPLES`) one after another, so they list in order,
+ * without adding creatures, and resolves with the names that could not be saved and why.
+ */
+export async function saveVoxelSamples(
+  library: SpeciesLibrary,
+  starter: StarterParts,
+): Promise<string[]> {
+  const failed: string[] = [];
+  for (const { name, plan, ...sample } of VOXEL_SAMPLES) {
+    const locomotion = planLocomotion(plan);
+    const assembly = assembleVoxelSample(starter, sample);
+    const saved = !locomotion.ok
+      ? locomotion
+      : !assembly.ok
+        ? assembly
+        : await library.saveVoxel(assembly.value, name, { locomotion: locomotion.value });
+    if (!saved.ok) failed.push([name, ...saved.diagnostics.map(formatDiagnostic)].join(": "));
+  }
+  return failed;
+}
+
 /** The starter parts as the console lists them. */
 export const listStarterParts = ({ parts }: StarterParts) =>
   parts.map(({ id, name, part }) => ({ id, name, type: part.type }));
 
 /**
  * Puts the library on `window.livingDiorama.library`, with `saveVoxelSample` to add a voxel
- * species, `starterParts` to list the registered voxel parts and `saveStarterCreature` to add a
- * voxel species assembled from them.
+ * species, `starterParts` to list the registered voxel parts, `saveStarterCreature` to add a
+ * voxel species assembled from them and `saveVoxelSamples` to save the twenty performance samples.
  */
 export function installLibraryDevHook(library: SpeciesLibrary, starter: StarterParts): void {
   window.livingDiorama = {
@@ -212,6 +292,7 @@ export function installLibraryDevHook(library: SpeciesLibrary, starter: StarterP
         }
         return saved;
       },
+      saveVoxelSamples: () => saveVoxelSamples(library, starter),
     },
   };
 }
