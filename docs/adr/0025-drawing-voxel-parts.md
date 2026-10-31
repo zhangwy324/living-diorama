@@ -175,7 +175,19 @@ The renderer's `body/` is gone: the extrusion, outline tracing, side colours, th
 
 ### PR 7: Build mode integration
 
-_To be written by PR 7._ Open: an edited part (a new version) shows in the tray, but an assembly already in progress keeps the copy it holds until the player swaps it.
+**Loading.** `studio/player-parts.ts` reads the parts store, checks each entry with `parsePlayerPartEntry` and skips, with a line in the log, an entry that fails or whose `id` isn't `playerPartId` of its file's UUID. Parts are listed oldest first, so a new part goes last and a renamed one keeps its place. `usePlayerParts(store)` gives the parts, the last failure in words (a store rejection may be a string from Tauri or an `Error`), `reload()`, `rename(uuid, name)` and `remove(uuid)`; only the latest read lands. Renaming saves the entry in place with its version raised and `updatedAt` set, like an edit (§7). A name is trimmed, not blank and at most 40 characters, as a creature's is.
+
+**The tray.** `withPlayerParts(kit, parts)` adds the player's parts to Build mode's kit: each goes after the packs' parts in its type's section (`TraySection.mine`), marked with a "Mine" badge, and into `byId`, so picking, placing, dragging and swapping work as for a pack part and the assembly takes a frozen copy. `parts` and `rootParts`, what Randomize and Fill empty draw from, stay pack parts only (§10); Fill empty keeps player parts placed by hand. A player part whose type has no section (no pack part of that type) isn't shown in the tray. Each section ends with a "Draw your own" tile when the editor is given `onDrawPart(partType)`. The view is made for the packs' kit alone, so a change to the player's parts never makes it again (#247). A picked part that leaves the tray, such as a deleted one, counts as not picked.
+
+**Versions.** A player part's `PartSummary.version` is its version number as a string. Tray and My parts images come from `usePartThumbnails`, keyed `id@version` like the renderer's cache, so an edited part is drawn anew and its old image is never shown. An assembly in progress keeps the copy it holds after an edit; placing the part again brings in the new version beside it. Picking the edited part doesn't offer to replace its old copies, since `targetsFor` leaves out sockets holding a copy of the same part ID; the player removes the old copy and places the new one.
+
+**My parts.** `studio/MyParts.tsx` lists the parts with their image, name and type, to rename in place, to edit (`onEditPart(entry)`, shown only when given) and to delete after a dialog that says released creatures keep theirs. Its images can come from the Build view's thumbnails, which `AssemblyEditor` hands on through `onThumbnails`, so no second WebGL context is made (#240). Styles are in `studio/my-parts.css`, imported by the components.
+
+**Use in Build.** `AssemblyEditor` takes `pickRequest: { key, partId }`. Each new key is picked once, as a click on its tray tile would pick it, after the part is in the tray and any release on its way is done, and takes Build mode back to its build step. Draw mode's Use in Build saves the part, has the Studio reload the player's parts, and sends a new key.
+
+**Wiring.** `AssemblyEditor` takes `playerParts` from the Studio, shared with My parts; without it, it reads `connectPartsStore()` itself. The Studio's wiring to Draw mode (`onDrawPart` and `onEditPart` to open Draw mode, Use in Build to `pickRequest`, and where My parts sits) lands with whichever of PR 6 and PR 7 merges second.
+
+**Release.** A creature built with player parts releases as any other: the world checks fits by part and socket type only, so player parts are never registered. A test builds one with a drawn leg, checks it with `checkAssemblyTypes` and saves it through the species library into a headless simulation.
 
 ### PR 8: Exit
 
