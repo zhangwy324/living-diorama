@@ -6,7 +6,7 @@
 
 **Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13): holes are kept (§2), walls are straight with no rounded edge (§4), and the walls take the rim's own colour instead of the side texture (§5). The notes in those sections say what changed.
 
-**Superseded by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): extruded bodies are removed and every creature is a voxel creature. Two choices outlive them: a creature faces +X (§7), kept as ADR 0022 §16, and a body draws its sun-facing side into the shadow map (§10), as voxel bodies do (ADR 0022, M19 "Rendering").
+**Superseded by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): extruded bodies are removed and every creature is a voxel creature. Four choices outlive them: a creature faces +X (§7), kept as ADR 0022 §16; a neutral fallback block stands in until a body is ready (§8; its depth came from `thickness`, so ADR 0025's PR 4 picks a new one); creatures cast real shadows from the sun, with no shadow blob (§9); and a body draws its sun-facing side into the shadow map (§10), as voxel bodies do (ADR 0022, M19 "Rendering").
 
 This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still holds.
 

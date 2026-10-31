@@ -67,7 +67,7 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
 
     _Amended by [ADR 0022](0022-voxel-creatures.md) §20 (M18) for voxel creatures:_ anchors are points in a voxel body frame (metres, +X forward, Y up) and come from the assembly, not from drawing pixels.
 
-    _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ drawn bodies go, so no species has anchors placed in drawing pixels. `anchors` leaves `species.body` (§11), which keeps only `locomotion`, and every species' anchors are derived from its assembly.
+    _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ drawn bodies go, so no species has anchors placed in drawing pixels; every species' anchors are derived from its assembly.
 
 ### The body plan (M16)
 
@@ -77,6 +77,8 @@ This ADR amends ADR 0004 §1 and ADR 0005 §3 (`core:walk` becomes `core:land`; 
     - `anchors`: the template's anchors that the player placed or accepted, by name, as `{ x, y }` in drawing pixels.
 
     Where a species can move stays where it is, in the species' `capabilities` map (ADR 0004 §2): land movement and swimming are `core:land` and `core:swim` entries with their speed factors. The gait is not in that map, and nothing is stored twice. PR 1 chooses the field names, but the style should be shaped per medium, for example `locomotion: { land: { gait } }`, so a water style can later sit beside it (`locomotion.water.style`) without renaming anything.
+
+    _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ `anchors` and `thickness` leave `species.body`, which keeps only `locomotion`.
 
 12. **A confirm step in the Studio.** _Amended by the owner on 2026-10-29: the panel has no template; the points shown follow the ways of moving (see "As built", Follow-up: no body templates)._ Between drawing and Release, the Studio shows a panel: the template, land movement and swimming, the land gait, clicks to place the anchors, and an animated preview of the body in each way it moves. The size limits (ADR 0015 §8) are asked for the chosen capabilities, since a navigation profile is the size class plus the capabilities (ADR 0012); the gait doesn't change them. The release moment (#51) and the size suggestion (#49) stay separate issues.
 

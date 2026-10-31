@@ -6,7 +6,7 @@
 
 **Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13 PR 2, implemented): the drawn image is the source of truth, with the strokes (and later fills) kept beside it as a record that is never replayed. The amendments in §1 and §5 below say what changed; the rest of this ADR still describes the code.
 
-**Amended by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): drawn species go. A species' folder holds `entry.json` alone (§1, §2), `drawing.json`, `appearance.png` and `load_library_image` are removed (§7), and the notes in §3–§5 say what else changes. Player parts are kept in a store of their own, not in the library (§6 there).
+**Amended by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): drawn species go. A species' folder holds `entry.json` alone (§1, §2), `drawing.json`, `appearance.png` and `load_library_image` are removed (§7), and the notes in §3–§5 say what else changes. The drawing's migration and `parseDrawing` go (§6). The library now holds only voxel species, the opposite of §10. The console hook's `saveSample()`, which saved a drawing, goes (§12). Player parts are kept in a store of their own, not in the library (§6 there).
 
 ## Decisions
 
