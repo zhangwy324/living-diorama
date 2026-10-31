@@ -92,11 +92,11 @@ export const fixtureRoundTree = {
  * so in water it stays exactly where it landed: stuck, but never stranded.
  */
 export const wader = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:wader",
   version: "1.0.0",
   name: "Wader",
-  appearance: "fixture:sprites/wader.png",
+  appearance: "fixture:wader.json",
   sizeClass: "medium",
   capabilities: { "core:land": 1, "core:swim": 1e-20 },
   baseSpeed: 0.6,
@@ -110,7 +110,7 @@ export function registerFarShelter(registries: Registries) {
     registries.assets.register({
       id: wader.appearance,
       version: "1.0.0",
-      kind: "image",
+      kind: "voxel",
       url: "-",
     }),
     registries.assets.register({

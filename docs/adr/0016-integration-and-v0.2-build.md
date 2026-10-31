@@ -61,7 +61,7 @@
 
 ### Soak, release and smoke test (PR 6 and the release-candidate round)
 
-13. **The soak mix.** 8 hours at the creature cap: 3 mosslings and 17 different drawn species, 20 creatures in all, the strip shown with the cursor off it. The pass criteria are v0.1's (ADR 0009 §6): memory flat after warm-up and every stuck event recovered.
+13. **The soak mix.** 8 hours at the creature cap: 3 mosslings and 17 different drawn species, 20 creatures in all, the strip shown with the cursor off it. The pass criteria are v0.1's (ADR 0009 §6): memory flat after warm-up and every stuck event recovered. _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11–§12 (M23): drawn species are gone, so the 17 are voxel species from the seeding hook (§11 above). The headless soak (`pnpm soak`) is unchanged by this: its test species were drawn only in name (an `image` asset no one read), and are now `voxel` assets the same way._
 
 14. **One release-notes file per version.** `docs/release-notes/0.2.0.md`. The release workflow publishes the file for the tag's version with `gh release create --notes-file`, replacing the text hard-coded for v0.1.
 

@@ -152,11 +152,11 @@ export const fixtureProps = [
 ];
 
 export const pebble = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "fixture:pebble",
   version: "0.1.0",
   name: "Pebble",
-  appearance: "fixture:sprites/pebble.png",
+  appearance: "fixture:pebble.json",
   sizeClass: "small",
   capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
@@ -170,7 +170,7 @@ export function registerFixtureAssets(registries: Registries) {
     registries.assets.register({
       id: pebble.appearance,
       version: "1.0.0",
-      kind: "image",
+      kind: "voxel",
       url: "-",
     }),
     ...[...models].map((id) =>

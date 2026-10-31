@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssemblyView, hiddenParts, type AssemblyView } from "./assembly-view";
 import { buildVoxelBody } from "./body";
-import { creature } from "../body/fixtures/voxel-creature";
+import { creature } from "./fixtures/voxel-creature";
 
 // The assembly view without WebGL or a DOM: three's renderer and the browser's frame loop, resize
 // observer and window are faked, and each rendered frame's scene is kept.

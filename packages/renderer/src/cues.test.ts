@@ -1,8 +1,8 @@
-import { defaultBody } from "@living-diorama/content-schema";
 import type { Cue, CreatureSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { CreatureBodies } from "./creatures";
+import { box } from "./voxel/fixtures/voxel-creature";
 import {
   BUBBLE_PX,
   CueSprites,
@@ -398,7 +398,6 @@ describe("cue sprites", () => {
       resolveSpecies: () => ({
         appearance: "x",
         sizeClass: "medium",
-        body: { ...defaultBody(), thickness: 0.25 },
       }),
       resolveAsset: () => undefined,
     });
@@ -601,27 +600,28 @@ describe("cue sprites", () => {
   });
 
   it("keeps a long body's front above the ground while it pecks", async () => {
-    // A 2:1 body: 40 × 20 px, so its front reaches as far ahead of its feet as it is tall.
-    const long = { width: 40, height: 20, data: new Uint8Array(40 * 20 * 4).fill(255) };
+    // A 3:1 body, 1.2 × 0.4 m, so its front reaches further ahead of its feet than it is tall.
+    const long = {
+      parts: { body: box(24, 8, 2, { step: 0.05 }) },
+      instances: [{ id: "body", part: "body" }],
+    };
     const layer = new SceneLayer("creatures");
     const bodies = new CreatureBodies(layer, {
-      resolveSpecies: () => ({
-        appearance: "x",
-        sizeClass: "medium",
-        body: { ...defaultBody(), thickness: 0.25 },
-      }),
-      resolveAsset: () => ({ kind: "image", url: "long.png" }),
-      readImage: async () => long,
+      resolveSpecies: () => ({ appearance: "x", sizeClass: "medium" }),
+      resolveAsset: () => ({ kind: "voxel", url: "long.json" }),
+      readAssembly: async () => long,
     });
     bodies.update([creature("a", ["eating"])], at(0));
     await bodies.ready;
+    // Meshed on the next frame.
+    bodies.update([creature("a", ["eating"])], at(0));
     const mesh = () => layer.group.getObjectByName("a") as THREE.Mesh;
     let deepest = Infinity;
     for (let t = 1; t < 4; t += 0.05) {
       bodies.update([creature("a", ["eating"])], at(t));
       deepest = Math.min(deepest, new THREE.Box3().setFromObject(mesh()).min.y);
     }
-    expect(mesh().geometry.type).toBe("ExtrudeGeometry");
+    expect(mesh()).toBeInstanceOf(THREE.SkinnedMesh);
     expect(deepest).toBeGreaterThanOrEqual(-1e-6);
   });
 

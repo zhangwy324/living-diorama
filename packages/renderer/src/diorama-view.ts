@@ -3,7 +3,6 @@ import type { NavigationOverlay, SceneData, SimulationSnapshot } from "@living-d
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { limitCamera } from "./camera";
-import type { ImageReader } from "./body/pixels";
 import { CreatureBodies, type AssemblyReader, type SpeciesResolver } from "./creatures";
 import { PropIcons } from "./cue-icons";
 import { CueVisibility } from "./cue-visibility";
@@ -38,7 +37,6 @@ export interface DioramaViewOptions {
   loadModel?: ModelLoader;
   /** Looks up species to draw creatures. Without it no creature is drawn. */
   resolveSpecies?: SpeciesResolver;
-  readImage?: ImageReader;
   readAssembly?: AssemblyReader;
   /** Part types' roles, for voxel bodies' tail anchors. Without it no part has a role. */
   partRole?: PartRoleResolver;
@@ -263,7 +261,6 @@ export function buildDioramaScene(
   const creatures = new CreatureBodies(layers.creatures, {
     resolveSpecies: options.resolveSpecies ?? (() => undefined),
     resolveAsset,
-    readImage: options.readImage,
     readAssembly: options.readAssembly,
     partRole: options.partRole,
     partMotion: options.partMotion,

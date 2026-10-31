@@ -8,7 +8,7 @@ import {
 } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { box, creature } from "../body/fixtures/voxel-creature";
+import { box, creature } from "./fixtures/voxel-creature";
 import { eatingPeck, type CueWeights } from "../cues";
 import { FULL_MOTION_SPEED, hopProgress } from "../locomotion";
 import { buildVoxelBody, type VoxelBody } from "./body";

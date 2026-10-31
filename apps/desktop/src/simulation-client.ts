@@ -54,9 +54,8 @@ export interface RegisteredSpecies {
 export interface SimulationClient {
   /**
    * Adds a species while the world runs (ADR 0012), its appearance an asset of `appearanceKind`
-   * served from `appearanceUrl`: a drawn body's image or a voxel body's assembly. Resolves once
-   * the worker has registered it and `onSpeciesRegistered` has run, or with the diagnostics if it
-   * was rejected.
+   * served from `appearanceUrl`: a voxel body's assembly. Resolves once the worker has
+   * registered it and `onSpeciesRegistered` has run, or with the diagnostics if it was rejected.
    */
   registerSpecies(
     species: unknown,

@@ -6,8 +6,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /** What the renderer needs to know about an asset ref. `AssetEntry` from extension-api fits. */
 export interface RenderAsset {
-  /** An image (a drawn species), a 3D model (a prop) or a voxel assembly as JSON (ADR 0022 §17). */
-  kind: "image" | "model" | "voxel";
+  /** A 3D model (a prop) or a voxel assembly as JSON (a species, ADR 0022 §17). */
+  kind: "model" | "voxel";
   url: string;
   /** Metres per model unit; 1 if omitted. */
   scale?: number;

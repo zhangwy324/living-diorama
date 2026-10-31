@@ -389,13 +389,12 @@ describe("simulation host", () => {
     host.init();
     host.take();
     const species = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "user:puddle",
       version: "1.0.0",
       name: "Puddle",
-      appearance: "user:puddle/appearance.png",
+      appearance: "user:puddle/assembly.json",
       sizeClass: "medium",
-      body: { thickness: 0.6 },
       capabilities: { "core:land": 1 },
       baseSpeed: 0.5,
       behaviors: ["core:wander"],
@@ -406,7 +405,7 @@ describe("simulation host", () => {
       requestId: "r1",
       species,
       appearanceUrl,
-      appearanceKind: "image",
+      appearanceKind: "voxel",
     });
     host.send({ type: "spawn", requestId: "r2", speciesId: "user:puddle" });
     host.advance(100);
@@ -419,9 +418,9 @@ describe("simulation host", () => {
         species: {
           appearance: species.appearance,
           sizeClass: "medium",
-          body: { ...defaultBody(), thickness: 0.6 },
+          body: defaultBody(),
         },
-        asset: { kind: "image", url: appearanceUrl },
+        asset: { kind: "voxel", url: appearanceUrl },
         limits: [],
       },
       { type: "spawned", requestId: "r2", creatureId: "creature-1" },
@@ -484,7 +483,7 @@ describe("simulation host", () => {
     host.init();
     host.take();
     const species = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "user:cubes",
       version: "1.0.0",
       name: "Cubes",
@@ -512,7 +511,7 @@ describe("simulation host", () => {
       species: {
         appearance: species.appearance,
         sizeClass: "medium",
-        // Only how it moves: no thickness or anchors, and nothing of its cubes.
+        // Only how it moves, and nothing of its cubes.
         body: { locomotion: { land: { gait: "hop" } } },
       },
       asset: { kind: "voxel", url: appearanceUrl },
@@ -529,7 +528,7 @@ describe("simulation host", () => {
       requestId: "bad",
       species: { id: "user:nothing" },
       appearanceUrl: "blob:x",
-      appearanceKind: "image",
+      appearanceKind: "voxel",
     });
     host.send({ type: "spawn", speciesId: "hollow:nobody" });
     host.advance(100);
@@ -1019,8 +1018,8 @@ describe("saving and restoring in the host", () => {
     });
   });
 
-  it("is protocol version 24, and ignores a save sent with another", () => {
-    expect(PROTOCOL_VERSION).toBe(24);
+  it("is protocol version 25, and ignores a save sent with another", () => {
+    expect(PROTOCOL_VERSION).toBe(25);
     const host = running(7, 1000);
     host.sendRaw({
       protocolVersion: PROTOCOL_VERSION - 1,

@@ -3,14 +3,6 @@ export const packageName = "@living-diorama/renderer";
 export * from "./diorama-view";
 export { MIN_CAMERA_CLEARANCE, limitCamera, terrainHeightAt } from "./camera";
 export { DEBUG_CELL_SIZE } from "./creature-labels";
-export { checkBody, type BodyCheck } from "./body/check";
-export type { ImageReader, Pixels } from "./body/pixels";
-export {
-  createBodyPreview,
-  type BodyHighlights,
-  type BodyPreview,
-  type PreviewMotion,
-} from "./body/preview";
 export { type AssemblyReader, type RenderSpecies, type SpeciesResolver } from "./creatures";
 export type { PartMotionResolver, PartRoleResolver } from "./voxel/body";
 export { SnapshotInterpolator, lerpHeading, type CreaturePose } from "./interpolation";
@@ -39,4 +31,5 @@ export {
   type AssemblyPick,
   type AssemblyView,
   type AssemblyViewOptions,
+  type PreviewMotion,
 } from "./voxel/assembly-view";

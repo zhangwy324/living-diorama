@@ -82,13 +82,13 @@ describe("Woodland Hollow", () => {
 });
 
 describe("water-only creatures in Woodland Hollow (ADR 0020 §6)", () => {
-  /** A drawn swimmer as the app would send it: water only, wandering. */
+  /** A swimmer as the app would send it: water only, wandering. */
   const swimmer = (name: string, sizeClass: SizeClass = "medium") => ({
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: `user:${name}`,
     version: "1.0.0",
     name,
-    appearance: `user:${name}/appearance.png`,
+    appearance: `user:${name}/assembly.json`,
     sizeClass,
     capabilities: SWIM,
     baseSpeed: 0.5,
@@ -101,7 +101,7 @@ describe("water-only creatures in Woodland Hollow (ADR 0020 §6)", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
     const limits = Object.fromEntries(
       SIZES.map((size) => {
-        const result = simulation.registerSpecies(swimmer(size, size), URL, "image");
+        const result = simulation.registerSpecies(swimmer(size, size), URL, "voxel");
         if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
         return [size, result.value.limits.map((d) => d.code)];
       }),
@@ -113,7 +113,7 @@ describe("water-only creatures in Woodland Hollow (ADR 0020 §6)", () => {
 
   it("appears only at the river spawn point, swimming; walkers never appear there", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    expect(simulation.registerSpecies(swimmer("minnow"), URL, "image").ok).toBe(true);
+    expect(simulation.registerSpecies(swimmer("minnow"), URL, "voxel").ok).toBe(true);
     for (let n = 0; n < 3; n++) {
       const spawned = simulation.spawn("user:minnow");
       if (!spawned.ok) throw new Error(spawned.diagnostics.map(formatDiagnostic).join("\n"));
@@ -138,7 +138,7 @@ describe("water-only creatures in Woodland Hollow (ADR 0020 §6)", () => {
       creatures: 2,
       onTick: (simulation) => {
         if (simulation.tick === 10) {
-          expect(simulation.registerSpecies(swimmer("minnow"), URL, "image").ok).toBe(true);
+          expect(simulation.registerSpecies(swimmer("minnow"), URL, "voxel").ok).toBe(true);
           for (let n = 0; n < 3; n++) expect(simulation.spawn("user:minnow").ok).toBe(true);
         }
         for (const creature of simulation.state.creatures.values()) {

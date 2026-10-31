@@ -1,6 +1,8 @@
 import type { VoxelAssemblyInput, VoxelPartInput } from "@living-diorama/content-schema";
 
-// A voxel creature for the voxel body's and the assembly view's tests (see README.md).
+// A voxel assembly in code for the voxel body's and the assembly view's tests: a torso with a
+// mirror pair of arms turned a quarter turn, a hand on each (the right one reflected through its
+// arm), and a tail with a mirror pair of fins, so rotations and mirroring meet.
 
 /** A box of `x × y × z` cubes of 2.5 cm, all of one colour. */
 export function box(

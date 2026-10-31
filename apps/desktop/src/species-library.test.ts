@@ -151,7 +151,7 @@ describe("startup", () => {
   it("skips entries that fail their schema, such as a drawn one from before M23", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = createMemoryLibraryStore();
-    await store.save(UUIDS[0] ?? "", { schemaVersion: 7 });
+    await store.save(UUIDS[0] ?? "", { schemaVersion: 8 });
     const other = userSpeciesIds(UUIDS[1]);
     await store.save(UUIDS[1] ?? "", {
       schemaVersion: 5,
@@ -267,15 +267,14 @@ describe("voxel species", () => {
 
     const [stored] = await store.list();
     expect(stored?.entry).toEqual({
-      schemaVersion: 6,
+      schemaVersion: 7,
       species: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: speciesId,
         version: "1.0.0",
         name: "Pebble",
         appearance: `${speciesId}/assembly.json`,
         sizeClass: "medium",
-        // Its gait only: an entry holds no thickness or anchors.
         body: { locomotion: { land: { gait: "hop" } } },
         capabilities: { "core:land": 1 },
         baseSpeed: 0.6,
