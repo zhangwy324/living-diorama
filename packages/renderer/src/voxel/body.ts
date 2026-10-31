@@ -31,7 +31,7 @@ export type PartRoleResolver = (partType: string) => PartRole | undefined;
  */
 export type PartMotionResolver = (partType: string) => PartMotion | undefined;
 
-/** How much of its colour a voxel body glows with (ADR 0022 §6); drawn bodies glow 0.35. */
+/** How much of its colour a voxel body glows with (ADR 0022 §6); drawn bodies glowed 0.35. */
 export const VOXEL_EMISSIVE_INTENSITY = 0.15;
 const ROUGHNESS = 0.9;
 
