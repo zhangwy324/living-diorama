@@ -31,7 +31,7 @@ function entry(): PlayerPartEntryInput {
     attach: { x: 1, y: 3, z: 1 },
     sockets: [],
   });
-  expect(fit.shallow).toEqual([]);
+  expect(fit.sockets).toEqual({});
   return {
     schemaVersion: 1,
     id: playerPartId(UUID),

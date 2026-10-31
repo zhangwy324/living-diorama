@@ -96,6 +96,7 @@ describe("voxelizeDrawing", () => {
   it("crops the part to the painted pixels", () => {
     const drawn = voxels(drawing(["..1..", ".....", "...1."], { left: 10, top: 20 }));
     expect(drawn.size).toEqual({ x: 2, y: 3, z: 1 });
+    expect(drawn.origin).toEqual({ left: 12, top: 20 });
   });
 
   it("maps a side view's canvas x to +X, canvas y down to −Y and depth to Z", () => {
@@ -168,7 +169,7 @@ describe("voxelizeDrawing", () => {
   });
 
   describe("tube", () => {
-    it.each([1, 3, 5])("makes a bar %i pixels wide as deep as it is wide", (width) => {
+    it.each([1, 2, 3, 4, 5, 6])("makes a bar %i pixels wide as deep as it is wide", (width) => {
       const drawn = voxels(drawing(bar(width, 10), { rule: "tube" }));
       expect(drawn.size).toEqual({ x: width, y: 10, z: width });
       for (let x = 0; x < width; x++) expect(depthAt(drawn, "side", x, 4)).toBe(width);
@@ -183,6 +184,18 @@ describe("voxelizeDrawing", () => {
       expect(depthAt(drawn, "side", 4, 4)).toBe(9);
       expect(depthAt(drawn, "side", 4, 14)).toBe(3);
       expect(isSymmetric(drawn, "z")).toBe(true);
+    });
+
+    it("draws in top view with canvas y down along +Z and depth along Y", () => {
+      // An L seen from above: the top-left pixel colour 2, the bottom-right colour 3.
+      const drawn = voxels(drawing(["2..", "1..", "113"], { view: "top", flatThickness: 2 }));
+      expect(drawn.size).toEqual({ x: 3, y: 2, z: 3 });
+      expect(at(drawn, 0, 0, 0)).toBe(2);
+      expect(at(drawn, 0, 1, 0)).toBe(2);
+      expect(at(drawn, 2, 0, 2)).toBe(3);
+      expect(at(drawn, 2, 0, 0)).toBe(0);
+      const tube = voxels(drawing(bar(4, 6), { rule: "tube", view: "top" }));
+      expect(tube.size).toEqual({ x: 4, y: 4, z: 6 });
     });
 
     it("draws in front view along X", () => {
@@ -285,7 +298,8 @@ function holds(root: VoxelPart, child: VoxelPart) {
 
 const fitted = (drawn: DrawnVoxels, base: VoxelPart): VoxelPart => {
   const fit = fitDrawnPart(drawn, base);
-  expect(fit.shallow).toEqual([]);
+  for (const socket of Object.values(fit.sockets)) expect(socket.shallow).toBe(false);
+  expect(fit.attachOnCubes).toBe(true);
   return fit.part;
 };
 
@@ -368,10 +382,17 @@ describe("fitDrawnPart", () => {
     expect(y).toBeGreaterThanOrEqual(limb.size.y - 1);
   });
 
-  it("buries a base's shallow socket a whole cube deep", () => {
-    const face = fitted(voxels(drawing(blob, { rule: "puffy", step: 0.05 })), head);
+  it("aims a socket for its base socket's depth: a face's eye socket half a cube in", () => {
+    const fit = fitDrawnPart(voxels(drawing(blob, { rule: "puffy", step: 0.05 })), head);
+    expect(fit.sockets["left-eye"]).toEqual({ depth: "finer", target: "finer", shallow: false });
+    expect(fit.sockets["right-eye"]).toEqual({ depth: "finer", target: "finer", shallow: false });
+    const face = fit.part;
+    // A finer eye fits there; a child at the face's own step would need it a whole cube deep.
     expect(holds(face, eye).success).toBe(true);
-    expect(holds(face, leg(0.05)).success).toBe(true);
+    expect(holds(face, leg(0.05)).success).toBe(false);
+    // Near the face, as on the base: half a cube from the front.
+    const front = face.sockets.find((socket) => socket.id === "left-eye")!.position;
+    expect(front.x).toBeGreaterThanOrEqual(face.size.x - 3);
     const left = face.sockets.find((socket) => socket.id === "left-eye")!.position;
     const right = face.sockets.find((socket) => socket.id === "right-eye")!.position;
     expect(right).toEqual({ ...left, z: face.size.z - left.z });
@@ -386,7 +407,9 @@ describe("fitDrawnPart", () => {
   it("lists the sockets with no room as shallow, placed as deep as the drawing allows", () => {
     // One cube deep: a socket on the middle plane is half a cube deep at most.
     const flat = fitDrawnPart(voxels(drawing(blob, { rule: "flat", step: 0.05 })), torso);
-    expect(flat.shallow).toEqual(torso.sockets.map((socket) => socket.id));
+    expect(Object.values(flat.sockets)).toEqual(
+      torso.sockets.map(() => ({ depth: "finer", target: "own", shallow: true })),
+    );
     expect(VoxelPartSchema.safeParse(flat.part).success).toBe(true);
     for (const socket of flat.part.sockets) expect(socket.position.z).toBe(0.5);
     // A finer child fits there.
@@ -397,15 +420,24 @@ describe("fitDrawnPart", () => {
     expect(position("front-right")).toEqual(position("front-left"));
   });
 
-  it("puts a socket on a stroke too thin to bury it", () => {
+  it("reaches a shallow target on a stroke too thin for a whole cube", () => {
     // A one-pixel-wide flat stroke, two cubes deep.
     const rows = ["1", "1", "1", "1"];
     const fit = fitDrawnPart(
       voxels(drawing(rows, { rule: "flat", flatThickness: 2, step: 0.05 })),
       head,
     );
-    expect(fit.shallow).toEqual(["left-eye", "right-eye"]);
+    expect(Object.values(fit.sockets).map((socket) => socket.depth)).toEqual(["finer", "finer"]);
+    expect(Object.values(fit.sockets).some((socket) => socket.shallow)).toBe(false);
     expect(VoxelPartSchema.safeParse(fit.part).success).toBe(true);
+  });
+
+  it("puts a socket only on the cubes at the finest step, which has no finer child", () => {
+    const flat = fitDrawnPart(voxels(drawing(blob, { rule: "flat", step: 0.0125 })), torso);
+    expect(Object.values(flat.sockets)).toEqual(
+      torso.sockets.map(() => ({ depth: "touching", target: "own", shallow: true })),
+    );
+    expect(VoxelPartSchema.safeParse(flat.part).success).toBe(true);
   });
 
   it("fits a leaf part on a flat drawing one cube deep", () => {
@@ -416,11 +448,51 @@ describe("fitDrawnPart", () => {
   });
 
   it("places the sockets of an asymmetric front-view drawing each on its own", () => {
-    // Taller on the canvas's left (the creature's right): the pair can't mirror there.
-    const rows = ["1111......", ...bar(10, 5), "1111......", "1111......"];
-    const fit = fitDrawnPart(voxels(drawing(rows, { rule: "tube", view: "front" })), head);
-    expect(fit.shallow).toEqual([]);
+    // Two blocks, upper on the canvas's left (the creature's right), lower on its right: the
+    // mirror image of any point on one block is off both, so the pair can't mirror.
+    const rows = ["11....", "11....", "......", "....11", "....11"];
+    const fit = fitDrawnPart(
+      voxels(drawing(rows, { view: "front", flatThickness: 2, step: 0.05 })),
+      head,
+    );
+    expect(Object.values(fit.sockets).some((socket) => socket.shallow)).toBe(false);
+    const left = fit.part.sockets.find((socket) => socket.id === "left-eye")!.position;
+    const right = fit.part.sockets.find((socket) => socket.id === "right-eye")!.position;
+    expect(right).not.toEqual({ ...left, z: fit.part.size.z - left.z });
+    // Each on its own side's block: the left eye at small z (the canvas's right).
+    expect(left.z).toBeLessThan(fit.part.size.z / 2);
+    expect(right.z).toBeGreaterThan(fit.part.size.z / 2);
     expect(holds(fit.part, eye).success).toBe(true);
+  });
+
+  describe("with points the player placed", () => {
+    const drawn = () => voxels(drawing(blob, { rule: "puffy", step: 0.05 }));
+
+    it("keeps them, snapped to half cubes, and says how deep they are", () => {
+      const fit = fitDrawnPart(drawn(), torso, {
+        attach: { x: 0.3, y: 6.2, z: 0.1 },
+        sockets: { neck: { x: 6.4, y: 4.1, z: 6 } },
+      });
+      expect(fit.part.attach).toEqual({ x: 0.5, y: 6, z: 0 });
+      expect(fit.attachOnCubes).toBe(false);
+      const neck = fit.part.sockets.find((socket) => socket.id === "neck")!;
+      expect(neck.position).toEqual({ x: 6.5, y: 4, z: 6 });
+      expect(fit.sockets.neck?.depth).toBe("own");
+    });
+
+    it("mirrors the socket of a pair whose partner was placed", () => {
+      const placed = { x: 3, y: 2, z: 1 };
+      const fit = fitDrawnPart(drawn(), torso, { sockets: { "front-right": placed } });
+      const position = (id: string) =>
+        fit.part.sockets.find((socket) => socket.id === id)!.position;
+      expect(position("front-right")).toEqual(placed);
+      expect(position("front-left")).toEqual({ ...placed, z: fit.part.size.z - 1 });
+    });
+
+    it("reports a socket off the cubes as loose", () => {
+      const fit = fitDrawnPart(drawn(), torso, { sockets: { neck: { x: 0, y: 8, z: 0 } } });
+      expect(fit.sockets.neck).toMatchObject({ depth: "loose", shallow: true });
+    });
   });
 
   it("gives the same part for the same drawing and base", () => {
