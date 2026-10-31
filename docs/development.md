@@ -300,6 +300,15 @@ Building a creature (once, in the dev app at any scale; ADR 0023, M21). The Stud
 - [ ] Press Edit a copy on the released species: the Studio switches to Build mode and shows that creature named "<name> copy", ready to edit, with nothing to undo and Reset greyed out. Closing the Studio without changing it closes at once; after one edit it asks first, and Reset goes back to the loaded creature, not the default torso. Change it and release it: it is listed as a second species beside the first, which is unchanged in the list and in the world. Edit a copy pressed while a release is on its way loads once the release is done.
 - [ ] Quit from the tray and relaunch: both species are listed again with their pictures, and their creatures are back in the world.
 
+Per-part motion (once, in the dev app at any scale; ADR 0024, M22). Voxel creatures move their parts: the part's type picks the motion (`swing`, `wag`, `bob`, `flop`, `blink`, `paddle`), its size scales it and the gait sets one rhythm per creature. Add a few starter creatures from the console (`await livingDiorama.library.saveStarterCreature({ seed: 1 })`, then seeds 3 and 5) and expand the strip.
+
+- [ ] Walking, each starter creature's legs visibly step, about twice a second at its usual walk: four legs in diagonal pairs, two legs alternating. An upright creature's arms swing against its legs, less than the legs. The body bobs once per step, its feet neither sink into the ground nor float above it, and it doesn't lift as it leans into the walk.
+- [ ] Seeds 1 and 5 (the same torso on stout legs and on mossling feet) step differently: compare them side by side close up.
+- [ ] Standing still, a creature's legs don't move, but it blinks every few seconds, now and then twitches an ear (never during a blink) and flicks its tail. Neighbours don't blink together. Mouths and noses never move.
+- [ ] Eating, the head dips with each peck, without a big nod. Asleep (`livingDiorama.time.set("22:00")`), the head droops a little, the ears drop, the eyes stay shut and the tail curls. `livingDiorama.time.follow()` afterwards.
+- [ ] A hopper tucks its legs in the air and stretches them at take-off and landing; a swimmer paddles its legs slowly and sculls its fins. Pause holds every part where it is.
+- [ ] In the Studio, Build mode stands at rest, and the confirm step's test walk steps the legs as in the strip, seen from the default angle. With no way of moving ticked, the preview stands and still blinks.
+
 ## Releasing
 
 1. On a branch, set the new version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (then build once to update `Cargo.lock`) and `apps/desktop/package.json`. Add the player-facing notes as `docs/release-notes/<version>.md` (for example `0.2.0.md`), and merge it. Every version needs its notes file before it is tagged: the workflow publishes it and fails without it. A release candidate tag such as `v0.2.0-rc.1` publishes `0.2.0.md`.

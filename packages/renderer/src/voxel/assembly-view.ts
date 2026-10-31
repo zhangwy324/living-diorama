@@ -11,6 +11,7 @@ import type { PreviewMotion } from "../body/preview";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
 import type { CueWeights } from "../cues";
 import {
+  groundReach,
   locomotionMotion,
   locomotionTransform,
   placePivots,
@@ -608,12 +609,13 @@ function build(
   tint.renderOrder = 1;
   tint.visible = false;
   const sockets = new Map(socketPoints(assembly, body).map((p) => [socketKey(p), p]));
-  const { bounds, height, centerOfGravity, tail } = body.measure;
+  const { bounds, height, centerOfGravity, tail, groundContact } = body.measure;
   const look: LocomotionBody = {
     height,
     minX: bounds.min.x,
     maxX: bounds.max.x,
     halfDepth: Math.max(0, bounds.max.z, -bounds.min.z),
+    ground: groundReach(groundContact),
     pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
   };
   placePivots(

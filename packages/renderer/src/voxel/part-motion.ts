@@ -77,7 +77,7 @@ export function resetPose(pose: MotionPose): MotionPose {
   return pose;
 }
 
-// Start values, to be tuned on captures (M22). Angles in radians, times in seconds.
+// Tuned on captures at strip size and close up (M22 PR 5). Angles in radians, times in seconds.
 
 /** The walk: each leg's own amplitude (`RigLeg.amplitude`), the head nodding on each footfall. */
 export const WALK = { headNod: 0.06, tailWag: 0.25, earBounce: 0.08 } as const;
@@ -86,7 +86,7 @@ export const HOP = { reach: 0.3, tuck: 0.5, earTrail: 0.3 } as const;
 /** The bank leap: the legs tuck under. */
 export const LEAP = { tuck: 0.55 } as const;
 /** The swim: legs paddle slowly, one stroke per `stroke` strides; fins scull on their own time. */
-export const SWIM = { legPaddle: 0.35, stroke: 2, fin: 0.35, finPeriod: 1.6, finAtRest: 0.4 };
+export const SWIM = { legPaddle: 0.35, stroke: 1, fin: 0.35, finPeriod: 1.6, finAtRest: 0.4 };
 /** Blinking: about every `period` seconds, shut for `seconds`, the eye squashed to `closed`. */
 export const BLINK = { period: 4, seconds: 0.16, closed: 0.15 } as const;
 /** An ear twitches outward about every `period` seconds, for `seconds`. */
@@ -94,9 +94,9 @@ export const EAR_TWITCH = { angle: 0.3, period: 5.5, seconds: 0.25 } as const;
 /** A tail flicks side to side twice about every `period` seconds, for `seconds`. */
 export const TAIL_FLICK = { angle: 0.4, period: 7, seconds: 0.6 } as const;
 /** Asleep: the head droops, the ears drop back and out, the tail curls round. */
-export const SLEEP = { headDroop: 0.3, earBack: 0.5, earOut: 0.25, tailCurl: 0.45 } as const;
+export const SLEEP = { headDroop: 0.2, earBack: 0.5, earOut: 0.25, tailCurl: 0.45 } as const;
 /** Eating: the head dips this far at the bottom of each peck (`eatingPeck`). */
-export const EAT = { headDip: 0.35 } as const;
+export const EAT = { headDip: 0.25 } as const;
 /** An event in a stream comes at a point within the first share of its period, so never in step. */
 const EVENT_JITTER = 0.6;
 
@@ -123,9 +123,9 @@ function sinceEvent(time: number, period: number, seed: number): number {
   return t - start;
 }
 
-/** A pulse 0 → 1 → 0 over `seconds` after an event, 0 after. */
+/** A pulse 0 → 1 → 0 over `seconds` after an event, 0 before and after. */
 const pulse = (since: number, seconds: number) =>
-  since < seconds ? Math.sin((Math.PI * since) / seconds) : 0;
+  since >= 0 && since < seconds ? Math.sin((Math.PI * since) / seconds) : 0;
 
 // Streams, so a creature's blinks, twitches and flicks don't come together.
 const BLINK_STREAM = 0.137;
@@ -220,10 +220,7 @@ const paddle: Motion = (_part, f, out) => {
 const flop: Motion = (part, f, out) => {
   const { time, phase } = f.input;
   const awake = 1 - f.sleeping;
-  const twitch = pulse(
-    sinceEvent(time, EAR_TWITCH.period, (phase + EAR_STREAM) % 1),
-    EAR_TWITCH.seconds,
-  );
+  const twitch = pulse(sinceTwitch(time, phase), EAR_TWITCH.seconds);
   let back = 0;
   if (f.walk) back = f.gait * WALK.earBounce * Math.sin(2 * TAU * f.cycles);
   else if (f.hop !== undefined && f.hop >= HOP_GROUND)
@@ -235,6 +232,20 @@ const flop: Motion = (part, f, out) => {
   const outward = part.mirrored ? -part.side : part.side;
   out.x = outward * (awake * EAR_TWITCH.angle * twitch + f.sleeping * SLEEP.earOut);
 };
+
+/**
+ * Seconds since the latest ear twitch, or a negative number before it starts. A twitch that would
+ * overlap a blink waits until the blink is over, so the two never come together: blinks are at
+ * least 40% of `BLINK.period` apart, far more than a twitch and a blink take.
+ */
+function sinceTwitch(time: number, phase: number): number {
+  const since = sinceEvent(time, EAR_TWITCH.period, (phase + EAR_STREAM) % 1);
+  const start = time - since;
+  // The latest blink to start before the twitch ends: overlapping if it ends after it starts.
+  const end = start + EAR_TWITCH.seconds;
+  const blink = end - sinceEvent(end, BLINK.period, (phase + BLINK_STREAM) % 1);
+  return blink + BLINK.seconds > start ? time - (blink + BLINK.seconds) : since;
+}
 
 /** `blink`: eyes. A blink every few seconds, shut asleep. */
 const blink: Motion = (_part, f, out) => {

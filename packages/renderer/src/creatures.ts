@@ -31,6 +31,7 @@ import { visibleState, type CueVisibility, type VisibilityState } from "./cue-vi
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import {
+  groundReach,
   leapMotion,
   locomotionMotion,
   locomotionTransform,
@@ -189,11 +190,12 @@ const tailOnBody = new THREE.Vector3();
 
 /** Sizes and anchors a look from its voxel body's measurement (ADR 0022 §20, §21). */
 function measureLook(look: SpeciesLook, voxel: VoxelBody): void {
-  const { bounds, height, centerOfGravity, tail } = voxel.measure;
+  const { bounds, height, centerOfGravity, tail, groundContact } = voxel.measure;
   look.height = height;
   look.minX = bounds.min.x;
   look.maxX = bounds.max.x;
   look.halfDepth = Math.max(0, bounds.max.z, -bounds.min.z);
+  look.ground = groundReach(groundContact);
   cogOnBody.set(centerOfGravity.x, centerOfGravity.y, centerOfGravity.z);
   tailOnBody.set(tail.x, tail.y, tail.z);
   placePivots(look, cogOnBody, tailOnBody);

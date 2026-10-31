@@ -14,9 +14,11 @@ import { FULL_MOTION_SPEED, hopProgress } from "../locomotion";
 import { buildVoxelBody, type VoxelBody } from "./body";
 import { composePose } from "./compose-pose";
 import {
+  ARM_SWING,
   MAX_SWING,
-  STRIDE_RANGE,
+  WALK_CADENCE,
   buildMotionRig,
+  strideFor,
   instanceMotions,
   walkLegs,
   WALK_DIP_SAMPLES,
@@ -24,6 +26,8 @@ import {
 } from "./motion-rig";
 import {
   BLINK,
+  EAR_TWITCH,
+  EAT,
   SLEEP,
   SWIM,
   WALK,
@@ -264,7 +268,11 @@ describe("motion rig", () => {
     expect(limb("leg-0-l").grounded).toBe(true);
     expect(limb("arm-l").offset).toBe(limb("leg-0-r").offset);
     expect(limb("arm-r").offset).toBe(limb("leg-0-l").offset);
-    expect(rig.stride).toBeCloseTo(1.5 * rig.parts[index("leg-0-l")]!.length, 9);
+    expect(rig.stride).toBeCloseTo(strideFor(rig.parts[index("leg-0-l")]!.length), 9);
+    // Arms swing less than a leg of their length would.
+    const arm = rig.parts[index("arm-l")]!;
+    const full = Math.min(MAX_SWING, Math.asin(Math.min(1, rig.stride / 4 / arm.length)));
+    expect(arm.leg!.amplitude).toBeCloseTo(ARM_SWING * full, 12);
     // Arms join the gait: they swing as it walks.
     const pose = motion(rig, walking(rig.stride * 0.2));
     expect(Math.abs(swingOf(pose, index("arm-l")))).toBeGreaterThan(0.1);
@@ -308,9 +316,23 @@ describe("motion rig", () => {
     expect(rig.parts[index("leg-1-l")]!.length).toBeCloseTo(Math.hypot(1, 4, 1) * 0.025, 3);
   });
 
+  it("steps at most WALK_CADENCE.max times a second at the walk's speed, short legs taking long strides", () => {
+    const stepsPerSecond = (stride: number) => WALK_CADENCE.speed / (stride / 2);
+    for (const length of [0.01, 0.1, 0.2])
+      expect(stepsPerSecond(strideFor(length))).toBeCloseTo(2, 9);
+    // A pendulum's cadence above about 25 cm, slower for longer legs, down to the minimum.
+    expect(stepsPerSecond(strideFor(0.5))).toBeCloseTo(Math.sqrt(9.81 / 0.5) / Math.PI, 9);
+    expect(stepsPerSecond(strideFor(1))).toBeLessThan(stepsPerSecond(strideFor(0.5)));
+    expect(stepsPerSecond(strideFor(10))).toBeCloseTo(WALK_CADENCE.min, 9);
+    // A short-legged creature's legs swing out to the cap.
+    const { rig } = build(animal({ legHeight: 3 }));
+    expect(rig.parts[rig.legs[0]!]!.leg!.amplitude).toBeCloseTo(MAX_SWING, 12);
+  });
+
   it("gives longer legs a longer stride: a wider foot sweep at a slower cadence", () => {
+    // 2 × 3 and 2 × 20 cubes of 2.5 cm: about 8 cm and 50 cm.
     const short = build(animal({ legHeight: 3 })).rig;
-    const long = build(animal({ legHeight: 6 })).rig;
+    const long = build(animal({ legHeight: 20 })).rig;
     expect(long.stride).toBeGreaterThan(short.stride);
     // Cycles per metre, so per second at the same speed.
     expect(1 / long.stride).toBeLessThan(1 / short.stride);
@@ -321,15 +343,18 @@ describe("motion rig", () => {
     expect(sweep(long)).toBeGreaterThan(sweep(short));
   });
 
-  it("swings a shorter leg further than a longer one in the same gait, capped", () => {
-    const { rig, index } = build(animal({ legHeight: 6, frontLegHeight: 2 }));
+  it("swings a long leg so its foot sweeps a quarter stride, and a short one off the ground less, capped", () => {
+    // Back legs long enough (40 cm) to swing less than the cap.
+    const { rig, index } = build(animal({ legHeight: 16, frontLegHeight: 2 }));
     const front = rig.parts[index("leg-0-l")]!.leg!;
-    const back = rig.parts[index("leg-1-l")]!.leg!;
+    const back = rig.parts[index("leg-1-l")]!;
     // The front legs don't reach the ground, so the back ones set the stride.
     expect(front.grounded).toBe(false);
-    expect(rig.stride).toBeCloseTo(1.5 * rig.parts[index("leg-1-l")]!.length, 9);
-    expect(front.amplitude).toBeGreaterThan(back.amplitude);
-    expect(front.amplitude).toBeLessThanOrEqual(MAX_SWING);
+    expect(rig.stride).toBeCloseTo(strideFor(back.length), 9);
+    expect(back.leg!.amplitude).toBeCloseTo(Math.asin(rig.stride / 4 / back.length), 12);
+    expect(back.leg!.amplitude).toBeLessThan(MAX_SWING);
+    // The short front legs would swing past the cap, and swing ARM_SWING of it, off the ground.
+    expect(front.amplitude).toBeCloseTo(ARM_SWING * MAX_SWING, 12);
   });
 
   it("drops unknown motions and the root's", () => {
@@ -444,7 +469,7 @@ describe("part motion", () => {
       const dip = -swingOf(motion(rig, input({ time: t, phase, cues: eating })), index("head"));
       if (dip > deepest) [deepest, deepestAt] = [dip, t];
     }
-    expect(deepest).toBeGreaterThan(0.3);
+    expect(deepest).toBeCloseTo(EAT.headDip, 2);
     expect(eatingPeck(deepestAt, phase)).toBeGreaterThan(0.99);
     expect(swingOf(motion(rig, input({ time: deepestAt, phase })), index("head"))).toBe(0);
   });
@@ -471,7 +496,7 @@ describe("part motion", () => {
   it("droops the head, drops the ears and curls the tail asleep", () => {
     const { rig, index } = quadruped;
     const pose = motion(rig, input({ time: 0, cues: { eating: 0, sleeping: 1, hungry: 0 } }));
-    expect(swingOf(pose, index("head"))).toBeLessThan(-0.2);
+    expect(swingOf(pose, index("head"))).toBeCloseTo(-SLEEP.headDroop, 9);
     const tail = index("tail");
     expect(Math.abs(pose.rotations[4 * tail + 1]!)).toBeGreaterThan(0.2);
     const ear = index("ear-l");
@@ -668,15 +693,15 @@ describe("motions", () => {
     );
   });
 
-  it("paddles legs slowly when swimming, alternating, one stroke per two strides", () => {
+  it("paddles legs slowly when swimming, alternating, one stroke per SWIM.stroke strides", () => {
     const { rig, index } = build(animal());
     const at = (travelled: number) => motion(rig, walking(travelled, "swim"));
     const fl = index("leg-0-l");
     const quarter = at(rig.stride * SWIM.stroke * 0.25);
     expect(swingOf(quarter, fl)).toBeCloseTo(SWIM.legPaddle, 9);
     expect(swingOf(quarter, index("leg-0-r"))).toBeCloseTo(-SWIM.legPaddle, 9);
-    // A full walk cycle in is only half a stroke.
-    expect(swingOf(at(rig.stride), fl)).toBeCloseTo(0, 9);
+    // Half a stroke in, the legs pass under the body.
+    expect(swingOf(at(rig.stride * SWIM.stroke * 0.5), fl)).toBeCloseTo(0, 9);
     expect(swingOf(at(rig.stride * SWIM.stroke * 0.75), fl)).toBeCloseTo(-SWIM.legPaddle, 9);
   });
 
@@ -730,6 +755,25 @@ describe("motions", () => {
     }
     expect(twitches).toBeGreaterThan(0);
   });
+
+  it("never twitches an ear while the eyes blink", () => {
+    const { rig, index } = build(animal());
+    const ear = index("ear-l");
+    const eye = index("eye-l");
+    for (const phase of [0, 0.13, 0.3, 0.57, 0.91]) {
+      let twitches = 0;
+      for (let k = 0; k < 60000; k++) {
+        const pose = motion(rig, input({ time: k * 0.01, phase }));
+        const twitching = Math.abs(turnAbout(pose, ear, 0)) > 1e-9;
+        if (twitching) twitches++;
+        expect(twitching && pose.squash[eye]! < 1).toBe(false);
+      }
+      // About one a period, none dropped: each is only delayed.
+      expect(twitches).toBeGreaterThan(
+        0.9 * (600 / EAR_TWITCH.period) * (EAR_TWITCH.seconds / 0.01),
+      );
+    }
+  });
 });
 
 describe("limbs off the ground", () => {
@@ -737,17 +781,17 @@ describe("limbs off the ground", () => {
     const { rig, index } = build(animal({ legsAt: [4], arms: true }), { "test:limb": "swing" });
     const arm = rig.parts[index("arm-l")]!;
     expect(arm.leg!.grounded).toBe(false);
-    expect(rig.stride).toBeCloseTo(1.5 * arm.length, 9);
+    expect(rig.stride).toBeCloseTo(strideFor(arm.length), 9);
+    // With no leg to swing against, limbs off the ground swing in full.
+    const full = Math.min(MAX_SWING, Math.asin(Math.min(1, rig.stride / 4 / arm.length)));
+    expect(arm.leg!.amplitude).toBeCloseTo(full, 12);
     expect(Math.abs(arm.leg!.offset - rig.parts[index("arm-r")]!.leg!.offset)).toBe(0.5);
   });
 
   it("fall back to half the body's height for the stride with no limbs at all", () => {
     const { rig, body } = build(animal(), {});
     expect(rig.legs).toEqual([]);
-    expect(rig.stride).toBeCloseTo(
-      Math.min(STRIDE_RANGE.max, Math.max(STRIDE_RANGE.min, 1.5 * (body.measure.height / 2))),
-      9,
-    );
+    expect(rig.stride).toBeCloseTo(strideFor(body.measure.height / 2), 9);
   });
 });
 
