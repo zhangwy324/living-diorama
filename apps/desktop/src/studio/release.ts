@@ -1,27 +1,9 @@
 import { RequestTimeoutError } from "@living-diorama/desktop-integration";
 import { studioErrorCode } from "../studio-protocol";
 
-// Releasing a drawing (roadmap M11 task 6): when the button is available and what the Studio
-// says afterwards.
+// Releasing a creature (roadmap M11 task 6, ADR 0023 §17): what the Studio says before and after.
 
-/**
- * Release needs a name and a body to build, and one release at a time. `empty` is true while the
- * image has nothing a body is built from: nothing drawn, all of it erased, or only faint pixels.
- * `moves` is false while the body plan has no way of moving (ADR 0020 §1).
- */
-export const canRelease = ({
-  name,
-  empty,
-  releasing,
-  moves,
-}: {
-  name: string;
-  empty: boolean;
-  releasing: boolean;
-  moves: boolean;
-}): boolean => name.trim() !== "" && !empty && !releasing && moves;
-
-/** Shown in the confirm step while the name is empty: the name is set while drawing. */
+/** Shown in the confirm step while the name is empty: the name is set while building. */
 export const NO_NAME = "Give your creature a name first: go back to name it.";
 
 /** The line shown when a creature goes into the world. */

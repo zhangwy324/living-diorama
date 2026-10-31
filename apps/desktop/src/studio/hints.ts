@@ -1,25 +1,7 @@
-import type { BodyCheck } from "@living-diorama/renderer";
 import type { Limit } from "@living-diorama/simulation";
 
 // The Studio's gentle hints (roadmap M11): short lines in the player's words, never blocking.
 // Diagnostic codes never reach the player.
-
-/** What the drawing will look like as a body: empty, thin parts, shapes that aren't joined. */
-export function drawingHints(check: BodyCheck): string[] {
-  if (check.empty) return ["Nothing drawn yet."];
-  const hints: string[] = [];
-  if (check.thinParts === 1) {
-    hints.push("This part is very thin (orange with Show warnings), so it may look flat.");
-  } else if (check.thinParts > 1) {
-    hints.push("Some parts are very thin (orange with Show warnings), so they may look flat.");
-  }
-  if (check.shapes > 1) {
-    hints.push(
-      "Parts aren't joined (blue with Show warnings): each separate shape becomes its own slab.",
-    );
-  }
-  return hints;
-}
 
 /**
  * Where a creature of the chosen size and ways of moving won't fit in the world (ADR 0013, ADR 0020

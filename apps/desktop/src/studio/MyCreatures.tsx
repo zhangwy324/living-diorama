@@ -1,9 +1,9 @@
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 
-// The player's species, beside Build and Draw mode (roadmap M11 task 6, ADR 0023 §19): each with
-// its image, name and creatures in the world, to add one, take one out or delete the species. It
-// shows what the strip's latest library snapshot says. A voxel species' image is drawn by the
-// Studio, so it shows a placeholder until that is ready.
+// The player's species, beside the Studio's modes (roadmap M11 task 6, ADR 0023 §19): each with
+// its image, name and creatures in the world, to add one, take one out, edit a copy or delete the
+// species. It shows what the strip's latest library snapshot says. A species' image is drawn by
+// the Studio from its cubes, so it shows a placeholder until that is ready.
 
 export interface MyCreaturesProps {
   /** Undefined until the strip answers. */
@@ -82,9 +82,7 @@ export function MyCreatures(props: MyCreaturesProps) {
               {image ? (
                 <img className="thumbnail" src={image} alt="" />
               ) : (
-                <span
-                  className={species.body === "voxel" ? "thumbnail voxel-placeholder" : "thumbnail"}
-                />
+                <span className="thumbnail voxel-placeholder" />
               )}
               <div className="species-text">
                 <span className="species-name">{species.name}</span>
@@ -119,17 +117,15 @@ export function MyCreatures(props: MyCreaturesProps) {
                     </button>
                   </>
                 )}
-                {species.body === "voxel" && (
-                  <button
-                    type="button"
-                    aria-label={`Edit a copy of ${species.name}`}
-                    title="Edit a copy"
-                    disabled={busy}
-                    onClick={() => props.onEditCopy(species)}
-                  >
-                    <Icon d="M10.5 3l2.5 2.5-7 7H3.5V10zM9 4.5L11.5 7" />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  aria-label={`Edit a copy of ${species.name}`}
+                  title="Edit a copy"
+                  disabled={busy}
+                  onClick={() => props.onEditCopy(species)}
+                >
+                  <Icon d="M10.5 3l2.5 2.5-7 7H3.5V10zM9 4.5L11.5 7" />
+                </button>
                 <button
                   type="button"
                   className="delete"

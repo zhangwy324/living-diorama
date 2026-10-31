@@ -1,4 +1,3 @@
-import type { LibraryBodyKind } from "@living-diorama/content-schema";
 import type { AssemblyThumbnailSource, VoxelThumbnails } from "@living-diorama/renderer";
 
 // The images of voxel species in My creatures (ADR 0023 §19, §20). A voxel species has no stored
@@ -45,10 +44,10 @@ export class VoxelCreatureThumbnails {
     return this.images.get(speciesId);
   }
 
-  /** Asks for the images of voxel species new to the list and forgets those no longer in it. */
-  sync(all: readonly { speciesId: string; body?: LibraryBodyKind }[]): void {
+  /** Asks for the images of species new to the list and forgets those no longer in it. */
+  sync(all: readonly { speciesId: string }[]): void {
     if (this.disposed || this.noRenderer) return;
-    const listed = new Set(all.filter(({ body }) => body === "voxel").map((s) => s.speciesId));
+    const listed = new Set(all.map((s) => s.speciesId));
     for (const speciesId of this.images.keys()) {
       if (!listed.has(speciesId)) this.images.delete(speciesId);
     }

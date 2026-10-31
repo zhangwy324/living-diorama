@@ -429,7 +429,7 @@ export function AssemblyEditor({
     press.current = { part, x: event.clientX, y: event.clientY };
   };
 
-  // Undo and redo as in Draw mode; Delete removes the selected part, R turns it, + and − grow and
+  // Undo and redo; Delete removes the selected part, R turns it, + and − grow and
   // shrink its cubes; Escape drops a drag, the pick or the selection. Not while typing a name.
   useEffect(() => {
     if (!keysEnabled || step !== "build") return;
@@ -731,15 +731,11 @@ export function AssemblyEditor({
             <>
               <BodyPlanPanel
                 name={name}
-                plan={{ locomotion, anchors: {} }}
+                locomotion={locomotion}
                 onLocomotion={(next) => {
                   setReleaseError(undefined);
                   setLocomotion(next);
                 }}
-                showAnchors={false}
-                placing={undefined}
-                onPlacing={() => {}}
-                onResetAnchors={() => {}}
                 modes={modes}
                 mode={mode?.key}
                 onMode={setPreviewMode}

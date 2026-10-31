@@ -1,5 +1,5 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
-import { checkAssemblyFit, formatDiagnostic, parseDrawing } from "@living-diorama/content-schema";
+import { checkAssemblyFit, formatDiagnostic } from "@living-diorama/content-schema";
 import { describeVoxelParts, type PartSummary } from "@living-diorama/simulation";
 import { describe, expect, it, vi } from "vitest";
 import { loadContent } from "./content";
@@ -7,7 +7,6 @@ import {
   assembleStarter,
   listStarterParts,
   randomSeed,
-  SAMPLE_DRAWING,
   saveStarterCreature,
   saveVoxelSample,
   starterRoots,
@@ -15,10 +14,6 @@ import {
 } from "./dev-library";
 import { partFitLookup } from "./part-types";
 import type { SpeciesLibrary } from "./species-library";
-
-it("ships a valid sample drawing", () => {
-  expect(parseDrawing(SAMPLE_DRAWING).ok).toBe(true);
-});
 
 describe("the voxel sample", () => {
   const library = () =>

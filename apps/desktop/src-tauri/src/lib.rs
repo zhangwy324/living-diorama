@@ -24,8 +24,6 @@ pub fn run() {
             studio::commands::open_studio,
             event_counts::record_event_counts,
             library::commands::list_library,
-            library::commands::load_library_drawing,
-            library::commands::load_library_image,
             library::commands::save_library_entry,
             library::commands::delete_library_entry,
             world::commands::load_world,

@@ -1,20 +1,7 @@
 import type { Diagnostic } from "@living-diorama/content-schema";
-import type { BodyCheck } from "@living-diorama/renderer";
 import type { Limit } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
-import { drawingHints, limitHints } from "./hints";
-
-const check = (fields: Partial<BodyCheck>): BodyCheck => ({
-  width: 1,
-  height: 1,
-  empty: false,
-  shapes: 1,
-  thinParts: 0,
-  thin: new Uint8Array(1),
-  loose: new Uint8Array(1),
-  bounds: undefined,
-  ...fields,
-});
+import { limitHints } from "./hints";
 
 const limit = (code: string, fields: Partial<Limit> = {}): Limit => ({
   severity: "warning",
@@ -22,26 +9,6 @@ const limit = (code: string, fields: Partial<Limit> = {}): Limit => ({
   message: `${code} message`,
   path: [],
   ...fields,
-});
-
-describe("drawingHints", () => {
-  it("says when nothing is drawn, and nothing else", () => {
-    expect(drawingHints(check({ empty: true, shapes: 0 }))).toEqual(["Nothing drawn yet."]);
-  });
-
-  it("says nothing about one solid shape", () => {
-    expect(drawingHints(check({}))).toEqual([]);
-  });
-
-  it("points out thin parts and shapes that aren't joined, and how to see them tinted", () => {
-    expect(drawingHints(check({ thinParts: 1 }))).toEqual([
-      "This part is very thin (orange with Show warnings), so it may look flat.",
-    ]);
-    expect(drawingHints(check({ thinParts: 3, shapes: 2 }))).toEqual([
-      "Some parts are very thin (orange with Show warnings), so they may look flat.",
-      "Parts aren't joined (blue with Show warnings): each separate shape becomes its own slab.",
-    ]);
-  });
 });
 
 describe("limitHints", () => {
