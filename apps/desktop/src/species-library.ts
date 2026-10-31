@@ -177,7 +177,7 @@ export const tooBigMessage = (name: string) =>
   `${name} has too much detail to save. Use fewer or smaller parts.`;
 
 /** An entry's assembly and version, for `Kept`. */
-const voxelOf = ({ species, assembly }: LibraryEntry): Kept["voxel"] => ({
+const assemblyOf = ({ species, assembly }: LibraryEntry): Kept["assembly"] => ({
   version: species.version,
   assembly,
 });
@@ -186,7 +186,7 @@ interface Kept {
   species: LibrarySpecies;
   uuid: string;
   /** The species' assembly and version, as its entry holds them. */
-  voxel: Omit<LibraryAssembly, "speciesId">;
+  assembly: Omit<LibraryAssembly, "speciesId">;
   /** The `blob:` URL the world draws the species from, while it is registered. */
   url?: string;
 }
@@ -221,7 +221,7 @@ export async function openSpeciesLibrary(
       available: true,
       limits: registered.value.limits,
     };
-    entries.set(species.speciesId, { uuid, species, url, voxel: voxelOf(entry) });
+    entries.set(species.speciesId, { uuid, species, url, assembly: assemblyOf(entry) });
     return { ok: true as const, value: species };
   };
   const keepUnavailable = (uuid: string, entry: LibraryEntry, reasons: Diagnostic[]) => {
@@ -231,7 +231,7 @@ export async function openSpeciesLibrary(
     entries.set(entry.species.id, {
       uuid,
       species: { ...describeEntry(entry), available: false, reasons },
-      voxel: voxelOf(entry),
+      assembly: assemblyOf(entry),
     });
   };
 
@@ -293,7 +293,7 @@ export async function openSpeciesLibrary(
     assembly(speciesId) {
       const found = entries.get(speciesId);
       if (!found) return failure("unknown_species", `${speciesId} is not in the library`);
-      return { ok: true, value: { speciesId, ...found.voxel } };
+      return { ok: true, value: { speciesId, ...found.assembly } };
     },
 
     async saveVoxel(assemblyInput, name, plan, { id = uuid() } = {}) {

@@ -1,4 +1,4 @@
-import { AssetRefSchema, ContentIdSchema } from "@living-diorama/content-schema";
+import { AssetRefSchema, ContentIdSchema, libraryAppearance } from "@living-diorama/content-schema";
 import { expect, it } from "vitest";
 import { userSpeciesIds } from "./user-species";
 
@@ -7,9 +7,9 @@ it("generates distinct, valid IDs in the user namespace", () => {
   const b = userSpeciesIds();
   expect(a.uuid).toMatch(/^[0-9a-f-]{36}$/);
   expect(a.speciesId).toBe(`user:${a.uuid}`);
-  expect(a.appearanceId).toBe(`${a.speciesId}/appearance.png`);
   expect(ContentIdSchema.safeParse(a.speciesId).success).toBe(true);
-  expect(AssetRefSchema.safeParse(a.appearanceId).success).toBe(true);
+  // Its appearance, the assembly its library entry holds, is a valid asset reference.
+  expect(AssetRefSchema.safeParse(libraryAppearance(a.speciesId)).success).toBe(true);
   expect(b.speciesId).not.toBe(a.speciesId);
 });
 

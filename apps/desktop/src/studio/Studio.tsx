@@ -19,8 +19,9 @@ import { describeFailure, keptMessage, releasedMessage } from "./release";
 import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 
 // The Creation Studio's page (ADR 0015, ADR 0023 §1): its modes side by side in one window, with My
-// creatures beside them. Build mode is the only one until Draw mode comes back to draw parts (M23). It never starts a simulation and never creates a
-// DesktopShell, so the shell's events and quit_ready stay the strip's.
+// creatures beside them. Build mode is the only one until Draw mode comes back to draw parts
+// (M23). It never starts a simulation and never creates a DesktopShell, so the shell's events and
+// quit_ready stay the strip's.
 
 const studioWindow = connectStudioWindow();
 const channel = openStudioChannel<StudioRequests, LibrarySnapshot>();

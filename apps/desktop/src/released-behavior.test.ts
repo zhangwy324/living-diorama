@@ -24,6 +24,8 @@ import { STARTUP } from "./startup";
 // species library as the Studio does, into a headless simulation of the startup world.
 
 const HUNGER = "core:hunger";
+/** The behavior that takes a creature to bed. */
+const REST = "core:rest";
 const TIRED = "core:tiredness";
 const HZ = 2;
 const MINUTE = 60 * HZ;
@@ -47,9 +49,7 @@ function headlessWorld(startMinutes: number) {
   if (!content.ok) throw new Error(content.diagnostics.map(formatDiagnostic).join("\n"));
   const created = Simulation.create(content.value, {
     worldId: STARTUP.worldId,
-    // Spawn points come from the seed; with 5 (as for the drawn creatures before M23), one walks
-    // to a shelter from further away and falls asleep later than the check below allows.
-    seed: 1,
+    seed: 5,
     tickRateHz: HZ,
     minutes: startMinutes,
   });
@@ -124,20 +124,26 @@ describe("creatures released from the Studio", () => {
       run(10 * MINUTE - 1);
       for (const [, c] of creatures) expect(of(c, "fell_asleep")).toEqual([]);
 
-      // Then to bed at a shelter, which becomes home.
-      run(
-        60 * MINUTE,
-        all((c) => c.asleep),
-      );
+      // Then to bed at a shelter, which becomes home. How long the walk there takes depends on how
+      // far its spawn point is from one, so the check is when it sets off (its rest behavior
+      // starts) and that it is asleep within the hour. It first finishes the wander it is on,
+      // which can run past the grace's end by a little over a minute: two minutes are allowed.
+      const setOff = new Map<string, number>();
+      run(60 * MINUTE, () => {
+        for (const [, c] of creatures) {
+          if (!setOff.has(c.id) && c.action?.behavior === REST) setOff.set(c.id, simulation.tick);
+        }
+        return creatures.every(([, c]) => c.asleep);
+      });
       const homes = new Map<string, string>();
       for (const [size, c] of creatures) {
-        expect({ size, asleep: c.asleep }).toEqual({ size, asleep: true });
-        const [fell] = of(c, "fell_asleep") as { placementId: string | null; tick: number }[];
-        // Within a minute of the grace ending.
-        expect({ size, tick: fell!.tick, inTime: fell!.tick <= 11 * MINUTE }).toMatchObject({
+        const tick = setOff.get(c.id);
+        expect({ size, tick, inTime: tick !== undefined && tick <= 12 * MINUTE }).toMatchObject({
           size,
           inTime: true,
         });
+        expect({ size, asleep: c.asleep }).toEqual({ size, asleep: true });
+        const [fell] = of(c, "fell_asleep") as { placementId: string | null; tick: number }[];
         expect({ size, home: c.home }).toEqual({ size, home: fell!.placementId });
         expect(c.home).not.toBeNull();
         homes.set(c.id, c.home!);

@@ -1,6 +1,7 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
 import {
   error,
+  libraryAppearance,
   parseLibraryEntry,
   type Diagnostic,
   type Result,
@@ -161,7 +162,7 @@ describe("startup", () => {
         id: other.speciesId,
         version: "1.0.0",
         name: "Puddle",
-        appearance: other.appearanceId,
+        appearance: libraryAppearance(other.speciesId),
         sizeClass: "small",
         capabilities: { "core:land": 1 },
         baseSpeed: 0.6,

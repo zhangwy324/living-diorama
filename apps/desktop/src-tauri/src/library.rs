@@ -209,7 +209,7 @@ mod tests {
     }
 
     fn entry(id: &str) -> Value {
-        json!({ "name": id, "body": { "kind": "voxel", "assembly": { "voxels": [32768, 1] } } })
+        json!({ "schemaVersion": 6, "name": id, "assembly": { "voxels": [32768, 1] } })
     }
 
     fn save_sample(library: &Path, id: &str) {

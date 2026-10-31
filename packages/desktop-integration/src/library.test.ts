@@ -5,7 +5,7 @@ const ID = "3f9c2a1e-8b4d-4c6f-9a2e-1d5b7c9e0f13";
 
 it("keeps a library in memory outside Tauri", async () => {
   const store = connectLibraryStore();
-  const entry = { name: "Cube", body: { kind: "voxel", assembly: { voxels: [8, 1] } } };
+  const entry = { schemaVersion: 6, name: "Cube", assembly: { voxels: [8, 1] } };
   await store.save(ID, entry);
   entry.name = "Changed";
 
