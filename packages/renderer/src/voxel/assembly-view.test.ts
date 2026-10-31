@@ -432,8 +432,13 @@ describe("the assembly view's moving parts (ADR 0024 §7)", () => {
   afterEach(() => view.dispose());
 
   /** The instances whose drawn bone isn't at its rest pose in `assembly`'s body. */
-  const moved = (assembly: VoxelAssembly, bones = drawn().body!.skeleton.bones) => {
-    const rest = buildVoxelBody(assembly).bones;
+  const moved = (
+    assembly: VoxelAssembly,
+    {
+      bones = drawn().body!.skeleton.bones,
+      rest = buildVoxelBody(assembly).bones,
+    }: { bones?: THREE.Bone[]; rest?: readonly THREE.Matrix4[] } = {},
+  ) => {
     return bones.flatMap((bone, i) =>
       bone.matrixWorld.equals(rest[i]!) ? [] : [assembly.instances[i]!.id],
     );
@@ -482,10 +487,11 @@ describe("the assembly view's moving parts (ADR 0024 §7)", () => {
     view.setAssembly(assembly);
     view.setTestWalk({ profile: undefined, submersion: 0, speed: 0 });
     // The tail flicks about every 7 s.
+    const rest = buildVoxelBody(assembly).bones;
     let flicked = false;
     for (let i = 0; i < 60 * 16 && !flicked; i++) {
       runFrames(1);
-      flicked = moved(assembly).includes("tail");
+      flicked = moved(assembly, { rest }).includes("tail");
     }
     expect(flicked).toBe(true);
     // The whole body stands still.
@@ -539,7 +545,12 @@ describe("the assembly view's moving parts (ADR 0024 §7)", () => {
     const { body } = drawn();
     expect(body).not.toBe(old);
     expect(body!.skeleton.bones).toHaveLength(next.instances.length);
-    expect(moved(next, body!.skeleton.bones)).toEqual(["left-arm", "left-hand", "tail", "fin-a"]);
+    expect(moved(next, { bones: body!.skeleton.bones })).toEqual([
+      "left-arm",
+      "left-hand",
+      "tail",
+      "fin-a",
+    ]);
   });
 
   it("moves no part without a motion resolver", () => {

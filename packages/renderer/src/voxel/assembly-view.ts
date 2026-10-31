@@ -180,7 +180,10 @@ interface Built {
   parts: PosedParts | undefined;
   /** The legs the walk steps with (`walkLegs`), with the rig. */
   legs: WalkLegs | undefined;
-  /** Per part: whether it is drawn (not replaced by a ghost), and whether it is tinted. */
+  /**
+   * Per part: whether it is drawn (not replaced by a ghost), and whether it is tinted. Filled by
+   * `showBones`, which must run after every rebuild before `writeBones` reads them.
+   */
   shown: boolean[];
   lit: boolean[];
 }
@@ -362,11 +365,12 @@ export function createAssemblyView(
     if (!built) return;
     const { mesh, tint, body, shown, lit } = built;
     const posed = motion ? built.parts?.bones : undefined;
-    body.bones.forEach((rest, i) => {
-      const bone = posed?.[i] ?? rest;
+    for (let i = 0; i < body.bones.length; i++) {
+      const bone = posed?.[i] ?? body.bones[i];
+      if (!bone) continue;
       mesh.skeleton.bones[i]?.matrixWorld.copy(shown[i] ? bone : COLLAPSED);
       tint.skeleton.bones[i]?.matrixWorld.copy(lit[i] ? bone : COLLAPSED);
-    });
+    }
     // Picking takes the skeleton and the bounds afresh from these; rendering updates the skeleton
     // itself.
     built.boundsStale = true;
