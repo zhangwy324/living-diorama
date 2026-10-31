@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
 
-use crate::storage::{self, read_limited};
+use crate::storage::{self, is_lowercase_uuid, read_limited};
 
 const ENTRY_FILE: &str = "entry.json";
 /// Suffix of a folder being written or deleted. Such a folder is never an entry, and listing
@@ -32,19 +32,10 @@ pub struct StoredEntry {
     pub entry: Value,
 }
 
-/// Whether `id` is a lowercase UUID, the only folder names the library uses. Checked before any
-/// path is built from an ID, so the frontend can't reach outside the library.
-pub fn is_entry_id(id: &str) -> bool {
-    let bytes = id.as_bytes();
-    bytes.len() == 36
-        && bytes.iter().enumerate().all(|(i, &b)| match i {
-            8 | 13 | 18 | 23 => b == b'-',
-            _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
-        })
-}
-
+/// The folder of entry `id`. Entry IDs are lowercase UUIDs, checked before any path is built, so
+/// the frontend can't reach outside the library.
 fn entry_dir(library: &Path, id: &str) -> Result<PathBuf, String> {
-    if is_entry_id(id) {
+    if is_lowercase_uuid(id) {
         Ok(library.join(id))
     } else {
         Err(format!("{id:?} is not a library entry ID"))
@@ -84,7 +75,7 @@ pub fn list(library: &Path) -> Vec<StoredEntry> {
             }
             continue;
         }
-        if !is_entry_id(&name) {
+        if !is_lowercase_uuid(&name) {
             log::warn!("Skipping {}: not a library entry", path.display());
             continue;
         }
@@ -159,10 +150,16 @@ fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// The frontend's library commands. They are async so file access runs off the main thread.
 pub mod commands {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Library operations run one at a time, so a listing never removes the pending folder of a
+    /// save or delete in progress.
+    static LIBRARY: Mutex<()> = Mutex::new(());
 
     #[tauri::command]
     pub async fn list_library(app: AppHandle) -> Result<Vec<StoredEntry>, String> {
-        Ok(list(&library_dir(&app)?))
+        let library = library_dir(&app)?;
+        Ok(storage::locked(&LIBRARY, || list(&library)))
     }
 
     #[tauri::command]
@@ -171,12 +168,14 @@ pub mod commands {
         id: String,
         entry: Value,
     ) -> Result<(), String> {
-        save(&library_dir(&app)?, &id, &entry)
+        let library = library_dir(&app)?;
+        storage::locked(&LIBRARY, || save(&library, &id, &entry))
     }
 
     #[tauri::command]
     pub async fn delete_library_entry(app: AppHandle, id: String) -> Result<(), String> {
-        delete(&library_dir(&app)?, &id)
+        let library = library_dir(&app)?;
+        storage::locked(&LIBRARY, || delete(&library, &id))
     }
 }
 
@@ -214,23 +213,6 @@ mod tests {
 
     fn save_sample(library: &Path, id: &str) {
         save(library, id, &entry(id)).unwrap();
-    }
-
-    #[test]
-    fn accepts_only_lowercase_uuids() {
-        assert!(is_entry_id(ID));
-        for id in [
-            "",
-            "..",
-            r"..\settings",
-            "3F9C2A1E-0000-4000-8000-000000000000",
-            "3f9c2a1e-0000-4000-8000-00000000000",
-            "3f9c2a1e-0000-4000-8000-0000000000000",
-            "3f9c2a1e00000-4000-8000-000000000000",
-            "3f9c2a1e-0000-4000-8000-00000000000g",
-        ] {
-            assert!(!is_entry_id(id), "{id}");
-        }
     }
 
     #[test]

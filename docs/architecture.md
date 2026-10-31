@@ -122,6 +122,10 @@ Rust stores, TypeScript checks, as for the library ([ADR 0019](adr/0019-world-sa
 - **Rust** (`src-tauri/src/world.rs`) keeps the save as text in `world.json` in the data directory, with the save before it as `world.prev.json`. It writes atomically, checks only that the file is JSON, and falls back to the backup when `world.json` is missing, too large, not UTF-8 or not JSON. A file that is there but can't be read (another program holds it, say) is an error instead. `WorldStore` in `desktop-integration` reaches it, with an in-memory version for tests and the browser.
 - **TypeScript** (`world-saving.ts`) restores the save once the library has registered its species, and saves every minute, after a creature is added or taken out, and on quit. Saves run one after another, so an older one never lands after a newer one. The worker parses and validates the text; a save it rejects starts the world fresh, without trying the backup. When loading fails, the world starts fresh and nothing is saved until the next launch, so a save that can't be read for now is never overwritten. With a creature-count override the world is neither loaded nor saved.
 
+### The player's parts
+
+Rust stores, TypeScript checks, as for the library ([ADR 0025](adr/0025-drawing-voxel-parts.md) §6). `src-tauri/src/parts.rs` keeps one `<uuid>.json` per part in `parts/` in the data directory (or `LIVING_DIORAMA_DEV_DATA_DIR` in development builds): the voxel part and the drawing it was made from. It saves through a `.tmp` file and a rename, replacing the part when it is edited, accepts only lowercase UUIDs as IDs, limits each file to 1 MiB and never interprets the contents. A file it can't read is skipped with a log line. `PartsStore` in `desktop-integration` reaches it, with an in-memory version for tests and the browser. Player parts never pass through the simulation worker.
+
 ### Startup
 
 1. The Rust host starts the diagnostics log and writes the version, Windows build and monitors to it, restores the settings, creates the hidden window, places it as the strip and starts the tray.

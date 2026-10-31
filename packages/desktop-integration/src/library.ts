@@ -18,6 +18,7 @@ export interface LibraryStore {
   list(): Promise<StoredLibraryEntry[]>;
   /** Saves a new entry. Rejects if the ID is taken. */
   save(id: string, entry: unknown): Promise<void>;
+  /** Removes an entry. Removing a missing entry does nothing. */
   delete(id: string): Promise<void>;
 }
 
@@ -27,14 +28,12 @@ export interface LibraryStore {
  */
 export function createMemoryLibraryStore(): LibraryStore {
   const entries = new Map<string, unknown>();
-  const find = (id: string) => {
-    if (!entries.has(id)) throw new Error(`No library entry ${id}`);
-    return entries.get(id);
-  };
   return {
     list: () =>
       Promise.resolve(
-        [...entries.keys()].sort().map((id) => ({ id, entry: structuredClone(find(id)) })),
+        [...entries]
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([id, entry]) => ({ id, entry: structuredClone(entry) })),
       ),
     save: (id, entry) =>
       Promise.resolve().then(() => {
@@ -43,7 +42,6 @@ export function createMemoryLibraryStore(): LibraryStore {
       }),
     delete: (id) =>
       Promise.resolve().then(() => {
-        find(id);
         entries.delete(id);
       }),
   };

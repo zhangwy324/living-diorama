@@ -14,5 +14,5 @@ it("keeps a library in memory outside Tauri", async () => {
 
   await store.delete(ID);
   expect(await store.list()).toEqual([]);
-  await expect(store.delete(ID)).rejects.toThrow("No library entry");
+  await expect(store.delete(ID)).resolves.toBeUndefined(); // already gone
 });
