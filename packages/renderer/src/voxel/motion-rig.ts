@@ -32,7 +32,10 @@ export interface RigLeg {
   readonly grounded: boolean;
   /** Where in the gait cycle it swings, in cycles: 0 or ½, so legs alternate. */
   readonly offset: number;
-  /** Its walk swing either way, in radians: so its foot sweeps a quarter stride, capped. */
+  /**
+   * Its walk swing either way, in radians: so its foot sweeps a quarter stride, capped at
+   * `MAX_SWING`; an arm (a limb off the ground beside grounded legs) swings `ARM_SWING` of that.
+   */
   readonly amplitude: number;
 }
 
@@ -71,12 +74,29 @@ export interface MotionRig {
 
 /** A leg's foot sweeps this share of the stride each way: a quarter, so a trot's feet keep pace. */
 const SWEEP_PER_STRIDE = 0.25;
-/** The stride is this many lengths of the longest leg: about 22° of swing for that leg. */
-export const STRIDE_PER_LEG = 1.5;
-/** Strides are kept within these metres, so tiny legs don't patter and huge ones don't crawl. */
-export const STRIDE_RANGE = { min: 0.06, max: 0.6 } as const;
-/** No motion turns a part further than this from its rest, in radians (35°). */
-export const MAX_SWING = (35 * Math.PI) / 180;
+/**
+ * The cadence, in steps per second at `speed` (metres per second, every species' base speed
+ * today), is a leg's own swing as a pendulum, √(g ÷ length) ÷ π, kept within `min` and `max`:
+ * a leg shorter than about 25 cm steps at `max`, a longer one slower. The stride grows to match,
+ * so a short-legged creature takes long strides rather than pattering, and swings its legs up to
+ * `MAX_SWING`. A creature moving faster or slower than `speed` steps faster or slower in
+ * proportion, since the gait follows the distance travelled.
+ *
+ * `speed` mirrors the base speed of every species today: `USER_SPECIES_DEFAULTS.baseSpeed` in
+ * `apps/desktop/src/startup.ts` and the mossling's `baseSpeed` in built-in-content's
+ * `mossling.json`. The renderer isn't told a species' speed, so a species with another base
+ * speed steps proportionally faster or slower than `max`.
+ */
+export const WALK_CADENCE = { speed: 0.6, min: 0.8, max: 2 } as const;
+/** Metres per second², for the pendulum. */
+const GRAVITY = 9.81;
+/** No motion turns a part further than this from its rest, in radians (45°). */
+export const MAX_SWING = (45 * Math.PI) / 180;
+/**
+ * A limb off the ground (an arm) swings through this share of what a leg its length would, so arms
+ * stay smaller than the legs they swing against. With no grounded limb, limbs swing in full.
+ */
+export const ARM_SWING = 0.6;
 /**
  * A part whose lowest cube is within this many metres of the ground contact (y = 0, ADR 0022 §21)
  * is grounded: half the finest cube, more than any part's shrink (`instanceInset`) lifts it.
@@ -160,11 +180,7 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
   const grounded = legs.filter(isGrounded);
   const carrying = grounded.length > 0 ? grounded : legs;
   const longest = carrying.reduce((best, i) => Math.max(best, parts[i]?.length ?? 0), 0);
-  const height = body.measure.height;
-  const stride = Math.min(
-    STRIDE_RANGE.max,
-    Math.max(STRIDE_RANGE.min, STRIDE_PER_LEG * (longest > 0 ? longest : height / 2)),
-  );
+  const stride = strideFor(longest > 0 ? longest : body.measure.height / 2);
 
   // Grounded legs first: per side in X order, alternating, the right side half a cycle on. A
   // limb off the ground (an arm) swings against the frontmost grounded leg on its side, so with
@@ -185,11 +201,12 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
       if (isGrounded(i) && lead === undefined) leading.set(side, offset);
     }
     const sweep = (SWEEP_PER_STRIDE * stride) / Math.max(part.length, 1e-6);
+    const swing = Math.min(MAX_SWING, Math.asin(Math.min(1, sweep)));
     part.leg = {
       front: part.origin.x > centre.x,
       grounded: isGrounded(i),
       offset,
-      amplitude: Math.min(MAX_SWING, Math.asin(Math.min(1, sweep))),
+      amplitude: isGrounded(i) || grounded.length === 0 ? swing : ARM_SWING * swing,
     };
   }
 
@@ -201,6 +218,16 @@ export function buildMotionRig(body: VoxelBody, motionOf: MotionLookup): MotionR
     legs,
     stride,
   };
+}
+
+/**
+ * The stride, in metres per full gait cycle (two steps), of legs `length` metres long: at
+ * `WALK_CADENCE.speed` they step at their pendulum cadence, within `WALK_CADENCE`'s range.
+ */
+export function strideFor(length: number): number {
+  const pendulum = Math.sqrt(GRAVITY / Math.max(length, 1e-6)) / Math.PI;
+  const cadence = Math.min(WALK_CADENCE.max, Math.max(WALK_CADENCE.min, pendulum));
+  return (2 * WALK_CADENCE.speed) / cadence;
 }
 
 /**

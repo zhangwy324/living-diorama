@@ -468,6 +468,39 @@ describe("CreatureBodies", () => {
         body.dispose();
       });
 
+      it("keeps the feet on the ground as the walk leans: the clearance is the feet's, not the body's", async () => {
+        // The torso reaches 10 cm either side of the centre, the one leg's foot 2.5 cm. Lifted
+        // by the torso's reach, the lean would float the foot about 3 mm.
+        const { layer, bodies } = make();
+        bodies.update([of("a")]);
+        await bodies.ready;
+        bodies.update([of("a")]);
+        const mesh = bodyOf(layer, "a") as THREE.SkinnedMesh;
+        const positions = mesh.geometry.getAttribute("position");
+        const skin = mesh.geometry.getAttribute("skinIndex");
+        const point = new THREE.Vector3();
+        const lowest: number[] = [];
+        for (let frame = 0; frame <= 60; frame++) {
+          const time = frame / 60;
+          bodies.update([{ ...of("a"), world: { x: 0.6 * time, y: 0, z: 0 }, animation: "walk" }], {
+            time,
+            realTime: time,
+          });
+          let low = Infinity;
+          for (let v = 0; v < positions.count; v++) {
+            point.fromBufferAttribute(positions, v);
+            point
+              .applyMatrix4(mesh.skeleton.bones[skin.getX(v)]!.matrixWorld)
+              .applyMatrix4(mesh.matrix);
+            low = Math.min(low, point.y);
+          }
+          lowest.push(low);
+        }
+        // Leaning in full by the end, on the ground all the way: within the damped roll and squash.
+        expect(Math.min(...lowest)).toBeGreaterThan(-1e-6);
+        expect(Math.max(...lowest)).toBeLessThan(5e-4);
+      });
+
       it("keeps every part at rest without a motion resolver", async () => {
         const rest = await restLeg();
         const { legs } = await walked(20);

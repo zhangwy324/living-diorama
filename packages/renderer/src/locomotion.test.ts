@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FULL_MOTION_SPEED,
   VOXEL_WALK,
+  groundReach,
   leapMotion,
   walkDip,
   locomotionMotion,
@@ -134,6 +135,15 @@ describe("locomotionMotion", () => {
       expect(walkDip(legs, 0.625)).toBeCloseTo(0.00175, 12); // between samples, linearly
       expect(walkDip(legs, 0)).toBe(0);
       expect(walkDip(legs, 1)).toBeCloseTo(0.004, 12);
+    });
+
+    it("follows the legs through the step: dropped by their drop at the share they are swung", () => {
+      // A quarter step in, the legs are swung through sin(π / 4) of their angle.
+      for (const share of [0.1, 0.25, 0.4]) {
+        const swung = Math.sin(Math.PI * share);
+        const lift = motion({ profile: "walk", legs, travelled: legs.step * (2 + share) }).lift;
+        expect(lift * 0.4).toBeCloseTo(-walkDip(legs, swung), 9);
+      }
     });
 
     it("leaves the swim and the hop as they are", () => {
@@ -333,6 +343,19 @@ describe("locomotionTransform", () => {
       ...[b.minX, b.maxX].map((x) => new THREE.Vector3(x, 0, 0).applyMatrix4(matrix).y + lift),
     );
     expect(lowest).toBeCloseTo(0, 9);
+  });
+
+  it("lifts a tilt by the reach of where the body touches the ground, when it is given", () => {
+    // Feet from 0.1 m behind the pivot to 0.15 m ahead of it, under a body reaching further.
+    const b = { ...body(0), ground: { minX: -0.1, maxX: 0.15, halfDepth: 0.05 } };
+    expect(locomotionTransform(at({ pitch: 0.1 }), b, matrix)).toBeCloseTo(0.15 * Math.sin(0.1));
+    expect(locomotionTransform(at({ pitch: -0.1 }), b, matrix)).toBeCloseTo(0.1 * Math.sin(0.1));
+    expect(locomotionTransform(at({ roll: 0.1 }), b, matrix)).toBeCloseTo(0.05 * Math.sin(0.1));
+    expect(groundReach({ minX: -0.1, maxX: 0.15, minZ: -0.07, maxZ: 0.05 })).toEqual({
+      minX: -0.1,
+      maxX: 0.15,
+      halfDepth: 0.07,
+    });
   });
 });
 

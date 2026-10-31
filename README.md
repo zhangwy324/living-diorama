@@ -37,6 +37,8 @@ Build a creature from parts in the Creation Studio and release it into the diora
 2. **Shape it.** Click a part to select it. Pick one of its colours and a suggested colour, or **Any colour…** for your own. **Turn part** (R) turns it a quarter turn, **Smaller part** (−) and **Bigger part** (+ or =) resize it, and **Delete** removes it. **Smaller creature** and **Bigger creature** resize the whole creature. **Randomize** builds a whole new creature to start from, **Fill empty** puts parts on every free spot and keeps yours, and **Reset** goes back to where you started. **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z) work as in drawing.
 3. **Name it, choose how it moves and release it**, as for a drawn creature below: **Next: how it moves →**, then **Release**.
 
+A built creature moves its parts as it lives: its legs step as it walks, its arms swing, it blinks, twitches its ears and flicks its tail, and when it eats or sleeps its head dips or droops.
+
 To change a creature you built, press **Edit a copy** on it in **My creatures**: the Studio loads a copy to edit, and releasing it adds a new creature, keeping the old one.
 
 ## Drawing a creature

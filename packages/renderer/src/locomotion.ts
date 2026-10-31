@@ -82,9 +82,9 @@ export interface WalkLegs {
   /** Metres per step: half the legs' stride, one footfall of each pair. */
   step: number;
   /**
-   * Metres the body drops as the legs swing out in full, so the lowest foot stays on the ground,
-   * at gait weights evenly from 0 to 1 (the legs swing through the weight times their amplitude);
-   * negative, it rises, where a swung toe would otherwise sink.
+   * Metres the body drops with the legs swung out, so the lowest foot stays on the ground, at
+   * shares of their amplitude evenly from 0 to 1 (the gait's weight times where in the step they
+   * are); negative, it rises, where a swung toe would otherwise sink.
    */
   dips: readonly number[];
 }
@@ -180,16 +180,18 @@ export function walkDip(legs: WalkLegs, w: number): number {
 
 /**
  * The walk of a body whose legs swing (`voxel/part-motion.ts`): the legs swing out in full twice
- * per stride, at the half steps, which is when the feet land. There the body drops by the legs'
- * drop at the weight's swing (`walkDip`), squashes a little, and rolls to the
- * side, and it is back as the legs pass under it.
+ * per stride, at the half steps, which is when the feet land. There the body squashes a little
+ * and rolls to the side, and it is back as the legs pass under it. Every grounded leg swings
+ * through the same share of its amplitude at once (their offsets are 0 or ½ a cycle), the weight
+ * times `|stride|` below, so the body drops by the legs' drop at that share (`walkDip`) all
+ * through the step, keeping the lowest foot on the ground, not only at full swing.
  */
 function voxelWalk(input: LocomotionInput, legs: WalkLegs, w: number, out: LocomotionMotion) {
   const steps = input.travelled / legs.step;
-  const stride = Math.sin(Math.PI * steps); // −1–1 over two steps
-  const splay = 0.5 - 0.5 * Math.cos(TAU * steps); // 1 with the legs swung out in full
+  const stride = Math.sin(Math.PI * steps); // −1–1 over two steps: the legs' swing
+  const splay = stride * stride; // 1 with the legs swung out in full
   const height = Math.max(input.height, 1e-6);
-  out.lift = (-walkDip(legs, w) * splay) / height;
+  out.lift = -walkDip(legs, w * Math.abs(stride)) / height;
   out.roll = w * WALK_ROLL * VOXEL_WALK.roll * stride;
   out.pitch = w * WALK_LEAN;
   const squash = w * WALK_SQUASH * VOXEL_WALK.squash * splay;
@@ -316,6 +318,12 @@ export interface LocomotionBody {
   halfDepth: number;
   /** The pivots on the body, as `placePivots` puts them. */
   pivots: Readonly<Record<LocomotionPivot, THREE.Vector3>>;
+  /**
+   * Where the body touches the ground, set for a body that stands on its feet (a voxel body's
+   * `groundContact`): a tilt is kept above the ground from there rather than from the body's whole
+   * reach, so a lean doesn't lift the feet off the ground. Unset, the reach above is used.
+   */
+  ground?: { minX: number; maxX: number; halfDepth: number } | undefined;
 }
 
 /** The swim's pivot sits this share of the way from the front back towards the tail. */
@@ -336,6 +344,20 @@ export function placePivots(
   body.pivots.centerOfGravity.set(centerOfGravity.x, 0, centerOfGravity.z);
   const front = body.minX + body.maxX - tail.x;
   body.pivots.front.set(front + (tail.x - front) * FRONT_PIVOT_INSET, tail.y, tail.z);
+}
+
+/** A body's `ground` from where it touches the ground (a voxel body's `groundContact`), in metres. */
+export function groundReach(contact: {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}): NonNullable<LocomotionBody["ground"]> {
+  return {
+    minX: contact.minX,
+    maxX: contact.maxX,
+    halfDepth: Math.max(0, contact.maxZ, -contact.minZ),
+  };
 }
 
 const turn = new THREE.Quaternion();
@@ -370,9 +392,10 @@ export function locomotionTransform(
 function groundClearance(motion: LocomotionMotion, body: LocomotionBody, pivot: THREE.Vector3) {
   if (motion.pivot !== "centerOfGravity") return 0;
   const { pitch, roll, scaleXZ } = motion;
+  const reach = body.ground ?? body;
   // Measured from the pivot, since the center of gravity may be placed anywhere along the body.
-  const front = Math.max(0, body.maxX - pivot.x);
-  const back = Math.max(0, pivot.x - body.minX);
+  const front = Math.max(0, reach.maxX - pivot.x);
+  const back = Math.max(0, pivot.x - reach.minX);
   const tilt = (pitch >= 0 ? front : back) * Math.sin(Math.abs(pitch));
-  return (tilt + body.halfDepth * Math.abs(Math.sin(roll))) * scaleXZ;
+  return (tilt + reach.halfDepth * Math.abs(Math.sin(roll))) * scaleXZ;
 }
