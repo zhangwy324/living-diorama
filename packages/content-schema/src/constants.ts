@@ -58,7 +58,7 @@ export const SCHEMA_VERSIONS = {
   structure: 2,
   prop: 2,
   propCategory: 1,
-  species: 1,
+  species: 2,
   partType: 3,
   socketType: 1,
   part: 1,

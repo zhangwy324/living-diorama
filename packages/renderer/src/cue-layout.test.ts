@@ -1,4 +1,3 @@
-import { defaultBody } from "@living-diorama/content-schema";
 import type { Cue, CreatureSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -217,7 +216,6 @@ describe("cue layout in CreatureBodies", () => {
       resolveSpecies: () => ({
         appearance: "x",
         sizeClass: "small",
-        body: { ...defaultBody(), thickness: 0.25 },
       }),
       resolveAsset: () => undefined,
     });

@@ -1,16 +1,11 @@
 import {
   SIZE_CLASSES,
   VoxelAssemblySchema,
-  defaultAnchor,
   validate,
-  type Anchors,
-  type BodyShape,
   type SizeClass,
   type VoxelAssembly,
 } from "@living-diorama/content-schema";
 import * as THREE from "three";
-import { buildBody, fallbackBody, type Body } from "./body/body";
-import { readImage, type ImageReader } from "./body/pixels";
 import {
   CueSprites,
   ScreenScale,
@@ -28,6 +23,7 @@ import {
 } from "./cues";
 import { describeCues, emptyCueBox, layoutCues, type CueBox } from "./cue-layout";
 import { visibleState, type CueVisibility, type VisibilityState } from "./cue-visibility";
+import { fallbackBlock, type FallbackBlock } from "./fallback-block";
 import type { CreaturePose } from "./interpolation";
 import type { SceneLayer } from "./layers";
 import {
@@ -64,9 +60,9 @@ import {
   type PosedParts,
 } from "./voxel/pose-parts";
 
-// Creatures as solid bodies extruded from their drawings, casting shadows from the sun (ADR 0011),
-// or assembled from voxel parts (ADR 0022), true to scale, posed and marked for their cues
-// (ADR 0018 §15).
+// Creatures as bodies assembled from voxel parts (ADR 0022), casting shadows from the sun, true to
+// scale, posed and marked for their cues (ADR 0018 §15). A grey block stands in until a body is
+// built (ADR 0011 §8).
 
 /**
  * Reads a voxel assembly's JSON, not yet checked. Injectable, so bodies can be built in tests
@@ -82,17 +78,9 @@ export const readAssembly: AssemblyReader = async (url) => {
 
 /** What the renderer needs to know about a species. `SpeciesDefinition` fits. */
 export interface RenderSpecies {
-  /**
-   * Asset ref of the appearance: an image drawn facing right, feet at the bottom of the drawing,
-   * or a voxel assembly (ADR 0022 §17).
-   */
+  /** Asset ref of the appearance: a voxel assembly (ADR 0022 §17). */
   appearance: string;
   sizeClass: SizeClass;
-  /**
-   * How the body is built from the image: how deep it is and its anchors. A voxel species has
-   * neither: its cubes give them.
-   */
-  body: BodyShape;
 }
 
 export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;
@@ -100,7 +88,6 @@ export type SpeciesResolver = (speciesId: string) => RenderSpecies | undefined;
 export interface CreatureBodiesOptions {
   resolveSpecies: SpeciesResolver;
   resolveAsset: AssetResolver;
-  readImage?: ImageReader;
   readAssembly?: AssemblyReader;
   /**
    * Part types' roles, for a voxel body's tail anchor (ADR 0022, M19 decisions). Without it no
@@ -123,15 +110,13 @@ export interface CreatureBodiesOptions {
 
 /** A species as drawn: its body, its size and reach in metres, and its anchors as pivots. */
 interface SpeciesLook extends LocomotionBody {
-  /** The fallback block until the drawing's body is built; a voxel species' stand-in. */
-  body: Body;
+  /** The stand-in shown until the voxel body is built, or if it can't be. */
+  block: FallbackBlock;
   /** A voxel species' assembled body once meshed; it then takes the place of `body`. */
   voxel: VoxelBody | undefined;
   /** The voxel body's motion rig, built with it (ADR 0024 §16), and what the walk takes from it. */
   rig: MotionRig | undefined;
   legs: WalkLegs | undefined;
-  /** The species' placed anchors; the others sit where `defaultAnchor` puts them. */
-  anchors: Anchors;
   pivots: Record<LocomotionPivot, THREE.Vector3>;
 }
 
@@ -147,7 +132,7 @@ export interface CreatureFrame {
 
 interface Creature {
   id: string;
-  /** A skinned mesh of its species' voxel body (`voxel`), or a mesh of `SpeciesLook.body`. */
+  /** A skinned mesh of its species' voxel body (`voxel`), or a mesh of `SpeciesLook.block`. */
   mesh: THREE.Mesh;
   /** The voxel body its mesh is skinned to, if any. */
   voxel: VoxelBody | undefined;
@@ -174,10 +159,10 @@ const DEFAULT_UNITS_PER_PIXEL = 0.02;
 
 const byId = (a: Creature, b: Creature) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-/** How far a body reaches back and forward along X, and to each side of its middle plane. */
-function reachOf(body: Body): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
-  body.geometry.computeBoundingBox();
-  const box = body.geometry.boundingBox;
+/** How far a block reaches back and forward along X, and to each side of its middle plane. */
+function reachOf(block: FallbackBlock): Pick<SpeciesLook, "minX" | "maxX" | "halfDepth"> {
+  block.geometry.computeBoundingBox();
+  const box = block.geometry.boundingBox;
   return {
     minX: box?.min.x ?? 0,
     maxX: box?.max.x ?? 0,
@@ -201,18 +186,6 @@ function measureLook(look: SpeciesLook, voxel: VoxelBody): void {
   placePivots(look, cogOnBody, tailOnBody);
 }
 
-/**
- * Puts the pivots of `look` on its current body (ADR 0020 §10), from its anchors: placed, or
- * where `defaultAnchor` puts them.
- */
-function placeAnchors(look: SpeciesLook): void {
-  const { drawing } = look.body;
-  const { centerOfGravity, tail } = look.anchors;
-  drawing.toBody(centerOfGravity ?? defaultAnchor("centerOfGravity", drawing.bounds), cogOnBody);
-  drawing.toBody(tail ?? defaultAnchor("tail", drawing.bounds), tailOnBody);
-  placePivots(look, cogOnBody, tailOnBody);
-}
-
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ONE = new THREE.Vector3(1, 1, 1);
@@ -220,13 +193,12 @@ const ONE = new THREE.Vector3(1, 1, 1);
 export class CreatureBodies {
   readonly #creatures = new Map<string, Creature>();
   readonly #looks = new Map<string, SpeciesLook>();
-  /** Every body built, fallbacks included, for `dispose`. */
-  readonly #bodies: Body[] = [];
+  /** Every fallback block built, for `dispose`. */
+  readonly #blocks: FallbackBlock[] = [];
   readonly #loads: Promise<void>[] = [];
   readonly #layer: SceneLayer;
   readonly #resolveSpecies: SpeciesResolver;
   readonly #resolveAsset: AssetResolver;
-  readonly #readImage: ImageReader;
   readonly #readAssembly: AssemblyReader;
   readonly #partRole: PartRoleResolver | undefined;
   readonly #partMotion: PartMotionResolver | undefined;
@@ -280,7 +252,6 @@ export class CreatureBodies {
     this.#layer = layer;
     this.#resolveSpecies = options.resolveSpecies;
     this.#resolveAsset = options.resolveAsset;
-    this.#readImage = options.readImage ?? readImage;
     this.#readAssembly = options.readAssembly ?? readAssembly;
     this.#partRole = options.partRole;
     this.#partMotion = options.partMotion;
@@ -290,8 +261,8 @@ export class CreatureBodies {
   }
 
   /**
-   * Resolves once every drawing requested so far has been built into a body or failed, and every
-   * voxel assembly read and checked or failed; those are meshed by later `update`s, one a frame.
+   * Resolves once every voxel assembly requested so far has been read and checked, or failed;
+   * those are meshed by later `update`s, one a frame.
    */
   get ready(): Promise<void> {
     return Promise.all(this.#loads).then(() => undefined);
@@ -351,10 +322,6 @@ export class CreatureBodies {
       // real time, as the whole-body cue motion does.
       if (creature.parts) {
         posePartsFrame(creature.parts, motionInputFrom(this.#partInput, input, pose.jump, weights));
-      }
-      if (!look.voxel) {
-        mesh.geometry = look.body.geometry;
-        mesh.material = look.body.material;
       }
 
       // Cues go above the head as it rises and falls, but don't swing aside as it sways.
@@ -431,7 +398,7 @@ export class CreatureBodies {
     this.#disposed = true;
     for (const creature of this.#creatures.values()) removeMesh(creature.mesh);
     this.#creatures.clear();
-    for (const body of this.#bodies) body.dispose();
+    for (const block of this.#blocks) block.dispose();
     for (const body of this.#voxelBodies) body.dispose();
     this.#voxelMaterial?.dispose();
     this.#toMesh.length = 0;
@@ -462,10 +429,10 @@ export class CreatureBodies {
       frontLift(Math.max(0, look.maxX) * cue.scaleXZ, cue.pitch) +
       locomotionTransform(move, look, moveMatrix) -
       pose.submersion * height;
-    // Heading 0 is +Z and the drawing faces +X: turn +X onto (sin h, 0, cos h).
+    // Heading 0 is +Z and the body faces +X: turn +X onto (sin h, 0, cos h).
     position.set(pose.world.x, pose.world.y + lift, pose.world.z);
     base.compose(position, turn.setFromAxisAngle(Y_AXIS, pose.heading - Math.PI / 2), ONE);
-    // The pitch turns about the drawing's own depth axis, so its front dips.
+    // The pitch turns about the body's own depth axis, so its front dips.
     cueMatrix.compose(
       position.set(0, 0, 0),
       turn.setFromAxisAngle(Z_AXIS, -cue.pitch),
@@ -479,7 +446,7 @@ export class CreatureBodies {
   #mesh(id: string, look: SpeciesLook): THREE.Mesh {
     const mesh = look.voxel
       ? skinVoxelBody(look.voxel, (this.#voxelMaterial ??= createVoxelMaterial()))
-      : new THREE.Mesh(look.body.geometry, look.body.material);
+      : new THREE.Mesh(look.block.geometry, look.block.material);
     mesh.name = id;
     mesh.castShadow = true;
     // Placed by `#place`, which composes more than a position, a rotation and a scale can say.
@@ -571,60 +538,38 @@ export class CreatureBodies {
       return undefined;
     }
     const { height } = SIZE_CLASSES[species.sizeClass];
-    const { thickness } = species.body;
-    const block = fallbackBody(height, thickness);
+    const block = fallbackBlock(height);
     const look: SpeciesLook = {
-      body: block,
+      block,
       voxel: undefined,
       rig: undefined,
       legs: undefined,
       height,
       ...reachOf(block),
-      anchors: species.body.anchors ?? {},
       pivots: { centerOfGravity: new THREE.Vector3(), front: new THREE.Vector3() },
     };
-    placeAnchors(look);
-    this.#bodies.push(look.body);
+    placePivots(look, block.centerOfGravity, block.tail);
+    this.#blocks.push(block);
     this.#looks.set(speciesId, look);
 
     const asset = this.#resolveAsset(species.appearance);
-    // A voxel species shows the fallback block until its assembly is read, checked and meshed.
-    if (asset?.kind === "voxel") {
-      this.#loads.push(
-        this.#readAssembly(asset.url).then(
-          (json) => {
-            // Read after `dispose`: nothing may be built any more.
-            if (this.#disposed) return;
-            const parsed = validate(VoxelAssemblySchema, json, species.appearance);
-            if (!parsed.ok) {
-              const details = parsed.diagnostics.map((d) => d.message).join("; ");
-              console.warn(`Invalid voxel assembly ${species.appearance}: ${details}`);
-              return;
-            }
-            this.#toMesh.push({ speciesId, look, assembly: parsed.value });
-          },
-          (error: unknown) => console.warn(`Could not load ${species.appearance}`, error),
-        ),
-      );
-      return look;
-    }
-    if (asset?.kind !== "image") {
-      console.warn(`No image asset for ${species.appearance}`);
+    // The block shows until the assembly is read, checked and meshed.
+    if (asset?.kind !== "voxel") {
+      console.warn(`No voxel asset for ${species.appearance}`);
       return look;
     }
     this.#loads.push(
-      this.#readImage(asset.url).then(
-        (pixels) => {
+      this.#readAssembly(asset.url).then(
+        (json) => {
+          // Read after `dispose`: nothing may be built any more.
           if (this.#disposed) return;
-          const body = buildBody(pixels, height, thickness);
-          if (!body) {
-            console.warn(`No opaque shape in ${species.appearance}`);
+          const parsed = validate(VoxelAssemblySchema, json, species.appearance);
+          if (!parsed.ok) {
+            const details = parsed.diagnostics.map((d) => d.message).join("; ");
+            console.warn(`Invalid voxel assembly ${species.appearance}: ${details}`);
             return;
           }
-          this.#bodies.push(body);
-          look.body = body;
-          Object.assign(look, reachOf(body));
-          placeAnchors(look);
+          this.#toMesh.push({ speciesId, look, assembly: parsed.value });
         },
         (error: unknown) => console.warn(`Could not load ${species.appearance}`, error),
       ),

@@ -71,12 +71,12 @@ function fakeWorker(wallNow = () => 0) {
   };
 }
 
-const drawn = {
-  schemaVersion: 1,
+const puddle = {
+  schemaVersion: 2,
   id: "user:puddle",
   version: "1.0.0",
   name: "Puddle",
-  appearance: "user:puddle/appearance.png",
+  appearance: "user:puddle/assembly.json",
   sizeClass: "medium",
   capabilities: { "core:land": 1 },
   baseSpeed: 0.5,
@@ -274,7 +274,7 @@ describe("simulation client", () => {
 
   it("registers a species, then spawns and despawns its creature", async () => {
     const { client, callbacks, tick } = start();
-    const registering = client.registerSpecies(drawn, "blob:http://localhost/puddle", "image");
+    const registering = client.registerSpecies(puddle, "blob:http://localhost/puddle", "voxel");
     tick();
     await expect(registering).resolves.toEqual({
       ok: true,
@@ -282,8 +282,8 @@ describe("simulation client", () => {
     });
     expect(callbacks.onSpeciesRegistered).toHaveBeenCalledWith(
       "user:puddle",
-      { appearance: drawn.appearance, sizeClass: "medium", body: defaultBody() },
-      { kind: "image", url: "blob:http://localhost/puddle" },
+      { appearance: puddle.appearance, sizeClass: "medium", body: defaultBody() },
+      { kind: "voxel", url: "blob:http://localhost/puddle" },
     );
 
     const spawning = client.spawn("user:puddle");
@@ -298,7 +298,7 @@ describe("simulation client", () => {
 
   it("resolves rejected requests with diagnostics instead of failing", async () => {
     const { client, callbacks, tick } = start();
-    const registering = client.registerSpecies({ ...drawn, behaviors: [] }, "blob:x", "image");
+    const registering = client.registerSpecies({ ...puddle, behaviors: [] }, "blob:x", "voxel");
     const despawning = client.despawn("creature-404");
     tick();
     const registered = await registering;

@@ -5,7 +5,8 @@ import type { Registries } from "@living-diorama/extension-api";
 // amphibian that walks and swims, a second one that prefers the water (#163), a water-only
 // swimmer and a land-only hopper, each living like
 // the mossling (wander, feed, rest, vision). The built-in pack ships only the mossling; these
-// stand in for creatures drawn in the Studio, so they live here and not in built-in content.
+// stand in for creatures made in the Studio, so they live here and not in built-in content. Their
+// appearances are voxel assets with no file behind them (URL "-"): the simulation never reads one.
 // Used by tests, `pnpm sim --species` and `pnpm soak`.
 
 const species = (
@@ -15,11 +16,11 @@ const species = (
   body: { locomotion: { land: { gait: string } } },
   traits: Record<string, number> = {},
 ) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   id,
   version: "1.0.0",
   name,
-  appearance: `${id}.png`,
+  appearance: `${id}.json`,
   sizeClass: "medium",
   capabilities,
   baseSpeed: 0.6,
@@ -29,7 +30,7 @@ const species = (
   body,
 });
 
-/** Walks and swims, at a speed factor of 1 in both, as a drawn species does. */
+/** Walks and swims, at a speed factor of 1 in both, as a Studio species does. */
 export const otter = species(
   "fixture:otter",
   "Otter",
@@ -69,7 +70,7 @@ export function registerHollowCreatures(registries: Registries) {
   return [
     ...registerBuiltInContent(registries),
     ...HOLLOW_CREATURES.flatMap((s) => [
-      registries.assets.register({ id: s.appearance, version: "1.0.0", kind: "image", url: "-" }),
+      registries.assets.register({ id: s.appearance, version: "1.0.0", kind: "voxel", url: "-" }),
       registries.species.register(s),
     ]),
   ];
@@ -77,11 +78,10 @@ export function registerHollowCreatures(registries: Registries) {
 
 /**
  * The registered mossling as the input of a test species made like it (`{ ...mosslingInput(r), id,
- * … }`). Parsing filled in the drawn-only body settings, which a voxel species may not set, so
- * they are left out.
+ * … }`): a fresh copy, so a test can change it.
  */
 export function mosslingInput(registries: Registries) {
   const mossling = registries.species.get("hollow:mossling");
   if (!mossling) throw new Error("The mossling isn't registered");
-  return { ...mossling, body: { locomotion: mossling.body.locomotion } };
+  return { ...mossling };
 }

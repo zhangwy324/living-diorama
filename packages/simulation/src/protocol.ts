@@ -28,7 +28,7 @@ import type { SceneData } from "./world/scene";
 // Messages between the main thread and the simulation Web Worker (roadmap §1.4).
 // Bump PROTOCOL_VERSION on any incompatible change to these types.
 
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 export type { ActionEvent } from "./creatures/action-event";
 
@@ -42,7 +42,7 @@ export type { ActionEvent } from "./creatures/action-event";
 export type RequestCommand =
   /**
    * Adds a species while the world runs, validated like pack content. Its appearance is an asset
-   * of `appearanceKind` (a drawn body's image or a voxel body's assembly) with the ID
+   * of `appearanceKind` (a voxel body's assembly, ADR 0025 §11) with the ID
    * `species.appearance` and the species' version, served from `appearanceUrl`. Only the URL
    * crosses: the worker never sees the file (ADR 0022 §20).
    */
@@ -167,12 +167,12 @@ export interface Limit extends Diagnostic {
 
 /** What the renderer needs of a registered species. */
 export interface SpeciesSummary {
-  /** Asset ref of the appearance: an image, or a voxel assembly. Its asset says which. */
+  /** Asset ref of the appearance: a voxel assembly. */
   appearance: string;
   sizeClass: SizeClass;
   /**
-   * How its body is built from the appearance. A voxel species has only `locomotion`: its cubes
-   * give its shape and anchors, and they stay in its appearance asset (ADR 0022 §17, §20).
+   * How it moves: its `locomotion`. Its cubes give its shape and anchors, and they stay in its
+   * appearance asset (ADR 0022 §17, §20).
    */
   body: BodyShape;
 }

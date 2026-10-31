@@ -27,9 +27,9 @@ const assembly = () => ({
 
 function validEntry() {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     species: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: ID,
       version: "1.0.0",
       name: "Blob",
@@ -97,6 +97,14 @@ describe("parseLibraryEntry", () => {
     ]);
   });
 
+  it("migrates a version 6 entry's species to schema version 2", () => {
+    const entry = validEntry();
+    entry.species.schemaVersion = 1;
+    const result = parseLibraryEntry({ ...entry, schemaVersion: 6 });
+    expect(messages(result)).toEqual([]);
+    expect(result.ok && result.value.species.schemaVersion).toBe(2);
+  });
+
   it("refuses a drawn body", () => {
     // Drawn bodies went at M23: an entry of version 5 that held one fails to load.
     const entry: Record<string, unknown> = validEntry();
@@ -126,15 +134,6 @@ describe("parseLibraryEntry", () => {
     expect(messages(parseLibraryEntry(huge))).toEqual([
       "The body is too large for every size class",
     ]);
-  });
-
-  it.each([
-    ["thickness", 0.4],
-    ["anchors", {}],
-  ])("refuses a species with %s", (key, value) => {
-    const entry = validEntry();
-    entry.species.body = { [key]: value };
-    expect(paths(parseLibraryEntry(entry))).toEqual([`species.body.${key}`]);
   });
 
   it("checks the assembly's structure on load", () => {

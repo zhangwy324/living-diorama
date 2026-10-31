@@ -214,18 +214,6 @@ export const SizeClassSchema = z.enum(
   Object.keys(SIZE_CLASSES) as [keyof typeof SIZE_CLASSES, ...(keyof typeof SIZE_CLASSES)[]],
 );
 
-/**
- * The range of a body's depth from front to back, as a share of its drawn height (ADR 0017 §11).
- * The default is the depth every body had before it could be chosen.
- */
-export const BODY_THICKNESS = { min: 0.1, max: 0.8, default: 0.4 } as const;
-
-/**
- * A drawing's width and height in pixels: the body image (ADR 0011 §1, ADR 0017 §8). Anchors are
- * stored in these pixels (ADR 0020 §10).
- */
-export const DRAWING_SIZE = 256;
-
 /** The ways a creature can move on land (ADR 0020 §1). A gait is a style, not a capability. */
 export const LAND_GAITS = ["walk", "hop"] as const;
 export type LandGait = (typeof LAND_GAITS)[number];
@@ -259,94 +247,18 @@ export const LOCOMOTION_MEDIA = Object.keys(
 ) as readonly LocomotionMedium[];
 
 /**
- * The named points on a body (ADR 0020 §10): the center of gravity, which land movement tilts and
- * squashes about, and the tail, which sets the swim's axis. Every species may have both, and each
- * is optional.
- */
-export const ANCHOR_NAMES = ["centerOfGravity", "tail"] as const;
-export type AnchorName = (typeof ANCHOR_NAMES)[number];
-
-const drawingPixel = (axis: "x" | "y") => {
-  const error = `An anchor's ${axis} must be within the drawing, 0 to ${DRAWING_SIZE}`;
-  return z.number().gte(0, { error }).lte(DRAWING_SIZE, { error });
-};
-
-/** A point on the drawing, in its pixels from the top left (ADR 0020 §10). */
-export const AnchorSchema = z.strictObject({ x: drawingPixel("x"), y: drawingPixel("y") });
-export type Anchor = z.output<typeof AnchorSchema>;
-
-/**
- * The anchors the player placed, by name. An anchor left out sits where `defaultAnchor` puts it.
- */
-export const AnchorsSchema = z.strictObject(
-  Object.fromEntries(ANCHOR_NAMES.map((name) => [name, AnchorSchema.optional()])) as Record<
-    AnchorName,
-    z.ZodOptional<typeof AnchorSchema>
-  >,
-);
-export type Anchors = z.output<typeof AnchorsSchema>;
-
-/**
- * A species' body plan: how its body is built from its appearance (ADR 0011, ADR 0017 §11) and how
- * it moves (ADR 0020 §11). Where it can move is in its capabilities, not here. The gait has a
- * default, so a species without a body plan walks. The drawn-only settings have none: left out,
- * they stay out, so the parsed species says what its pack wrote, and the renderer uses the default
- * thickness and anchors (ADR 0020 §13).
+ * A species' body plan: how it moves (ADR 0020 §11). Its shape, depth and anchors come from its
+ * voxel assembly's cubes (ADR 0022 §20), and where it can move from its capabilities. The gait has
+ * a default, so a species without a body plan walks.
  */
 export const BodyShapeSchema = z.strictObject({
-  /** Depth from front to back as a share of the drawn height. Left out, `BODY_THICKNESS.default`. */
-  thickness: z
-    .number()
-    .gte(BODY_THICKNESS.min, {
-      error: `Thickness must be at least ${BODY_THICKNESS.min} of the height`,
-    })
-    .lte(BODY_THICKNESS.max, {
-      error: `Thickness must be at most ${BODY_THICKNESS.max} of the height`,
-    })
-    .optional(),
   /** The style per medium: for now the land gait. */
   locomotion: BodyLocomotionSchema.prefault({}),
-  /** Left out, every anchor sits where `defaultAnchor` puts it. */
-  anchors: AnchorsSchema.optional(),
 });
 export type BodyShape = z.output<typeof BodyShapeSchema>;
 
-/**
- * Body plan settings only a drawn body has: a voxel body's cubes give its depth and its anchors
- * (ADR 0022, M19 decisions). A voxel species may not set them.
- */
-export const DRAWN_ONLY_BODY_SETTINGS = ["thickness", "anchors"] as const;
-export type DrawnOnlyBodySetting = (typeof DRAWN_ONLY_BODY_SETTINGS)[number];
-
-/** The drawn-only settings a body plan sets: what a voxel species must not have. */
-export const drawnOnlySettings = (body: BodyShape): DrawnOnlyBodySetting[] =>
-  DRAWN_ONLY_BODY_SETTINGS.filter((setting) => body[setting] !== undefined);
-
 /** A body plan with every default: the walk gait alone (ADR 0020 §13). A fresh object. */
 export const defaultBody = (): BodyShape => BodyShapeSchema.parse({});
-
-/** The drawn shape's bounds in drawing pixels: left and top inclusive, right and bottom exclusive. */
-export interface DrawingBounds {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-/**
- * Where an anchor the player didn't place sits (ADR 0020 §10): the center of gravity in the middle
- * of the drawn shape's bounds (only its x is used: the body rocks and squashes about the point on
- * the ground below it); the tail at the middle of the bounds' left edge, the rear, since drawings
- * face right.
- */
-export function defaultAnchor(name: AnchorName, bounds: DrawingBounds): Anchor {
-  switch (name) {
-    case "centerOfGravity":
-      return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
-    case "tail":
-      return { x: bounds.left, y: (bounds.top + bounds.bottom) / 2 };
-  }
-}
 
 export const SpeciesDefinitionSchema = z.strictObject({
   ...header("species"),

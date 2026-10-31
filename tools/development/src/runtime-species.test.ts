@@ -19,14 +19,14 @@ const river = {
   speciesId: "fixture:pebble",
 };
 
-/** A drawn species as the app would send it: a `user` ID, walking and wandering. */
-function drawnSpecies(name: string, sizeClass: SizeClass = "medium") {
+/** A species as the app would send it: a `user` ID, walking and wandering. */
+function userSpecies(name: string, sizeClass: SizeClass = "medium") {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: `user:${name}`,
     version: "1.0.0",
     name,
-    appearance: `user:${name}/appearance.png`,
+    appearance: `user:${name}/assembly.json`,
     sizeClass,
     capabilities: { "core:land": 1 },
     baseSpeed: 0.5,
@@ -36,7 +36,7 @@ function drawnSpecies(name: string, sizeClass: SizeClass = "medium") {
 
 const URL = "blob:http://localhost/drawing";
 
-function expectOk(simulation: Simulation, input: unknown, kind: SpeciesAppearanceKind = "image") {
+function expectOk(simulation: Simulation, input: unknown, kind: SpeciesAppearanceKind = "voxel") {
   const result = simulation.registerSpecies(input, URL, kind);
   expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([]);
 }
@@ -44,7 +44,7 @@ function expectOk(simulation: Simulation, input: unknown, kind: SpeciesAppearanc
 const codes = (result: { ok: boolean; diagnostics?: { code: string }[] }) =>
   result.ok ? [] : (result.diagnostics ?? []).map((d) => d.code);
 
-/** Registers a drawn species of this size mid-run in the Hollow, spawns some and runs on. */
+/** Registers a species of this size mid-run in the Hollow, spawns some and runs on. */
 function runSized(sizeClass: SizeClass, seed: number) {
   const limits: string[] = [];
   const events: SimulationEvent[] = [];
@@ -56,7 +56,7 @@ function runSized(sizeClass: SizeClass, seed: number) {
     onTick: (simulation, tickEvents) => {
       events.push(...tickEvents);
       if (simulation.tick !== 10) return;
-      const result = simulation.registerSpecies(drawnSpecies(sizeClass, sizeClass), URL, "image");
+      const result = simulation.registerSpecies(userSpecies(sizeClass, sizeClass), URL, "voxel");
       if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
       limits.push(...result.value.limits.map((d) => `${d.severity} ${d.code}`));
       for (let n = 0; n < 4; n++) expect(simulation.spawn(`user:${sizeClass}`).ok).toBe(true);
@@ -101,7 +101,7 @@ describe("size limits (ADR 0013)", () => {
 
   it("still reports cut-off areas larger than a square metre, and counts only those", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL, "image");
+    const result = simulation.registerSpecies(userSpecies("boulder", "large"), URL, "voxel");
     if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
     const splits = result.value.limits.filter((d) => d.code === "disconnected_region");
     // West woods: an 18-cell (4.5 m²) island. East meadow: the 163 cells behind the rock; its
@@ -114,7 +114,7 @@ describe("size limits (ADR 0013)", () => {
 
   it("names the structure a creature can't use", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL, "image");
+    const result = simulation.registerSpecies(userSpecies("boulder", "large"), URL, "voxel");
     if (!result.ok) throw new Error(result.diagnostics.map(formatDiagnostic).join("\n"));
     const portals = result.value.limits.filter((d) => d.code === "portal_unusable");
     expect(portals.map((d) => d.message)).toEqual([
@@ -125,7 +125,7 @@ describe("size limits (ADR 0013)", () => {
 
   it("reports no limits for a size that fits everywhere", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    const result = simulation.registerSpecies(drawnSpecies("puddle"), URL, "image");
+    const result = simulation.registerSpecies(userSpecies("puddle"), URL, "voxel");
     expect(result.ok && result.value.limits).toEqual([]);
   });
 });
@@ -141,7 +141,7 @@ describe("runtime species", () => {
       onTick: (simulation, tickEvents) => {
         events.push(...tickEvents);
         if (simulation.tick === 1_000) {
-          expectOk(simulation, drawnSpecies("puddle"));
+          expectOk(simulation, userSpecies("puddle"));
           for (let n = 0; n < 3; n++) expect(simulation.spawn("user:puddle").ok).toBe(true);
         }
         if (simulation.tick === 5_000) {
@@ -158,14 +158,14 @@ describe("runtime species", () => {
     expect(report.eventCounts.creature_spawned).toBe(6);
     expect(report.eventCounts.species_introduced).toBe(2);
     expect(report.eventCounts.creature_despawned).toBe(1);
-    // The drawn creatures wander like the mosslings: over the bridge too.
-    const drawn = new Set(
+    // The added creatures wander like the mosslings: over the bridge too.
+    const added = new Set(
       events.flatMap((e) =>
         e.type === "creature_spawned" && e.speciesId === "user:puddle" ? [e.creatureId] : [],
       ),
     );
     const crossed = events.filter(
-      (e) => e.type === "first_use_of_structure" && drawn.has(e.creatureId),
+      (e) => e.type === "first_use_of_structure" && added.has(e.creatureId),
     );
     expect(crossed.length).toBeGreaterThan(0);
   });
@@ -173,7 +173,7 @@ describe("runtime species", () => {
   it("builds and checks navigation for a new profile", () => {
     const simulation = createSimulation({ ...river, seed: 1 });
     expect(simulation.state.navigations).toHaveLength(1);
-    expectOk(simulation, drawnSpecies("speck", "tiny"));
+    expectOk(simulation, userSpecies("speck", "tiny"));
     expect(simulation.state.navigations).toHaveLength(2);
     expect(simulation.state.pathfinderFor("user:speck")).not.toBe(
       simulation.state.pathfinderFor(river.speciesId),
@@ -187,7 +187,7 @@ describe("runtime species", () => {
       maxDecisionsPer10Seconds: 2,
       onTick: (sim) => {
         if (sim.tick === 100) {
-          expectOk(sim, drawnSpecies("speck", "tiny"));
+          expectOk(sim, userSpecies("speck", "tiny"));
           expect(sim.spawn("user:speck").ok).toBe(true);
         }
       },
@@ -198,10 +198,10 @@ describe("runtime species", () => {
 
   it("rejects a species that can't stand on any spawn point", () => {
     const simulation = createSimulation({ ...river, seed: 1 });
-    const result = simulation.registerSpecies(drawnSpecies("boulder", "large"), URL, "image");
+    const result = simulation.registerSpecies(userSpecies("boulder", "large"), URL, "voxel");
     expect(codes(result)).toEqual(["no_spawn_point"]);
     expect(simulation.state.registries.species.has("user:boulder")).toBe(false);
-    expect(simulation.state.registries.assets.has("user:boulder/appearance.png")).toBe(false);
+    expect(simulation.state.registries.assets.has("user:boulder/assembly.json")).toBe(false);
     expect(simulation.state.navigations).toHaveLength(1);
   });
 
@@ -209,36 +209,36 @@ describe("runtime species", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
     const before = simulation.state.registries.species.size;
     expect(
-      codes(simulation.registerSpecies({ ...drawnSpecies("x"), baseSpeed: -1 }, URL, "image")),
+      codes(simulation.registerSpecies({ ...userSpecies("x"), baseSpeed: -1 }, URL, "voxel")),
     ).toEqual(["too_small"]);
     expect(
       codes(
         simulation.registerSpecies(
-          { ...drawnSpecies("x"), behaviors: ["core:dance"] },
+          { ...userSpecies("x"), behaviors: ["core:dance"] },
           URL,
-          "image",
+          "voxel",
         ),
       ),
     ).toEqual(["unresolved_reference"]);
     expect(
       codes(
         simulation.registerSpecies(
-          { ...drawnSpecies("x"), capabilities: { "core:fly": 1 } },
+          { ...userSpecies("x"), capabilities: { "core:fly": 1 } },
           URL,
-          "image",
+          "voxel",
         ),
       ),
     ).toEqual(["unresolved_reference"]);
-    expect(codes(simulation.registerSpecies(drawnSpecies("x"), "", "image"))).toEqual([
+    expect(codes(simulation.registerSpecies(userSpecies("x"), "", "voxel"))).toEqual([
       "invalid_type",
     ]);
     expect(
       codes(
-        simulation.registerSpecies({ ...drawnSpecies("x"), id: hollow.speciesId }, URL, "image"),
+        simulation.registerSpecies({ ...userSpecies("x"), id: hollow.speciesId }, URL, "voxel"),
       ),
     ).toEqual(["duplicate_id"]);
     expect(simulation.state.registries.species.size).toBe(before);
-    expect(simulation.state.registries.assets.has("user:x/appearance.png")).toBe(false);
+    expect(simulation.state.registries.assets.has("user:x/assembly.json")).toBe(false);
     // The world keeps running.
     expect(simulation.spawn(hollow.speciesId).ok).toBe(true);
     simulation.step();
@@ -246,7 +246,7 @@ describe("runtime species", () => {
 
   it("registers a voxel species' appearance as a voxel asset by URL, and its creatures move", () => {
     const simulation = createSimulation({ ...hollow, seed: 1 });
-    const species = { ...drawnSpecies("cubes"), appearance: "user:cubes/assembly.json" };
+    const species = { ...userSpecies("cubes"), appearance: "user:cubes/assembly.json" };
     const result = simulation.registerSpecies(species, "blob:http://localhost/assembly", "voxel");
     expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([]);
     // Only the kind and the URL are kept: the simulation never reads the assembly.
@@ -258,8 +258,8 @@ describe("runtime species", () => {
     });
     expect(simulation.spawn("user:cubes").ok).toBe(true);
     for (let i = 0; i < 50; i++) simulation.step();
-    // What `ready` sends the main thread: the asset's kind and URL, and only the locomotion of
-    // the body plan. Thickness and anchors are drawn-only; the cubes stay in the asset.
+    // What `ready` sends the main thread: the asset's kind and URL, and the body plan, which is
+    // only its locomotion; the cubes stay in the asset.
     const content = describeContent(simulation);
     expect(content.assets["user:cubes/assembly.json"]).toEqual({
       kind: "voxel",
@@ -270,20 +270,9 @@ describe("runtime species", () => {
       sizeClass: "medium",
       body: { locomotion: { land: { gait: "walk" } } },
     });
-    const drawn = { ...drawnSpecies("drawn"), body: { thickness: 0.6 } };
-    expect(simulation.registerSpecies(drawn, URL, "image").ok).toBe(true);
-    expect(describeContent(simulation).species["user:drawn"]?.body).toHaveProperty(
-      "thickness",
-      0.6,
-    );
-    // A voxel species can't set the drawn-only settings (ADR 0022, M20).
-    const thick = { ...drawnSpecies("thick"), appearance: "user:thick/assembly.json" };
-    const refused = simulation.registerSpecies(
-      { ...thick, body: { thickness: 0.6 } },
-      URL,
-      "voxel",
-    );
-    expect(codes(refused)).toEqual(["drawn_only_setting"]);
+    // Drawn bodies are gone (ADR 0025 §11): a species has no thickness or anchors.
+    const thick = { ...userSpecies("thick"), body: { thickness: 0.6 } };
+    expect(codes(simulation.registerSpecies(thick, URL, "voxel"))).toEqual(["unrecognized_keys"]);
     expect(simulation.state.registries.species.has("user:thick")).toBe(false);
   });
 
@@ -292,20 +281,19 @@ describe("runtime species", () => {
     const before = simulation.state.registries.species.size;
     const assembly = { root: { part: { size: [1, 1, 1], voxels: [1, 1], colors: ["#fff"] } } };
     expect(
-      codes(simulation.registerSpecies({ ...drawnSpecies("x"), assembly }, URL, "voxel")),
+      codes(simulation.registerSpecies({ ...userSpecies("x"), assembly }, URL, "voxel")),
     ).toEqual(["unrecognized_keys"]);
     expect(
-      codes(simulation.registerSpecies({ ...drawnSpecies("x"), body: { assembly } }, URL, "voxel")),
+      codes(simulation.registerSpecies({ ...userSpecies("x"), body: { assembly } }, URL, "voxel")),
     ).toEqual(["unrecognized_keys"]);
     // The worker gets the kind from another thread, so it is checked like the rest.
-    expect(codes(simulation.registerSpecies(drawnSpecies("x"), URL, "model" as never))).toEqual([
-      "invalid_value",
-    ]);
-    expect(codes(simulation.registerSpecies(drawnSpecies("x"), URL, "sound" as never))).toEqual([
-      "invalid_value",
-    ]);
+    for (const kind of ["model", "image", "sound"]) {
+      expect(codes(simulation.registerSpecies(userSpecies("x"), URL, kind as never))).toEqual([
+        "invalid_value",
+      ]);
+    }
     expect(simulation.state.registries.species.size).toBe(before);
-    expect(simulation.state.registries.assets.has("user:x/appearance.png")).toBe(false);
+    expect(simulation.state.registries.assets.has("user:x/assembly.json")).toBe(false);
   });
 
   it("caps the creatures in the world", () => {
@@ -348,9 +336,9 @@ describe("limits query (ADR 0015 §8)", () => {
     const checked = simulation.checkLimits("large", land);
     if (!checked.ok) throw new Error(checked.diagnostics.map(formatDiagnostic).join("\n"));
     const registered = createSimulation({ ...hollow, seed: 1 }).registerSpecies(
-      drawnSpecies("boulder", "large"),
+      userSpecies("boulder", "large"),
       URL,
-      "image",
+      "voxel",
     );
     expect(registered.ok && registered.value.limits).toEqual(checked.value);
     expect(checked.value.filter((d) => d.code === "portal_unusable")).toMatchObject([
@@ -369,7 +357,7 @@ describe("limits query (ADR 0015 §8)", () => {
     expect(simulation.checkLimits("tiny", land)).toEqual(first);
     expect(simulation.state.navigations).toHaveLength(navigations + 1);
     expect(simulation.state.registries.species.values()).toHaveLength(species);
-    expectOk(simulation, drawnSpecies("pip", "tiny"));
+    expectOk(simulation, userSpecies("pip", "tiny"));
     expect(simulation.state.navigations).toHaveLength(navigations + 1);
   });
 

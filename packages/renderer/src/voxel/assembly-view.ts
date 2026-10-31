@@ -7,7 +7,6 @@ import type {
 } from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { PreviewMotion } from "../body/preview";
 import { createSkyLight, createSunLight, SUN_DIRECTION } from "../lighting";
 import type { CueWeights } from "../cues";
 import {
@@ -56,6 +55,25 @@ import { VoxelThumbnails } from "./thumbnails";
 /** What is under the pointer: a marked socket, or a part instance. */
 export type AssemblyPick =
   { kind: "socket"; instance: string; socket: string } | { kind: "part"; instance: string };
+
+/** A way of moving for a preview to play in place (ADR 0020 §8, §9). */
+export interface PreviewMotion {
+  /**
+   * The animation profile, e.g. "walk", "hop" or "swim". Unknown or none plays no motion, as in
+   * the diorama; the body still sits at its submersion.
+   */
+  profile: string | undefined;
+  /**
+   * How far the body sits below a water surface, as a share of its height. Above 0 the ground
+   * grid gives way to a water surface.
+   */
+  submersion: number;
+  /**
+   * Metres per second to move at, in place. At `FULL_MOTION_SPEED` or more a profile plays in
+   * full; 0 shows only what it does at rest (a swimmer's bob).
+   */
+  speed: number;
+}
 
 /** A part shown see-through where it would be placed, before it is (ADR 0023 §4). */
 export interface AssemblyGhost {

@@ -2,7 +2,6 @@ import {
   defaultBody,
   FoodAffordanceParamsSchema,
   formatDiagnostic,
-  parseSpeciesDefinition,
   validate,
   VoxelAssemblySchema,
   type Result,
@@ -26,11 +25,11 @@ import {
 } from "./index";
 
 const species = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "test:pebble",
   version: "0.1.0",
   name: "Pebble",
-  appearance: "test:sprites/pebble.png",
+  appearance: "test:sprites/pebble.json",
   sizeClass: "small",
   capabilities: { "core:land": 1 },
   baseSpeed: 0.6,
@@ -71,15 +70,15 @@ const world = {
   ],
 };
 
-const sprite = {
+const pebbleAssembly = {
   id: species.appearance,
   version: "1.0.0",
-  kind: "image",
-  url: "https://example.test/pebble.png",
+  kind: "voxel",
+  url: "https://example.test/pebble.json",
 };
 
 function withActions(registries: Registries) {
-  expectOk(registries.assets.register(sprite));
+  expectOk(registries.assets.register(pebbleAssembly));
   expectOk(registries.actions.register({ id: "core:idle", version: "1.0.0" }));
   expectOk(registries.actions.register({ id: "core:follow_path", version: "1.2.0" }));
   expectOk(
@@ -356,19 +355,19 @@ describe("resolveReferences", () => {
     before("actions/core:follow_path", "behaviors/core:wander");
     before("behaviors/core:wander", "species/test:pebble");
     before("capabilities/core:land", "species/test:pebble");
-    before(`assets/${sprite.id}`, "species/test:pebble");
+    before(`assets/${pebbleAssembly.id}`, "species/test:pebble");
   });
 
   it("validates assets and checks that a prop type refers to a model", () => {
     const registries = createRegistries();
-    const bad = registries.assets.register({ ...sprite, kind: "sound", url: "", scale: 0 });
+    const bad = registries.assets.register({ ...pebbleAssembly, kind: "sound", url: "", scale: 0 });
     expect(bad.ok ? [] : bad.diagnostics.map((d) => d.path.join("."))).toEqual([
       "kind",
       "url",
       "scale",
     ]);
 
-    expectOk(registries.assets.register(sprite));
+    expectOk(registries.assets.register(pebbleAssembly));
     const prop = (id: string, model: string) => ({
       schemaVersion: 2,
       id,
@@ -377,26 +376,26 @@ describe("resolveReferences", () => {
       model,
       blockRadius: 0,
     });
-    expectOk(registries.props.register(prop("test:flat-thing", sprite.id)));
+    expectOk(registries.props.register(prop("test:flat-thing", pebbleAssembly.id)));
     expectOk(registries.props.register(prop("test:lost-thing", "test:models/gone.glb")));
     expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
-      'error: props/test:flat-thing model: "test:sprites/pebble.png" is an asset of kind image, expected model (invalid_value)',
+      'error: props/test:flat-thing model: "test:sprites/pebble.json" is an asset of kind voxel, expected model (invalid_value)',
       'error: props/test:lost-thing model: "test:models/gone.glb" is not registered in assets (unresolved_reference)',
     ]);
   });
 
-  it("lets a species' appearance be an image or a voxel assembly, not a model", () => {
-    for (const kind of ["image", "voxel", "model"]) {
+  it("lets a species' appearance be a voxel assembly, not a model or an image", () => {
+    for (const kind of ["voxel", "model"]) {
       const registries = createRegistries();
       withActions(registries);
       expectOk(registries.behaviors.register({ id: "core:wander", version: "1.0.0" }));
       const appearance = `test:pebble.${kind}`;
-      expectOk(registries.assets.register({ ...sprite, id: appearance, kind }));
+      expectOk(registries.assets.register({ ...pebbleAssembly, id: appearance, kind }));
       expectOk(registries.species.register({ ...species, appearance }));
       expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual(
         kind === "model"
           ? [
-              'error: species/test:pebble appearance: "test:pebble.model" is an asset of kind model, expected image or voxel (invalid_value)',
+              'error: species/test:pebble appearance: "test:pebble.model" is an asset of kind model, expected voxel (invalid_value)',
             ]
           : [],
       );
@@ -415,7 +414,7 @@ describe("resolveReferences", () => {
         ],
       }),
     );
-    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(registries.assets.register({ ...pebbleAssembly, id: "test:pine.glb", kind: "model" }));
     expectOk(
       registries.props.register({
         schemaVersion: 2,
@@ -444,7 +443,7 @@ describe("resolveReferences", () => {
         paramsSchema: FoodAffordanceParamsSchema,
       }),
     );
-    expectOk(registries.assets.register({ ...sprite, id: "test:bush.glb", kind: "model" }));
+    expectOk(registries.assets.register({ ...pebbleAssembly, id: "test:bush.glb", kind: "model" }));
     expectOk(
       registries.props.register({
         schemaVersion: 2,
@@ -705,7 +704,7 @@ describe("prop categories", () => {
 
   it("checks that a prop type's category is registered", () => {
     const registries = createRegistries();
-    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(registries.assets.register({ ...pebbleAssembly, id: "test:pine.glb", kind: "model" }));
     expectOk(registries.propCategories.register(category("test:trees", "Trees", 10)));
     expectOk(registries.props.register(prop("test:pine", "test:trees")));
     expectOk(registries.props.register(prop("test:loose")));
@@ -717,7 +716,7 @@ describe("prop categories", () => {
 
   it("checks a prop type added with its category, and one whose category is missing", () => {
     const registries = createRegistries();
-    expectOk(registries.assets.register({ ...sprite, id: "test:pine.glb", kind: "model" }));
+    expectOk(registries.assets.register({ ...pebbleAssembly, id: "test:pine.glb", kind: "model" }));
     expectOk(
       addEntries(registries, [
         { registry: "props", input: prop("test:pine", "test:trees") },
@@ -1018,7 +1017,7 @@ describe("voxel species' body plans", () => {
     return registries;
   }
 
-  it("accepts a voxel species with its gait alone, and drawn ones with any setting", () => {
+  it("accepts a voxel species with its gait alone", () => {
     const registries = registered();
     expectOk(registries.species.register(cubes));
     expectOk(
@@ -1028,56 +1027,7 @@ describe("voxel species' body plans", () => {
         body: { locomotion: { land: { gait: "hop" } } },
       }),
     );
-    expectOk(registries.species.register({ ...species, body: { thickness: 0.6, anchors: {} } }));
     expect(resolveReferences(registries).diagnostics).toEqual([]);
-  });
-
-  it("refuses thickness and anchors on a species whose appearance is a voxel asset", () => {
-    const registries = registered();
-    expectOk(
-      registries.species.register({
-        ...cubes,
-        body: { thickness: 0.4, anchors: { tail: { x: 0, y: 0 } } },
-      }),
-    );
-    expect(resolveReferences(registries).diagnostics.map(formatDiagnostic)).toEqual([
-      'error: species/test:cubes body.thickness: "test:cubes" is a voxel species, which has no thickness: its cubes give it (drawn_only_setting)',
-      'error: species/test:cubes body.anchors: "test:cubes" is a voxel species, which has no anchors: its cubes give it (drawn_only_setting)',
-    ]);
-  });
-
-  it("leaves a species whose appearance isn't registered to reference resolution", () => {
-    const registries = registered();
-    expectOk(
-      registries.species.register({
-        ...cubes,
-        appearance: "test:sprites/missing.json",
-        body: { thickness: 0.4 },
-      }),
-    );
-    expect(resolveReferences(registries).diagnostics.map((d) => d.code)).toEqual([
-      "unresolved_reference",
-    ]);
-  });
-
-  it("refuses them on a voxel species added at runtime, and adds nothing", () => {
-    const registries = registered();
-    expect(resolveReferences(registries).diagnostics).toEqual([]);
-    const result = addEntries(registries, [
-      { registry: "species", input: { ...cubes, body: { anchors: {} } } },
-    ]);
-    expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["drawn_only_setting"]);
-    expect(registries.species.size).toBe(0);
-  });
-
-  it("refuses them on a voxel species parsed outside the registry", () => {
-    const registries = registered();
-    expect(resolveReferences(registries).diagnostics).toEqual([]);
-    const parsed = parseSpeciesDefinition({ ...cubes, body: { thickness: 0.4 } });
-    if (!parsed.ok) throw new Error("invalid species");
-    expect(checkReferences(registries, "species", parsed.value).map((d) => d.code)).toEqual([
-      "drawn_only_setting",
-    ]);
   });
 });
 
@@ -1118,15 +1068,15 @@ describe("addEntries", () => {
     const registries = resolved();
     const result = addEntries(registries, [
       { registry: "species", input: species },
-      { registry: "assets", input: sprite },
+      { registry: "assets", input: pebbleAssembly },
     ]);
     expectOk(result);
     expect(result.ok && result.value).toEqual([
       { registry: "species", id: "test:pebble" },
-      { registry: "assets", id: sprite.id },
+      { registry: "assets", id: pebbleAssembly.id },
     ]);
     expect(registries.species.has("test:pebble")).toBe(true);
-    expect(registries.assets.has(sprite.id)).toBe(true);
+    expect(registries.assets.has(pebbleAssembly.id)).toBe(true);
     expect(resolveReferences(registries).diagnostics).toEqual([]);
   });
 
@@ -1134,7 +1084,7 @@ describe("addEntries", () => {
     const registries = resolved();
     const result = addEntries(registries, [
       { registry: "species", input: { ...species, behaviors: ["core:wander", "test:sleep"] } },
-      { registry: "assets", input: sprite },
+      { registry: "assets", input: pebbleAssembly },
     ]);
     expect(result.ok ? [] : result.diagnostics.map(formatDiagnostic)).toEqual([
       'error: species/test:pebble behaviors[1]: "test:sleep" is not registered in behaviors (unresolved_reference)',
@@ -1144,7 +1094,7 @@ describe("addEntries", () => {
 
     const invalid = addEntries(registries, [
       { registry: "species", input: species },
-      { registry: "assets", input: { ...sprite, kind: "sound" } },
+      { registry: "assets", input: { ...pebbleAssembly, kind: "sound" } },
     ]);
     expect(invalid.ok).toBe(false);
     expect(registries.species.size).toBe(0);
@@ -1156,7 +1106,7 @@ describe("addEntries", () => {
     const still = { ...species, capabilities: { "test:sing": 1 } };
     const result = addEntries(registries, [
       { registry: "species", input: still },
-      { registry: "assets", input: sprite },
+      { registry: "assets", input: pebbleAssembly },
     ]);
     expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["no_locomotion"]);
     expect(registries.species.size).toBe(0);
@@ -1168,7 +1118,7 @@ describe("addEntries", () => {
     const result = addEntries(registries, [
       { registry: "species", input: { ...species, capabilities: { "test:swim": 1 } } },
       { registry: "capabilities", input: swim },
-      { registry: "assets", input: sprite },
+      { registry: "assets", input: pebbleAssembly },
     ]);
     expectOk(result);
     expect(registries.species.has("test:pebble")).toBe(true);
@@ -1177,11 +1127,11 @@ describe("addEntries", () => {
 
   it("rejects IDs that are registered or added twice", () => {
     const registries = resolved();
-    expectOk(registries.assets.register(sprite));
+    expectOk(registries.assets.register(pebbleAssembly));
     const result = addEntries(registries, [
       { registry: "species", input: species },
       { registry: "species", input: species },
-      { registry: "assets", input: sprite },
+      { registry: "assets", input: pebbleAssembly },
     ]);
     expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual([
       "duplicate_id",

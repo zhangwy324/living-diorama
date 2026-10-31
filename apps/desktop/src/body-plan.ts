@@ -56,6 +56,6 @@ export function locomotionCapabilities({
  * A voxel species' `body` for this plan: its gait only, since its cubes give its shape and anchors
  * (ADR 0022, M19 decisions).
  */
-export const planVoxelBody = ({ locomotion }: BodyPlanChoice): Pick<BodyShape, "locomotion"> => ({
+export const planVoxelBody = ({ locomotion }: BodyPlanChoice): BodyShape => ({
   locomotion: { land: { gait: locomotion.gait } },
 });

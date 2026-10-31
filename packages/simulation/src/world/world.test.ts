@@ -128,11 +128,11 @@ describe("walkability", () => {
     const registries = createRegistries();
     registerCoreEngine(registries);
     registries.species.register({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: "test:walker",
       version: "1.0.0",
       name: "Walker",
-      appearance: "test:walker.png",
+      appearance: "test:walker.json",
       sizeClass: "medium",
       capabilities: { "core:land": 1 },
       baseSpeed: 1,

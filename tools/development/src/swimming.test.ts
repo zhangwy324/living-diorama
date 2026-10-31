@@ -491,7 +491,7 @@ describe("world checks for swimmers (ADR 0020 §4–§5)", () => {
   it("no longer warns about a connection no registered species can use", () => {
     // Only the vole: nothing can use the shore exit, and nothing swims to the middle spawn point.
     const onlyVole = (r: Registries) => {
-      r.assets.register({ id: vole.appearance, version: "1.0.0", kind: "image", url: "-" });
+      r.assets.register({ id: vole.appearance, version: "1.0.0", kind: "voxel", url: "-" });
       r.species.register(vole);
       r.worlds.register(pondWorld);
     };

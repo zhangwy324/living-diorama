@@ -83,8 +83,7 @@ export interface SpeciesLibrary {
    * `MAX_ASSEMBLY_BYTES` as JSON is refused first (`assembly_too_big`). Its size class is measured
    * from its cubes, and one too large for every class is refused (`too_large`). Its parts must fit
    * the world's part and socket types, checked here, at release, and not when it loads again.
-   * `plan`'s ways of moving give it its capabilities and gait; a voxel species has no placed
-   * anchors. `options.id` is the lowercase UUID to keep it under, a fresh one by default; one
+   * `plan`'s ways of moving give it its capabilities and gait; its cubes give its anchors. `options.id` is the lowercase UUID to keep it under, a fresh one by default; one
    * already used is refused.
    */
   saveVoxel(
@@ -238,7 +237,7 @@ export async function openSpeciesLibrary(
   /**
    * Checks a new entry, registers it and stores it as written. Registered first, so a species the
    * world rejects never reaches the disk. Stored as written, not parsed: parsing fills in
-   * defaults, such as the drawn-only body settings a voxel entry must not hold.
+   * defaults, such as the gait and empty senses, which the entry needn't hold.
    */
   const keepNew = async (
     uuid: string,

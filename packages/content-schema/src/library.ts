@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { drawnOnlySettings, SpeciesDefinitionSchema } from "./definitions";
+import { SCHEMA_VERSIONS } from "./constants";
+import { SpeciesDefinitionSchema } from "./definitions";
 import type { Result } from "./diagnostics";
 import { VoxelAssemblySchema, measureAssembly } from "./voxel-assembly";
 import { migrate, type Migration } from "./migrate";
@@ -10,13 +11,20 @@ import { validate } from "./parse";
 // release can add data by adding a migration.
 
 /** Current data-format version of a library entry. */
-export const LIBRARY_ENTRY_SCHEMA_VERSION = 6;
+export const LIBRARY_ENTRY_SCHEMA_VERSION = 7;
 
 // Version 3 adds the body plan (ADR 0020 §13); version 4 drops its template (ADR 0020, Follow-up:
 // no body templates); version 5 adds the body, drawn or voxel (ADR 0022 §17); version 6 holds only
-// a voxel assembly, as drawn bodies are gone (M23). Older entries are not migrated: no backward
-// compatibility is required yet (AGENTS.md), so they fail to load.
-const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {};
+// a voxel assembly, as drawn bodies are gone (M23); version 7 holds a species of schema version 2,
+// whose body plan has lost the drawn-only thickness and anchors (M23), which a voxel entry never
+// held. Entries before version 6 are not migrated: no backward compatibility is required yet
+// (AGENTS.md), so they fail to load.
+const LIBRARY_ENTRY_MIGRATIONS: Readonly<Record<number, Migration>> = {
+  6: (entry) => ({
+    ...entry,
+    species: { ...(entry.species as object), schemaVersion: SCHEMA_VERSIONS.species },
+  }),
+};
 
 /**
  * The appearance a library species of `speciesId` (e.g. `user:3f9c…`) has: its assembly,
@@ -44,14 +52,6 @@ export const LibraryEntrySchema = z
           code: "custom",
           message: `A library species' appearance is "${appearance}"`,
           path: ["species", "appearance"],
-        });
-      }
-      // Its cubes give its depth and anchors (ADR 0022, M19 decisions).
-      for (const setting of drawnOnlySettings(species.body)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `A voxel species has no ${setting}: its cubes give it`,
-          path: ["species", "body", setting],
         });
       }
       // The size class is stored, and must be the one the cubes give (ADR 0022 §3).

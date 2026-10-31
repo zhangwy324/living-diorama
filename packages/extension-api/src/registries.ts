@@ -14,7 +14,6 @@ import {
   parseStructureDefinition,
   parseWorldDefinition,
   validate,
-  drawnOnlySettings,
   type Affordances,
   type BodyShape,
   type ContentId,
@@ -206,18 +205,18 @@ export interface CapabilityType extends CodeEntry {
 }
 
 /**
- * What an asset's file holds: an image (a drawn species' appearance), a 3D model (a prop) or a
- * voxel assembly as JSON (a voxel species' appearance, ADR 0022 §17).
+ * What an asset's file holds: a 3D model (a prop) or a voxel assembly as JSON (a species'
+ * appearance, ADR 0022 §17).
  */
-export const ASSET_KINDS = ["image", "model", "voxel"] as const;
+export const ASSET_KINDS = ["model", "voxel"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 /**
- * The kinds of asset a species' appearance may be: a drawn body's image or a voxel body's
- * assembly. The simulation carries only the kind and the URL, never the file; the renderer reads
- * it (ADR 0022 §20).
+ * The kinds of asset a species' appearance may be: a voxel body's assembly, now that drawn bodies
+ * are gone (ADR 0025 §11). The simulation carries only the kind and the URL, never the file; the
+ * renderer reads it (ADR 0022 §20).
  */
-export const SPECIES_APPEARANCE_KINDS = ["image", "voxel"] as const satisfies readonly AssetKind[];
+export const SPECIES_APPEARANCE_KINDS = ["voxel"] as const satisfies readonly AssetKind[];
 export type SpeciesAppearanceKind = (typeof SPECIES_APPEARANCE_KINDS)[number];
 
 export const isSpeciesAppearanceKind = (kind: unknown): kind is SpeciesAppearanceKind =>
@@ -579,7 +578,7 @@ const dependencyReferences = (entry: CodeEntry): Reference[] =>
 
 /**
  * A reference to an asset, optionally of given kinds (a prop needs a model; a species'
- * appearance an image or a voxel assembly).
+ * appearance a voxel assembly).
  */
 function assetReference(id: string, path: DiagnosticPath, kinds?: readonly AssetKind[]): Reference {
   if (kinds === undefined) return { registry: "assets", id, path };
@@ -685,25 +684,6 @@ const speciesReferences = (species: SpeciesDefinition): Reference[] => [
   ...rangedReferences("senses", species.senses),
   ...rangedReferences("traits", species.traits),
 ];
-
-/**
- * A voxel species has no drawn-only body settings (ADR 0022, M19 decisions; M20): its cubes give
- * its depth and anchors. Whether the species is voxel is its appearance asset's kind, known only
- * once references resolve; an unregistered asset is left to reference resolution.
- */
-function checkVoxelBodyPlan(species: SpeciesDefinition, lookup: Lookup): Diagnostic[] {
-  const written = drawnOnlySettings(species.body);
-  if (written.length === 0) return [];
-  const appearance = lookup("assets", species.appearance) as AssetEntry | undefined;
-  if (appearance?.kind !== "voxel") return [];
-  return written.map((setting) =>
-    error(
-      "drawn_only_setting",
-      `"${species.id}" is a voxel species, which has no ${setting}: its cubes give it`,
-      ["body", setting],
-    ),
-  );
-}
 
 /**
  * A part's type and the types of its sockets must be registered (ADR 0022 §10, M20). Fits are
@@ -854,10 +834,7 @@ export function createRegistries(): Registries {
     species: new Registry("species", {
       validate: parseSpeciesDefinition,
       references: speciesReferences,
-      check: (species, lookup) => [
-        ...checkSpeciesLocomotion(species, lookup),
-        ...checkVoxelBodyPlan(species, lookup),
-      ],
+      check: checkSpeciesLocomotion,
     }),
     surfaces: new Registry<SurfaceType>("surfaces", {
       validate: validateCodeEntry<SurfaceType>((entry, source) =>

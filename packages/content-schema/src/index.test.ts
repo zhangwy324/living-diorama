@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   allConnections,
-  ANCHOR_NAMES,
-  BODY_THICKNESS,
   allRegions,
-  defaultAnchor,
   defaultBody,
-  DRAWING_SIZE,
   formatDiagnostic,
   parseContentId,
   parsePaletteDefinition,
@@ -20,7 +16,6 @@ import {
   PART_DRAWING_RULES,
   PART_DRAWING_VIEWS,
   PART_MOTIONS,
-  drawnOnlySettings,
   type Diagnostic,
   type Result,
 } from "./index";
@@ -268,11 +263,11 @@ describe("WorldDefinition", () => {
 
 describe("SpeciesDefinition", () => {
   const species = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "test:pebble",
     version: "0.1.0",
     name: "Pebble",
-    appearance: "test:sprites/pebble.png",
+    appearance: "test:pebble/assembly.json",
     sizeClass: "small",
     capabilities: { "core:land": 1 },
     baseSpeed: 0.6,
@@ -283,34 +278,16 @@ describe("SpeciesDefinition", () => {
     expect(parseSpeciesDefinition(species).ok).toBe(true);
   });
 
-  it("leaves out the drawn-only settings a species doesn't write", () => {
-    expect(BODY_THICKNESS.default).toBe(0.4);
-    for (const input of [species, { ...species, body: {} }]) {
-      const parsed = parseSpeciesDefinition(input);
-      expect(parsed.ok && parsed.value.body).toEqual({ locomotion: { land: { gait: "walk" } } });
-      expect(parsed.ok && drawnOnlySettings(parsed.value.body)).toEqual([]);
+  it("refuses the drawn-only thickness and anchors, and the old schema version", () => {
+    // Drawn bodies are gone (ADR 0025 §11): a species' cubes give its depth and anchors.
+    for (const body of [{ thickness: 0.4 }, { anchors: {} }]) {
+      expect(diagnostics(parseSpeciesDefinition({ ...species, body })).map((d) => d.code)).toEqual([
+        "unrecognized_keys",
+      ]);
     }
-    const drawn = parseSpeciesDefinition({ ...species, body: { thickness: 0.4, anchors: {} } });
-    expect(drawn.ok && drawnOnlySettings(drawn.value.body)).toEqual(["thickness", "anchors"]);
-  });
-
-  it("keeps a thickness within its range and rejects one outside it", () => {
-    for (const thickness of [BODY_THICKNESS.min, 0.25, BODY_THICKNESS.max]) {
-      expect(parseSpeciesDefinition({ ...species, body: { thickness } })).toMatchObject({
-        ok: true,
-        value: { body: { thickness } },
-      });
-    }
-    expect(messages(parseSpeciesDefinition({ ...species, body: { thickness: 0.05 } }))).toEqual([
-      "error: body.thickness: Thickness must be at least 0.1 of the height (too_small)",
+    expect(messages(parseSpeciesDefinition({ ...species, schemaVersion: 1 }))).toEqual([
+      "error: schemaVersion: species schema version 1 is not supported (supported: 2) (unsupported_schema_version)",
     ]);
-    expect(messages(parseSpeciesDefinition({ ...species, body: { thickness: 0.9 } }))).toEqual([
-      "error: body.thickness: Thickness must be at most 0.8 of the height (too_big)",
-    ]);
-    const odd = parseSpeciesDefinition({ ...species, body: { thickness: "thin", depth: 1 } });
-    expect(diagnostics(odd).map((d) => d.path)).toEqual(
-      expect.arrayContaining([["body", "thickness"], ["body"]]),
-    );
   });
 
   it("reads a species without a body plan with the walk gait alone", () => {
@@ -322,18 +299,12 @@ describe("SpeciesDefinition", () => {
     ).toMatchObject({ ok: true, value: { body: { locomotion: { land: { gait: "walk" } } } } });
   });
 
-  it("keeps a body plan's gait and anchors", () => {
-    const body = {
-      thickness: 0.3,
-      locomotion: { land: { gait: "hop" } },
-      anchors: { tail: { x: 0, y: 127.5 } },
-    };
+  it("keeps a body plan's gait", () => {
+    const body = { locomotion: { land: { gait: "hop" } } };
     expect(parseSpeciesDefinition({ ...species, body })).toMatchObject({
       ok: true,
       value: { body },
     });
-    const corner = { ...body, anchors: { centerOfGravity: { x: 256, y: 256 } } };
-    expect(parseSpeciesDefinition({ ...species, body: corner }).ok).toBe(true);
   });
 
   it("rejects an unknown gait or medium, and a template", () => {
@@ -355,41 +326,6 @@ describe("SpeciesDefinition", () => {
         (d) => d.code,
       ),
     ).toEqual(["unrecognized_keys"]);
-  });
-
-  it("rejects an anchor outside the drawing", () => {
-    const at = (x: number, y: number) =>
-      parseSpeciesDefinition({ ...species, body: { anchors: { centerOfGravity: { x, y } } } });
-    expect(messages(at(-1, 10))).toEqual([
-      `error: body.anchors.centerOfGravity.x: An anchor's x must be within the drawing, 0 to ${DRAWING_SIZE} (too_small)`,
-    ]);
-    expect(messages(at(10, DRAWING_SIZE + 0.5))).toEqual([
-      `error: body.anchors.centerOfGravity.y: An anchor's y must be within the drawing, 0 to ${DRAWING_SIZE} (too_big)`,
-    ]);
-  });
-
-  it("takes both anchors on any species, and no other", () => {
-    const anchors = { centerOfGravity: { x: 128, y: 128 }, tail: { x: 10, y: 128 } };
-    for (const capabilities of [{ "core:land": 1 }, { "core:swim": 1 }]) {
-      expect(parseSpeciesDefinition({ ...species, capabilities, body: { anchors } })).toMatchObject(
-        { ok: true, value: { body: { anchors } } },
-      );
-    }
-    expect(
-      diagnostics(
-        parseSpeciesDefinition({ ...species, body: { anchors: { nose: { x: 1, y: 1 } } } }),
-      ).map((d) => d.code),
-    ).toEqual(["unrecognized_keys"]);
-  });
-
-  it("places default anchors on the drawn shape's bounds", () => {
-    const bounds = { left: 40, top: 60, right: 200, bottom: 230 };
-    expect(defaultAnchor("centerOfGravity", bounds)).toEqual({ x: 120, y: 145 });
-    expect(defaultAnchor("tail", bounds)).toEqual({ x: 40, y: 145 });
-    for (const name of ANCHOR_NAMES) {
-      const body = { anchors: { [name]: defaultAnchor(name, bounds) } };
-      expect(parseSpeciesDefinition({ ...species, body }).ok).toBe(true);
-    }
   });
 
   it("rejects bad versions, sizes, capabilities and empty behaviors", () => {

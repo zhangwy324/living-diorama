@@ -1,10 +1,4 @@
-import {
-  VoxelAssemblySchema,
-  defaultBody,
-  validate,
-  type BodyShape,
-  type Vec3,
-} from "@living-diorama/content-schema";
+import { VoxelAssemblySchema, validate, type Vec3 } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData, SimulationSnapshot } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -201,28 +195,22 @@ describe("camera limits", () => {
 });
 
 describe("CreatureBodies", () => {
-  /** A 20 × 40 px green rectangle filling its image. */
-  const drawing = {
-    width: 20,
-    height: 40,
-    data: new Uint8Array(20 * 40 * 4).fill(255),
-  };
-  const make = (readImage = vi.fn(async () => drawing), body: Partial<BodyShape> = {}) => {
+  /**
+   * A medium species whose assembly is read with `read`: by default never, so its creatures
+   * show the fallback block, 0.8 m tall, 0.6 m long and 0.32 m deep.
+   */
+  const make = (read: (url: string) => Promise<unknown> = () => new Promise(() => undefined)) => {
     const layer = new SceneLayer("creatures");
+    const readAssembly = vi.fn(read);
     const bodies = new CreatureBodies(layer, {
       resolveSpecies: (id) =>
         id === "test:critter"
-          ? {
-              appearance: "test:img",
-              sizeClass: "medium",
-              body: { ...defaultBody(), thickness: 0.25, ...body },
-            }
+          ? { appearance: "test:critter/assembly.json", sizeClass: "medium" }
           : undefined,
-      resolveAsset: (ref) =>
-        ref === "test:img" ? { kind: "image", url: "critter.png" } : undefined,
-      readImage,
+      resolveAsset: (ref) => ({ kind: "voxel", url: `blob:${ref}` }),
+      readAssembly,
     });
-    return { layer, bodies, readImage };
+    return { layer, bodies, readAssembly };
   };
   const bodyOf = (layer: SceneLayer, id: string) => layer.group.getObjectByName(id) as THREE.Mesh;
   const boxOf = (mesh: THREE.Mesh) => {
@@ -230,24 +218,19 @@ describe("CreatureBodies", () => {
     return mesh.geometry.boundingBox!;
   };
 
-  it("shows a block until the drawing loads, then the body built once per species, as thick as the species says", async () => {
-    const { layer, bodies, readImage } = make();
+  it("shows a fallback block of a fixed depth, one per species, until the body is built", () => {
+    const { layer, bodies, readAssembly } = make();
     const poses = [creature("a", { x: 0, y: 0, z: 0 }), creature("b", { x: 1, y: 0, z: 0 })];
     bodies.update(poses);
-    const block = bodyOf(layer, "a").geometry;
-    expect(block.type).toBe("RoundedBoxGeometry");
-    expect(boxOf(bodyOf(layer, "a")).max.z * 2).toBeCloseTo(0.8 * 0.25);
-    await bodies.ready;
-    bodies.update(poses);
-    expect(readImage).toHaveBeenCalledTimes(1);
+    expect(readAssembly).toHaveBeenCalledTimes(1);
     expect(bodies.count).toBe(2);
-    const body = bodyOf(layer, "a");
-    expect(body.geometry.type).toBe("ExtrudeGeometry");
-    expect(bodyOf(layer, "b").geometry).toBe(body.geometry);
+    const block = bodyOf(layer, "a");
+    expect(block.geometry.type).toBe("RoundedBoxGeometry");
+    expect(bodyOf(layer, "b").geometry).toBe(block.geometry);
     expect(placed(bodyOf(layer, "b")).position.toArray()).toEqual([1, 0, 0]);
-    expect(boxOf(body).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
-    expect(boxOf(body).max.z - boxOf(body).min.z).toBeCloseTo(0.8 * 0.25);
-    expect(body.material).toBeInstanceOf(THREE.MeshStandardMaterial); // faces and walls share it
+    expect(boxOf(block).max.y).toBeCloseTo(0.8); // a medium creature is 0.8 m tall
+    expect(boxOf(block).max.x - boxOf(block).min.x).toBeCloseTo(0.8 * 0.75);
+    expect(boxOf(block).max.z - boxOf(block).min.z).toBeCloseTo(0.8 * 0.4);
   });
 
   describe("voxel species", () => {
@@ -282,23 +265,19 @@ describe("CreatureBodies", () => {
       partRole?: (partType: string) => "tail" | undefined,
       partMotion?: (partType: string) => "swing" | undefined,
     ) => {
-      const readImage = vi.fn(async () => drawing);
       const readAssembly = vi.fn(read);
       const layer = new SceneLayer("creatures");
       const bodies = new CreatureBodies(layer, {
         resolveSpecies: (id) => ({
           appearance: `${id}/assembly.json`,
           sizeClass: "tiny",
-          // A voxel species' summary carries only its locomotion.
-          body: { locomotion: defaultBody().locomotion },
         }),
         resolveAsset: (ref) => ({ kind: "voxel", url: `blob:${ref}` }),
-        readImage,
         readAssembly,
         ...(partRole ? { partRole } : {}),
         ...(partMotion ? { partMotion } : {}),
       });
-      return { layer, bodies, readImage, readAssembly };
+      return { layer, bodies, readAssembly };
     };
     const of = (id: string, speciesId = "test:voxel") => ({
       ...creature(id, { x: 0, y: 0, z: 0 }),
@@ -306,12 +285,11 @@ describe("CreatureBodies", () => {
     });
 
     it("shows the block until the assembly is read and meshed, then a skinned body", async () => {
-      const { layer, bodies, readImage, readAssembly } = make();
+      const { layer, bodies, readAssembly } = make();
       bodies.update([of("a"), of("b")]);
       expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
       await bodies.ready;
       bodies.update([of("a"), of("b")]);
-      expect(readImage).not.toHaveBeenCalled();
       expect(readAssembly).toHaveBeenCalledTimes(1);
       expect(readAssembly).toHaveBeenCalledWith("blob:test:voxel/assembly.json");
       const a = bodyOf(layer, "a") as THREE.SkinnedMesh;
@@ -582,7 +560,7 @@ describe("CreatureBodies", () => {
     });
   });
 
-  it("turns the drawing's facing (+X) to the creature's heading", () => {
+  it("turns the body's facing (+X) to the creature's heading", () => {
     const { layer, bodies } = make();
     const facing = (heading: number) => {
       bodies.update([creature("a", { x: 0, y: 0, z: 0 }, heading)]);
@@ -603,21 +581,16 @@ describe("CreatureBodies", () => {
     expect(layer.group.getObjectByName("a")).toBeUndefined();
   });
 
-  it("makes bodies cast shadows from their faces towards the sun", async () => {
+  it("makes the block cast shadows from its faces towards the sun", () => {
     const { layer, bodies } = make();
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    const sides = (mesh: THREE.Mesh) =>
-      [mesh.material].flat().map((material) => material.shadowSide);
     expect(bodyOf(layer, "a").castShadow).toBe(true);
-    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide]); // the block
-    await bodies.ready;
-    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    expect(sides(bodyOf(layer, "a"))).toEqual([THREE.FrontSide]); // the body
+    expect((bodyOf(layer, "a").material as THREE.Material).shadowSide).toBe(THREE.FrontSide);
   });
 
-  it("draws nothing for an unknown species and keeps the block if the drawing fails", async () => {
+  it("draws nothing for an unknown species and keeps the block if the assembly fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { layer, bodies } = make(vi.fn(() => Promise.reject(new Error("missing"))));
+    const { layer, bodies } = make(() => Promise.reject(new Error("missing")));
     bodies.update([{ ...creature("a", { x: 0, y: 0, z: 0 }), speciesId: "test:other" }]);
     expect(bodies.count).toBe(0);
     bodies.update([creature("b", { x: 0, y: 0, z: 0 })]);
@@ -626,18 +599,28 @@ describe("CreatureBodies", () => {
     expect(bodies.count).toBe(1);
     expect(bodyOf(layer, "b").geometry.type).toBe("RoundedBoxGeometry");
     expect(warn).toHaveBeenCalledWith("No species test:other to draw");
+    expect(warn).toHaveBeenCalledWith(
+      "Could not load test:critter/assembly.json",
+      expect.any(Error),
+    );
+    warn.mockRestore();
   });
 
-  it("keeps the block for a drawing with no opaque shape", async () => {
+  it("keeps the block for a species whose appearance isn't a voxel asset", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const empty = { width: 4, height: 4, data: new Uint8Array(64) };
-    const { layer, bodies } = make(vi.fn(async () => empty));
-    bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-    await bodies.ready;
+    const layer = new SceneLayer("creatures");
+    const bodies = new CreatureBodies(layer, {
+      resolveSpecies: () => ({ appearance: "test:gone.json", sizeClass: "small" }),
+      resolveAsset: () => undefined,
+    });
     bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
     expect(bodyOf(layer, "a").geometry.type).toBe("RoundedBoxGeometry");
-    expect(warn).toHaveBeenCalledWith("No opaque shape in test:img");
+    expect(warn).toHaveBeenCalledWith("No voxel asset for test:gone.json");
+    warn.mockRestore();
   });
+
+  // Whole-body motion, on the fallback block (ADR 0020 §8). A voxel body's parts move as well
+  // (ADR 0024): see the voxel species' tests above.
   describe("animation", () => {
     /** A creature walking along +X at 0.6 m/s, sampled each 1/60 s. */
     const moving = (
@@ -656,17 +639,10 @@ describe("CreatureBodies", () => {
         each?.(frame);
       }
     };
-    /** Builds the drawing's body before the creature moves. */
-    const loaded = async (bodies: CreatureBodies) => {
-      bodies.update([creature("a", { x: 0, y: 0, z: 0 })]);
-      await bodies.ready;
-      bodies.update([]);
-    };
     const box = (layer: SceneLayer) => new THREE.Box3().setFromObject(bodyOf(layer, "a"));
 
-    it("stands still at rest and for an unknown profile, and moves as it walks", async () => {
+    it("stands still at rest and for an unknown profile, and moves as it walks", () => {
       const { layer, bodies } = make();
-      await loaded(bodies);
       const plain = new THREE.Matrix4().compose(
         new THREE.Vector3(1, 0, 0),
         new THREE.Quaternion(),
@@ -686,25 +662,21 @@ describe("CreatureBodies", () => {
       expect(Math.max(...walking) - Math.min(...walking)).toBeGreaterThan(0.02);
     });
 
-    it("keeps a walking and a hopping body on the ground as it tilts and squashes", async () => {
-      // The default center of gravity, and one placed off-centre and high on the body: the body
-      // tilts about the ground below it, so it neither dips below the ground nor floats above it.
-      for (const anchors of [{}, { centerOfGravity: { x: 4, y: 30 } }]) {
-        for (const animation of ["walk", "hop"]) {
-          const { layer, bodies } = make(undefined, { anchors });
-          await loaded(bodies);
-          const lowest: number[] = [];
-          moving(240, { animation }, bodies, () => lowest.push(box(layer).min.y));
-          expect(Math.min(...lowest)).toBeGreaterThanOrEqual(-1e-6);
-          // On the ground at each landing: within a millimetre, many frames of the run.
-          expect(lowest.filter((y) => y < 1e-3).length).toBeGreaterThan(10);
-        }
+    it("keeps a walking and a hopping body on the ground as it tilts and squashes", () => {
+      // The body tilts about the ground below its center of gravity, so it neither dips below the
+      // ground nor floats above it.
+      for (const animation of ["walk", "hop"]) {
+        const { layer, bodies } = make();
+        const lowest: number[] = [];
+        moving(240, { animation }, bodies, () => lowest.push(box(layer).min.y));
+        expect(Math.min(...lowest)).toBeGreaterThanOrEqual(-1e-6);
+        // On the ground at each landing: within a millimetre, many frames of the run.
+        expect(lowest.filter((y) => y < 1e-3).length).toBeGreaterThan(10);
       }
     });
 
-    it("draws the leap in the air on a bank jump, and walks on at pace after landing", async () => {
+    it("draws the leap in the air on a bank jump, and walks on at pace after landing", () => {
       const { layer, bodies } = make();
-      await loaded(bodies);
       moving(30, { animation: "walk" }, bodies);
       // Halfway through the leap the body is plain: no waddle or bob, the arc is in the pose.
       const apex = { x: 0.6 * (31 / 60) + 1.5, y: 0.9, z: 0 };
@@ -726,42 +698,38 @@ describe("CreatureBodies", () => {
       expect(after.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(0.01);
     });
 
-    it("lowers the body by its submersion, a share of its height", async () => {
+    it("lowers the body by its submersion, a share of its height", () => {
       const { layer, bodies } = make();
-      await loaded(bodies);
       bodies.update([{ ...creature("a", { x: 0, y: 2, z: 0 }), submersion: 0.25 }]);
       expect(placed(bodyOf(layer, "a")).position.y).toBeCloseTo(2 - 0.25 * 0.8);
       expect(box(layer).max.y).toBeCloseTo(2 + 0.75 * 0.8);
     });
 
-    it("sways a swimmer about a point near its front, so its tail sweeps", async () => {
-      // The tail placed at the drawing's top-left corner: the line through the body runs along
-      // its top, and the pivot sits on it a quarter of the way back from the front.
-      const swimmer = { anchors: { tail: { x: 0, y: 0 } } };
-      const { layer, bodies } = make(undefined, swimmer);
-      await loaded(bodies);
+    it("sways a swimmer about a point near its front, so its tail sweeps", () => {
+      // The block's tail is the middle of its rear face: the line through the body runs along its
+      // middle, and the pivot sits on it a quarter of the way back from the front.
+      const { layer, bodies } = make();
       const tails: number[] = [];
       const heads: number[] = [];
       moving(120, { animation: "swim" }, bodies, (frame) => {
         const mesh = bodyOf(layer, "a");
         const x = (0.6 * frame) / 60;
-        // The body is 0.4 m long (20 px at 0.02 m/px): front at 0.2 m, pivot at 0.1 m, 0.8 m up.
-        const pivot = new THREE.Vector3(0.1, 0.8, 0).applyMatrix4(mesh.matrix);
+        // The block is 0.6 m long: front at 0.3 m, pivot at 0.15 m, 0.4 m up.
+        const pivot = new THREE.Vector3(0.15, 0.4, 0).applyMatrix4(mesh.matrix);
         // Facing +X, the pivot stays put whichever way the body sways...
-        expect(pivot.x).toBeCloseTo(x + 0.1, 6);
+        expect(pivot.x).toBeCloseTo(x + 0.15, 6);
         expect(pivot.z).toBeCloseTo(0, 6);
         // ...while the tail sweeps from side to side, much further than the front.
-        tails.push(new THREE.Vector3(-0.2, 0.8, 0).applyMatrix4(mesh.matrix).z);
-        heads.push(new THREE.Vector3(0.2, 0.8, 0).applyMatrix4(mesh.matrix).z);
+        tails.push(new THREE.Vector3(-0.3, 0.4, 0).applyMatrix4(mesh.matrix).z);
+        heads.push(new THREE.Vector3(0.3, 0.4, 0).applyMatrix4(mesh.matrix).z);
       });
       const sweep = (zs: number[]) => Math.max(...zs) - Math.min(...zs);
       expect(sweep(tails)).toBeGreaterThan(0.08);
       expect(sweep(tails)).toBeGreaterThan(2.5 * sweep(heads));
     });
 
-    it("keeps a resting swimmer bobbing gently in the water, without swaying", async () => {
+    it("keeps a resting swimmer bobbing gently in the water, without swaying", () => {
       const { layer, bodies } = make();
-      await loaded(bodies);
       const tops: number[] = [];
       const forwards: number[] = [];
       for (let frame = 0; frame <= 180; frame++) {

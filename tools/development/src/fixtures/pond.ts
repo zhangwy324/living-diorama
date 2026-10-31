@@ -103,11 +103,11 @@ export function pond({ id = "fixture:pond", water = 0, cliffs = [] }: PondOption
 export const pondWorld = pond();
 
 const species = (id: string, name: string, capabilities: Record<string, number>) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   id,
   version: "1.0.0",
   name,
-  appearance: `${id}.png`,
+  appearance: `${id}.json`,
   sizeClass: "small",
   capabilities,
   baseSpeed: 0.6,
@@ -128,7 +128,7 @@ export const vole = species("fixture:vole", "Vole", { "core:land": 1 });
 export function registerPond(registries: Registries, world: object = pondWorld) {
   return [
     ...[newt, minnow, vole].flatMap((s) => [
-      registries.assets.register({ id: s.appearance, version: "1.0.0", kind: "image", url: "-" }),
+      registries.assets.register({ id: s.appearance, version: "1.0.0", kind: "voxel", url: "-" }),
       registries.species.register(s),
     ]),
     registries.worlds.register(world),

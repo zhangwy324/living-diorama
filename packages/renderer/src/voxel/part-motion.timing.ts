@@ -6,7 +6,7 @@
  */
 import { VoxelAssemblySchema, validate, type PartMotion } from "@living-diorama/content-schema";
 import * as THREE from "three";
-import { box } from "../body/fixtures/voxel-creature";
+import { box } from "./fixtures/voxel-creature";
 import { buildVoxelBody } from "./body";
 import { composePose } from "./compose-pose";
 import { buildMotionRig } from "./motion-rig";

@@ -31,19 +31,19 @@ Definitions are plain JSON-compatible objects. Keep them in `.json` files (as th
 
 ## Assets
 
-Every file content refers to (a prop model, a creature drawing) is registered in `assets`. The asset's ID is the reference other content uses:
+Every file content refers to (a prop model, a creature's voxel assembly) is registered in `assets`. The asset's ID is the reference other content uses:
 
 ```ts
 registries.assets.register({
   id: "meadow:models/oak.glb",
   version: "1.0.0",
-  kind: "model", // or "image"
+  kind: "model", // or "voxel"
   url: new URL("./assets/oak.glb", import.meta.url).href,
   scale: 2, // metres per model unit; 1 if omitted
 });
 ```
 
-Write `new URL("…", import.meta.url)` literally, so Vite bundles the file. Models are glTF binaries (`.glb`); images are anything the WebView can load. Check the licence of anything you didn't make and keep it next to the files, as the built-in pack does for Kenney's models.
+Write `new URL("…", import.meta.url)` literally, so Vite bundles the file. Models are glTF binaries (`.glb`); voxel assemblies are JSON. Check the licence of anything you didn't make and keep it next to the files, as the built-in pack does for Kenney's models.
 
 ## Props
 
@@ -81,13 +81,13 @@ A placement in the world's `props` names the type and says where it stands:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "meadow:hedgehog",
   "version": "1.0.0",
   "name": "Hedgehog",
-  "appearance": "meadow:sprites/hedgehog.svg",
+  "appearance": "meadow:voxels/hedgehog.json",
   "sizeClass": "small",
-  "body": { "thickness": 0.3 },
+  "body": { "locomotion": { "land": { "gait": "walk" } } },
   "capabilities": { "core:land": 0.8 },
   "baseSpeed": 0.6,
   "behaviors": ["core:wander"],
@@ -96,7 +96,7 @@ A placement in the world's `props` names the type and says where it stands:
 }
 ```
 
-- `appearance` is an image asset the renderer builds a solid body from (see [Drawing an appearance](#drawing-an-appearance)), or a `voxel` asset: an assembly of voxel parts as JSON, in the format of a library entry's, as the built-in mossling's is (`hollow:voxels/mossling.json`, see [Voxel parts](#voxel-parts)). A voxel species takes its depth and anchors from its cubes, so it may not set `body.thickness` or `body.anchors`, and its measured size should be its `sizeClass`.
+- `appearance` is a `voxel` asset: an assembly of voxel parts as JSON, in the format of a library entry's, as the built-in mossling's is (`hollow:voxels/mossling.json`, see [Voxel parts](#voxel-parts)). The species takes its shape, depth and anchors from its cubes, and its measured size should be its `sizeClass`. Until the assembly loads, or if it fails, the creature is a grey block.
 - `sizeClass` sets the creature's size, and the body's height matches it:
 
   | Size class | Radius (m) | Height (m) |
@@ -106,32 +106,17 @@ A placement in the world's `props` names the type and says where it stands:
   | `medium`   |        0.4 |        0.8 |
   | `large`    |        0.8 |        1.6 |
 
-- `body.thickness` (optional) is how deep the body is from front to back, as a share of its height: from 0.1 to 0.8, 0.4 if left out. The Studio's Thickness slider sets it for drawn creatures.
-- The rest of `body` is the body plan ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §10–§11), every field optional; left out, the species walks on land and its anchors sit at their defaults. Where it can move is in `capabilities`, not here:
+- `body` is the body plan ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §11), every field optional; left out, the species walks on land. Where it can move is in `capabilities`, not here:
   - `locomotion.land.gait` is how the creature moves on land, `walk` (the default) or `hop`. It is a style, not a capability: it picks the animation on land and is used only when the species has a land capability.
-  - `anchors` places the body's points, in the drawing's pixels from the top left (0 to 256): `centerOfGravity`, which land movement tilts and squashes about, and `tail`, which sets the swim's axis. Any species may give either or both. The center of gravity can be anywhere on the body; only its x counts, the left–right position the body rocks and squashes about on the ground. An anchor left out sits where the drawing's bounds put it (the middle of the drawn shape for the center of gravity, the middle of its left edge for the tail).
 - `capabilities` maps each capability to a speed factor: the creature moves at `baseSpeed × factor` metres per second. At least one must be a locomotion capability. The engine has two: `core:land` (land and cave regions, slopes up to 35°; its animation is the species' land gait) and `core:swim` (water regions, on the water's surface, lowered by half the body's height). A species may have either or both ([ADR 0020](adr/0020-body-plans-swimming-and-live-edits.md) §1–§2). Where several cover a region, the creature moves with the largest factor. A creature only uses connections whose `requiredCapabilities` it has all of ([ADR 0004](adr/0004-capabilities-actions-connections.md)).
   - A creature that swims and also moves on land jumps between land and water anywhere along a bank, both ways, where the water is at most 0.75 m below the bank and close enough (`maxBankJumpHeight`, `maxBankJumpGap` in [world coordinates](world-coordinates.md)); no connection is needed. A connection that requires `core:swim` (a shore exit) still works, but is only needed where every bank is too high. A water-only species needs a spawn point in the water.
-- `behaviors` lists what decides the creature's next action. The engine has `core:wander` (rest and walk about), `core:feed` (when hungry, eat at remembered food, or explore to find some; it gives the creature `core:hunger`) and `core:rest` (when tired or at night, sleep beside a remembered shelter, its home if it has one, or, knowing none, look for one a few times and then sleep in the open, clear of other sleepers; it gives the creature `core:tiredness`). Species drawn in the Studio get all three, and `core:vision` 8, like the mossling. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
+- `behaviors` lists what decides the creature's next action. The engine has `core:wander` (rest and walk about), `core:feed` (when hungry, eat at remembered food, or explore to find some; it gives the creature `core:hunger`) and `core:rest` (when tired or at night, sleep beside a remembered shelter, its home if it has one, or, knowing none, look for one a few times and then sleep in the open, clear of other sleepers; it gives the creature `core:tiredness`). Species made in the Studio get all three, and `core:vision` 8, like the mossling. A behavior is code: an object with `id`, `version`, `dependencies` and an `evaluate` function (`BehaviorProvider` in [`packages/simulation/src/creatures/contracts.ts`](../packages/simulation/src/creatures/contracts.ts)), registered in `behaviors`. See `core:wander` in `wander.ts`.
 - `senses` (optional) maps each sense the creature has to its strength. A sense left out is one it lacks. The engine registers `core:vision`, its range in metres (1 to 30).
 - `traits` (optional) maps traits to values. A trait left out takes its default. The engine registers `core:nocturnal` (0 sleeps at night, 1 by day; a whole number; default 0), `core:appetite` (scales how fast hunger rises, 0.5 to 2; default 1) and `core:water_preference` (from 0, keeps to land, to 1, keeps to the water; default 0.5, no preference). Water preference matters only to a species that both walks and swims: `core:wander` heads into the water from land with twice the preference times its base chance per walk, and out of it with twice one minus the preference, so 0.5 gives the base chance both ways, 0 never wanders into the water and 1 never wanders out. Eating and sleeping still take a creature to land where its food and shelter are.
 
   Senses and traits are registered in `senses` and `traits` with a `default`, `min` and `max`, and a species value outside that range is an error ([ADR 0018](adr/0018-living-behavior.md) §4). With `integer: true`, the value must also be a whole number. Needs (`core:hunger`, `core:tiredness`) are registered in `needs`. A need's `rateTrait` names the trait that scales its rates (`core:hunger` uses `core:appetite`). A need's or sense's `variation` makes individuals differ: each one's rates or value are scaled once by a factor in [1 − variation, 1 + variation] (0.15 for hunger, tiredness and vision). A creature with `core:vision` notices places offering food or shelter within that many metres, once a second; without it, it learns of a place only on coming within 1 m of it ([ADR 0018](adr/0018-living-behavior.md) §10).
 
 The app spawns the starting creatures listed in [`apps/desktop/src/startup.ts`](../apps/desktop/src/startup.ts). To see a new species, add it there with a count.
-
-### Drawing an appearance
-
-The renderer traces the drawing's outline, with any holes in it, and extrudes it into a slab with straight walls, `body.thickness` of the creature's height thick ([ADR 0011](adr/0011-extruded-creature-bodies.md), [ADR 0017](adr/0017-hollow-bodies-and-fill.md)). The front shows the drawing, the back shows it mirrored, and the walls are coloured like the edge of the drawing beside them.
-
-- **Draw the creature facing right, side on,** with its feet at the bottom. The body turns to the creature's heading, so the drawing is what you see from the side.
-- **Use a transparent background.** A pixel counts as part of the body at 50% opacity or more. Padding around the drawing is ignored: the body is sized to what is drawn.
-- **The walls take the edge's colour.** A dark outline gives dark walls, and a thin brown arm has brown walls. Where two colours meet at the edge, the wall changes colour there.
-- **Undrawn areas are holes.** Every enclosed gap goes right through the body, whatever its size, including slivers left when colouring in up to an outline and pinholes in the anti-aliased edge of a stroke. Colour in fully where the body should be solid.
-- **Avoid hair-thin parts.** The image is read at 256 px on its longer side, and a part under a few pixels wide is lost or comes out much thicker than drawn. Whiskers and antennae work better as solid strokes.
-- **Parts that don't touch become separate slabs,** floating where they were drawn. Touching only at a corner doesn't count; tiny specks are dropped.
-
-Until the image loads, or if it fails or has nothing opaque, the creature is a grey block.
 
 ## Voxel parts
 

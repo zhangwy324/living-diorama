@@ -1,4 +1,3 @@
-import { defaultBody } from "@living-diorama/content-schema";
 import type { CreatureSnapshot, SceneData } from "@living-diorama/simulation";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
@@ -189,7 +188,6 @@ describe("CueVisibility", () => {
       resolveSpecies: () => ({
         appearance: "x",
         sizeClass: "small",
-        body: { ...defaultBody(), thickness: 0.25 },
       }),
       resolveAsset: () => undefined,
       visibility,
