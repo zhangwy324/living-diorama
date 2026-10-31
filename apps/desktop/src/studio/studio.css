@@ -18,7 +18,7 @@ body,
   height: 100%;
 }
 
-/* Build mode and Draw mode, one shown at a time (ADR 0023 §1). */
+/* The Studio's modes, one shown at a time (ADR 0023 §1). */
 .studio-mode {
   display: flex;
   flex: 1;
@@ -108,60 +108,6 @@ body,
   min-height: 0;
 }
 
-.sheet-area {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding: 16px;
-  container-type: size;
-  display: grid;
-  place-items: center;
-}
-
-/* Square, as large as the area allows. */
-.sheet {
-  position: relative;
-  width: min(100cqw, 100cqh);
-  height: min(100cqw, 100cqh);
-}
-
-.drawing {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 4px;
-  background: #ece8dc;
-  cursor: crosshair;
-  touch-action: none;
-}
-
-/* The fill tool's bucket, outlined in white to show on any colour; it fills at the drop's tip. */
-.drawing.filling {
-  cursor:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 16 16'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5h8l-1 7h-6zM3.5 6.5a3 3.5 0 0 1 6 0' stroke='white' stroke-width='3'/%3E%3Cpath d='M2.5 6.5h8l-1 7h-6zM3.5 6.5a3 3.5 0 0 1 6 0' stroke='%231e2a14' stroke-width='1.4'/%3E%3C/g%3E%3Cpath d='M13.5 11.2a1.3 1.3 0 0 1-2.6 0c0-1 1.3-2.7 1.3-2.7s1.3 1.7 1.3 2.7z' fill='%231e2a14' stroke='white' stroke-width='0.8'/%3E%3C/svg%3E")
-      18 19,
-    crosshair;
-}
-
-/* 230 of the canvas's 256 units down. */
-.guide {
-  position: absolute;
-  top: calc(100% * 230 / 256);
-  right: 0;
-  left: 0;
-  border-top: 2px dashed rgb(47 59 47 / 35%);
-  pointer-events: none;
-}
-
-.guide span {
-  position: absolute;
-  right: 8px;
-  bottom: 4px;
-  font-size: 12px;
-  color: rgb(47 59 47 / 60%);
-  user-select: none;
-}
-
 .close-dialog {
   max-width: 360px;
   padding: 20px;
@@ -215,61 +161,6 @@ body,
   overflow-y: auto;
 }
 
-.preview-frame {
-  position: relative;
-  flex: none;
-}
-
-.preview {
-  aspect-ratio: 1;
-  overflow: hidden;
-  border-radius: 4px;
-  background: #cfe3ea;
-}
-
-/* Over the preview's bottom left corner, dark on its light sky. */
-.warning-toggle {
-  position: absolute;
-  bottom: 6px;
-  left: 6px;
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 999px;
-  font: inherit;
-  font-size: 12px;
-  color: #f4f7ee;
-  background: rgb(38 48 38 / 72%);
-  cursor: pointer;
-}
-
-.warning-toggle:hover:not([aria-disabled="true"]) {
-  background: rgb(38 48 38 / 90%);
-}
-
-.warning-toggle[aria-pressed="true"] {
-  background: rgb(110 160 90 / 92%);
-}
-
-.warning-toggle[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.warning-toggle:focus-visible {
-  outline: 2px solid #263026;
-  outline-offset: 2px;
-}
-
-.warning-toggle svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linejoin: round;
-}
-
 .creature-details {
   display: flex;
   flex-direction: column;
@@ -302,7 +193,7 @@ body,
   background: rgb(255 255 255 / 8%);
 }
 
-/* A `.field > span`, so it undoes the caption's small grey text, as the thickness row does. */
+/* A `.field > span`, so it undoes the caption's small grey text. */
 .field .name-row {
   display: flex;
   gap: 6px;
@@ -330,79 +221,6 @@ body,
 
 .suggest-name:hover {
   background: rgb(255 255 255 / 16%);
-}
-
-.sizes {
-  flex-direction: row;
-  flex-wrap: wrap;
-}
-
-.sizes legend {
-  width: 100%;
-  margin-bottom: 4px;
-}
-
-.sizes label {
-  flex: 1;
-}
-
-.sizes input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.sizes span {
-  display: block;
-  padding: 6px 0;
-  border-radius: 6px;
-  text-align: center;
-  background: rgb(255 255 255 / 8%);
-  cursor: pointer;
-}
-
-.sizes label:hover span {
-  background: rgb(255 255 255 / 16%);
-}
-
-.sizes input:checked + span {
-  background: rgb(110 160 90 / 80%);
-}
-
-.sizes .suggested {
-  display: block;
-  min-height: 1.4em;
-  padding-top: 2px;
-  font-size: 11px;
-  line-height: 1.2;
-  text-align: center;
-  /* About 6.6:1 on the panel: small text, so well clear of AA's 4.5:1. */
-  color: rgb(238 243 232 / 75%);
-}
-
-.sizes input:focus-visible + span {
-  outline: 2px solid #eef3e8;
-  outline-offset: 1px;
-}
-
-.thickness .thickness-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: inherit;
-}
-
-.thickness input[type="range"] {
-  flex: 1;
-  min-width: 0;
-  accent-color: rgb(110 160 90);
-}
-
-.thickness output {
-  min-width: 3.5ch;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 .hints {
@@ -467,11 +285,6 @@ body,
   border-radius: 6px;
   font-size: 13px;
   background: rgb(200 67 58 / 30%);
-}
-
-/* No new strokes while a release is on its way: the canvas clears when it lands. */
-.sheet-area.releasing .drawing {
-  pointer-events: none;
 }
 
 .celebration {
@@ -689,7 +502,7 @@ body,
   background: rgb(200 67 58 / 70%);
 }
 
-/* The confirm step (ADR 0020 §12): the body plan, revealed beside a locked drawing. */
+/* The confirm step (ADR 0020 §12): the body plan, revealed beside a locked creature. */
 .tool-groups.locked {
   opacity: 0.4;
 }
@@ -703,9 +516,6 @@ body,
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-}
-.side-panel.planning .preview {
-  animation: reveal-glow 0.9s ease-out;
 }
 .preview-modes {
   flex-direction: row;
@@ -777,32 +587,6 @@ body,
 .toggle input {
   accent-color: #6ea05a;
 }
-.anchor-help {
-  margin: 0;
-  font-size: 13px;
-  color: rgb(238 243 232 / 85%);
-}
-/* With two points, each is a row to pick which one a click on the drawing places. */
-.anchor-choice {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgb(255 255 255 / 6%);
-  cursor: pointer;
-}
-.anchor-choice:hover {
-  background: rgb(255 255 255 / 12%);
-}
-.anchor-choice:has(input:checked) {
-  background: rgb(110 160 90 / 35%);
-}
-.anchor-choice input {
-  margin: 2px 0 0;
-  accent-color: #6ea05a;
-}
-.reset-anchors,
 .step-buttons .back {
   align-self: flex-start;
   padding: 4px 10px;
@@ -814,7 +598,6 @@ body,
   background: transparent;
   cursor: pointer;
 }
-.reset-anchors:disabled,
 .step-buttons .back:disabled {
   opacity: 0.4;
   cursor: default;
@@ -837,63 +620,10 @@ body,
   font-size: 13px;
   background: rgb(242 207 60 / 18%);
 }
-.anchor-layer {
-  position: absolute;
-  inset: 0;
-  background: rgb(47 59 47 / 6%);
-}
-.anchor-layer.placing {
-  cursor: crosshair;
-}
-.anchor-marker {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  margin: -7px 0 0 -7px;
-  border: 2px dashed #c8433a;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.anchor-marker.inactive {
-  opacity: 0.45;
-}
-.anchor-marker.placed {
-  border-style: solid;
-  background: rgb(200 67 58 / 85%);
-  box-shadow: 0 0 0 3px rgb(255 255 255 / 70%);
-}
-.anchor-label {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 0 4px;
-  border-radius: 4px;
-  color: #fff;
-  background: rgb(122 42 36 / 85%);
-}
-.anchor-guide {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  right: 0;
-  font-size: 12px;
-  text-align: center;
-  color: rgb(47 59 47 / 70%);
-  user-select: none;
-}
 @keyframes reveal {
   from {
     opacity: 0;
     transform: translateY(8px);
-  }
-}
-@keyframes reveal-glow {
-  from {
-    box-shadow: 0 0 0 4px rgb(242 207 60 / 80%);
   }
 }
 .body-plan h2:focus {
@@ -903,17 +633,8 @@ body,
   outline: 2px solid #eef3e8;
   outline-offset: 2px;
 }
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 @media (prefers-reduced-motion: reduce) {
-  .body-plan,
-  .side-panel.planning .preview {
+  .body-plan {
     animation: none;
   }
 }
@@ -926,7 +647,7 @@ body,
     #ece8dc;
 }
 
-/* The Build/Draw switch and the toolbar's buttons with words. */
+/* The mode switch and the toolbar's buttons with words. */
 .mode-switch {
   padding-right: 12px;
   border-right: 1px solid rgb(255 255 255 / 14%);

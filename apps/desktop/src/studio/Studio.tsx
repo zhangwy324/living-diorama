@@ -1,14 +1,9 @@
-import {
-  connectLibraryStore,
-  connectStudioWindow,
-  openStudioChannel,
-} from "@living-diorama/desktop-integration";
+import { connectStudioWindow, openStudioChannel } from "@living-diorama/desktop-integration";
 import { createStandaloneVoxelThumbnails } from "@living-diorama/renderer";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   studioClient,
   type LibrarySnapshot,
-  type ReleaseParams,
   type Released,
   type StudioRequests,
   type StudioSpecies,
@@ -16,56 +11,46 @@ import {
 import { AssemblyEditor } from "./AssemblyEditor";
 import { CloseDialog } from "./CloseDialog";
 import { DeleteDialog } from "./DeleteDialog";
-import { DrawMode } from "./DrawMode";
 import { useEditCopy } from "./edit-copy";
 import type { AskLimits } from "./limits";
-import type { StudioMode } from "./modes";
+import { STUDIO_MODES, type StudioMode } from "./modes";
 import { MyCreatures } from "./MyCreatures";
 import { describeFailure, keptMessage, releasedMessage } from "./release";
-import { Thumbnails } from "./thumbnails";
 import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 
-// The Creation Studio's page (ADR 0015, ADR 0023 §1): Build mode and Draw mode side by side in one
-// window, with My creatures beside them. It never starts a simulation and never creates a
-// DesktopShell, so the shell's events and quit_ready stay the strip's.
+// The Creation Studio's page (ADR 0015, ADR 0023 §1): its modes side by side in one window, with My
+// creatures beside them. Build mode is the only one until Draw mode comes back to draw parts
+// (M23). It never starts a simulation and never creates a DesktopShell, so the shell's events and
+// quit_ready stay the strip's.
 
 const studioWindow = connectStudioWindow();
 const channel = openStudioChannel<StudioRequests, LibrarySnapshot>();
-const libraryStore = connectLibraryStore();
 const client = studioClient(channel);
 const askLimits: AskLimits = (sizeClass, locomotion) =>
   channel.request("limits", { sizeClass, locomotion });
-const releaseDrawing = (params: ReleaseParams) => channel.request("release", params);
 
 /** How long "… is off into the world!" stays. */
 const CELEBRATION_MS = 4000;
 
-export const MODE_LABELS: Readonly<Record<StudioMode, string>> = { build: "Build", draw: "Draw" };
+export const MODE_LABELS: Readonly<Record<StudioMode, string>> = { build: "Build" };
 
 export function Studio() {
   // Build is the main way to make a creature, so the Studio opens in it.
   const [mode, setMode] = useState<StudioMode>("build");
   const [closing, setClosing] = useState(false);
   // What each mode would lose on closing.
-  const unsaved = useRef<Record<StudioMode, boolean>>({ build: false, draw: false });
+  const unsaved = useRef<Record<StudioMode, boolean>>({ build: false });
   const onUnsavedBuild = useCallback((value: boolean) => {
     unsaved.current.build = value;
-  }, []);
-  const onUnsavedDraw = useCallback((value: boolean) => {
-    unsaved.current.draw = value;
   }, []);
   const [library, setLibrary] = useState<LibrarySnapshot>();
   const [celebration, setCelebration] = useState<{ text: string; happy: boolean }>();
   // Each mode keeps its own: Build starts with it collapsed, so the 3D view has the room.
-  const [listOpen, setListOpen] = useState<Record<StudioMode, boolean>>({
-    build: false,
-    draw: true,
-  });
+  const [listOpen, setListOpen] = useState<Record<StudioMode, boolean>>({ build: false });
   const [busySpecies, setBusySpecies] = useState<string>();
   const [listMessage, setListMessage] = useState<string>();
   const [deleting, setDeleting] = useState<StudioSpecies>();
   const [, setThumbnailsLoaded] = useState(0);
-  const thumbnails = useRef<Thumbnails>(undefined);
   const voxelThumbnails = useRef<VoxelCreatureThumbnails>(undefined);
   // Edit a copy's latest creature for Build mode (ADR 0023 §3).
   // It asks first when Build mode has a creature that wasn't released.
@@ -81,7 +66,7 @@ export function Studio() {
   useEffect(
     () =>
       studioWindow.onCloseRequested(() => {
-        if (!unsaved.current.build && !unsaved.current.draw) return true;
+        if (!Object.values(unsaved.current).some(Boolean)) return true;
         setClosing(true);
         return false;
       }),
@@ -90,30 +75,17 @@ export function Studio() {
 
   // The library lives in the strip's window: ask for it now, then hear about every change.
   useEffect(() => {
-    const created = new Thumbnails({
-      load: (libraryId) => libraryStore.loadImage(libraryId),
-      onChange: () => setThumbnailsLoaded((n) => n + 1),
-    });
-    thumbnails.current = created;
-    const keep = (snapshot: LibrarySnapshot) => {
-      created.sync(snapshot.species);
-      setLibrary(snapshot);
-    };
-    const stop = channel.onLibraryChanged(keep);
+    const stop = channel.onLibraryChanged(setLibrary);
     channel
       .request("snapshot", undefined)
-      .then(keep)
+      .then(setLibrary)
       .catch((error: unknown) => console.warn("Could not read the species library", error));
-    return () => {
-      stop();
-      created.dispose();
-      thumbnails.current = undefined;
-    };
+    return stop;
   }, []);
 
-  // Voxel species' images are drawn by the Studio from their assemblies (ADR 0023 §19), with a
-  // renderer of its own made only once one is listed: Build mode's view, which could draw them,
-  // lives inside AssemblyEditor and only while it runs.
+  // Species' images are drawn by the Studio from their assemblies (ADR 0023 §19), with a renderer
+  // of its own made only once one is listed: Build mode's view, which could draw them, lives inside
+  // AssemblyEditor and only while it runs.
   useEffect(() => {
     const created = new VoxelCreatureThumbnails({
       fetch: (speciesId) => client.assembly(speciesId),
@@ -176,22 +148,9 @@ export function Studio() {
         onUnsaved={onUnsavedBuild}
         loadRequest={editCopy.loadRequest}
       />
-      <DrawMode
-        active={mode === "draw"}
-        keysEnabled={keysEnabled && mode === "draw"}
-        library={library}
-        modeSwitch={modeSwitch}
-        askLimits={askLimits}
-        release={releaseDrawing}
-        onReleaseStart={onReleaseStart}
-        onReleased={onReleased}
-        onUnsaved={onUnsavedDraw}
-      />
       <MyCreatures
         library={library}
-        thumbnail={(speciesId) =>
-          thumbnails.current?.get(speciesId) ?? voxelThumbnails.current?.get(speciesId)
-        }
+        thumbnail={(speciesId) => voxelThumbnails.current?.get(speciesId)}
         open={listShown}
         onToggle={() => setListOpen((open) => ({ ...open, [mode]: !open[mode] }))}
         busy={busySpecies}
@@ -243,11 +202,15 @@ export function Studio() {
   );
 }
 
-/** The Build/Draw switch, at the start of each mode's toolbar (ADR 0023 §1). */
+/**
+ * The switch between the Studio's modes, at the start of each mode's toolbar (ADR 0023 §1). Nothing
+ * while there is only one mode to be in.
+ */
 export function ModeSwitch(props: { mode: StudioMode; onMode(mode: StudioMode): void }) {
+  if (STUDIO_MODES.length < 2) return null;
   return (
     <div className="tool-group mode-switch" role="group" aria-label="Mode">
-      {(["build", "draw"] as const).map((mode) => (
+      {STUDIO_MODES.map((mode) => (
         <button
           key={mode}
           type="button"

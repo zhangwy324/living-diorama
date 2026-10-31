@@ -2,10 +2,16 @@ import type { ReactNode } from "react";
 import type { LibrarySnapshot, Released } from "../studio-protocol";
 import type { AskLimits } from "./limits";
 
-/** The Studio's two modes (ADR 0023 §1): Build assembles a voxel creature, Draw draws one. */
-export type StudioMode = "build" | "draw";
+/**
+ * The Studio's modes (ADR 0023 §1): Build assembles a voxel creature. Draw mode, which drew a
+ * creature, went with drawn bodies; it comes back to draw parts (M23).
+ */
+export type StudioMode = "build";
 
-/** What the Studio gives each of its modes. Both stay mounted; the one not shown is hidden. */
+/** Every mode, in the order the mode switch shows them. */
+export const STUDIO_MODES: readonly StudioMode[] = ["build"];
+
+/** What the Studio gives each of its modes. All stay mounted; those not shown are hidden. */
 export interface ModeProps {
   /** Whether this mode is shown. */
   active: boolean;
@@ -13,7 +19,7 @@ export interface ModeProps {
   keysEnabled: boolean;
   /** The strip's library, for name suggestions; undefined until it answers. */
   library: LibrarySnapshot | undefined;
-  /** The Build/Draw switch, for the mode's toolbar. */
+  /** The switch between modes, for the mode's toolbar. */
   modeSwitch: ReactNode;
   askLimits: AskLimits;
   /** A release is on its way: the Studio stops saying the last one went. */

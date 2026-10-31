@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { libraryAppearance, parseDrawing, parseLibraryEntry, type Result } from "./index";
+import { libraryAppearance, parseLibraryEntry, type Result } from "./index";
 import { migrate } from "./migrate";
 
 const codes = (result: Result<unknown>) => (result.ok ? [] : result.diagnostics.map((d) => d.code));
@@ -8,133 +8,61 @@ const messages = (result: Result<unknown>) =>
 const paths = (result: Result<unknown>) =>
   result.ok ? [] : result.diagnostics.map((d) => d.path.join("."));
 
-function validDrawing() {
-  return {
-    schemaVersion: 2,
-    canvas: { width: 512, height: 512 },
-    history: [
-      {
-        kind: "stroke",
-        tool: "pen",
-        color: "#3a7d5c",
-        width: 12,
-        points: [10, 20, 0.5, 30, 40, 1],
-      },
-      { kind: "stroke", tool: "eraser", color: "#000000", width: 20, points: [15, 25, 0] },
-    ],
-  };
-}
+const ID = "user:3f9c2a1e-0000-4000-8000-000000000000";
+
+/** A 10 × 15 × 5 cm block of 2.5 cm cubes: tiny. */
+const assembly = () => ({
+  parts: {
+    body: {
+      type: "test:torso",
+      size: { x: 4, y: 6, z: 2 },
+      step: 0.025,
+      colors: ["#7fae5a"],
+      voxels: [48, 1],
+      attach: { x: 2, y: 0, z: 1 },
+    },
+  },
+  instances: [{ id: "body", part: "body" }],
+});
 
 function validEntry() {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     species: {
       schemaVersion: 1,
-      id: "user:3f9c2a1e-0000-4000-8000-000000000000",
+      id: ID,
       version: "1.0.0",
       name: "Blob",
-      appearance: "user:3f9c2a1e-0000-4000-8000-000000000000/appearance.png",
-      sizeClass: "small",
-      body: {
-        thickness: 0.3,
-        locomotion: { land: { gait: "walk" } },
-        anchors: { centerOfGravity: { x: 128, y: 140 } },
-      },
+      appearance: `${ID}/assembly.json`,
+      sizeClass: "tiny",
+      body: { locomotion: { land: { gait: "hop" } } } as Record<string, unknown>,
       capabilities: { "core:land": 1 },
       baseSpeed: 0.6,
       behaviors: ["core:wander", "core:feed", "core:rest"],
       senses: { "core:vision": 8 },
       traits: {},
     },
-    body: { kind: "drawn" },
+    assembly: assembly(),
     createdAt: "2026-10-27T12:00:00.000Z",
   };
 }
 
-describe("parseDrawing", () => {
-  it("accepts a valid drawing", () => {
-    expect(parseDrawing(validDrawing())).toEqual({ ok: true, value: validDrawing() });
-  });
-
-  it("accepts a drawing with nothing in its history", () => {
-    expect(parseDrawing({ ...validDrawing(), history: [] }).ok).toBe(true);
-  });
-
-  it.each([
-    ["points not in threes", [1, 2]],
-    ["pressure above 1", [1, 2, 1.5]],
-    ["negative pressure", [1, 2, -0.1]],
-  ])("rejects %s", (_, points) => {
-    const drawing = validDrawing();
-    drawing.history[0]!.points = points;
-    expect(parseDrawing(drawing).ok).toBe(false);
-  });
-
-  it("rejects a bad colour and an unknown tool", () => {
-    const drawing = validDrawing();
-    drawing.history[0]!.color = "green";
-    drawing.history[1]!.tool = "spray";
-    expect(parseDrawing(drawing).ok).toBe(false);
-  });
-
-  it("accepts a fill between strokes", () => {
-    const { history, ...drawing } = validDrawing();
-    const fill = { kind: "fill", x: 0, y: 511, color: "#3c7fc2" };
-    expect(parseDrawing({ ...drawing, history: [history[0], fill, history[1]] }).ok).toBe(true);
-  });
-
-  it.each([
-    ["between pixels", { x: 1.5, y: 2 }],
-    ["off the top", { x: 1, y: -1 }],
-    ["with no colour", { color: undefined }],
-    ["with a brush width", { width: 10 }],
-  ])("rejects a fill %s", (_, change) => {
-    const fill = { kind: "fill", x: 1, y: 2, color: "#3c7fc2", ...change };
-    expect(parseDrawing({ ...validDrawing(), history: [fill] }).ok).toBe(false);
-  });
-
-  it("rejects an operation of an unknown kind or with none", () => {
-    const [stroke] = validDrawing().history;
-    expect(parseDrawing({ ...validDrawing(), history: [{ ...stroke, kind: "spray" }] }).ok).toBe(
-      false,
-    );
-    const kindless: Record<string, unknown> = { ...stroke };
-    delete kindless.kind;
-    expect(parseDrawing({ ...validDrawing(), history: [kindless] }).ok).toBe(false);
-  });
-
-  it("rejects the strokes of version 1 under version 2", () => {
-    const { history, ...drawing } = validDrawing();
-    expect(parseDrawing({ ...drawing, strokes: history }).ok).toBe(false);
-  });
-
-  it("reads a version 1 drawing, its strokes as the record in the same order", () => {
-    const { history } = validDrawing();
-    const strokes = history.map((stroke) => {
-      const old: Record<string, unknown> = { ...stroke };
-      delete old.kind;
-      return old;
-    });
-    const result = parseDrawing({ schemaVersion: 1, canvas: { width: 512, height: 512 }, strokes });
-    expect(result).toEqual({ ok: true, value: validDrawing() });
-  });
-
-  it("rejects a version 1 drawing with bad strokes", () => {
-    const drawing = { schemaVersion: 1, canvas: { width: 256, height: 256 } };
-    expect(parseDrawing({ ...drawing, strokes: [{ tool: "pen" }] }).ok).toBe(false);
-    expect(parseDrawing({ ...drawing, strokes: [7] }).ok).toBe(false);
-    expect(parseDrawing({ ...drawing, strokes: "none" }).ok).toBe(false);
-  });
-
-  it("rejects a newer version with one clear diagnostic", () => {
-    const result = parseDrawing({ ...validDrawing(), schemaVersion: 3 });
-    expect(codes(result)).toEqual(["unsupported_schema_version"]);
-  });
-});
-
 describe("parseLibraryEntry", () => {
-  it("accepts a valid entry", () => {
-    expect(parseLibraryEntry(validEntry())).toEqual({ ok: true, value: validEntry() });
+  it("accepts a species with its assembly inline", () => {
+    const result = parseLibraryEntry(validEntry());
+    expect(messages(result)).toEqual([]);
+    if (!result.ok) throw new Error("not parsed");
+    expect(result.value.assembly.instances[0]?.rotation).toEqual([0, 0, 0, 1]);
+    expect(result.value.species.body.locomotion.land.gait).toBe("hop");
+  });
+
+  it("parses to an entry which parses again unchanged", () => {
+    const first = parseLibraryEntry(validEntry());
+    if (!first.ok) throw new Error(messages(first).join("\n"));
+    expect(first.value.species.body).toEqual({ locomotion: { land: { gait: "hop" } } });
+    const again = parseLibraryEntry(JSON.parse(JSON.stringify(first.value)));
+    expect(messages(again)).toEqual([]);
+    expect(again.ok && again.value).toEqual(first.value);
   });
 
   it("checks the species like pack content", () => {
@@ -163,97 +91,38 @@ describe("parseLibraryEntry", () => {
     });
   });
 
-  it.each([[1], [2], [3], [4]])("doesn't migrate a version %i entry", (schemaVersion) => {
+  it.each([[1], [2], [3], [4], [5]])("doesn't migrate a version %i entry", (schemaVersion) => {
     expect(codes(parseLibraryEntry({ ...validEntry(), schemaVersion }))).toEqual([
       "missing_migration",
     ]);
   });
 
-  it("needs a body", () => {
+  it("refuses a drawn body", () => {
+    // Drawn bodies went at M23: an entry of version 5 that held one fails to load.
     const entry: Record<string, unknown> = validEntry();
-    delete entry.body;
-    expect(parseLibraryEntry(entry).ok).toBe(false);
-    expect(parseLibraryEntry({ ...validEntry(), body: { kind: "clay" } }).ok).toBe(false);
+    delete entry.assembly;
+    expect(parseLibraryEntry({ ...entry, body: { kind: "drawn" } }).ok).toBe(false);
   });
 
-  it("names a drawn species' image as its appearance", () => {
+  it("names the assembly as its appearance", () => {
+    expect(libraryAppearance("user:abc")).toBe("user:abc/assembly.json");
     const entry = validEntry();
-    entry.species.appearance = `${entry.species.id}/assembly.json`;
+    entry.species.appearance = `${ID}/appearance.png`;
     expect(messages(parseLibraryEntry(entry))).toEqual([
-      `A drawn species' appearance is "${entry.species.id}/appearance.png"`,
+      `A library species' appearance is "${ID}/assembly.json"`,
     ]);
-  });
-});
-
-describe("parseLibraryEntry, voxel bodies", () => {
-  /** A 10 × 15 × 5 cm block of 2.5 cm cubes: tiny. */
-  const assembly = () => ({
-    parts: {
-      body: {
-        type: "test:torso",
-        size: { x: 4, y: 6, z: 2 },
-        step: 0.025,
-        colors: ["#7fae5a"],
-        voxels: [48, 1],
-        attach: { x: 2, y: 0, z: 1 },
-      },
-    },
-    instances: [{ id: "body", part: "body" }],
-  });
-  const voxelEntry = () => {
-    const entry = validEntry();
-    const species: Record<string, unknown> = {
-      ...entry.species,
-      appearance: libraryAppearance(entry.species.id, "voxel"),
-      sizeClass: "tiny",
-      body: { locomotion: { land: { gait: "hop" } } },
-    };
-    return { ...entry, species, body: { kind: "voxel", assembly: assembly() } };
-  };
-
-  it("accepts a voxel species with its assembly inline", () => {
-    const result = parseLibraryEntry(voxelEntry());
-    expect(messages(result)).toEqual([]);
-    if (!result.ok || result.value.body.kind !== "voxel") throw new Error("not a voxel entry");
-    expect(result.value.body.assembly.instances[0]?.rotation).toEqual([0, 0, 0, 1]);
-    expect(result.value.species.body.locomotion.land.gait).toBe("hop");
-  });
-
-  it("parses to an entry without the drawn-only settings, which parses again unchanged", () => {
-    const first = parseLibraryEntry(voxelEntry());
-    if (!first.ok) throw new Error(messages(first).join("\n"));
-    expect(first.value.species.body).toEqual({ locomotion: { land: { gait: "hop" } } });
-    const again = parseLibraryEntry(JSON.parse(JSON.stringify(first.value)));
-    expect(messages(again)).toEqual([]);
-    expect(again.ok && again.value).toEqual(first.value);
-  });
-
-  it("keeps a drawn species' thickness and anchors", () => {
-    const drawn = parseLibraryEntry(validEntry());
-    expect(drawn.ok && drawn.value.species.body).toMatchObject({
-      thickness: 0.3,
-      anchors: { centerOfGravity: { x: 128, y: 140 } },
-    });
-  });
-
-  it("names the assembly as a voxel species' appearance", () => {
-    expect(libraryAppearance("user:abc", "voxel")).toBe("user:abc/assembly.json");
-    expect(libraryAppearance("user:abc", "drawn")).toBe("user:abc/appearance.png");
-    const entry = voxelEntry();
-    entry.species.appearance = `${entry.species.id as string}/appearance.png`;
-    expect(paths(parseLibraryEntry(entry))).toEqual(["species.appearance"]);
   });
 
   it("checks the stored size class against the one the cubes give", () => {
-    const entry = voxelEntry();
+    const entry = validEntry();
     entry.species.sizeClass = "small";
     expect(messages(parseLibraryEntry(entry))).toEqual([
       "The body's size class is tiny, not small",
     ]);
-    const huge = voxelEntry();
-    huge.body.assembly.parts.body.step = 0.1;
-    huge.body.assembly.parts.body.size.y = 20;
-    huge.body.assembly.parts.body.voxels = [160, 1];
+    const huge = validEntry();
+    huge.assembly.parts.body.step = 0.1;
+    huge.assembly.parts.body.size.y = 20;
+    huge.assembly.parts.body.voxels = [160, 1];
     expect(messages(parseLibraryEntry(huge))).toEqual([
       "The body is too large for every size class",
     ]);
@@ -262,16 +131,16 @@ describe("parseLibraryEntry, voxel bodies", () => {
   it.each([
     ["thickness", 0.4],
     ["anchors", {}],
-  ])("refuses a voxel species with %s", (key, value) => {
-    const entry = voxelEntry();
+  ])("refuses a species with %s", (key, value) => {
+    const entry = validEntry();
     entry.species.body = { [key]: value };
     expect(paths(parseLibraryEntry(entry))).toEqual([`species.body.${key}`]);
   });
 
   it("checks the assembly's structure on load", () => {
-    const entry = voxelEntry();
-    entry.body.assembly.parts.body.voxels = [47, 1];
-    expect(paths(parseLibraryEntry(entry))).toEqual(["body.assembly.parts.body.voxels"]);
+    const entry = validEntry();
+    entry.assembly.parts.body.voxels = [47, 1];
+    expect(paths(parseLibraryEntry(entry))).toEqual(["assembly.parts.body.voxels"]);
   });
 });
 

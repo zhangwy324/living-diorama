@@ -1,4 +1,4 @@
-// IDs for species the player draws (roadmap §2.2, ADR 0012). They live in the `user` namespace
+// IDs for species the player makes (roadmap §2.2, ADR 0012). They live in the `user` namespace
 // by convention only: the engine registers and runs them like any pack's species.
 
 export interface UserSpeciesIds {
@@ -6,15 +6,12 @@ export interface UserSpeciesIds {
   uuid: string;
   /** The species ID, e.g. `user:3f9c2a1e-…`. */
   speciesId: string;
-  /** The ID of a drawn body's appearance image, e.g. `user:3f9c2a1e-…/appearance.png`. */
-  appearanceId: string;
 }
 
-/** The IDs of the drawn species stored under `uuid`; a fresh one by default. */
+/** The IDs of the species stored under `uuid`; a fresh one by default. */
 export function userSpeciesIds(uuid: string = crypto.randomUUID()): UserSpeciesIds {
-  const speciesId = `user:${uuid}`;
-  return { uuid, speciesId, appearanceId: `${speciesId}/appearance.png` };
+  return { uuid, speciesId: `user:${uuid}` };
 }
 
-/** The UUID a drawn species is stored under, from its species ID. */
+/** The UUID a species is stored under, from its species ID. */
 export const userSpeciesUuid = (speciesId: string): string => speciesId.replace(/^user:/, "");

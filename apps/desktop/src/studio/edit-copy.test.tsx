@@ -12,13 +12,12 @@ import { MyCreatures } from "./MyCreatures";
 
 const ASSEMBLY = { parts: {}, instances: [] } as unknown as VoxelAssembly;
 
-const species = (n: number, body: "voxel" | "drawn"): StudioSpecies => ({
+const species = (n: number): StudioSpecies => ({
   speciesId: `user:${n}`,
   libraryId: String(n),
   name: `Creature ${n}`,
   sizeClass: "medium",
   createdAt: "2026-10-30T12:00:00.000Z",
-  body,
   available: true,
   limits: [],
   inWorld: 1,
@@ -47,7 +46,7 @@ describe("Edit a copy", () => {
     );
   });
 
-  it("is offered for voxel species only, and asks for the species pressed", async () => {
+  it("is offered for each species, and asks for the species pressed", async () => {
     const onEditCopy = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -55,7 +54,7 @@ describe("Edit a copy", () => {
       root.render(
         <MyCreatures
           library={{
-            species: [species(1, "drawn"), species(2, "voxel")],
+            species: [species(1), species(2)],
             creatures: 2,
             maxCreatures: 20,
           }}
@@ -71,9 +70,10 @@ describe("Edit a copy", () => {
     );
     const buttons = [...container.querySelectorAll("button[title='Edit a copy']")];
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Edit a copy of Creature 1",
       "Edit a copy of Creature 2",
     ]);
-    await act(async () => (buttons[0] as HTMLButtonElement).click());
+    await act(async () => (buttons[1] as HTMLButtonElement).click());
     expect(onEditCopy).toHaveBeenCalledWith(expect.objectContaining({ speciesId: "user:2" }));
     await act(async () => root.unmount());
   });
@@ -115,7 +115,6 @@ async function mountHook(fetch: (id: string) => Promise<{ assembly: VoxelAssembl
     onMode,
     state,
     loads,
-    render,
     /** Presses Edit a copy; the load it started, if it didn't ask first. */
     press: (species: { speciesId: string; name: string }) => {
       const before = loads.length;
@@ -153,30 +152,6 @@ describe("Edit a copy in the Studio", () => {
     const firstKey = hook.get().loadRequest?.key;
     await act(async () => hook.press({ speciesId: "user:1", name: "Pebble" }));
     expect(hook.get().loadRequest?.key).not.toBe(firstKey);
-    await hook.unmount();
-  });
-
-  it("switches to Build when the copy arrives, unless the mode changed meanwhile", async () => {
-    const { fetch, answer } = deferredFetch();
-    const hook = await mountHook(fetch);
-    await hook.render("draw");
-    let pressed!: Promise<void>;
-    await act(async () => {
-      pressed = hook.press({ speciesId: "user:1", name: "Pebble" })!;
-    });
-    await answer("user:1", ASSEMBLY);
-    await act(() => pressed);
-    expect(hook.onMode).toHaveBeenCalledWith("build");
-
-    hook.onMode.mockClear();
-    await act(async () => {
-      pressed = hook.press({ speciesId: "user:2", name: "Twig" })!;
-    });
-    await hook.render("build");
-    await answer("user:2", OTHER);
-    await act(() => pressed);
-    expect(hook.onMode).not.toHaveBeenCalled();
-    expect(hook.get().loadRequest).toMatchObject({ name: "Twig copy" });
     await hook.unmount();
   });
 

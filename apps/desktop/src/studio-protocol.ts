@@ -1,10 +1,4 @@
-import type {
-  Diagnostic,
-  Drawing,
-  Result,
-  SizeClass,
-  VoxelAssembly,
-} from "@living-diorama/content-schema";
+import type { Diagnostic, Result, SizeClass, VoxelAssembly } from "@living-diorama/content-schema";
 import {
   StudioRequestError,
   type RequestHandlers,
@@ -31,13 +25,13 @@ import { userSpeciesIds, userSpeciesUuid } from "./user-species";
 
 /** A species as the Studio lists it: the library's, with its creatures in the world. */
 export type StudioSpecies = LibrarySpecies & {
-  /** The UUID it is stored under, to load its image with (ADR 0014 §1). */
+  /** The UUID it is stored under (ADR 0014 §1). */
   libraryId: string;
   /** How many of its creatures are in the world now. */
   inWorld: number;
 };
 
-/** The species library as the Studio sees it. Images are not included: the Studio loads them. */
+/** The species library as the Studio sees it. Images are not included: the Studio draws them. */
 export interface LibrarySnapshot {
   species: StudioSpecies[];
   /** Creatures in the world now, of every species, built-in ones included. */
@@ -46,32 +40,18 @@ export interface LibrarySnapshot {
   maxCreatures: number;
 }
 
-export interface ReleaseParams {
-  /**
-   * The lowercase UUID the species is kept under. The Studio makes one per drawing and sends the
-   * same one again when the player retries, so a release whose answer was lost isn't saved twice.
-   */
-  releaseId: string;
-  drawing: Drawing;
-  /** The appearance image's PNG bytes. */
-  image: number[];
-  name: string;
-  sizeClass: SizeClass;
-  /** The body's depth as a share of its height. */
-  thickness: number;
-  /** The body plan chosen in the confirm panel (ADR 0020 §12, §14). */
-  plan: BodyPlanChoice;
-}
-
 /** A voxel creature to release (ADR 0023 §17). */
 export interface ReleaseVoxelParams {
-  /** As for `ReleaseParams`: the Studio keeps it while the assembly, name and plan are unchanged. */
+  /**
+   * The lowercase UUID the species is kept under. The Studio keeps it while the assembly, name and
+   * plan are unchanged, so a release whose answer was lost isn't saved twice.
+   */
   releaseId: string;
   /** The assembly as built. Untrusted: the library checks it again. */
   assembly: VoxelAssembly;
   name: string;
   /** Its ways of moving. A voxel body's size and anchors come from its cubes (ADR 0022 §20). */
-  plan: Pick<BodyPlanChoice, "locomotion">;
+  plan: BodyPlanChoice;
 }
 
 /** The parts the Studio builds with, from the strip's latest `ready` (ADR 0023 §18). */
@@ -105,7 +85,7 @@ export const studioParts = ({
  * - `too_large`: larger than `large`, so no size class fits it (ADR 0023 §14).
  * - `no_spawn_point`: a limit error, nowhere for it to appear in this world (ADR 0023 §14).
  * - `release_failed`: anything else that kept a release from being saved.
- * - `unknown_species`, `not_voxel`: no voxel species with that ID is in the library.
+ * - `unknown_species`: no species with that ID is in the library.
  */
 export type StudioErrorCode =
   | "not_ready"
@@ -115,8 +95,7 @@ export type StudioErrorCode =
   | "too_large"
   | "no_spawn_point"
   | "release_failed"
-  | "unknown_species"
-  | "not_voxel";
+  | "unknown_species";
 
 const refuse = (code: StudioErrorCode, message: string) => new StudioRequestError(code, message);
 
@@ -131,23 +110,21 @@ export type StudioRequests = {
   /** The library now. The Studio asks when it opens, since a push before then is lost. */
   snapshot: { params: undefined; result: LibrarySnapshot };
   /**
-   * Where a drawn species of this size, moving this way, wouldn't fit in the world, registering
-   * nothing (ADR 0015 §8, ADR 0020 §12). Errors among them mean it can't be released so. With
-   * them, the locomotion rules of its ways of moving, which the preview plays (issue #136).
+   * Where a species of this size, moving this way, wouldn't fit in the world, registering nothing
+   * (ADR 0015 §8, ADR 0020 §12). Errors among them mean it can't be released so. With them, the
+   * locomotion rules of its ways of moving, which the preview plays (issue #136).
    */
   limits: {
     params: { sizeClass: SizeClass; locomotion: Pick<LocomotionChoice, "land" | "swim"> };
     result: CheckedLimits;
   };
-  /** Saves the drawing as a species in the library and adds one of it to the world. */
-  release: { params: ReleaseParams; result: Released };
   /** The parts, part types and socket types to build with (ADR 0023 §18). */
   parts: { params: undefined; result: StudioParts };
   /** A saved voxel species' assembly, for its thumbnail or to edit a copy (ADR 0023 §3, §19). */
   assembly: { params: { speciesId: string }; result: LibraryAssembly };
   /**
-   * Saves a voxel assembly as a species in the library and adds one of it to the world, with
-   * `release`'s retries (ADR 0023 §17).
+   * Saves a voxel assembly as a species in the library and adds one of it to the world (ADR 0023
+   * §17). A retry with the same release ID gets the first try's answer.
    */
   releaseVoxel: { params: ReleaseVoxelParams; result: Released };
   /** Adds a creature of a library species. Resolves with its ID. */
@@ -189,24 +166,6 @@ const describe = (diagnostics: readonly Diagnostic[]) =>
 
 /** Release needs at least one way of moving (ADR 0020 §1). */
 export const NO_LOCOMOTION = "Choose at least one way for it to move: on land, swimming or both.";
-
-/**
- * Why a release failed, in the player's words where the reason is one they can act on. A world
- * with no starting spot for this size and way of moving refuses the species (`no_spawn_point`,
- * ADR 0020 §6): for a creature that only swims, a world whose spawn points are all on land.
- */
-export function releaseFailure(
-  name: string,
-  locomotion: LocomotionChoice,
-  diagnostics: readonly Diagnostic[],
-): string {
-  if (diagnostics.some((d) => d.code === "no_spawn_point")) {
-    return locomotion.land
-      ? `${name} has nowhere to appear in this world at this size. Try another size.`
-      : `${name} has nowhere to appear in this world: no starting spot in the water suits it. Let it move on land too, or try another size.`;
-  }
-  return `${name} couldn't be released: ${describe(diagnostics)}`;
-}
 
 /** Where a voxel creature has nowhere to appear: its size comes from its parts, so change them. */
 function voxelNoSpawnPoint(name: string, locomotion: LocomotionChoice): string {
@@ -297,19 +256,6 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     };
   };
 
-  const release = (params: ReleaseParams) => {
-    const { releaseId, drawing, image, name, sizeClass, thickness, plan } = params;
-    const trimmed = checkRelease(releaseId, name, plan.locomotion);
-    return releaseAs(releaseId, async (library) => {
-      const saved = await library.save(drawing, Uint8Array.from(image), trimmed, sizeClass, {
-        id: releaseId,
-        thickness,
-        plan,
-      });
-      if (!saved.ok) throw new Error(releaseFailure(trimmed, plan.locomotion, saved.diagnostics));
-      return saved.value;
-    });
-  };
   const releaseVoxel = ({ releaseId, assembly, name, plan }: ReleaseVoxelParams) => {
     // Before anything else, even a species an earlier try kept, so an oversized assembly costs no
     // more work (#208). One that isn't JSON passes here and `saveVoxel` refuses it. A retry while
@@ -324,8 +270,7 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       return saved.value;
     });
   };
-  // A retry while the first try is still running, or after it finished, gets the same answer,
-  // whichever kind of release it is.
+  // A retry while the first try is still running, or after it finished, gets the same answer.
   const releases = new Map<string, Promise<Released>>();
   const once = (releaseId: string, run: () => Promise<Released>) => {
     let pending = releases.get(releaseId);
@@ -348,7 +293,6 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
       if (!checked.ok) throw new Error(describe(checked.diagnostics));
       return checked.value;
     },
-    release: (params) => once(params.releaseId, () => release(params)),
     releaseVoxel: (params) => once(params.releaseId, () => releaseVoxel(params)),
     parts: () => {
       const parts = services.parts();
@@ -358,10 +302,7 @@ export function studioHandlers(services: StudioServices): RequestHandlers<Studio
     assembly: ({ speciesId }) => {
       const found = open().assembly(speciesId);
       if (found.ok) return found.value;
-      const code = found.diagnostics.some((d) => d.code === "not_voxel")
-        ? "not_voxel"
-        : "unknown_species";
-      throw refuse(code, describe(found.diagnostics));
+      throw refuse("unknown_species", describe(found.diagnostics));
     },
     addCreature: async ({ speciesId }) => {
       const library = open();

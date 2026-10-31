@@ -4,8 +4,7 @@ import { CREATURE_THUMBNAIL_SIZE, VoxelCreatureThumbnails } from "./voxel-thumbn
 
 const ASSEMBLY = { parts: {}, instances: [] } as unknown as VoxelAssembly;
 
-const voxel = (n: number) => ({ speciesId: `user:${n}`, body: "voxel" as const });
-const drawn = (n: number) => ({ speciesId: `user:${n}`, body: "drawn" as const });
+const voxel = (n: number) => ({ speciesId: `user:${n}` });
 
 function setUp(options: { failFetch?: Set<string>; noRenderer?: boolean } = {}) {
   const fetch = vi.fn((speciesId: string) =>
@@ -29,9 +28,9 @@ function setUp(options: { failFetch?: Set<string>; noRenderer?: boolean } = {}) 
 const settle = () => new Promise((resolve) => setTimeout(resolve));
 
 describe("voxel creature thumbnails", () => {
-  it("fetches and draws only voxel species, keyed by id and version", async () => {
+  it("fetches and draws each species, keyed by id and version", async () => {
     const { thumbnails, fetch, draw, onChange } = setUp();
-    thumbnails.sync([drawn(1), voxel(2)]);
+    thumbnails.sync([voxel(2)]);
     await settle();
     expect(fetch.mock.calls).toEqual([["user:2"]]);
     expect(draw.mock.calls).toEqual([
@@ -42,9 +41,9 @@ describe("voxel creature thumbnails", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it("makes no renderer until a voxel species is listed, and one for all of them", async () => {
+  it("makes no renderer until a species is listed, and one for all of them", async () => {
     const { thumbnails, createRenderer } = setUp();
-    thumbnails.sync([drawn(1)]);
+    thumbnails.sync([]);
     await settle();
     expect(createRenderer).not.toHaveBeenCalled();
     thumbnails.sync([voxel(2), voxel(3)]);

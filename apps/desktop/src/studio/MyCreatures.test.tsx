@@ -7,7 +7,6 @@ import { MyCreatures, type MyCreaturesProps } from "./MyCreatures";
 const base = {
   sizeClass: "medium",
   createdAt: "2026-10-27T12:00:00.000Z",
-  body: "drawn",
 } as const;
 const puddle: StudioSpecies = {
   ...base,
@@ -71,27 +70,39 @@ describe("My creatures", () => {
     expect(rows(html)).toEqual([
       {
         text: "Puddle / 2 in the world",
-        buttons: ["Take one Puddle out of the world", "Add a Puddle to the world", "Delete Puddle"],
+        buttons: [
+          "Take one Puddle out of the world",
+          "Add a Puddle to the world",
+          "Edit a copy of Puddle",
+          "Delete Puddle",
+        ],
       },
       {
         text: "Twig / 0 in the world",
-        buttons: ["Take one Twig out of the world*", "Add a Twig to the world", "Delete Twig"],
+        buttons: [
+          "Take one Twig out of the world*",
+          "Add a Twig to the world",
+          "Edit a copy of Twig",
+          "Delete Twig",
+        ],
       },
-      { text: "Ghost / Unavailable: No room anywhere.", buttons: ["Delete Ghost"] },
+      {
+        text: "Ghost / Unavailable: No room anywhere.",
+        buttons: ["Edit a copy of Ghost", "Delete Ghost"],
+      },
     ]);
   });
 
-  it("shows a voxel species' drawn image, and a placeholder until it is drawn", () => {
-    const pebble: StudioSpecies = { ...twig, speciesId: "user:4", name: "Pebble", body: "voxel" };
-    const waiting = render({ library: { ...LIBRARY, species: [pebble] } });
+  it("shows a species' drawn image, and a placeholder until it is drawn", () => {
+    const waiting = render({ library: { ...LIBRARY, species: [twig] } });
     expect(waiting).toContain("thumbnail voxel-placeholder");
     expect(waiting).not.toContain("<img");
     const drawn = render({
-      library: { ...LIBRARY, species: [puddle, pebble] },
-      thumbnail: (id) => (id === "user:1" ? "blob:puddle" : "data:image/png;base64,pebble"),
+      library: { ...LIBRARY, species: [puddle, twig] },
+      thumbnail: (id) => (id === "user:1" ? "blob:puddle" : "data:image/png;base64,twig"),
     });
     expect(drawn).toContain('src="blob:puddle"');
-    expect(drawn).toContain('src="data:image/png;base64,pebble"');
+    expect(drawn).toContain('src="data:image/png;base64,twig"');
     expect(drawn).not.toContain("voxel-placeholder");
   });
 
