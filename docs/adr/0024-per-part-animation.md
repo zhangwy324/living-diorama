@@ -144,7 +144,12 @@ In `packages/renderer/src/voxel/`: `motion-rig.ts`, `part-motion.ts` and `compos
 
 ### PR 4: Studio
 
-_Not built yet._
+- **The resolver (§8).** `createAssemblyView` takes `motionOf` (a `PartMotionResolver`) beside `roleOf`. The Studio's `PartsKit` gains `motionOf: partMotionLookup(partTypes)`, made from the same `parts` answer as `lookup.roleOf`, and `AssemblyEditor` passes both. Without a resolver no part moves and the test walk moves the body as a whole, as before.
+- **Per assembly (§16).** The view builds the rig with the body, through `buildMotionRig` and `instanceMotions` as the strip does, so every new assembly object, any edit, gets a new rig and `walkLegs`. The old rig is plain arrays and matrices, dropped with the old body. If the rig can't be built the body still walks as a whole. The parts' pose is composed into matrices of the view's own (`posedParts`), never straight into the skinned bones.
+- **Per frame (§7).** While the test walk plays, each frame runs the strip's `posePartsFrame` with `motionInputFrom`, from the same `LocomotionInput` the whole-body walk takes. That input now carries `legs`, so the Studio's walk steps with the legs and has the damped roll and squash, as in the strip (§5). Phase 0, no leap and no cues. Then `writeBones` copies the pose into the body's and the selection tint's bones, a hidden part (under a ghost) collapsed and an unselected part collapsed in the tint, so collapse and tint sit on the posed parts. At rest it copies the rest bones, as before.
+- **Where it moves.** Build mode's build step stands still at rest: the view gets no test walk, as before, so the parts don't move where they are placed and picked. The confirm step (the body-plan preview) always plays: its chosen way of moving, or, with none to play (no way of moving ticked, or the world's rule not come yet), a walk with no profile and no speed, so the creature stands but still blinks, twitches its ears and flicks its tail. With reduced motion the speed is 0 as before, so the legs stand still and only those idle motions play, as the swim's bob already did. Thumbnails are drawn from rest bones and are untouched.
+- **Picking.** Picking and `probe` only run in the build step, so at rest. `pick` now updates the skeleton itself before it takes the bounds afresh, so it reads whatever bones are shown.
+- **Tests.** `assembly-view.test.ts` covers the posed walk, rest out of the walk and after it, the idle motions with no profile, tint and collapse over a posed frame, a new rig for a new assembly, and no motion without a resolver. `AssemblyEditor.test.tsx` covers the resolver passed in, the build step at rest, and the standing preview.
 
 ### PR 5: Tuning
 

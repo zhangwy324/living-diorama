@@ -186,7 +186,10 @@ export function AssemblyEditor({
     if (!element || !kit) return;
     let created: AssemblyView;
     try {
-      created = createAssemblyView(element, { roleOf: kit.lookup.roleOf });
+      created = createAssemblyView(element, {
+        roleOf: kit.lookup.roleOf,
+        motionOf: kit.motionOf,
+      });
     } catch (error) {
       console.warn("The assembly view could not start", error);
       return;
@@ -267,14 +270,16 @@ export function AssemblyEditor({
   const moves = canMove(locomotion);
   const releasable = !!assembly && name.trim() !== "" && moves && !releasing && block.length === 0;
 
-  // The confirm step walks the creature in place (ADR 0023 §13).
+  // The confirm step walks the creature in place (ADR 0023 §13), its parts moving as in the strip
+  // (ADR 0024 §7). With no way of moving to play it stands, but still blinks and twitches; the
+  // build step keeps it at rest, where parts are placed and picked.
   const body = useMemo(() => planVoxelBody({ locomotion }), [locomotion]);
   const modes = previewModes(locomotion, body, limits.rules);
   const mode = chosenMode(modes, previewMode);
   const reducedMotion = useReducedMotion();
   // Only while shown: a hidden Build mode draws nothing.
-  const motion = active && step === "plan" ? mode?.motion : undefined;
-  const moving = motion !== undefined;
+  const moving = active && step === "plan";
+  const motion = moving ? mode?.motion : undefined;
   const profile = motion?.profile;
   const submersion = motion?.submersion ?? 0;
   const speed = reducedMotion ? 0 : (motion?.speed ?? 0);

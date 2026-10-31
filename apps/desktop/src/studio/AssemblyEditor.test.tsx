@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { scoreSockets, type VoxelAssembly } from "@living-diorama/content-schema";
-import type { AssemblyGhost, AssemblyPick, AssemblyView } from "@living-diorama/renderer";
+import type {
+  AssemblyGhost,
+  AssemblyPick,
+  AssemblyView,
+  AssemblyViewOptions,
+} from "@living-diorama/renderer";
 import type { CheckedLimits } from "@living-diorama/simulation";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -29,32 +34,41 @@ const view = vi.hoisted(() => ({
   selection: [] as string[],
   ghost: undefined as AssemblyGhost | undefined,
   walking: false,
+  walk: undefined as Parameters<AssemblyView["setTestWalk"]>[0],
+  options: undefined as AssemblyViewOptions | undefined,
   probe: undefined as AssemblyView["probe"] | undefined,
 }));
 vi.mock("@living-diorama/renderer", () => ({
-  createAssemblyView: (): Partial<AssemblyView> => ({
-    setAssembly: (assembly) => {
-      view.assembly = assembly;
-    },
-    setHighlightedSockets: (sockets) => {
-      view.highlighted = [...sockets];
-    },
-    setSelection: (ids) => {
-      view.selection = [...ids];
-    },
-    setGhost: (ghost) => {
-      view.ghost = ghost;
-    },
-    setTestWalk: (motion) => {
-      view.walking = motion !== undefined;
-    },
-    pick: () => view.under,
-    probe: (x, y) => view.probe?.(x, y),
-    dispose: () => {},
-    thumbnails: {
-      part: () => Promise.resolve("data:image/png;base64,"),
-    } as unknown as AssemblyView["thumbnails"],
-  }),
+  createAssemblyView: (
+    _container: HTMLElement,
+    options?: AssemblyViewOptions,
+  ): Partial<AssemblyView> => {
+    view.options = options;
+    return {
+      setAssembly: (assembly) => {
+        view.assembly = assembly;
+      },
+      setHighlightedSockets: (sockets) => {
+        view.highlighted = [...sockets];
+      },
+      setSelection: (ids) => {
+        view.selection = [...ids];
+      },
+      setGhost: (ghost) => {
+        view.ghost = ghost;
+      },
+      setTestWalk: (motion) => {
+        view.walking = motion !== undefined;
+        view.walk = motion;
+      },
+      pick: () => view.under,
+      probe: (x, y) => view.probe?.(x, y),
+      dispose: () => {},
+      thumbnails: {
+        part: () => Promise.resolve("data:image/png;base64,"),
+      } as unknown as AssemblyView["thumbnails"],
+    };
+  },
 }));
 
 const LIBRARY: LibrarySnapshot = { species: [], creatures: 3, maxCreatures: 20 };
@@ -270,6 +284,27 @@ it("walks the creature in the confirm step only while Build mode is shown", asyn
   expect(view.walking).toBe(false);
   await show(true);
   expect(view.walking).toBe(true);
+  expect(view.walk?.profile).toBe("walk");
+  // Back in the build step the parts are at rest, where they are placed and picked.
+  await click(button("Back"));
+  expect(view.walking).toBe(false);
+});
+
+it("moves the creature's parts by their types' motions (ADR 0024 §7)", async () => {
+  await setup();
+  const motionOf = view.options?.motionOf;
+  expect(view.options?.roleOf).toBeDefined();
+  expect(motionOf?.("hollow:leg")).toBe("swing");
+  expect(motionOf?.("hollow:eye")).toBe("blink");
+  expect(motionOf?.("hollow:torso")).toBeUndefined();
+});
+
+it("keeps the confirm step's preview alive with no way of moving to play", async () => {
+  // No rule has come for any way of moving: the creature stands, but its parts still idle.
+  await setup(() => Promise.resolve({ limits: [], locomotion: {} }));
+  await click(button("Next"));
+  expect(view.walking).toBe(true);
+  expect(view.walk).toEqual({ profile: undefined, submersion: 0, speed: 0 });
 });
 
 it("recolours the selected part from the suggested colours, as one undo step", async () => {

@@ -1,4 +1,8 @@
-import { VoxelAssemblySchema, type VoxelAssembly } from "@living-diorama/content-schema";
+import {
+  VoxelAssemblySchema,
+  type PartMotion,
+  type VoxelAssembly,
+} from "@living-diorama/content-schema";
 import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssemblyView, hiddenParts, type AssemblyView } from "./assembly-view";
@@ -410,5 +414,142 @@ describe("the parts a ghost replaces", () => {
         { sockets: [{ instance: "tail", socket: "b" }] },
       ).size,
     ).toBe(0);
+  });
+});
+
+describe("the assembly view's moving parts (ADR 0024 §7)", () => {
+  const MOTIONS: Record<string, PartMotion> = {
+    "test:arm": "swing",
+    "test:tail": "wag",
+    "test:fin": "paddle",
+  };
+  const motionOf = (type: string) => MOTIONS[type];
+  const WALK = { profile: "walk", submersion: 0, speed: 0.6 } as const;
+  let view: AssemblyView;
+  beforeEach(() => {
+    view = createAssemblyView(container, { motionOf });
+  });
+  afterEach(() => view.dispose());
+
+  /** The instances whose drawn bone isn't at its rest pose in `assembly`'s body. */
+  const moved = (assembly: VoxelAssembly, bones = drawn().body!.skeleton.bones) => {
+    const rest = buildVoxelBody(assembly).bones;
+    return bones.flatMap((bone, i) =>
+      bone.matrixWorld.equals(rest[i]!) ? [] : [assembly.instances[i]!.id],
+    );
+  };
+
+  it("moves the parts in the test walk, and only those with a motion", () => {
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    view.setTestWalk(WALK);
+    runFrames(20);
+    // The arms swing, the hands with them, the tail wags with the fins on it; the torso, moved
+    // by the whole-body walk, and the fins' paddle, which is for water, add none of their own.
+    expect(moved(assembly)).toEqual([
+      "left-arm",
+      "right-arm",
+      "left-hand",
+      "right-hand",
+      "tail",
+      "fin-a",
+      "fin-b",
+    ]);
+    // And keep moving, frame to frame.
+    const before = drawn().body!.skeleton.bones.map((bone) => bone.matrixWorld.clone());
+    runFrames(3);
+    const after = drawn().body!.skeleton.bones;
+    expect(before[1]!.equals(after[1]!.matrixWorld)).toBe(false);
+  });
+
+  it("keeps the parts at rest out of the test walk, as Build mode places and picks them", () => {
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    runFrames(5);
+    expect(moved(assembly)).toEqual([]);
+    view.setTestWalk(WALK);
+    runFrames(20);
+    expect(moved(assembly)).not.toEqual([]);
+    view.setTestWalk(undefined);
+    runFrames(1);
+    expect(moved(assembly)).toEqual([]);
+    // Picked at rest: the bounds and skeleton picking reads are taken afresh.
+    expect(view.pick(...MIDDLE)?.kind).toBe("part");
+  });
+
+  it("still idles with no profile to play: blinks and flicks need no walk", () => {
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    view.setTestWalk({ profile: undefined, submersion: 0, speed: 0 });
+    // The tail flicks about every 7 s.
+    let flicked = false;
+    for (let i = 0; i < 60 * 16 && !flicked; i++) {
+      runFrames(1);
+      flicked = moved(assembly).includes("tail");
+    }
+    expect(flicked).toBe(true);
+    // The whole body stands still.
+    expect(drawn().rig!.matrix.equals(new THREE.Matrix4())).toBe(true);
+  });
+
+  it("tints and collapses over the posed parts", () => {
+    const assembly = parsed();
+    view.setAssembly(assembly);
+    view.setSelection(["left-arm", "right-arm"]);
+    view.setGhost({ part: assembly.parts.fin!, sockets: [{ instance: "tail", socket: "a" }] });
+    view.setTestWalk(WALK);
+    runFrames(20);
+    const { body, tint } = drawn();
+    expect(tint!.visible).toBe(true);
+    const rest = buildVoxelBody(assembly).bones;
+    assembly.instances.forEach(({ id }, i) => {
+      const drawnBone = body!.skeleton.bones[i]!.matrixWorld;
+      const tinted = tint!.skeleton.bones[i]!.matrixWorld;
+      if (id === "fin-a") {
+        // Replaced by the ghost: collapsed, posed or not.
+        expect(drawnBone.determinant(), id).toBe(0);
+      } else {
+        expect(drawnBone.determinant(), id).not.toBe(0);
+      }
+      const selected = id === "left-arm" || id === "right-arm";
+      if (selected) {
+        // The tint sits on the posed arm, not where it rests.
+        expect(tinted.equals(drawnBone), id).toBe(true);
+        expect(tinted.equals(rest[i]!), id).toBe(false);
+      } else {
+        expect(tinted.determinant(), id).toBe(0);
+      }
+    });
+  });
+
+  it("builds the rig anew for a new assembly, and walks it", () => {
+    const first = parsed();
+    view.setAssembly(first);
+    view.setTestWalk(WALK);
+    runFrames(10);
+    const old = drawn().body!;
+    // An edit: the right arm, its hand and a fin gone.
+    const edited = creature();
+    edited.instances = edited.instances.filter(
+      ({ id }) => !["right-arm", "right-hand", "fin-b"].includes(id),
+    );
+    const next = VoxelAssemblySchema.parse(edited);
+    view.setAssembly(next);
+    runFrames(10);
+    const { body } = drawn();
+    expect(body).not.toBe(old);
+    expect(body!.skeleton.bones).toHaveLength(next.instances.length);
+    expect(moved(next, body!.skeleton.bones)).toEqual(["left-arm", "left-hand", "tail", "fin-a"]);
+  });
+
+  it("moves no part without a motion resolver", () => {
+    const plain = createAssemblyView(container);
+    const assembly = parsed();
+    plain.setAssembly(assembly);
+    plain.setTestWalk(WALK);
+    runFrames(20);
+    expect(moved(assembly)).toEqual([]);
+    expect(drawn().rig!.matrix.equals(new THREE.Matrix4())).toBe(false);
+    plain.dispose();
   });
 });

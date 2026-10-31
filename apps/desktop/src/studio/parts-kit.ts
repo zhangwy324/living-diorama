@@ -1,10 +1,11 @@
 import {
   assembleParts,
   type PartFitLookup,
+  type PartMotion,
   type VoxelAssembly,
 } from "@living-diorama/content-schema";
 import type { PartSummary, PartTypeSummary } from "@living-diorama/simulation";
-import { partFitLookup } from "../part-types";
+import { partFitLookup, partMotionLookup } from "../part-types";
 import type { StudioParts } from "../studio-protocol";
 
 // What Build mode builds with (ADR 0023 §4, §10, §18): the parts from the strip's `parts` answer,
@@ -18,6 +19,8 @@ export interface PartsKit {
   /** The tray's sections, in order: one per part type that has parts. */
   sections: readonly TraySection[];
   lookup: PartFitLookup;
+  /** Part types' motions (`partMotionLookup`), for the preview's moving parts (ADR 0024 §7). */
+  motionOf: (partType: string) => PartMotion | undefined;
   /** The part types a creature is built on (`rootPartTypes`). */
   roots: ReadonlySet<string>;
   /** What a new creature starts from: the default torso alone. */
@@ -116,6 +119,7 @@ export function partsKit({
     byId: new Map(parts.map((part) => [part.id, part])),
     sections: traySections(partTypes, parts, roots),
     lookup,
+    motionOf: partMotionLookup(partTypes),
     roots,
     start: assemblyOf(root, lookup),
     rootParts: parts.filter(({ part }) => roots.has(part.type)),
