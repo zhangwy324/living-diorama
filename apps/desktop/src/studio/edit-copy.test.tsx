@@ -115,6 +115,7 @@ async function mountHook(fetch: (id: string) => Promise<{ assembly: VoxelAssembl
     onMode,
     state,
     loads,
+    render,
     /** Presses Edit a copy; the load it started, if it didn't ask first. */
     press: (species: { speciesId: string; name: string }) => {
       const before = loads.length;
@@ -152,6 +153,30 @@ describe("Edit a copy in the Studio", () => {
     const firstKey = hook.get().loadRequest?.key;
     await act(async () => hook.press({ speciesId: "user:1", name: "Pebble" }));
     expect(hook.get().loadRequest?.key).not.toBe(firstKey);
+    await hook.unmount();
+  });
+
+  it("switches to Build when the copy arrives, unless the mode changed meanwhile", async () => {
+    const { fetch, answer } = deferredFetch();
+    const hook = await mountHook(fetch);
+    await hook.render("draw");
+    let pressed!: Promise<void>;
+    await act(async () => {
+      pressed = hook.press({ speciesId: "user:1", name: "Pebble" })!;
+    });
+    await answer("user:1", ASSEMBLY);
+    await act(() => pressed);
+    expect(hook.onMode).toHaveBeenCalledWith("build");
+
+    hook.onMode.mockClear();
+    await act(async () => {
+      pressed = hook.press({ speciesId: "user:2", name: "Twig" })!;
+    });
+    await hook.render("build");
+    await answer("user:2", OTHER);
+    await act(() => pressed);
+    expect(hook.onMode).not.toHaveBeenCalled();
+    expect(hook.get().loadRequest).toMatchObject({ name: "Twig copy" });
     await hook.unmount();
   });
 

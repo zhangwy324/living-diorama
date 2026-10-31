@@ -53,6 +53,10 @@ describe("PlayerPartEntrySchema", () => {
     expect(again).toEqual(first);
   });
 
+  it("takes a name of 40 characters", () => {
+    expect(parsePlayerPartEntry({ ...entry(), name: "A".repeat(40) }).ok).toBe(true);
+  });
+
   it("has a content ID", () => {
     expect(isContentId(playerPartId(UUID))).toBe(true);
   });
@@ -63,6 +67,7 @@ describe("PlayerPartEntrySchema", () => {
     ["another schema version", { schemaVersion: 2 }],
     ["version 0", { version: 0 }],
     ["an empty name", { name: "" }],
+    ["a name over 40 characters", { name: "A".repeat(41) }],
     ["a date without a time zone", { createdAt: "2026-10-30T12:00:00" }],
   ])("refuses %s", (_, change) => {
     expect(parsePlayerPartEntry({ ...entry(), ...change }).ok).toBe(false);
