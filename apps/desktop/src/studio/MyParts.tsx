@@ -1,5 +1,6 @@
 import type { PlayerPartEntry } from "@living-diorama/content-schema";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DeleteDialog, partDeleteMessage } from "./DeleteDialog";
 import "./my-parts.css";
 import { partThumbnailKey, usePartThumbnails, type PartThumbnails } from "./part-thumbnails";
 import {
@@ -19,32 +20,58 @@ export const MY_PARTS_THUMBNAIL_SIZE = 80;
 export interface MyPartsProps {
   playerParts: PlayerPartsState;
   /** A part type's name, e.g. "Leg", shown under each part's name. */
-  typeName?(partType: string): string | undefined;
+  partTypeName(partType: string): string;
   /** Draws the images; with none, placeholders show. */
   thumbnails?: PartThumbnails | undefined;
   /** Opens the part's drawing in Draw mode; with none, there is no Edit button. */
   onEditPart?: ((entry: PlayerPartEntry) => void) | undefined;
 }
 
-export function MyParts({ playerParts, typeName, thumbnails, onEditPart }: MyPartsProps) {
-  const { parts, error } = playerParts;
-  const summaries = useMemo(() => (parts ?? []).map(({ summary }) => summary), [parts]);
+/** Newest first: the part last drawn, edited or renamed at the top. */
+const byLatestChange = (a: PlayerPart, b: PlayerPart) =>
+  Date.parse(b.entry.updatedAt) - Date.parse(a.entry.updatedAt) || (a.uuid < b.uuid ? -1 : 1);
+
+export function MyParts({ playerParts, partTypeName, thumbnails, onEditPart }: MyPartsProps) {
+  const { parts: loaded, error } = playerParts;
+  const parts = useMemo(() => loaded && [...loaded].sort(byLatestChange), [loaded]);
+  const summaries = useMemo(() => (loaded ?? []).map(({ summary }) => summary), [loaded]);
   const images = usePartThumbnails(summaries, thumbnails, MY_PARTS_THUMBNAIL_SIZE);
   const [renaming, setRenaming] = useState<{ uuid: string; name: string }>();
   const [deleting, setDeleting] = useState<PlayerPart>();
-  // The part a rename or delete is waiting on, whose buttons are disabled meanwhile.
-  const [busy, setBusy] = useState<string>();
+  // The parts a rename or delete is waiting on, whose buttons are disabled meanwhile.
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  // Where the focus goes once a rename ends or a delete is done.
+  const [focus, setFocus] = useState<{ to: "rename"; uuid: string } | { to: "heading" }>();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.to === "heading") heading.current?.focus();
+    else renameButtons.current.get(focus.uuid)?.focus();
+  }, [focus]);
 
   const run = (uuid: string, request: () => Promise<boolean>, after?: (ok: boolean) => void) => {
-    setBusy(uuid);
+    setBusy((known) => new Set(known).add(uuid));
     void request()
       .then((ok) => after?.(ok))
-      .finally(() => setBusy(undefined));
+      .finally(() =>
+        setBusy((known) => {
+          const next = new Set(known);
+          next.delete(uuid);
+          return next;
+        }),
+      );
+  };
+  const endRename = (uuid: string) => {
+    setRenaming(undefined);
+    setFocus({ to: "rename", uuid });
   };
 
   return (
     <section className="my-parts" aria-labelledby="my-parts-heading">
-      <h2 id="my-parts-heading">My parts</h2>
+      <h2 id="my-parts-heading" ref={heading} tabIndex={-1}>
+        My parts
+      </h2>
       {error && (
         <p className="panel-message" role="alert">
           {error}
@@ -55,7 +82,7 @@ export function MyParts({ playerParts, typeName, thumbnails, onEditPart }: MyPar
         {parts?.map((part) => {
           const { uuid, entry, summary } = part;
           const image = images.get(partThumbnailKey(summary));
-          const disabled = busy === uuid;
+          const disabled = busy.has(uuid);
           return (
             <li key={uuid} className="my-part">
               {image ? (
@@ -69,12 +96,12 @@ export function MyParts({ playerParts, typeName, thumbnails, onEditPart }: MyPar
                   original={entry.name}
                   disabled={disabled}
                   onName={(name) => setRenaming({ uuid, name })}
-                  onCancel={() => setRenaming(undefined)}
+                  onCancel={() => endRename(uuid)}
                   onSave={() =>
                     run(
                       uuid,
                       () => playerParts.rename(uuid, renaming.name),
-                      (ok) => ok && setRenaming(undefined),
+                      (ok) => ok && endRename(uuid),
                     )
                   }
                 />
@@ -82,19 +109,22 @@ export function MyParts({ playerParts, typeName, thumbnails, onEditPart }: MyPar
                 <>
                   <div className="my-part-text">
                     <span className="my-part-name">{entry.name}</span>
-                    <span className="my-part-type">
-                      {typeName?.(entry.part.type) ?? entry.part.type}
-                    </span>
+                    <span className="my-part-type">{partTypeName(entry.part.type)}</span>
                   </div>
                   <div className="my-part-buttons">
                     <button
                       type="button"
+                      ref={(element) => {
+                        if (element) renameButtons.current.set(uuid, element);
+                        else renameButtons.current.delete(uuid);
+                      }}
                       aria-label={`Rename ${entry.name}`}
                       title="Rename"
                       disabled={disabled}
                       onClick={() => setRenaming({ uuid, name: entry.name })}
                     >
-                      <Icon d="M2.5 12.5h11M4 9.5l5.5-5.5 2 2L6 11.5H4z" />
+                      {/* A text cursor: renaming is typing, not drawing. */}
+                      <Icon d="M6 3h4M6 13h4M8 3v10M2.5 6.5v3M13.5 6.5v3" />
                     </button>
                     {onEditPart && (
                       <button
@@ -125,14 +155,23 @@ export function MyParts({ playerParts, typeName, thumbnails, onEditPart }: MyPar
         })}
       </ul>
       {deleting && (
-        <DeletePartDialog
+        <DeleteDialog
           name={deleting.entry.name}
+          message={partDeleteMessage(deleting.entry.name)}
           onDelete={() => {
             const { uuid } = deleting;
             setDeleting(undefined);
-            run(uuid, () => playerParts.remove(uuid));
+            run(
+              uuid,
+              () => playerParts.remove(uuid),
+              (ok) => setFocus(ok ? { to: "heading" } : { to: "rename", uuid }),
+            );
           }}
-          onCancel={() => setDeleting(undefined)}
+          onCancel={() => {
+            const { uuid } = deleting;
+            setDeleting(undefined);
+            setFocus({ to: "rename", uuid });
+          }}
         />
       )}
     </section>
@@ -180,41 +219,6 @@ function RenameField(props: {
         Cancel
       </button>
     </form>
-  );
-}
-
-/** Asked before a part is deleted from My parts. Escape cancels; Cancel has the focus. */
-export function DeletePartDialog(props: { name: string; onDelete(): void; onCancel(): void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    dialog.current?.showModal();
-    cancel.current?.focus();
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      className="close-dialog"
-      aria-labelledby="delete-part-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        props.onCancel();
-      }}
-    >
-      <h2 id="delete-part-title">Delete {props.name}?</h2>
-      <p>
-        {props.name} will be gone from My parts for good. Creatures you released with it keep
-        theirs.
-      </p>
-      <div className="close-dialog-buttons">
-        <button type="button" className="danger" onClick={props.onDelete}>
-          Delete
-        </button>
-        <button type="button" ref={cancel} onClick={props.onCancel}>
-          Cancel
-        </button>
-      </div>
-    </dialog>
   );
 }
 

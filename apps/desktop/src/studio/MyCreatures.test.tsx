@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
-import { DeleteDialog } from "./DeleteDialog";
+import { DeleteDialog, speciesDeleteMessage } from "./DeleteDialog";
 import { MyCreatures, type MyCreaturesProps } from "./MyCreatures";
 
 const base = {
@@ -125,10 +125,19 @@ describe("My creatures", () => {
 describe("deleting", () => {
   it("asks first and says its creatures leave the world", () => {
     const html = renderToStaticMarkup(
-      <DeleteDialog name="Puddle" inWorld={2} onDelete={() => {}} onCancel={() => {}} />,
+      <DeleteDialog
+        name="Puddle"
+        message={speciesDeleteMessage("Puddle", 2)}
+        onDelete={() => {}}
+        onCancel={() => {}}
+      />,
     );
     expect(html).toContain("Delete Puddle?");
     expect(html).toContain("All 2 in the world leave it.");
+    expect(speciesDeleteMessage("Twig", 1)).toBe(
+      "Twig will be gone from My creatures for good. The one in the world leaves it.",
+    );
+    expect(speciesDeleteMessage("Twig", 0)).toBe("Twig will be gone from My creatures for good.");
     expect([...html.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map(([, text]) => text)).toEqual([
       "Delete",
       "Cancel",

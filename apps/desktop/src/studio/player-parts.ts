@@ -83,6 +83,9 @@ export const validPartName = (name: string): boolean => {
   return trimmed !== "" && trimmed.length <= MAX_PART_NAME_LENGTH;
 };
 
+/** Said when a part is renamed or deleted before the parts have been read. */
+export const NOT_READ_YET = "Your parts haven't been read yet. Try again in a moment.";
+
 /** The player's parts and what can be done with them, for the tray and My parts. */
 export interface PlayerPartsState {
   /** Undefined until first read. */
@@ -140,8 +143,13 @@ export function usePlayerParts(
 
   const rename = useCallback(
     async (uuid: string, name: string) => {
-      const known = latest.current?.find((part) => part.uuid === uuid);
-      if (!store || !known || !validPartName(name)) return false;
+      if (!store) return false;
+      if (!latest.current) {
+        setError(NOT_READ_YET);
+        return false;
+      }
+      const known = latest.current.find((part) => part.uuid === uuid);
+      if (!known || !validPartName(name)) return false;
       const entry = renamedEntry(known.entry, name, nowRef.current());
       try {
         await store.save(uuid, entry);
@@ -161,8 +169,13 @@ export function usePlayerParts(
 
   const remove = useCallback(
     async (uuid: string) => {
-      const known = latest.current?.find((part) => part.uuid === uuid);
-      if (!store || !known) return false;
+      if (!store) return false;
+      if (!latest.current) {
+        setError(NOT_READ_YET);
+        return false;
+      }
+      const known = latest.current.find((part) => part.uuid === uuid);
+      if (!known) return false;
       try {
         await store.delete(uuid);
       } catch (cause) {

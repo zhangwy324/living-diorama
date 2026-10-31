@@ -1,6 +1,6 @@
 import type { PartSummary } from "@living-diorama/simulation";
 import { useMemo, type PointerEvent } from "react";
-import "./my-parts.css";
+import "./parts-tray.css";
 import { partThumbnailKey, usePartThumbnails, type PartThumbnails } from "./part-thumbnails";
 import type { TraySection } from "./parts-kit";
 
@@ -38,7 +38,8 @@ export function PartsTray(props: {
         type="button"
         className={mine ? "tray-part mine" : "tray-part"}
         aria-pressed={props.picked === part.id}
-        title={mine ? `${part.name} (yours)` : part.name}
+        aria-label={mine ? `${part.name}, mine` : undefined}
+        title={mine ? `${part.name} · Mine` : part.name}
         onClick={() => props.onPick(part.id)}
         onPointerDown={(event) => props.onPress?.(part.id, event)}
       >
@@ -48,7 +49,11 @@ export function PartsTray(props: {
           <span className="tray-placeholder" aria-hidden="true" />
         )}
         <span className="tray-name">{part.name}</span>
-        {mine && <span className="mine-badge">Mine</span>}
+        {mine && (
+          <span className="mine-badge" aria-hidden="true">
+            Mine
+          </span>
+        )}
       </button>
     );
   };

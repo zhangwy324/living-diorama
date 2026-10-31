@@ -10,6 +10,7 @@ import {
   checkPlayerPart,
   loadPlayerParts,
   MAX_PART_NAME_LENGTH,
+  NOT_READ_YET,
   playerPartSummary,
   renamedEntry,
   usePlayerParts,
@@ -126,6 +127,20 @@ describe("usePlayerParts", () => {
     await store.save(B, leg(B, "2026-10-30T14:00:00.000Z"));
     await act(() => state().reload());
     expect(state().parts?.map((part) => part.uuid)).toEqual([A, B]);
+  });
+
+  it("says so when a part is renamed or deleted before the parts are read", async () => {
+    const state = await mount({
+      list: () => new Promise(() => {}),
+      save: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+    });
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await state().rename(A, "Long leg");
+    });
+    expect(ok).toBe(false);
+    expect(state().error).toBe(NOT_READ_YET);
   });
 
   it("reads nothing with no store", async () => {

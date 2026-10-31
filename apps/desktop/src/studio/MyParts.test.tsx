@@ -13,12 +13,17 @@ import { playerPartSummary, type PlayerPart, type PlayerPartsState } from "./pla
 const studioParts = builtInParts();
 const A = "00000000-0000-4000-8000-00000000000a";
 const B = "00000000-0000-4000-8000-00000000000b";
-const part = (uuid: string, type: string, name: string): PlayerPart => {
-  const entry = drawnPartEntry(studioParts, { uuid, type, name });
+const part = (uuid: string, type: string, name: string, createdAt: string): PlayerPart => {
+  const entry = drawnPartEntry(studioParts, { uuid, type, name, createdAt });
   return { uuid, entry, summary: playerPartSummary(entry) };
 };
-const STILT = part(A, "hollow:leg", "Stilt");
-const BEAD = part(B, "hollow:eye", "Bead");
+const STILT = part(A, "hollow:leg", "Stilt", "2026-10-30T12:00:00.000Z");
+// Made earlier but changed last, so listed first.
+const bead = part(B, "hollow:eye", "Bead", "2026-10-30T11:00:00.000Z");
+const BEAD: PlayerPart = {
+  ...bead,
+  entry: { ...bead.entry, updatedAt: "2026-10-30T13:00:00.000Z" },
+};
 
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -52,7 +57,7 @@ async function mount(playerParts: PlayerPartsState, onEditPart?: (entry: PlayerP
     root?.render(
       <MyParts
         playerParts={playerParts}
-        typeName={(type) => studioParts.partTypes.find((t) => t.id === type)?.name}
+        partTypeName={(type) => studioParts.partTypes.find((t) => t.id === type)?.name ?? type}
         onEditPart={onEditPart}
       />,
     ),
@@ -72,9 +77,9 @@ const button = (text: string) => {
 const click = (target: HTMLElement) => act(async () => target.click());
 const rows = () => [...container.querySelectorAll(".my-part-text")].map((row) => row.textContent);
 
-it("lists each part with its type, and says where drawn parts go when there are none", async () => {
+it("lists each part with its type, newest change first, and says where parts go when none", async () => {
   await mount(state([STILT, BEAD]));
-  expect(rows()).toEqual(["StiltLeg", "BeadEye"]);
+  expect(rows()).toEqual(["BeadEye", "StiltLeg"]);
   // No Edit without Draw mode to edit in.
   expect(container.querySelector('button[aria-label="Edit Stilt"]')).toBeNull();
   act(() => root?.unmount());
@@ -114,6 +119,8 @@ it("renames a part, and Escape or Cancel keep its name", async () => {
   await click(button("Save"));
   expect(parts.rename).toHaveBeenCalledWith(A, "Long leg");
   expect(container.querySelector("input")).toBeNull();
+  // The focus is back where the rename began.
+  expect(document.activeElement).toBe(labelled("Rename Stilt"));
 
   await click(labelled("Rename Stilt"));
   await act(async () =>
@@ -123,6 +130,7 @@ it("renames a part, and Escape or Cancel keep its name", async () => {
   );
   expect(container.querySelector("input")).toBeNull();
   expect(parts.rename).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(labelled("Rename Stilt"));
 });
 
 it("asks before deleting a part, and Cancel keeps it", async () => {
@@ -131,6 +139,9 @@ it("asks before deleting a part, and Cancel keeps it", async () => {
   await click(labelled("Delete Stilt"));
   expect(container.querySelector("dialog h2")?.textContent).toBe("Delete Stilt?");
   expect(document.activeElement?.textContent).toBe("Cancel");
+  expect(container.querySelector("dialog p")?.textContent).toBe(
+    "Stilt will be gone from My parts for good. Creatures you released with it keep theirs.",
+  );
   await click(button("Cancel"));
   expect(container.querySelector("dialog")).toBeNull();
   expect(parts.remove).not.toHaveBeenCalled();
@@ -139,4 +150,6 @@ it("asks before deleting a part, and Cancel keeps it", async () => {
   await click(button("Delete"));
   expect(parts.remove).toHaveBeenCalledWith(B);
   expect(container.querySelector("dialog")).toBeNull();
+  // The row is going, so the focus goes to the list's heading.
+  expect(document.activeElement?.textContent).toBe("My parts");
 });

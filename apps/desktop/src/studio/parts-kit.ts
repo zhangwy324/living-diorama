@@ -142,17 +142,22 @@ export function partsKit({
 /**
  * The kit with the player's own parts added (ADR 0025 §9): each in its type's tray section after
  * the packs' parts, and pickable like them. Randomize and Fill empty still use the packs' parts
- * only (§10), and the default torso stays a pack part. Takes the packs' kit, `partsKit`'s. A part of a type with no section (no pack
- * part of that type) isn't in the tray: there is nothing to draw it from.
+ * only (§10), and the default torso stays a pack part. Takes the packs' kit, `partsKit`'s.
+ *
+ * A part of a type with no section (no pack part of that type) is left out altogether, from the
+ * tray and from `byId`, so what can be picked is what the tray shows: there is no base part to
+ * draw it from either.
  */
 export function withPlayerParts(kit: PartsKit, mine: readonly PartSummary[]): PartsKit {
-  if (mine.length === 0) return kit;
+  const shown = new Set(kit.sections.map((section) => section.type));
+  const kept = mine.filter(({ part }) => shown.has(part.type));
+  if (kept.length === 0) return kit;
   return {
     ...kit,
-    byId: new Map([...kit.byId, ...mine.map((part) => [part.id, part] as const)]),
+    byId: new Map([...kit.byId, ...kept.map((part) => [part.id, part] as const)]),
     sections: kit.sections.map((section) => ({
       ...section,
-      mine: mine.filter(({ part }) => part.type === section.type),
+      mine: kept.filter(({ part }) => part.type === section.type),
     })),
   };
 }

@@ -78,6 +78,14 @@ vi.mock("@living-diorama/renderer", () => ({
 }));
 
 const LIBRARY: LibrarySnapshot = { species: [], creatures: 3, maxCreatures: 20 };
+/** The player has drawn no parts. */
+const NO_PLAYER_PARTS: PlayerPartsState = {
+  parts: [],
+  error: undefined,
+  reload: () => Promise.resolve(),
+  rename: () => Promise.resolve(true),
+  remove: () => Promise.resolve(true),
+};
 // The land rule, so the confirm step's preview has a motion to play.
 const NO_LIMITS: CheckedLimits = {
   limits: [],
@@ -133,6 +141,7 @@ async function setup(
         askLimits={askLimits}
         client={client}
         loadRequest={loadRequest}
+        playerParts={NO_PLAYER_PARTS}
         onReleaseStart={onReleaseStart}
         onReleased={onReleased}
         onUnsaved={onUnsaved}
@@ -697,6 +706,7 @@ describe("the player's own parts", () => {
             modeSwitch={null}
             askLimits={() => Promise.resolve(NO_LIMITS)}
             client={client}
+            playerParts={NO_PLAYER_PARTS}
             onReleaseStart={() => {}}
             onReleased={() => {}}
             onUnsaved={() => {}}
@@ -771,5 +781,9 @@ describe("the player's own parts", () => {
     expect(onThumbnails).toHaveBeenLastCalledWith(
       expect.objectContaining({ part: expect.any(Function) }),
     );
+    // Gone with the editor.
+    act(() => root?.unmount());
+    root = undefined;
+    expect(onThumbnails).toHaveBeenLastCalledWith(undefined);
   });
 });

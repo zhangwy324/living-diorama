@@ -1,5 +1,4 @@
 import type { SocketRef, VoxelAssembly } from "@living-diorama/content-schema";
-import { connectPartsStore, type PartsStore } from "@living-diorama/desktop-integration";
 import { createAssemblyView, type AssemblyView } from "@living-diorama/renderer";
 import {
   useCallback,
@@ -57,7 +56,7 @@ import { PartColours } from "./PartColours";
 import type { PartThumbnails } from "./part-thumbnails";
 import { partsKit, withPlayerParts, type PartsKit } from "./parts-kit";
 import { PartsTray } from "./PartsTray";
-import { usePlayerParts, type PlayerPartsState } from "./player-parts";
+import type { PlayerPartsState } from "./player-parts";
 import { useReducedMotion } from "./reduced-motion";
 import { NO_NAME, voxelReleaseFailure } from "./release";
 import { keepTrying } from "./retry";
@@ -109,9 +108,6 @@ export interface PickRequest {
   partId: string;
 }
 
-/** Where Build mode reads the player's parts while the Studio doesn't give them. */
-let fallbackPartsStore: PartsStore | undefined;
-
 const centimetres = (metres: number) => `${Math.round(metres * 100)} cm`;
 
 /** Whether a key press is typing in a field, which the shortcuts leave alone. */
@@ -144,18 +140,15 @@ export function AssemblyEditor({
   onReleaseStart,
   onReleased,
   onUnsaved,
-  playerParts: givenPlayerParts,
+  playerParts,
   onDrawPart,
   pickRequest,
   onThumbnails,
 }: ModeProps & {
   client: BuildClient;
   loadRequest?: LoadRequest | undefined;
-  /**
-   * The player's parts, for the tray (ADR 0025 §9). The Studio shares them with My parts; without
-   * them Build mode reads the parts store itself.
-   */
-  playerParts?: PlayerPartsState | undefined;
+  /** The player's parts, for the tray (ADR 0025 §9), shared with My parts by the Studio. */
+  playerParts: PlayerPartsState;
   /** Opens Draw mode for a part of this type, from the tray's "Draw your own" tiles. */
   onDrawPart?: ((partType: string) => void) | undefined;
   pickRequest?: PickRequest | undefined;
@@ -165,10 +158,6 @@ export function AssemblyEditor({
   // The packs' kit, from the strip; the view is made for it alone, so it stays when the player's
   // parts change (#247).
   const [packKit, setKit] = useState<PartsKit>();
-  const ownPlayerParts = usePlayerParts(
-    givenPlayerParts ? undefined : (fallbackPartsStore ??= connectPartsStore()),
-  );
-  const playerParts = givenPlayerParts ?? ownPlayerParts;
   const loadedParts = playerParts.parts;
   const mine = useMemo(() => (loadedParts ?? []).map(({ summary }) => summary), [loadedParts]);
   const kit = useMemo(() => packKit && withPlayerParts(packKit, mine), [packKit, mine]);
@@ -248,7 +237,10 @@ export function AssemblyEditor({
   }, [packKit]);
 
   const thumbnails = view?.thumbnails;
-  useEffect(() => onThumbnails?.(thumbnails), [onThumbnails, thumbnails]);
+  useEffect(() => {
+    onThumbnails?.(thumbnails);
+    return () => onThumbnails?.(undefined);
+  }, [onThumbnails, thumbnails]);
 
   // Made once per creature and kept while its assembly, name and plan are unchanged, so retrying a
   // release whose answer was lost can't save it twice (ADR 0023 §17); any edit makes a new one.

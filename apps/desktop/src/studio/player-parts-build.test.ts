@@ -67,7 +67,11 @@ describe("the tray with the player's parts", () => {
 
   it("leaves out a part of a type with no section, and is the packs' kit with none", () => {
     const stray = { ...stilt, id: "user-part:x", part: { ...stilt.part, type: "other:wing" } };
-    expect(withPlayerParts(packKit, [stray]).sections.flatMap((s) => s.mine)).toEqual([]);
+    const withStray = withPlayerParts(packKit, [stilt, stray]);
+    expect(withStray.sections.flatMap((s) => s.mine)).toEqual([stilt]);
+    // Not pickable either: what can be picked is what the tray shows.
+    expect(withStray.byId.has(stray.id)).toBe(false);
+    expect(withPlayerParts(packKit, [stray])).toBe(packKit);
     expect(withPlayerParts(packKit, [])).toBe(packKit);
   });
 });
