@@ -49,7 +49,8 @@ const num = (values: ArrayLike<number>, i: number): number => values[i] ?? 0;
 /** A step's cube size in `VOXEL_UNIT`s: 2, 4, 8 or 16. */
 export const stepUnits = (step: VoxelStep): number => 2 << VOXEL_STEPS.indexOf(step);
 
-const StepSchema = z.literal(VOXEL_STEPS, {
+/** One of `VOXEL_STEPS`. */
+export const VoxelStepSchema = z.literal(VOXEL_STEPS, {
   error: `A part's step must be one of ${VOXEL_STEPS.join(", ")} m`,
 });
 
@@ -100,7 +101,7 @@ export const VoxelPartSchema = z
     source: ContentIdSchema.optional(),
     size: VoxelSizeSchema,
     /** Edge of one cube in metres, one of `VOXEL_STEPS`. */
-    step: StepSchema,
+    step: VoxelStepSchema,
     /** sRGB colours; a cube of index `i` (1–255) has `colors[i - 1]`. */
     colors: z
       .array(HexColorSchema)
