@@ -15,7 +15,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LibrarySnapshot, ReleaseVoxelParams, Released } from "../studio-protocol";
-import { AssemblyEditor, type BuildClient, type LoadRequest } from "./AssemblyEditor";
+import { AssemblyEditor, cantPick, type BuildClient, type LoadRequest } from "./AssemblyEditor";
 import {
   NOTHING_TO_FILL,
   randomize,
@@ -82,7 +82,7 @@ const LIBRARY: LibrarySnapshot = { species: [], creatures: 3, maxCreatures: 20 }
 const NO_PLAYER_PARTS: PlayerPartsState = {
   parts: [],
   error: undefined,
-  reload: () => Promise.resolve(),
+  reload: () => Promise.resolve(true),
   rename: () => Promise.resolve(true),
   remove: () => Promise.resolve(true),
 };
@@ -685,7 +685,7 @@ describe("the player's own parts", () => {
       summary: playerPartSummary(entry),
     })),
     error: undefined,
-    reload: () => Promise.resolve(),
+    reload: () => Promise.resolve(true),
     rename: () => Promise.resolve(true),
     remove: () => Promise.resolve(true),
   });
@@ -750,18 +750,65 @@ describe("the player's own parts", () => {
     const render = await mount({ playerParts: loaded([]) });
     await click(button("Next"));
     // Draw mode saved it, but the Studio hasn't read it back yet: it waits.
-    await render({ pickRequest: { key: 1, partId: stilt.id } });
+    await render({ pickRequest: { key: 1, partId: stilt.id, version: 1 } });
     expect(container.querySelector(".tray-part[aria-pressed='true']")).toBeNull();
-    await render({ pickRequest: { key: 1, partId: stilt.id }, playerParts: loaded([stilt]) });
+    await render({
+      pickRequest: { key: 1, partId: stilt.id, version: 1 },
+      playerParts: loaded([stilt]),
+    });
     expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("true");
     expect(button("Next")).toBeDefined();
     // Once per key: dropping the pick sticks until a new key.
     await click(trayPart("Stilt"));
     expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("false");
-    await render({ pickRequest: { key: 1, partId: stilt.id }, playerParts: loaded([stilt]) });
+    await render({
+      pickRequest: { key: 1, partId: stilt.id, version: 1 },
+      playerParts: loaded([stilt]),
+    });
     expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("false");
-    await render({ pickRequest: { key: 2, partId: stilt.id }, playerParts: loaded([stilt]) });
+    await render({
+      pickRequest: { key: 2, partId: stilt.id, version: 1 },
+      playerParts: loaded([stilt]),
+    });
     expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("waits for the version asked for, so an edited part's old one is never picked", async () => {
+    const render = await mount({ playerParts: loaded([stilt]) });
+    const longer = { ...stilt, version: 2, name: "Longer stilt" };
+    await render({ pickRequest: { key: 1, partId: stilt.id, version: 2 } });
+    expect(container.querySelector(".tray-part[aria-pressed='true']")).toBeNull();
+    await render({
+      pickRequest: { key: 1, partId: stilt.id, version: 2 },
+      playerParts: loaded([longer]),
+    });
+    expect(trayPart("Longer stilt").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("says so when a part asked for has no place in the tray, and is done with it", async () => {
+    const stray = { ...stilt, name: "Wing", part: { ...stilt.part, type: "other:wing" } };
+    const render = await mount({ playerParts: loaded([]) });
+    await render({ pickRequest: { key: 1, partId: stilt.id, version: 1 } });
+    expect(container.querySelector(".stage-notice")).toBeNull();
+    await render({
+      pickRequest: { key: 1, partId: stilt.id, version: 1 },
+      playerParts: loaded([stray]),
+    });
+    expect(container.querySelector(".stage-notice")?.textContent).toBe(cantPick("Wing"));
+    // A later read that brings it into the tray doesn't pick it unasked.
+    await render({
+      pickRequest: { key: 1, partId: stilt.id, version: 1 },
+      playerParts: loaded([stilt]),
+    });
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("hands the tray's part type names on, for My parts", async () => {
+    const onPartTypeNames = vi.fn();
+    await mount({ onPartTypeNames });
+    const names = onPartTypeNames.mock.lastCall?.[0] as ReadonlyMap<string, string>;
+    expect(names.get("hollow:leg")).toBe("Leg");
+    expect(names.get("hollow:torso")).toBe("Torso");
   });
 
   it("drops the pick of a part that leaves the tray, and keeps the view", async () => {

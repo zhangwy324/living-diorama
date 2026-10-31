@@ -13,7 +13,7 @@ import {
   type StudioRequests,
   type StudioSpecies,
 } from "../studio-protocol";
-import { AssemblyEditor, type PickRequest } from "./AssemblyEditor";
+import { AssemblyEditor, cantPick, type PickRequest } from "./AssemblyEditor";
 import { CloseDialog } from "./CloseDialog";
 import { DeleteDialog, speciesDeleteMessage } from "./DeleteDialog";
 import { useEditCopy } from "./edit-copy";
@@ -27,7 +27,6 @@ import type { PartThumbnails } from "./part-thumbnails";
 import { PartDrawMode } from "./PartDrawMode";
 import { usePlayerParts } from "./player-parts";
 import { describeFailure, keptMessage, releasedMessage } from "./release";
-import { keepTrying } from "./retry";
 import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 
 // The Creation Studio's page (ADR 0015, ADR 0023 §1): Build mode and Draw mode side by side in one
@@ -95,27 +94,22 @@ export function Studio() {
   const pickKey = useRef(0);
   const onUseInBuild = useCallback(
     (entry: PlayerPartEntry) => {
-      void reloadPlayerParts();
-      setPickRequest({ key: ++pickKey.current, partId: entry.id });
+      const key = ++pickKey.current;
+      setPickRequest({ key, partId: entry.id, version: entry.version });
       setMode("build");
+      void reloadPlayerParts().then((read) => {
+        if (read) return;
+        // No read brings the part in: drop the request, so a later read doesn't pick it unasked.
+        setPickRequest((request) => (request?.key === key ? undefined : request));
+        setCelebration({ text: cantPick(entry.name), happy: false });
+      });
     },
     [reloadPlayerParts],
   );
   // My parts draws its images with Build mode's view's thumbnails, so no other renderer (#240).
   const [partThumbnails, setPartThumbnails] = useState<PartThumbnails>();
-  // Part types' names, for My parts, from the strip's parts answer as Build mode has it.
+  // Part types' names, for My parts, as Build mode has them from the strip's parts answer.
   const [partTypeNames, setPartTypeNames] = useState<ReadonlyMap<string, string>>(new Map());
-  useEffect(
-    () =>
-      keepTrying(
-        () =>
-          client.parts().then(({ partTypes }) => {
-            setPartTypeNames(new Map(partTypes.map(({ id, name }) => [id, name])));
-          }),
-        (error: unknown) => console.warn("Could not get the part types", error),
-      ),
-    [],
-  );
 
   // Closing with a creature not released or a part not saved asks first (ADR 0015 §10, ADR 0023
   // §21, ADR 0025).
@@ -207,6 +201,7 @@ export function Studio() {
         onDrawPart={(partType) => openDraw.open({ partType })}
         pickRequest={pickRequest}
         onThumbnails={setPartThumbnails}
+        onPartTypeNames={setPartTypeNames}
       />
       <PartDrawMode
         active={mode === "draw"}

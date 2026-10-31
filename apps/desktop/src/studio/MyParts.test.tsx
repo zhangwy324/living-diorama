@@ -45,7 +45,7 @@ function state(parts: PlayerPart[] | undefined, error?: string) {
   return {
     parts,
     error,
-    reload: vi.fn<PlayerPartsState["reload"]>(() => Promise.resolve()),
+    reload: vi.fn<PlayerPartsState["reload"]>(() => Promise.resolve(true)),
     rename: vi.fn<PlayerPartsState["rename"]>(() => Promise.resolve(true)),
     remove: vi.fn<PlayerPartsState["remove"]>(() => Promise.resolve(true)),
   } satisfies PlayerPartsState;

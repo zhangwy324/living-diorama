@@ -98,15 +98,22 @@ export interface LoadRequest {
  * A part to pick in the tray, e.g. one Draw mode just saved, for its "Use in Build" (ADR 0025 §9).
  * Each new `key` is picked once, exactly as a click on its tray tile picks it: a part of a root
  * type swaps the torso, another is placed at once if it has one place, else its sockets are marked.
- * It waits until the part is in the tray (the Studio reloads the player's parts after saving one)
- * and until a release on its way has finished; it takes Build mode back to the build step. Only
- * the latest key is picked.
+ * It waits until the part is in the tray at `version` or later (the Studio reloads the player's
+ * parts after saving one), so an edited part's old version is never picked, and until a release on
+ * its way has finished; it takes Build mode back to the build step. A player part that is read but
+ * has no place in the tray (no section for its type) isn't picked: Build mode says so, and the key
+ * is done. Only the latest key is picked.
  */
 export interface PickRequest {
   key: number;
-  /** The part's ID, e.g. `user-part:<uuid>`. */
+  /** The player part's ID, `user-part:<uuid>`. */
   partId: string;
+  /** The entry's version, as saved. */
+  version: number;
 }
+
+/** Said in Build mode when a part asked for can't be picked. */
+export const cantPick = (name: string): string => `Couldn't pick ${name}.`;
 
 const centimetres = (metres: number) => `${Math.round(metres * 100)} cm`;
 
@@ -144,6 +151,7 @@ export function AssemblyEditor({
   onDrawPart,
   pickRequest,
   onThumbnails,
+  onPartTypeNames,
 }: ModeProps & {
   client: BuildClient;
   loadRequest?: LoadRequest | undefined;
@@ -152,6 +160,11 @@ export function AssemblyEditor({
   /** Opens Draw mode for a part of this type, from the tray's "Draw your own" tiles. */
   onDrawPart?: ((partType: string) => void) | undefined;
   pickRequest?: PickRequest | undefined;
+  /**
+   * Hears of the part types' names, by ID, for those in the tray: My parts' type names, so the
+   * Studio needn't ask for the parts again. A player part's type always has a tray section.
+   */
+  onPartTypeNames?: ((names: ReadonlyMap<string, string>) => void) | undefined;
   /** Hears of the view's part thumbnails, e.g. for My parts' images, so no second renderer is made. */
   onThumbnails?: ((thumbnails: PartThumbnails | undefined) => void) | undefined;
 }) {
@@ -235,6 +248,10 @@ export function AssemblyEditor({
       setView(undefined);
     };
   }, [packKit]);
+
+  useEffect(() => {
+    if (packKit) onPartTypeNames?.(new Map(packKit.sections.map(({ type, name }) => [type, name])));
+  }, [packKit, onPartTypeNames]);
 
   const thumbnails = view?.thumbnails;
   useEffect(() => {
@@ -395,21 +412,31 @@ export function AssemblyEditor({
 
   // A part to pick, e.g. from Draw mode's "Use in Build", once it is in the tray (`PickRequest`).
   const pickedKey = useRef<number>(undefined);
+  const loadedPlayerParts = playerParts.parts;
   useEffect(() => {
     if (!kit || !pickRequest || releasing || pickRequest.key === pickedKey.current) return;
-    if (!kit.byId.has(pickRequest.partId)) return;
+    const { partId, version } = pickRequest;
+    const inTray = kit.byId.get(partId);
+    if (!inTray || Number(inTray.version) < version) {
+      // Read, but with no place in the tray: it can't be picked, now or after a later read.
+      const read = loadedPlayerParts?.find(({ entry }) => entry.id === partId);
+      if (read && read.entry.version >= version && !inTray) {
+        pickedKey.current = pickRequest.key;
+        // A request from outside, taken once per key as `loadRequest` is.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setBuild((state) => state && { ...state, notice: cantPick(read.entry.name) });
+      }
+      return;
+    }
     pickedKey.current = pickRequest.key;
     endDrag();
     // A request from outside, taken once per key as `loadRequest` is.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHover(undefined);
     setReleaseError(undefined);
     setStep("build");
     // Picking the picked part again would drop the pick.
-    setBuild(
-      (state) => state && pickPart({ ...state, picked: undefined }, kit, pickRequest.partId),
-    );
-  }, [kit, pickRequest, releasing, endDrag]);
+    setBuild((state) => state && pickPart({ ...state, picked: undefined }, kit, partId));
+  }, [kit, pickRequest, releasing, endDrag, loadedPlayerParts]);
 
   useEffect(() => {
     if (step !== "build") return;

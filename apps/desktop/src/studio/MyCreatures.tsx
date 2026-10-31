@@ -28,6 +28,9 @@ export interface MyCreaturesProps {
 const reasonsOf = (species: StudioSpecies) =>
   species.available ? "" : species.reasons.map((reason) => reason.message).join(" ");
 
+/** The panel's name: My creatures, and My parts below them when the Studio gives it (ADR 0025 §9). */
+export const PANEL_NAME = "My creatures & parts";
+
 export function MyCreatures(props: MyCreaturesProps) {
   const { library } = props;
   const count = library?.species.length;
@@ -40,20 +43,21 @@ export function MyCreatures(props: MyCreaturesProps) {
           aria-expanded={false}
           onClick={props.onToggle}
         >
-          My creatures{count ? ` (${count})` : ""}
+          {PANEL_NAME}
+          {count ? ` (${count})` : ""}
         </button>
       </aside>
     );
   }
   return (
-    <aside className="my-creatures" aria-label="My creatures">
+    <aside className="my-creatures" aria-label={PANEL_NAME}>
       <div className="my-creatures-header">
         <h2>My creatures</h2>
         <button
           type="button"
           className="my-creatures-toggle"
           aria-expanded={true}
-          aria-label="Hide My creatures"
+          aria-label={`Hide ${PANEL_NAME}`}
           title="Hide"
           onClick={props.onToggle}
         >

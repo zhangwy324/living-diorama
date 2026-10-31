@@ -90,8 +90,11 @@ export interface PlayerPartsState {
   parts: readonly PlayerPart[] | undefined;
   /** The last failure to read, rename or delete, in words. */
   error: string | undefined;
-  /** Reads the store again, e.g. after Draw mode saved a part. */
-  reload(): Promise<void>;
+  /**
+   * Reads the store again, e.g. after Draw mode saved a part. Resolves false when the read failed
+   * (see `error`), true when it landed or a newer read took its place.
+   */
+  reload(): Promise<boolean>;
   /** Renames a part, saving it as its next version. Resolves false when it failed (see `error`). */
   rename(uuid: string, name: string): Promise<boolean>;
   /** Deletes a part; the caller asks first. Resolves false when it failed (see `error`). */
@@ -117,19 +120,21 @@ export function usePlayerParts(
     nowRef.current = now;
   });
 
-  const reload = useCallback((): Promise<void> => {
-    if (!store) return Promise.resolve();
+  const reload = useCallback((): Promise<boolean> => {
+    if (!store) return Promise.resolve(false);
     const read = ++reads.current;
     return loadPlayerParts(store).then(
       (loaded) => {
-        if (read !== reads.current) return;
+        if (read !== reads.current) return true;
         setParts(loaded);
         setError(undefined);
+        return true;
       },
       (cause: unknown) => {
-        if (read !== reads.current) return;
+        if (read !== reads.current) return true;
         console.warn("Could not read your parts", cause);
         setError(`Could not read your parts: ${describeStoreError(cause)}`);
+        return false;
       },
     );
   }, [store]);

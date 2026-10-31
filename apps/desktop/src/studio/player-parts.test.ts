@@ -124,7 +124,11 @@ describe("usePlayerParts", () => {
     const state = await mount(store);
     expect(state().parts?.map((part) => part.uuid)).toEqual([A]);
     await store.save(B, leg(B, "2026-10-30T14:00:00.000Z"));
-    await act(() => state().reload());
+    let read: boolean | undefined;
+    await act(async () => {
+      read = await state().reload();
+    });
+    expect(read).toBe(true);
     expect(state().parts?.map((part) => part.uuid)).toEqual([A, B]);
   });
 
@@ -210,6 +214,12 @@ describe("usePlayerParts", () => {
       delete: () => Promise.resolve(),
     });
     expect(state().error).toBe("Could not read your parts: No parts folder");
+    // So Use in Build can drop its pick.
+    let read: boolean | undefined;
+    await act(async () => {
+      read = await state().reload();
+    });
+    expect(read).toBe(false);
     warn.mockRestore();
   });
 });

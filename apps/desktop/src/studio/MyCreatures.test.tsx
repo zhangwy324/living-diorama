@@ -117,7 +117,10 @@ describe("My creatures", () => {
       "Creatures you release appear here.",
     );
     const folded = render({ open: false });
-    expect(folded).toContain("My creatures (3)");
+    expect(folded).toContain("My creatures &amp; parts (3)");
+    expect(render()).toContain('aria-label="Hide My creatures &amp; parts"');
+    // The list keeps its own heading.
+    expect(render()).toContain("<h2>My creatures</h2>");
     expect(folded).not.toContain("Puddle");
   });
 });
