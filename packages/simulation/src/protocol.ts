@@ -2,7 +2,7 @@ import type {
   AppliedWorldEdit,
   BodyShape,
   Diagnostic,
-  PartDrawing,
+  PartDrawingRecipe,
   PartMotion,
   PartRole,
   RegionPosition,
@@ -202,7 +202,7 @@ export interface PartTypeSummary {
   fits: string[];
   role?: PartRole;
   motion?: PartMotion;
-  drawing?: PartDrawing;
+  drawing?: PartDrawingRecipe;
 }
 
 /**

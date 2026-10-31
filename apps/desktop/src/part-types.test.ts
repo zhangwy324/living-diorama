@@ -1,9 +1,14 @@
 import { sampleVoxelAssembly } from "@living-diorama/built-in-content";
-import { DEFAULT_PART_DRAWING, measureAssembly } from "@living-diorama/content-schema";
+import { DEFAULT_PART_DRAWING_RECIPE, measureAssembly } from "@living-diorama/content-schema";
 import { describeVoxelParts } from "@living-diorama/simulation";
 import { describe, expect, it } from "vitest";
 import { loadContent } from "./content";
-import { partDrawingLookup, partFitLookup, partMotionLookup, partRoleLookup } from "./part-types";
+import {
+  partDrawingRecipeLookup,
+  partFitLookup,
+  partMotionLookup,
+  partRoleLookup,
+} from "./part-types";
 
 // The part and socket types as the worker's `ready` lists them.
 const content = loadContent();
@@ -47,25 +52,25 @@ describe("partMotionLookup", () => {
   });
 });
 
-describe("partDrawingLookup", () => {
+describe("partDrawingRecipeLookup", () => {
   it("gives the built-in part types their drawing recipes", () => {
-    const drawingOf = partDrawingLookup(partTypes);
-    expect(drawingOf("hollow:torso")).toEqual({ view: "side", rule: "puffy" });
-    expect(drawingOf("hollow:leg")).toEqual({ view: "side", rule: "tube" });
-    expect(drawingOf("hollow:eye")).toEqual({ view: "front", rule: "flat" });
+    const recipeOf = partDrawingRecipeLookup(partTypes);
+    expect(recipeOf("hollow:torso")).toEqual({ view: "side", rule: "puffy" });
+    expect(recipeOf("hollow:leg")).toEqual({ view: "side", rule: "tube" });
+    expect(recipeOf("hollow:eye")).toEqual({ view: "front", rule: "flat" });
   });
 
   it("draws a type without a recipe, or one the summary doesn't list, flat from the side", () => {
-    const drawingOf = partDrawingLookup([{ id: "pack:antenna", name: "Antenna", fits: [] }]);
-    expect(DEFAULT_PART_DRAWING).toEqual({ view: "side", rule: "flat" });
-    expect(drawingOf("pack:antenna")).toBe(DEFAULT_PART_DRAWING);
-    expect(drawingOf("pack:unknown")).toBe(DEFAULT_PART_DRAWING);
+    const recipeOf = partDrawingRecipeLookup([{ id: "pack:antenna", name: "Antenna", fits: [] }]);
+    expect(DEFAULT_PART_DRAWING_RECIPE).toEqual({ view: "side", rule: "flat" });
+    expect(recipeOf("pack:antenna")).toBe(DEFAULT_PART_DRAWING_RECIPE);
+    expect(recipeOf("pack:unknown")).toBe(DEFAULT_PART_DRAWING_RECIPE);
   });
 
   it("agrees with the registries on every part type", () => {
-    const drawingOf = partDrawingLookup(partTypes);
+    const recipeOf = partDrawingRecipeLookup(partTypes);
     for (const type of content.value.partTypes.values()) {
-      expect(drawingOf(type.id)).toEqual(type.drawing ?? DEFAULT_PART_DRAWING);
+      expect(recipeOf(type.id)).toEqual(type.drawing ?? DEFAULT_PART_DRAWING_RECIPE);
     }
   });
 });

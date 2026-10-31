@@ -106,7 +106,7 @@ export const PART_DRAWING_RULES = ["puffy", "tube", "flat"] as const;
 export type PartDrawingRule = (typeof PART_DRAWING_RULES)[number];
 
 /** How a player draws a part of a type (M23): the view and the depth rule a drawing starts with. */
-export const PartDrawingSchema = z.strictObject({
+export const PartDrawingRecipeSchema = z.strictObject({
   view: z.enum(PART_DRAWING_VIEWS, {
     error: `Unknown drawing view (expected ${PART_DRAWING_VIEWS.join(", ")})`,
   }),
@@ -114,10 +114,10 @@ export const PartDrawingSchema = z.strictObject({
     error: `Unknown drawing rule (expected ${PART_DRAWING_RULES.join(", ")})`,
   }),
 });
-export type PartDrawing = z.output<typeof PartDrawingSchema>;
+export type PartDrawingRecipe = z.output<typeof PartDrawingRecipeSchema>;
 
 /** The drawing recipe of a part type that doesn't set one: flat, drawn from the side. */
-export const DEFAULT_PART_DRAWING: Readonly<PartDrawing> = Object.freeze({
+export const DEFAULT_PART_DRAWING_RECIPE: Readonly<PartDrawingRecipe> = Object.freeze({
   view: "side",
   rule: "flat",
 });
@@ -137,8 +137,8 @@ export const PartTypeDefinitionSchema = z.strictObject({
   motion: z
     .enum(PART_MOTIONS, { error: `Unknown part motion (expected ${PART_MOTIONS.join(", ")})` })
     .optional(),
-  /** How a player draws a part of this type. Left out, `DEFAULT_PART_DRAWING`. */
-  drawing: PartDrawingSchema.optional(),
+  /** How a player draws a part of this type. Left out, `DEFAULT_PART_DRAWING_RECIPE`. */
+  drawing: PartDrawingRecipeSchema.optional(),
 });
 export type PartTypeDefinition = z.output<typeof PartTypeDefinitionSchema>;
 
