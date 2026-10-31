@@ -6,6 +6,8 @@
 
 **Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13 PR 2, implemented): the drawn image is the source of truth, with the strokes (and later fills) kept beside it as a record that is never replayed. The amendments in §1 and §5 below say what changed; the rest of this ADR still describes the code.
 
+**Amended by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): drawn species go. A species' folder holds `entry.json` alone (§1, §2), `drawing.json`, `appearance.png` and `load_library_image` are removed (§7), and the notes in §3–§5 say what else changes. The drawing's migration and `parseDrawing` go (§6). The library now holds only voxel species, the opposite of §10. The console hook's `saveSample()`, which saved a drawing, goes (§12). Player parts are kept in a store of their own, not in the library (§6 there).
+
 ## Decisions
 
 1. **One folder per species.** The library is `library/` in the app data directory (`%APPDATA%\com.livingdiorama.desktop\library`). Each species has a folder named by the UUID of its `user:<uuid>` ID, holding:
@@ -25,9 +27,13 @@
 
    _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ `drawing.json` and `appearance.png` are optional, but come as a pair: a folder with one and not the other is skipped as unreadable. Rust still doesn't read the entry, so it can't tell a drawn entry that lost both files from a voxel one; the frontend finds that out when the drawn entry's image fails to load, and lists the species as unavailable.
 
+   _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ the drawing and image files go. A drawn entry left from before fails the entry schema and is skipped with a log line.
+
 4. **Rust guards the paths and sizes.** IDs must be lowercase UUIDs before any path is built from them, so the frontend can't reach outside the library. Each file has a size limit, well above what the Studio produces: 64 KB for the entry, 16 MB for the drawing, 4 MB for the image.
 
    _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19 PR 4a):_ the entry's limit is 8 MB, since a voxel entry holds its whole assembly. The assembly's faces are capped (131,072), its run-length runs are not: a part full of cubes alternating between two colours is 32,768 runs for 6,144 faces, so 21 such parts fit under the face cap, about 4.2 MB of compact JSON. 8 MB covers that with room for the species. `entry.json` is now written compact rather than pretty-printed, which would put each number of the assembly on its own line.
+
+   _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ the drawing's and the image's limits go with their files; the entry keeps its 8 MB.
 
 5. **The schemas.**
    - Library entry: `{ schemaVersion, species, createdAt }`. `species` is a species definition, checked like pack content. The name shown to the player is the species' name.
@@ -43,6 +49,8 @@
    - Rust is unchanged: it never interprets `drawing.json`.
 
    _Amended by [ADR 0022](0022-voxel-creatures.md) §17 (M19):_ library entry version 5 adds the species' `body`, `{ kind: "drawn" }` or `{ kind: "voxel", assembly }`, with the assembly inline (M19 PR 1). A drawing belongs to a drawn entry only. No migration from version 4.
+
+   _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §11 (M23):_ library entry version 6 holds voxel species only. The drawing schema, the drawn body kind and the drawing's migration are removed. No migration from version 5.
 
 6. **Files are migrated before they are validated.** `parseDrawing` and `parseLibraryEntry` run the file through `migrate`: `migrations[n]` turns version `n` into `n + 1`, up to the current version. Drawings have one migration, from version 1 to 2 (§5 amendment). Library entries have one too, from version 1 to 2, which gives a stored drawn species `core:feed`, `core:rest` and vision ([ADR 0018](0018-living-behavior.md) §4). A file without a version, or from a newer build, is rejected with `unsupported_schema_version`; a gap in the migrations with `missing_migration`. The next release adds body-plan data by adding a migration.
 

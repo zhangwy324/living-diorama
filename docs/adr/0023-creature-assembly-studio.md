@@ -12,6 +12,8 @@ This ADR amends ADR 0015 §4, §5, §7, §10 and §12 (the Studio gains a Build 
 
 1. **One Studio, two modes.** A Build/Draw switch in the one Studio window chooses between assembling a voxel creature and drawing one. Draw mode is today's Studio, unchanged; it is removed at M23, when drawn bodies go (ADR 0022 §22). There is no second window.
 
+   _Amended by [ADR 0025](0025-drawing-voxel-parts.md) §9 (M23):_ the switch stays, and Draw mode is repurposed to draw a voxel part rather than removed.
+
 2. **The confirm step is shared.** Build mode ends with Next, which shows the confirm step (ADR 0020 §12) without the drawn-only settings: no thickness (in `CreatureDetails`) and no anchors (in `BodyPlanPanel`), since a voxel body's anchors are derived (ADR 0022 §20). The flow is Next → body plan → Release, as for a drawing.
 
 3. **Edit a copy, never in place.** A released creature can be loaded into Build mode with "Edit a copy". Its saved assembly becomes the starting point, and a release makes a new species. A released species is never changed.

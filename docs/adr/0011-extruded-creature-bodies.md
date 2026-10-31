@@ -1,10 +1,12 @@
 # ADR 0011: Extruded creature bodies
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0025](0025-drawing-voxel-parts.md) (M23)
 - **Date:** 2026-10-27
 - **Context:** Roadmap M8. Creatures are upright sprites that turn towards the camera and mirror to their heading (ADR 0007 §6). From above or at a steep angle they read as flat cards, and v0.2 has players draw creatures that have to hold up from every angle. M8 replaces the sprite, for every species, with a solid body built from the species' `appearance` image. It ships as three PRs: **A** this ADR, the body pipeline, the fallback block and bodies in the creature layer; **B** real shadows and the shadow blob fix (issue #29); **C** docs and the mossling art. Decisions for all three are recorded here; each PR updates this ADR if it has to deviate.
 
 **Amended by [ADR 0017](0017-hollow-bodies-and-fill.md)** (M13): holes are kept (§2), walls are straight with no rounded edge (§4), and the walls take the rim's own colour instead of the side texture (§5). The notes in those sections say what changed.
+
+**Superseded by [ADR 0025](0025-drawing-voxel-parts.md)** (M23: drawing voxel parts): extruded bodies are removed and every creature is a voxel creature. Four choices outlive them: a creature faces +X (§7), kept as ADR 0022 §16; a neutral fallback block stands in until a body is ready (§8; its depth came from `thickness`, so ADR 0025's PR 4 picks a new one); creatures cast real shadows from the sun, with no shadow blob (§9); and a body draws its sun-facing side into the shadow map (§10), as voxel bodies do (ADR 0022, M19 "Rendering").
 
 This ADR supersedes ADR 0007 §6. ADR 0007 §7 (no minimum on-screen size) still holds.
 
