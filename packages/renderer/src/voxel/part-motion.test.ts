@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { box, creature } from "../body/fixtures/voxel-creature";
 import { eatingPeck, type CueWeights } from "../cues";
-import { hopProgress } from "../locomotion";
+import { FULL_MOTION_SPEED, hopProgress } from "../locomotion";
 import { buildVoxelBody, type VoxelBody } from "./body";
 import { composePose } from "./compose-pose";
 import {
@@ -19,6 +19,7 @@ import {
   buildMotionRig,
   instanceMotions,
   walkLegs,
+  WALK_DIP_SAMPLES,
   type MotionRig,
 } from "./motion-rig";
 import {
@@ -801,13 +802,22 @@ describe("the world's wiring", () => {
         }
         return low;
       };
-      // With every leg swung out in full (a quarter cycle in), lowered by the dip (raised, when
-      // it is negative), the lowest foot is back on the ground, where it was at rest.
-      const splayed = lowest(motion(rig, walking(rig.stride * 0.25)));
-      expect(splayed - legs.dip).toBeCloseTo(lowest(motion(rig, input())), 9);
+      expect(legs.dips).toHaveLength(WALK_DIP_SAMPLES);
+      expect(legs.dips[0]).toBe(0);
+      // With every leg swung out (a quarter cycle in), at full weight and at half (ease(0.5) is
+      // 0.5, so the legs swing through half their angle), lowered by the drop at that weight
+      // (raised, when it is negative), the lowest foot is back where it was at rest.
+      const rest = lowest(motion(rig, input()));
+      const quarter = rig.stride * 0.25;
+      const full = lowest(motion(rig, walking(quarter)));
+      expect(full - legs.dips[WALK_DIP_SAMPLES - 1]!).toBeCloseTo(rest, 9);
+      const half = lowest(
+        motion(rig, input({ travelled: quarter, speed: FULL_MOTION_SPEED / 2, gait: "walk" })),
+      );
+      expect(half - legs.dips[(WALK_DIP_SAMPLES - 1) / 2]!).toBeCloseTo(rest, 9);
     }
     // No grounded leg: no dip.
     const { rig, body } = build(animal(), {});
-    expect(walkLegs(body, rig).dip).toBe(0);
+    expect(walkLegs(body, rig).dips.every((dip) => dip === 0)).toBe(true);
   });
 });

@@ -4,6 +4,7 @@ import {
   FULL_MOTION_SPEED,
   VOXEL_WALK,
   leapMotion,
+  walkDip,
   locomotionMotion,
   locomotionTransform,
   placePivots,
@@ -106,7 +107,8 @@ describe("locomotionMotion", () => {
   });
 
   describe("on a body whose legs swing (ADR 0024 §5)", () => {
-    const legs = { step: 0.1, dip: 0.004 };
+    // Drops 4 mm at full swing, and less than linearly with the weight, as a heel's lift does.
+    const legs = { step: 0.1, dips: [0, 0.0002, 0.001, 0.0025, 0.004] };
 
     it("damps the roll and squash, and dips as the legs swing out, once per step", () => {
       const drawn = sweep({ profile: "walk" });
@@ -120,8 +122,18 @@ describe("locomotionMotion", () => {
       // In metres: at full speed (0.6 m/s), for the default 0.4 m body.
       const at = (travelled: number) => motion({ profile: "walk", legs, travelled }).lift * 0.4;
       expect(at(legs.step * 3)).toBeCloseTo(0, 9);
-      expect(at(legs.step * 3.5)).toBeCloseTo(-legs.dip, 9);
+      expect(at(legs.step * 3.5)).toBeCloseTo(-0.004, 9);
       expect(range(voxel, "lift").max).toBeLessThanOrEqual(1e-12);
+    });
+
+    it("drops by the legs' drop at the gait's weight, not by a fixed share of the full drop", () => {
+      // smooth(0.5) = 0.5: at half of FULL_MOTION_SPEED the legs swing through half their angle.
+      const half = motion({ profile: "walk", legs, speed: FULL_MOTION_SPEED / 2, travelled: 0.35 });
+      expect(half.lift * 0.4).toBeCloseTo(-0.001, 9);
+      expect(walkDip(legs, 0.5)).toBeCloseTo(0.001, 12);
+      expect(walkDip(legs, 0.625)).toBeCloseTo(0.00175, 12); // between samples, linearly
+      expect(walkDip(legs, 0)).toBe(0);
+      expect(walkDip(legs, 1)).toBeCloseTo(0.004, 12);
     });
 
     it("leaves the swim and the hop as they are", () => {

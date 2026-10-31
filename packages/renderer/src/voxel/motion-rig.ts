@@ -218,35 +218,57 @@ export function instanceMotions(
   };
 }
 
+/** How many weights `walkLegs` measures the drop at, from 0 to 1 evenly. */
+export const WALK_DIP_SAMPLES = 9;
+
 /**
  * What the walk profile needs to keep the whole body in step with `rig`'s legs (ADR 0024 §5):
- * metres per step, half the stride, and how far the hips should drop as the legs swing out in
- * full, so that the lowest foot stays on the ground. A swung leg's foot rises at its heel and
- * sinks at its toe, so this is measured on the cubes of every grounded leg of `body` (the body
- * `rig` was built from), swung either way: it is negative, a rise, when a toe would sink more
- * than any foot lifts. A rig with no grounded leg doesn't dip. Reads the body's vertices: once
- * per species.
+ * metres per step, half the stride, and how far the body should drop as the legs swing out in
+ * full, so the lowest foot stays on the ground. A swung leg's heel lifts but its toe sinks, so
+ * this is measured on the cubes of every grounded leg of `body` (the body `rig` was built from),
+ * and of the parts hanging from it, swung either way about its attach point: negative, a rise,
+ * when a toe would sink further than any foot lifts. The gait's weight scales a leg's swing, and
+ * the drop isn't proportional to the angle, so it is measured at `WALK_DIP_SAMPLES` weights.
+ *
+ * A leg is grounded by its own cubes (`RigLeg.grounded`), so a leg whose foot is a separate part
+ * hanging from it isn't grounded, and a body whose legs are all like that doesn't dip. A rig with
+ * no grounded leg doesn't dip. Reads the body's vertices: once per species.
  */
 export function walkLegs(body: VoxelBody, rig: MotionRig): WalkLegs {
+  const { parts } = rig;
+  // Each part's grounded leg: itself, or the nearest `swing` part it hangs from, if grounded.
+  const legOf = parts.map((_, i) => {
+    let j = i;
+    while (j >= 0 && !parts[j]?.leg) j = parts[j]?.parent ?? -1;
+    return j >= 0 && parts[j]?.leg?.grounded ? j : -1;
+  });
   const positions = body.geometry.getAttribute("position");
   const skin = body.geometry.getAttribute("skinIndex");
   const rest = new Map<number, number>();
-  const swung = new Map<number, number>();
+  const swung = new Map<number, number[]>();
   for (let v = 0; v < positions.count; v++) {
     const i = skin.getX(v);
-    const part = rig.parts[i];
+    const leg = legOf[i] ?? -1;
+    const part = parts[leg];
     const bone = rig.bones[i];
-    if (!part?.leg?.grounded || !bone) continue;
+    if (!part?.leg || !bone) continue;
     vertex.fromBufferAttribute(positions, v).applyMatrix4(bone);
-    rest.set(i, Math.min(rest.get(i) ?? Infinity, vertex.y));
-    // Turned about Z through its attach point, as `swing` turns it, either way.
+    rest.set(leg, Math.min(rest.get(leg) ?? Infinity, vertex.y));
+    // Turned about Z through the leg's attach point, as `swing` turns it, either way.
     const x = vertex.x - part.origin.x;
     const y = vertex.y - part.origin.y;
-    const a = part.leg.amplitude;
-    const low = part.origin.y + Math.min(x * Math.sin(a), -x * Math.sin(a)) + y * Math.cos(a);
-    swung.set(i, Math.min(swung.get(i) ?? Infinity, low));
+    const lows = swung.get(leg) ?? new Array<number>(WALK_DIP_SAMPLES).fill(Infinity);
+    for (let k = 0; k < WALK_DIP_SAMPLES; k++) {
+      const a = (part.leg.amplitude * k) / (WALK_DIP_SAMPLES - 1);
+      const low = part.origin.y - Math.abs(x * Math.sin(a)) + y * Math.cos(a);
+      lows[k] = Math.min(lows[k] ?? Infinity, low);
+    }
+    swung.set(leg, lows);
   }
-  let drop = Infinity;
-  for (const [i, low] of swung) drop = Math.min(drop, low - (rest.get(i) ?? low));
-  return { step: rig.stride / 2, dip: Number.isFinite(drop) ? drop : 0 };
+  const dips = Array.from({ length: WALK_DIP_SAMPLES }, (_, k) => {
+    let drop = Infinity;
+    for (const [leg, lows] of swung) drop = Math.min(drop, (lows[k] ?? 0) - (rest.get(leg) ?? 0));
+    return Number.isFinite(drop) ? drop : 0;
+  });
+  return { step: rig.stride / 2, dips };
 }

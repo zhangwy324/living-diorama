@@ -82,10 +82,11 @@ export interface WalkLegs {
   /** Metres per step: half the legs' stride, one footfall of each pair. */
   step: number;
   /**
-   * Metres the body drops as the legs swing out in full, so the lowest foot stays on the ground;
-   * negative, it rises, when a swung toe would otherwise sink.
+   * Metres the body drops as the legs swing out in full, so the lowest foot stays on the ground,
+   * at gait weights evenly from 0 to 1 (the legs swing through the weight times their amplitude);
+   * negative, it rises, where a swung toe would otherwise sink.
    */
-  dip: number;
+  dips: readonly number[];
 }
 
 /**
@@ -167,10 +168,20 @@ const walk: Profile = (input, w, out) => {
   out.pivot = "centerOfGravity";
 };
 
+/** How far a body with `legs` drops at full swing at gait weight `w`, between its samples. */
+export function walkDip(legs: WalkLegs, w: number): number {
+  const { dips } = legs;
+  if (dips.length < 2) return dips[0] ?? 0;
+  const at = Math.min(1, Math.max(0, w)) * (dips.length - 1);
+  const k = Math.min(dips.length - 2, Math.floor(at));
+  const a = dips[k] ?? 0;
+  return a + ((dips[k + 1] ?? a) - a) * (at - k);
+}
+
 /**
  * The walk of a body whose legs swing (`voxel/part-motion.ts`): the legs swing out in full twice
  * per stride, at the half steps, which is when the feet land. There the body drops by the legs'
- * `dip` (scaled by the weight twice, as a swing's drop is), squashes a little, and rolls to the
+ * drop at the weight's swing (`walkDip`), squashes a little, and rolls to the
  * side, and it is back as the legs pass under it.
  */
 function voxelWalk(input: LocomotionInput, legs: WalkLegs, w: number, out: LocomotionMotion) {
@@ -178,7 +189,7 @@ function voxelWalk(input: LocomotionInput, legs: WalkLegs, w: number, out: Locom
   const stride = Math.sin(Math.PI * steps); // −1–1 over two steps
   const splay = 0.5 - 0.5 * Math.cos(TAU * steps); // 1 with the legs swung out in full
   const height = Math.max(input.height, 1e-6);
-  out.lift = (-w * w * legs.dip * splay) / height;
+  out.lift = (-walkDip(legs, w) * splay) / height;
   out.roll = w * WALK_ROLL * VOXEL_WALK.roll * stride;
   out.pitch = w * WALK_LEAN;
   const squash = w * WALK_SQUASH * VOXEL_WALK.squash * splay;
