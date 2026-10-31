@@ -48,6 +48,11 @@ export interface VoxelBody {
   shapes: readonly THREE.Matrix4[];
   /** Per part instance: the index of the instance it hangs from, or −1 for the root. */
   parents: readonly number[];
+  /**
+   * Per part instance: whether it is drawn reflected (`InstancePlacement.mirrored`: an odd number
+   * of the instances on its path from the root are mirrored). Per-part motion mirrors by it.
+   */
+  mirrored: readonly boolean[];
   /** The body measured in its rest pose, in the same frame. */
   measure: AssemblyMeasure;
   vertexCount: number;
@@ -205,6 +210,7 @@ export function buildVoxelBody(
     joints,
     shapes,
     parents,
+    mirrored: placements.map((placement) => placement.mirrored),
     measure,
     vertexCount: mesh.vertexCount,
     dispose: () => geometry.dispose(),

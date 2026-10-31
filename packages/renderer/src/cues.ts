@@ -63,6 +63,14 @@ const BREATH_PERIOD = 4;
 /** Breathing swells the sleeping body's height by up to this share. */
 const BREATH = 0.025;
 
+/**
+ * The eating peck at `time` seconds for a creature of this `phase`: from rest (0) to its deepest
+ * (1) and back, once every `EAT_PERIOD`. The body's dip and a voxel head's dip both follow it, so
+ * they peck together.
+ */
+export const eatingPeck = (time: number, phase: number) =>
+  0.5 - 0.5 * Math.cos(TAU * (time / EAT_PERIOD + phase));
+
 /** How a creature's body is posed for its cues, relative to its plain pose. */
 export interface BodyMotion {
   /** Rise of the feet, as a share of the body's height. */
@@ -96,7 +104,7 @@ export function bodyMotion(
   const eating = ease(weights.eating);
   const sleeping = ease(weights.sleeping);
   // A bob from rest up and back (0–1), so the feet never sink below the ground.
-  const bob = 0.5 - 0.5 * Math.cos(TAU * (time / EAT_PERIOD + phase));
+  const bob = eatingPeck(time, phase);
   // A breath in and out (−1–1).
   const breath = Math.sin(TAU * (time / BREATH_PERIOD + phase));
   out.lift = eating * EAT_LIFT * bob;
