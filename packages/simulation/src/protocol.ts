@@ -193,8 +193,8 @@ export interface PropSummary {
 /**
  * A registered voxel part type: its name, the socket types it fits (ADR 0022 §9), its role if it
  * has one (§10), its motion if it has one (M22) and its drawing recipe if it has one (M23). The
- * name heads the type's parts in the Studio's
- * tray (ADR 0023 §18), which lists the `root` types first (§10).
+ * name heads the type's parts in the Studio's tray (ADR 0023 §18), which lists the `root` types
+ * first (§10).
  */
 export interface PartTypeSummary {
   id: string;

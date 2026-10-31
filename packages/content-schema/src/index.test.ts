@@ -589,10 +589,10 @@ describe("PartTypeDefinition", () => {
     if (!parsed.ok) throw new Error("The torso doesn't parse");
     expect("drawing" in parsed.value).toBe(false);
     const found = diagnostics(
-      parsePartTypeDefinition({ ...torso, drawing: { view: "top", rule: "round" } }),
+      parsePartTypeDefinition({ ...torso, drawing: { view: "back", rule: "round" } }),
     );
     expect(found.map((d) => [d.path.join("."), d.message])).toEqual([
-      ["drawing.view", "Unknown drawing view (expected side, front)"],
+      ["drawing.view", "Unknown drawing view (expected side, front, top)"],
       ["drawing.rule", "Unknown drawing rule (expected puffy, tube, flat)"],
     ]);
     // Both halves are needed, and nothing else is taken.

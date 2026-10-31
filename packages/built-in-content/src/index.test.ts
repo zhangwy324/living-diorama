@@ -116,8 +116,9 @@ it("registers the core part types, each fitting a registered socket type", () =>
     "hollow:tail-fin": "wag",
     "hollow:torso": null,
   });
-  // Bodies are drawn puffy, limbs and tails as tubes, and ears, fins and face parts flat. Ears and
-  // face parts are drawn from the front, where their shape shows; the rest from the side (M23).
+  // Bodies are drawn puffy, limbs and tails as tubes, and ears, fins and face parts flat. Each is
+  // drawn where its shape shows: ears and face parts from the front, the side fin from above and
+  // the rest from the side (M23).
   expect(
     Object.fromEntries(
       sortedPartTypes(registries).map((t) => [
@@ -129,7 +130,7 @@ it("registers the core part types, each fitting a registered socket type", () =>
     "hollow:arm": "side tube",
     "hollow:ear": "front flat",
     "hollow:eye": "front flat",
-    "hollow:fin": "side flat",
+    "hollow:fin": "top flat",
     "hollow:head": "side puffy",
     "hollow:leg": "side tube",
     "hollow:mouth": "front flat",

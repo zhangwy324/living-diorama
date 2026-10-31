@@ -86,7 +86,7 @@
     "name": "Fin",
     "fits": ["hollow:fin-mount"],
     "motion": "paddle",
-    "drawing": { "view": "side", "rule": "flat" }
+    "drawing": { "view": "top", "rule": "flat" }
   },
   {
     "schemaVersion": 3,

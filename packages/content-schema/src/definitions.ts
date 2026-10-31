@@ -91,10 +91,15 @@ export const PART_MOTIONS = ["swing", "wag", "bob", "paddle", "flop", "blink"] a
 export type PartMotion = (typeof PART_MOTIONS)[number];
 
 /**
- * The view a player draws a part of a type in (M23): `side` (the creature seen from its side) or
- * `front` (seen from the front). The voxelizer owns how each maps onto the part's axes.
+ * The view a player draws a part of a type in (M23), and so how the canvas maps onto the part's
+ * axes, its depth always centred:
+ * - `side`: the creature seen from its side. Canvas x runs along +X, canvas y going down along −Y,
+ *   and depth along Z.
+ * - `front`: seen from the front. Canvas x runs along Z, and depth along X.
+ * - `top`: seen from above, e.g. a side fin. Canvas x runs along +X, canvas y going down along +Z,
+ *   and depth along Y.
  */
-export const PART_DRAWING_VIEWS = ["side", "front"] as const;
+export const PART_DRAWING_VIEWS = ["side", "front", "top"] as const;
 export type PartDrawingView = (typeof PART_DRAWING_VIEWS)[number];
 
 /**
