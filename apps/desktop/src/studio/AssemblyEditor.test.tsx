@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
-import { scoreSockets, type VoxelAssembly } from "@living-diorama/content-schema";
+import {
+  scoreSockets,
+  type PlayerPartEntry,
+  type VoxelAssembly,
+} from "@living-diorama/content-schema";
 import type {
   AssemblyGhost,
   AssemblyPick,
@@ -20,8 +24,10 @@ import {
   TOO_BIG_HINT,
 } from "./assembly-state";
 import { builtInParts } from "./fixtures/built-in-parts";
+import { drawnPartEntry } from "./fixtures/player-parts";
 import type { AskLimits } from "./limits";
 import { partsKit } from "./parts-kit";
+import { playerPartSummary, type PlayerPartsState } from "./player-parts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -657,4 +663,113 @@ it("loads a creature that arrives during a release once the release is done", as
   expect(shown()).toBe(loaded);
   expect(nameField().value).toBe("Fern copy");
   expect(button("Reset").disabled).toBe(true);
+});
+
+describe("the player's own parts", () => {
+  const studioParts = builtInParts();
+  const UUID = "00000000-0000-4000-8000-0000000000aa";
+  const stilt = drawnPartEntry(studioParts, { uuid: UUID, type: "hollow:leg", name: "Stilt" });
+  const loaded = (entries: PlayerPartEntry[]): PlayerPartsState => ({
+    parts: entries.map((entry) => ({
+      uuid: entry.id.slice("user-part:".length),
+      entry,
+      summary: playerPartSummary(entry),
+    })),
+    error: undefined,
+    reload: () => Promise.resolve(),
+    rename: () => Promise.resolve(true),
+    remove: () => Promise.resolve(true),
+  });
+
+  async function mount(props: Partial<Parameters<typeof AssemblyEditor>[0]> = {}) {
+    const client: BuildClient = {
+      parts: () => Promise.resolve(studioParts),
+      releaseVoxel: vi.fn(),
+    };
+    root = createRoot(container);
+    const render = (more: Partial<Parameters<typeof AssemblyEditor>[0]> = {}) =>
+      act(async () =>
+        root?.render(
+          <AssemblyEditor
+            active={true}
+            keysEnabled={true}
+            library={LIBRARY}
+            modeSwitch={null}
+            askLimits={() => Promise.resolve(NO_LIMITS)}
+            client={client}
+            onReleaseStart={() => {}}
+            onReleased={() => {}}
+            onUnsaved={() => {}}
+            {...props}
+            {...more}
+          />,
+        ),
+      );
+    await render();
+    return render;
+  }
+
+  const legSection = () =>
+    [...container.querySelectorAll(".parts-tray section")].find(
+      (section) => section.querySelector("h3")?.textContent === "Leg",
+    );
+
+  it("lists them after the packs' parts of their type, marked as yours", async () => {
+    await mount({ playerParts: loaded([stilt]) });
+    const tiles = [...(legSection()?.querySelectorAll(".tray-part") ?? [])];
+    expect(tiles.at(-1)?.textContent).toBe("StiltMine");
+    expect(tiles.at(-1)?.classList.contains("mine")).toBe(true);
+    // Picked like a pack part: legs have two places, so it stays picked.
+    await click(trayPart("Stilt"));
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("true");
+    expect(view.highlighted).toHaveLength(4);
+  });
+
+  it("has a Draw your own tile per section only when Draw mode can be opened", async () => {
+    const render = await mount();
+    expect(container.querySelector(".draw-your-own")).toBeNull();
+    const onDrawPart = vi.fn();
+    await render({ onDrawPart });
+    const tiles = container.querySelectorAll(".draw-your-own");
+    expect(tiles).toHaveLength(container.querySelectorAll(".parts-tray section").length);
+    await click(labelled("Draw your own leg"));
+    expect(onDrawPart).toHaveBeenCalledWith("hollow:leg");
+  });
+
+  it("picks a part asked for once it is in the tray, back in the build step", async () => {
+    const render = await mount({ playerParts: loaded([]) });
+    await click(button("Next"));
+    // Draw mode saved it, but the Studio hasn't read it back yet: it waits.
+    await render({ pickRequest: { key: 1, partId: stilt.id } });
+    expect(container.querySelector(".tray-part[aria-pressed='true']")).toBeNull();
+    await render({ pickRequest: { key: 1, partId: stilt.id }, playerParts: loaded([stilt]) });
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("true");
+    expect(button("Next")).toBeDefined();
+    // Once per key: dropping the pick sticks until a new key.
+    await click(trayPart("Stilt"));
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("false");
+    await render({ pickRequest: { key: 1, partId: stilt.id }, playerParts: loaded([stilt]) });
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("false");
+    await render({ pickRequest: { key: 2, partId: stilt.id }, playerParts: loaded([stilt]) });
+    expect(trayPart("Stilt").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("drops the pick of a part that leaves the tray, and keeps the view", async () => {
+    const render = await mount({ playerParts: loaded([stilt]) });
+    const before = view.options;
+    await click(trayPart("Stilt"));
+    await render({ playerParts: loaded([]) });
+    expect(container.textContent).not.toContain("Stilt");
+    expect(view.highlighted).toEqual([]);
+    // The view wasn't made again for the new tray (#247).
+    expect(view.options).toBe(before);
+  });
+
+  it("hands the view's thumbnails on, for My parts", async () => {
+    const onThumbnails = vi.fn();
+    await mount({ onThumbnails });
+    expect(onThumbnails).toHaveBeenLastCalledWith(
+      expect.objectContaining({ part: expect.any(Function) }),
+    );
+  });
 });

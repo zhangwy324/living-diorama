@@ -1,4 +1,5 @@
 import type { SocketRef, VoxelAssembly } from "@living-diorama/content-schema";
+import { connectPartsStore, type PartsStore } from "@living-diorama/desktop-integration";
 import { createAssemblyView, type AssemblyView } from "@living-diorama/renderer";
 import {
   useCallback,
@@ -53,8 +54,10 @@ import { angleBetween, DRAG_REACH_PX, dragTarget } from "./drag-to-socket";
 import { useLimits } from "./limits";
 import type { ModeProps } from "./modes";
 import { PartColours } from "./PartColours";
-import { partsKit, type PartsKit } from "./parts-kit";
+import type { PartThumbnails } from "./part-thumbnails";
+import { partsKit, withPlayerParts, type PartsKit } from "./parts-kit";
 import { PartsTray } from "./PartsTray";
+import { usePlayerParts, type PlayerPartsState } from "./player-parts";
 import { useReducedMotion } from "./reduced-motion";
 import { NO_NAME, voxelReleaseFailure } from "./release";
 import { keepTrying } from "./retry";
@@ -92,6 +95,23 @@ export interface LoadRequest {
   name: string;
 }
 
+/**
+ * A part to pick in the tray, e.g. one Draw mode just saved, for its "Use in Build" (ADR 0025 §9).
+ * Each new `key` is picked once, exactly as a click on its tray tile picks it: a part of a root
+ * type swaps the torso, another is placed at once if it has one place, else its sockets are marked.
+ * It waits until the part is in the tray (the Studio reloads the player's parts after saving one)
+ * and until a release on its way has finished; it takes Build mode back to the build step. Only
+ * the latest key is picked.
+ */
+export interface PickRequest {
+  key: number;
+  /** The part's ID, e.g. `user-part:<uuid>`. */
+  partId: string;
+}
+
+/** Where Build mode reads the player's parts while the Studio doesn't give them. */
+let fallbackPartsStore: PartsStore | undefined;
+
 const centimetres = (metres: number) => `${Math.round(metres * 100)} cm`;
 
 /** Whether a key press is typing in a field, which the shortcuts leave alone. */
@@ -124,8 +144,34 @@ export function AssemblyEditor({
   onReleaseStart,
   onReleased,
   onUnsaved,
-}: ModeProps & { client: BuildClient; loadRequest?: LoadRequest | undefined }) {
-  const [kit, setKit] = useState<PartsKit>();
+  playerParts: givenPlayerParts,
+  onDrawPart,
+  pickRequest,
+  onThumbnails,
+}: ModeProps & {
+  client: BuildClient;
+  loadRequest?: LoadRequest | undefined;
+  /**
+   * The player's parts, for the tray (ADR 0025 §9). The Studio shares them with My parts; without
+   * them Build mode reads the parts store itself.
+   */
+  playerParts?: PlayerPartsState | undefined;
+  /** Opens Draw mode for a part of this type, from the tray's "Draw your own" tiles. */
+  onDrawPart?: ((partType: string) => void) | undefined;
+  pickRequest?: PickRequest | undefined;
+  /** Hears of the view's part thumbnails, e.g. for My parts' images, so no second renderer is made. */
+  onThumbnails?: ((thumbnails: PartThumbnails | undefined) => void) | undefined;
+}) {
+  // The packs' kit, from the strip; the view is made for it alone, so it stays when the player's
+  // parts change (#247).
+  const [packKit, setKit] = useState<PartsKit>();
+  const ownPlayerParts = usePlayerParts(
+    givenPlayerParts ? undefined : (fallbackPartsStore ??= connectPartsStore()),
+  );
+  const playerParts = givenPlayerParts ?? ownPlayerParts;
+  const loadedParts = playerParts.parts;
+  const mine = useMemo(() => (loadedParts ?? []).map(({ summary }) => summary), [loadedParts]);
+  const kit = useMemo(() => packKit && withPlayerParts(packKit, mine), [packKit, mine]);
   const [noParts, setNoParts] = useState(false);
   const [build, setBuild] = useState<BuildState>();
   const stage = useRef<HTMLDivElement>(null);
@@ -183,12 +229,12 @@ export function AssemblyEditor({
   // the tray.
   useEffect(() => {
     const element = stage.current;
-    if (!element || !kit) return;
+    if (!element || !packKit) return;
     let created: AssemblyView;
     try {
       created = createAssemblyView(element, {
-        roleOf: kit.lookup.roleOf,
-        motionOf: kit.motionOf,
+        roleOf: packKit.lookup.roleOf,
+        motionOf: packKit.motionOf,
       });
     } catch (error) {
       console.warn("The assembly view could not start", error);
@@ -199,14 +245,21 @@ export function AssemblyEditor({
       created.dispose();
       setView(undefined);
     };
-  }, [kit]);
+  }, [packKit]);
+
+  const thumbnails = view?.thumbnails;
+  useEffect(() => onThumbnails?.(thumbnails), [onThumbnails, thumbnails]);
 
   // Made once per creature and kept while its assembly, name and plan are unchanged, so retrying a
   // release whose answer was lost can't save it twice (ADR 0023 §17); any edit makes a new one.
   const releaseId = useRef<string>(undefined);
 
   const assembly = build?.history.present;
-  const picked = step === "build" ? build?.picked : undefined;
+  // A picked part that left the tray, e.g. a deleted player part, counts as not picked.
+  const picked =
+    step === "build" && build?.picked !== undefined && kit?.byId.has(build.picked)
+      ? build.picked
+      : undefined;
   // The part a click or drop would place: the dragged one, else the picked one.
   const placing = drag?.part ?? picked;
   const mirror = build?.mirror ?? true;
@@ -347,6 +400,24 @@ export function AssemblyEditor({
     setStep("build");
     releaseId.current = undefined;
   }, [kit, loadRequest, releasing, typeName, endDrag]);
+
+  // A part to pick, e.g. from Draw mode's "Use in Build", once it is in the tray (`PickRequest`).
+  const pickedKey = useRef<number>(undefined);
+  useEffect(() => {
+    if (!kit || !pickRequest || releasing || pickRequest.key === pickedKey.current) return;
+    if (!kit.byId.has(pickRequest.partId)) return;
+    pickedKey.current = pickRequest.key;
+    endDrag();
+    // A request from outside, taken once per key as `loadRequest` is.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHover(undefined);
+    setReleaseError(undefined);
+    setStep("build");
+    // Picking the picked part again would drop the pick.
+    setBuild(
+      (state) => state && pickPart({ ...state, picked: undefined }, kit, pickRequest.partId),
+    );
+  }, [kit, pickRequest, releasing, endDrag]);
 
   useEffect(() => {
     if (step !== "build") return;
@@ -693,7 +764,8 @@ export function AssemblyEditor({
               edit((state, k) => pickPart(state, k, partId));
             }}
             onPress={onTrayPress}
-            thumbnails={view?.thumbnails}
+            thumbnails={thumbnails}
+            onDrawPart={onDrawPart}
             locked={step !== "build"}
           />
         )}

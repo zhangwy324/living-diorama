@@ -1,0 +1,152 @@
+/* The player's own parts (ADR 0025 §9): marked in the tray, a "Draw your own" tile per tray
+   section, and the My parts list. */
+
+.tray-part.mine {
+  position: relative;
+}
+
+.mine-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #1f2a1f;
+  background: #e6c86e;
+}
+
+.tray-part.draw-your-own {
+  justify-content: center;
+  min-height: 74px;
+  border: 1px dashed rgb(238 243 232 / 35%);
+  color: rgb(238 243 232 / 80%);
+  background: none;
+}
+
+.tray-part.draw-your-own:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.tray-part.draw-your-own svg .stroke,
+.my-part-buttons svg .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.my-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.my-parts h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.my-parts button {
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+}
+
+.my-parts button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 16%);
+}
+
+.my-parts button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.my-parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-part {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.my-part .thumbnail {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #ece8dc;
+}
+
+.my-part .thumbnail.placeholder {
+  background: rgb(255 255 255 / 8%);
+}
+
+.my-part-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.my-part-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-part-type {
+  font-size: 12px;
+  color: rgb(238 243 232 / 65%);
+}
+
+.my-part-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.my-part-buttons button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.my-part-rename {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.my-part-rename input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid rgb(238 243 232 / 30%);
+  border-radius: 4px;
+  font: inherit;
+  color: inherit;
+  background: rgb(0 0 0 / 20%);
+}
+
+.my-part-rename button {
+  padding: 2px 6px;
+}

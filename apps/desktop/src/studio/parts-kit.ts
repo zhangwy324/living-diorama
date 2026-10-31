@@ -14,7 +14,7 @@ import type { StudioParts } from "../studio-protocol";
 
 /** The parts to build with and what Build mode works out from them once. */
 export interface PartsKit {
-  /** Every part, by ID. */
+  /** Every part, by ID: the packs' and the player's own (`withPlayerParts`). */
   byId: ReadonlyMap<string, PartSummary>;
   /** The tray's sections, in order: one per part type that has parts. */
   sections: readonly TraySection[];
@@ -25,9 +25,12 @@ export interface PartsKit {
   roots: ReadonlySet<string>;
   /** What a new creature starts from: the default torso alone. */
   start: VoxelAssembly;
-  /** Every part of a root type, by ID: what Randomize builds on (ADR 0023 §9). */
+  /**
+   * Every pack part of a root type, by ID: what Randomize builds on (ADR 0023 §9). Never the
+   * player's own parts, which are placed by hand (ADR 0025 §10).
+   */
   rootParts: readonly PartSummary[];
-  /** Every part, by ID: what Randomize and Fill empty fill sockets from. */
+  /** Every pack part, by ID: what Randomize and Fill empty fill sockets from. No player parts. */
   parts: readonly PartSummary[];
   /** The packs' suggested colours, lower-case `#rrggbb` (ADR 0023 §11). */
   suggestedColors: readonly string[];
@@ -38,7 +41,10 @@ export interface TraySection {
   type: string;
   /** Its name, the section's heading. */
   name: string;
+  /** The packs' parts of this type. */
   parts: readonly PartSummary[];
+  /** The player's own parts of this type (ADR 0025 §9), after the packs'. */
+  mine: readonly PartSummary[];
 }
 
 /** The part types a creature is built on, such as torsos: those with the `root` role (ADR 0023 §10). */
@@ -83,7 +89,12 @@ export function traySections(
   const order = (type: PartTypeSummary) => depth.get(type.id) ?? Infinity;
   return [...partTypes]
     .sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name))
-    .map(({ id, name }) => ({ type: id, name, parts: parts.filter((p) => p.part.type === id) }))
+    .map(({ id, name }) => ({
+      type: id,
+      name,
+      parts: parts.filter((p) => p.part.type === id),
+      mine: [],
+    }))
     .filter((section) => section.parts.length > 0);
 }
 
@@ -125,5 +136,23 @@ export function partsKit({
     rootParts: parts.filter(({ part }) => roots.has(part.type)),
     parts,
     suggestedColors,
+  };
+}
+
+/**
+ * The kit with the player's own parts added (ADR 0025 §9): each in its type's tray section after
+ * the packs' parts, and pickable like them. Randomize and Fill empty still use the packs' parts
+ * only (§10), and the default torso stays a pack part. Takes the packs' kit, `partsKit`'s. A part of a type with no section (no pack
+ * part of that type) isn't in the tray: there is nothing to draw it from.
+ */
+export function withPlayerParts(kit: PartsKit, mine: readonly PartSummary[]): PartsKit {
+  if (mine.length === 0) return kit;
+  return {
+    ...kit,
+    byId: new Map([...kit.byId, ...mine.map((part) => [part.id, part] as const)]),
+    sections: kit.sections.map((section) => ({
+      ...section,
+      mine: mine.filter(({ part }) => part.type === section.type),
+    })),
   };
 }
