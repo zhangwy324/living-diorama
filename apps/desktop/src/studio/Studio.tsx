@@ -13,17 +13,21 @@ import {
   type StudioRequests,
   type StudioSpecies,
 } from "../studio-protocol";
-import { AssemblyEditor } from "./AssemblyEditor";
+import { AssemblyEditor, type PickRequest } from "./AssemblyEditor";
 import { CloseDialog } from "./CloseDialog";
-import { DeleteDialog } from "./DeleteDialog";
+import { DeleteDialog, speciesDeleteMessage } from "./DeleteDialog";
 import { useEditCopy } from "./edit-copy";
 import type { AskLimits } from "./limits";
 import { closeMessage, type StudioMode } from "./modes";
 import { ModeSwitch } from "./ModeSwitch";
 import { MyCreatures } from "./MyCreatures";
+import { MyParts } from "./MyParts";
 import { useOpenDraw } from "./open-draw";
+import type { PartThumbnails } from "./part-thumbnails";
 import { PartDrawMode } from "./PartDrawMode";
+import { usePlayerParts } from "./player-parts";
 import { describeFailure, keptMessage, releasedMessage } from "./release";
+import { keepTrying } from "./retry";
 import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 
 // The Creation Studio's page (ADR 0015, ADR 0023 §1): Build mode and Draw mode side by side in one
@@ -34,7 +38,8 @@ import { VoxelCreatureThumbnails } from "./voxel-thumbnails";
 const studioWindow = connectStudioWindow();
 const channel = openStudioChannel<StudioRequests, LibrarySnapshot>();
 const client = studioClient(channel);
-// The player's parts (ADR 0025 §6): Draw mode saves to it, and Build mode lists from it.
+// The player's parts (ADR 0025 §6): Draw mode saves to it; Build mode's tray and My parts list
+// from it through one `usePlayerParts`. Made once: outside Tauri each call is a new memory store.
 const partsStore = connectPartsStore();
 const askLimits: AskLimits = (sizeClass, locomotion) =>
   channel.request("limits", { sizeClass, locomotion });
@@ -78,13 +83,39 @@ export function Studio() {
   });
 
   // Draw mode on a new part of a type or a saved part (ADR 0025 §9), asking first if a drawing
-  // would be lost. PR 7: the tray's "Draw your own" tiles and My parts' Edit call `openDraw.open`.
+  // would be lost: from the tray's "Draw your own" tiles, My parts' Edit and Draw mode's New part.
   const openDraw = useOpenDraw({ unsaved: () => unsaved.current.draw, onMode: setMode });
-  // Build mode will pick the part: PR 7 passes the entry on to it.
-  const onUseInBuild = useCallback((entry: PlayerPartEntry) => {
-    setMode("build");
-    setCelebration({ text: `${entry.name} is in My parts.`, happy: true });
-  }, []);
+
+  // The player's parts, read again whenever Draw mode saves one.
+  const playerParts = usePlayerParts(partsStore);
+  const { reload: reloadPlayerParts } = playerParts;
+  const onSavedPart = useCallback(() => void reloadPlayerParts(), [reloadPlayerParts]);
+  // Use in Build: Build mode picks the part once the read that brings it in lands (`PickRequest`).
+  const [pickRequest, setPickRequest] = useState<PickRequest>();
+  const pickKey = useRef(0);
+  const onUseInBuild = useCallback(
+    (entry: PlayerPartEntry) => {
+      void reloadPlayerParts();
+      setPickRequest({ key: ++pickKey.current, partId: entry.id });
+      setMode("build");
+    },
+    [reloadPlayerParts],
+  );
+  // My parts draws its images with Build mode's view's thumbnails, so no other renderer (#240).
+  const [partThumbnails, setPartThumbnails] = useState<PartThumbnails>();
+  // Part types' names, for My parts, from the strip's parts answer as Build mode has it.
+  const [partTypeNames, setPartTypeNames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(
+    () =>
+      keepTrying(
+        () =>
+          client.parts().then(({ partTypes }) => {
+            setPartTypeNames(new Map(partTypes.map(({ id, name }) => [id, name])));
+          }),
+        (error: unknown) => console.warn("Could not get the part types", error),
+      ),
+    [],
+  );
 
   // Closing with a creature not released or a part not saved asks first (ADR 0015 §10, ADR 0023
   // §21, ADR 0025).
@@ -172,6 +203,10 @@ export function Studio() {
         onReleased={onReleased}
         onUnsaved={onUnsavedBuild}
         loadRequest={editCopy.loadRequest}
+        playerParts={playerParts}
+        onDrawPart={(partType) => openDraw.open({ partType })}
+        pickRequest={pickRequest}
+        onThumbnails={setPartThumbnails}
       />
       <PartDrawMode
         active={mode === "draw"}
@@ -182,7 +217,7 @@ export function Studio() {
         store={partsStore}
         request={openDraw.request}
         onNew={(partType) => openDraw.open({ partType })}
-        onSaved={() => {}}
+        onSaved={onSavedPart}
         onUseInBuild={onUseInBuild}
       />
       <MyCreatures
@@ -198,7 +233,14 @@ export function Studio() {
         }
         onDelete={setDeleting}
         onEditCopy={editCopy.press}
-      />
+      >
+        <MyParts
+          playerParts={playerParts}
+          partTypeName={(type) => partTypeNames.get(type) ?? "Part"}
+          thumbnails={partThumbnails}
+          onEditPart={(entry) => openDraw.open({ entry })}
+        />
+      </MyCreatures>
       {celebration && (
         <div
           key={celebration.text}
@@ -212,7 +254,7 @@ export function Studio() {
       {deleting && (
         <DeleteDialog
           name={deleting.name}
-          inWorld={deleting.inWorld}
+          message={speciesDeleteMessage(deleting.name, deleting.inWorld)}
           onDelete={() => {
             const { speciesId } = deleting;
             setDeleting(undefined);

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { playerPartId } from "@living-diorama/content-schema";
+import { MAX_PLAYER_PART_NAME_LENGTH, playerPartId } from "@living-diorama/content-schema";
 import { createMemoryPartsStore, type PartsStore } from "@living-diorama/desktop-integration";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -9,7 +9,6 @@ import { drawnPartEntry } from "./fixtures/player-parts";
 import {
   checkPlayerPart,
   loadPlayerParts,
-  MAX_PART_NAME_LENGTH,
   NOT_READ_YET,
   playerPartSummary,
   renamedEntry,
@@ -94,7 +93,7 @@ describe("renaming", () => {
   it("takes a name that isn't blank or too long", () => {
     expect(validPartName("Stilt")).toBe(true);
     expect(validPartName("   ")).toBe(false);
-    expect(validPartName("x".repeat(MAX_PART_NAME_LENGTH + 1))).toBe(false);
+    expect(validPartName("x".repeat(MAX_PLAYER_PART_NAME_LENGTH + 1))).toBe(false);
   });
 });
 

@@ -1,14 +1,9 @@
-import type { PlayerPartEntry } from "@living-diorama/content-schema";
+import { MAX_PLAYER_PART_NAME_LENGTH, type PlayerPartEntry } from "@living-diorama/content-schema";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DeleteDialog, partDeleteMessage } from "./DeleteDialog";
 import "./my-parts.css";
 import { partThumbnailKey, usePartThumbnails, type PartThumbnails } from "./part-thumbnails";
-import {
-  MAX_PART_NAME_LENGTH,
-  validPartName,
-  type PlayerPart,
-  type PlayerPartsState,
-} from "./player-parts";
+import { validPartName, type PlayerPart, type PlayerPartsState } from "./player-parts";
 
 // The parts the player drew (ADR 0025 §7, §9): each with its image, name and part type, to
 // rename, edit in Draw mode or delete. Deleting asks first; creatures already released keep
@@ -203,7 +198,7 @@ function RenameField(props: {
         type="text"
         aria-label={`New name for ${props.original}`}
         value={props.name}
-        maxLength={MAX_PART_NAME_LENGTH}
+        maxLength={MAX_PLAYER_PART_NAME_LENGTH}
         disabled={props.disabled}
         onChange={(event) => props.onName(event.target.value)}
         onKeyDown={(event) => {

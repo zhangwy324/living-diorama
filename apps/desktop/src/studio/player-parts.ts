@@ -1,5 +1,6 @@
 import {
   formatDiagnostic,
+  MAX_PLAYER_PART_NAME_LENGTH,
   parsePlayerPartEntry,
   playerPartId,
   type PlayerPartEntry,
@@ -21,9 +22,6 @@ export interface PlayerPart {
   /** The part as the tray lists it, made once per loaded entry so its identity is stable. */
   summary: PartSummary;
 }
-
-/** The longest name a part can have, as for a creature's name. */
-export const MAX_PART_NAME_LENGTH = 40;
 
 /** The part as the tray and the assembly take it: its version as a string, as a pack part's is. */
 export const playerPartSummary = (entry: PlayerPartEntry): PartSummary => ({
@@ -80,7 +78,7 @@ export const renamedEntry = (entry: PlayerPartEntry, name: string, now: Date): P
 /** Whether `name` can be a part's name. */
 export const validPartName = (name: string): boolean => {
   const trimmed = name.trim();
-  return trimmed !== "" && trimmed.length <= MAX_PART_NAME_LENGTH;
+  return trimmed !== "" && trimmed.length <= MAX_PLAYER_PART_NAME_LENGTH;
 };
 
 /** Said when a part is renamed or deleted before the parts have been read. */

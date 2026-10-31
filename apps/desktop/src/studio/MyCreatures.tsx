@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LibrarySnapshot, StudioSpecies } from "../studio-protocol";
 
 // The player's species, beside the Studio's modes (roadmap M11 task 6, ADR 0023 §19): each with
@@ -20,6 +21,8 @@ export interface MyCreaturesProps {
   onDelete(species: StudioSpecies): void;
   /** Loads a copy of a voxel species into Build mode (ADR 0023 §3). */
   onEditCopy(species: StudioSpecies): void;
+  /** Shown below the species while the panel is open: My parts (ADR 0025 §9). */
+  children?: ReactNode;
 }
 
 const reasonsOf = (species: StudioSpecies) =>
@@ -141,6 +144,7 @@ export function MyCreatures(props: MyCreaturesProps) {
           );
         })}
       </ul>
+      {props.children}
     </aside>
   );
 }

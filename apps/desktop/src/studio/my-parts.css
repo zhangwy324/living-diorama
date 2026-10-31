@@ -118,3 +118,19 @@
 .my-part-rename button {
   padding: 2px 6px;
 }
+
+/* Below My creatures, in the same panel. */
+.my-creatures .my-parts {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(238 243 232 / 15%);
+}
+
+.my-parts h2:focus {
+  outline: none;
+}
+
+.my-parts h2:focus-visible {
+  outline: 2px solid #eef3e8;
+  outline-offset: 2px;
+}

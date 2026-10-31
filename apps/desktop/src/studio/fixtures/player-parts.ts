@@ -3,6 +3,7 @@ import {
   DRAWING_GRID,
   fitDrawnPart,
   PartDrawingSchema,
+  PLAYER_PART_SCHEMA_VERSION,
   playerPartId,
   voxelizeDrawing,
   type PlayerPartEntry,
@@ -25,7 +26,8 @@ export interface DrawnPartOptions {
 
 /**
  * Test only: a player part entry as Draw mode would save one (ADR 0025 §3, §8): an ellipse drawn
- * with the type's recipe, fitted to the type's first pack part (the starter for a root type).
+ * with the type's recipe, fitted to the type's first pack part in ID order (the starter for a root
+ * type), which it names as its base.
  */
 export function drawnPartEntry(
   studioParts: StudioParts,
@@ -60,12 +62,13 @@ export function drawnPartEntry(
     view: recipe.view,
     rule: recipe.rule,
     step: base.part.step,
+    baseId: base.id,
   });
   const drawn = voxelizeDrawing(drawing);
   if (!drawn) throw new Error("Nothing drawn");
   const { part } = fitDrawnPart(drawn, base.part);
   return {
-    schemaVersion: 1,
+    schemaVersion: PLAYER_PART_SCHEMA_VERSION,
     id: playerPartId(uuid),
     name,
     version,
