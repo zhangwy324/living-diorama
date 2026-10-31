@@ -150,10 +150,16 @@ fn library_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// The frontend's library commands. They are async so file access runs off the main thread.
 pub mod commands {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Library operations run one at a time, so a listing never removes the pending folder of a
+    /// save or delete in progress.
+    static LIBRARY: Mutex<()> = Mutex::new(());
 
     #[tauri::command]
     pub async fn list_library(app: AppHandle) -> Result<Vec<StoredEntry>, String> {
-        Ok(list(&library_dir(&app)?))
+        let library = library_dir(&app)?;
+        Ok(storage::locked(&LIBRARY, || list(&library)))
     }
 
     #[tauri::command]
@@ -162,12 +168,14 @@ pub mod commands {
         id: String,
         entry: Value,
     ) -> Result<(), String> {
-        save(&library_dir(&app)?, &id, &entry)
+        let library = library_dir(&app)?;
+        storage::locked(&LIBRARY, || save(&library, &id, &entry))
     }
 
     #[tauri::command]
     pub async fn delete_library_entry(app: AppHandle, id: String) -> Result<(), String> {
-        delete(&library_dir(&app)?, &id)
+        let library = library_dir(&app)?;
+        storage::locked(&LIBRARY, || delete(&library, &id))
     }
 }
 

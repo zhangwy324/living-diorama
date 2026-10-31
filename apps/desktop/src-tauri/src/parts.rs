@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use serde_json::Value;
+use serde_json::value::RawValue;
 use tauri::AppHandle;
 
 use crate::storage::{self, is_lowercase_uuid, pending_path, read_limited, write_atomic};
@@ -28,11 +29,12 @@ const MAX_PART_BYTES: u64 = 1024 * 1024;
 /// is still writing it.
 static STORE: Mutex<()> = Mutex::new(());
 
-/// A part as stored: the file's ID and its contents, unvalidated.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+/// A part as stored: the file's ID and its contents, unvalidated. The contents are checked to be
+/// JSON but passed on as raw text, so listing never builds a value tree per number (#208).
+#[derive(Debug, Serialize)]
 pub struct StoredPart {
     pub id: String,
-    pub entry: Value,
+    pub entry: Box<RawValue>,
 }
 
 /// The file of part `id`. Part IDs are lowercase UUIDs, checked before any path is built, so the
@@ -134,10 +136,7 @@ pub mod commands {
     use super::*;
 
     fn locked<T>(run: impl FnOnce() -> T) -> T {
-        let _store = STORE
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        run()
+        storage::locked(&STORE, run)
     }
 
     #[tauri::command]
@@ -191,6 +190,14 @@ mod tests {
         json!({ "schemaVersion": 1, "id": format!("user-part:{id}"), "version": version })
     }
 
+    /// What `list` returns, each entry's raw JSON parsed so it can be compared.
+    fn listed(parts: &Path) -> Vec<(String, Value)> {
+        list(parts)
+            .into_iter()
+            .map(|part| (part.id, serde_json::from_str(part.entry.get()).unwrap()))
+            .collect()
+    }
+
     fn file(parts: &Path, id: &str) -> PathBuf {
         parts.join(format!("{id}{EXTENSION}"))
     }
@@ -199,27 +206,21 @@ mod tests {
     fn saves_lists_and_deletes_parts() {
         let dir = TempDir::new("round-trip");
         let parts = dir.0.join("parts");
-        assert_eq!(list(&parts), vec![]); // no parts folder yet
+        assert_eq!(listed(&parts), vec![]); // no parts folder yet
         save(&parts, ID, &entry(ID, 1)).unwrap();
         save(&parts, OTHER_ID, &entry(OTHER_ID, 1)).unwrap();
         assert_eq!(
-            list(&parts),
+            listed(&parts),
             vec![
-                StoredPart {
-                    id: OTHER_ID.into(),
-                    entry: entry(OTHER_ID, 1),
-                },
-                StoredPart {
-                    id: ID.into(),
-                    entry: entry(ID, 1),
-                },
+                (OTHER_ID.into(), entry(OTHER_ID, 1)),
+                (ID.into(), entry(ID, 1)),
             ]
         );
 
         delete(&parts, OTHER_ID).unwrap();
         assert!(!file(&parts, OTHER_ID).exists());
         delete(&parts, OTHER_ID).unwrap(); // already gone
-        let ids: Vec<_> = list(&parts).into_iter().map(|part| part.id).collect();
+        let ids: Vec<_> = listed(&parts).into_iter().map(|(id, _)| id).collect();
         assert_eq!(ids, [ID]);
     }
 
@@ -228,7 +229,7 @@ mod tests {
         let dir = TempDir::new("edit");
         save(&dir.0, ID, &entry(ID, 1)).unwrap();
         save(&dir.0, ID, &entry(ID, 2)).unwrap();
-        assert_eq!(list(&dir.0)[0].entry, entry(ID, 2));
+        assert_eq!(listed(&dir.0)[0].1, entry(ID, 2));
         let files: Vec<_> = fs::read_dir(&dir.0)
             .unwrap()
             .map(|file| file.unwrap().file_name())
@@ -266,7 +267,7 @@ mod tests {
             fs::metadata(file(&dir.0, ID)).unwrap().len(),
             MAX_PART_BYTES
         );
-        assert_eq!(list(&dir.0)[0].entry, entry(MAX_PART_BYTES));
+        assert_eq!(listed(&dir.0)[0].1, entry(MAX_PART_BYTES));
     }
 
     #[test]
@@ -306,7 +307,7 @@ mod tests {
         assert!(bytes * 4 < MAX_PART_BYTES, "{bytes}");
         let dir = TempDir::new("worst-case");
         save(&dir.0, ID, &entry).unwrap();
-        assert_eq!(list(&dir.0)[0].entry, entry);
+        assert_eq!(listed(&dir.0)[0].1, entry);
     }
 
     #[test]
@@ -328,7 +329,7 @@ mod tests {
         )
         .unwrap();
 
-        let ids: Vec<_> = list(&dir.0).into_iter().map(|part| part.id).collect();
+        let ids: Vec<_> = listed(&dir.0).into_iter().map(|(id, _)| id).collect();
         assert_eq!(ids, [ID]);
         // Skipped, not removed.
         assert!(file(&dir.0, broken).exists());
@@ -347,13 +348,7 @@ mod tests {
         let other = dir.0.join("notes.tmp");
         fs::write(&other, "hi").unwrap();
 
-        assert_eq!(
-            list(&dir.0),
-            vec![StoredPart {
-                id: ID.into(),
-                entry: entry(ID, 1)
-            }]
-        );
+        assert_eq!(listed(&dir.0), vec![(ID.into(), entry(ID, 1))]);
         assert!(!pending.exists());
         assert!(!unsaved.exists());
         assert!(other.exists()); // not the store's
@@ -362,6 +357,6 @@ mod tests {
         fs::write(&pending, "{ half").unwrap();
         save(&dir.0, ID, &entry(ID, 2)).unwrap();
         assert!(!pending.exists());
-        assert_eq!(list(&dir.0)[0].entry, entry(ID, 2));
+        assert_eq!(listed(&dir.0)[0].1, entry(ID, 2));
     }
 }

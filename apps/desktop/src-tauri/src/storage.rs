@@ -5,6 +5,7 @@
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager};
 
@@ -52,6 +53,15 @@ pub fn read_limited(path: &Path, max: u64) -> io::Result<Vec<u8>> {
 
 fn too_large(path: &Path, max: u64) -> io::Error {
     io::Error::other(format!("{} is more than {max} bytes", path.display()))
+}
+
+/// Runs `run` holding `store`, so a store's operations run one at a time. A panic in an earlier
+/// operation doesn't poison the store: each operation leaves the files whole on its own.
+pub fn locked<T>(store: &Mutex<()>, run: impl FnOnce() -> T) -> T {
+    let _store = store
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    run()
 }
 
 /// Whether `id` is a lowercase UUID, the only names the library and the parts store give their
