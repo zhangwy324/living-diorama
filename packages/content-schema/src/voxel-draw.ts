@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PART_DRAWING_RULES, PART_DRAWING_VIEWS, type PartDrawingView } from "./definitions";
 import { nearest } from "./distance";
 import { HexColorSchema } from "./primitives";
 import {
@@ -23,26 +24,6 @@ import {
 /** A drawing's grid is this many pixels along each side, one pixel a cube. */
 export const DRAWING_GRID = 32;
 
-/**
- * Which side of the part the drawing shows. `side`: canvas x is +X (forward), canvas y down is −Y,
- * and depth is along Z. `front`: the part seen from in front, canvas x is −Z (the creature's right
- * is on the canvas's left, as a face is seen), canvas y down is −Y, and depth is along X. `top`:
- * the part seen from above, canvas x is +X, canvas y down is +Z (the creature's right), and depth
- * is along Y. `VIEW_AXES` maps each.
- */
-// TODO(M23): reuse `PART_DRAWING_VIEWS` from definitions.ts once M23 PR 2 lands.
-export const DRAWING_VIEWS = ["side", "front", "top"] as const;
-export type DrawingView = (typeof DRAWING_VIEWS)[number];
-
-/**
- * How deep each painted pixel becomes. `puffy`: rounded like a pillow, deepest in the middle of
- * the shape. `tube`: as deep as the shape is wide where the pixel is, like a limb. `flat`: one or
- * two cubes deep everywhere.
- */
-// TODO(M23): reuse `PART_DRAWING_RULES` from definitions.ts once M23 PR 2 lands.
-export const DRAWING_RULES = ["puffy", "tube", "flat"] as const;
-export type DrawingRule = (typeof DRAWING_RULES)[number];
-
 /** The chubby factor's range: it scales the depth of `puffy` and `tube` drawings. */
 export const MIN_CHUBBY = 0.25;
 export const MAX_CHUBBY = 2;
@@ -61,8 +42,14 @@ export const PartDrawingSchema = z
     palette: z
       .array(HexColorSchema)
       .max(MAX_PART_COLORS, { error: `A drawing has at most ${MAX_PART_COLORS} colours` }),
-    view: z.enum(DRAWING_VIEWS),
-    rule: z.enum(DRAWING_RULES),
+    /** `PART_DRAWING_VIEWS`; `VIEW_AXES` maps each onto the part's axes. */
+    view: z.enum(PART_DRAWING_VIEWS),
+    /**
+     * `PART_DRAWING_RULES`: how deep each painted pixel becomes. `puffy`: rounded like a pillow,
+     * deepest in the middle of the shape. `tube`: as deep as the shape is wide where the pixel is,
+     * like a limb. `flat`: `flatThickness` cubes deep everywhere.
+     */
+    rule: z.enum(PART_DRAWING_RULES),
     /** Scales the depth of a `puffy` or `tube` drawing. */
     chubby: z.number().min(MIN_CHUBBY).max(MAX_CHUBBY).default(1),
     /** A `flat` drawing's depth in cubes. */
@@ -108,7 +95,7 @@ interface ViewAxes {
   depth: Axis;
 }
 
-const VIEW_AXES: Readonly<Record<DrawingView, ViewAxes>> = {
+const VIEW_AXES: Readonly<Record<PartDrawingView, ViewAxes>> = {
   side: { canvasX: ["x", 1], canvasY: ["y", -1], depth: "z" },
   front: { canvasX: ["z", -1], canvasY: ["y", -1], depth: "x" },
   top: { canvasX: ["x", 1], canvasY: ["z", 1], depth: "y" },
@@ -207,7 +194,7 @@ function pixelDepths(drawing: PartDrawing, filled: Uint8Array, width: number, he
 
 /**
  * Turns a drawing into cubes, cropped to the painted pixels, each pixel a column of cubes of its
- * colour along the depth axis (`DRAWING_VIEWS`), centred on the part's middle plane. Every column
+ * colour along the depth axis (`VIEW_AXES`), centred on the part's middle plane. Every column
  * is an odd number of cubes deep when the deepest is, even when it is even, so the cubes are a
  * mirror image about that plane and a mirror pair of sockets fits them. Depth is capped at
  * `MAX_PART_CUBES`. Undefined for a drawing with nothing painted.
