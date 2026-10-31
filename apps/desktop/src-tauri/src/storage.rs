@@ -3,7 +3,7 @@
 //! they are unit tested without the app.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
@@ -34,16 +34,36 @@ pub fn pending_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Reads a file of at most `max` bytes.
+/// Reads a file of at most `max` bytes. It reads no more than `max + 1` bytes, so a file that
+/// grows while it is read is refused too, without reading it all (#208).
 pub fn read_limited(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let size = fs::metadata(path)?.len();
+    let file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
     if size > max {
-        return Err(io::Error::other(format!(
-            "{} is {size} bytes, more than {max}",
-            path.display()
-        )));
+        return Err(too_large(path, max));
     }
-    fs::read(path)
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(max + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(too_large(path, max));
+    }
+    Ok(bytes)
+}
+
+fn too_large(path: &Path, max: u64) -> io::Error {
+    io::Error::other(format!("{} is more than {max} bytes", path.display()))
+}
+
+/// Whether `id` is a lowercase UUID, the only names the library and the parts store give their
+/// folders and files. The stores check it before building a path from an ID, so the frontend
+/// can't reach outside them.
+pub fn is_lowercase_uuid(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(i, &b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
+        })
 }
 
 /// In development builds, the folder named by this variable holds the player's data (the library
@@ -120,6 +140,23 @@ mod tests {
         write_atomic(&path, b"12345").unwrap();
         assert_eq!(read_limited(&path, 5).unwrap(), b"12345");
         assert!(read_limited(&path, 4).is_err());
+    }
+
+    #[test]
+    fn accepts_only_lowercase_uuids() {
+        assert!(is_lowercase_uuid("3f9c2a1e-0000-4000-8000-000000000000"));
+        for id in [
+            "",
+            "..",
+            r"..\settings",
+            "3F9C2A1E-0000-4000-8000-000000000000",
+            "3f9c2a1e-0000-4000-8000-00000000000",
+            "3f9c2a1e-0000-4000-8000-0000000000000",
+            "3f9c2a1e00000-4000-8000-000000000000",
+            "3f9c2a1e-0000-4000-8000-00000000000g",
+        ] {
+            assert!(!is_lowercase_uuid(id), "{id}");
+        }
     }
 
     #[test]

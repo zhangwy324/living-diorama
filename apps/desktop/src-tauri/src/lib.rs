@@ -1,6 +1,7 @@
 mod diagnostics;
 mod event_counts;
 mod library;
+mod parts;
 mod placement;
 mod platform;
 mod settings;
@@ -26,6 +27,9 @@ pub fn run() {
             library::commands::list_library,
             library::commands::save_library_entry,
             library::commands::delete_library_entry,
+            parts::commands::list_parts,
+            parts::commands::save_part,
+            parts::commands::delete_part,
             world::commands::load_world,
             world::commands::save_world,
         ])
