@@ -6,7 +6,6 @@ import {
   MAX_PART_CUBES,
   VoxelPartSchema,
   VoxelStepSchema,
-  decodeVoxels,
   encodeVoxels,
   stepUnits,
   type VoxelPart,
@@ -334,57 +333,65 @@ function nearestPoint(
   return best;
 }
 
-/**
- * The deepest the joint depth rule asks a socket to be, in cubes of `part`, to keep fitting the
- * children its base socket fits. A child's socket must be buried one cube of the finer of the two
- * grids deep (ADR 0022 §12). A base socket buried a whole base cube deep fits every child, so the
- * drawn one is buried a whole drawn cube deep. A shallower one (an eye socket near a head's face)
- * fits only finer children, so the drawn one is buried as deep as the base one, in metres, or a
- * whole drawn cube if that is less.
- */
-function socketDepth(base: VoxelPart, baseCount: FilledCount, socket: VoxelSocket, step: number) {
-  const baseStep = stepUnits(base.step);
-  let depth = baseStep;
-  while (depth > stepUnits(0.0125) && !baseCount.buried(socket.position, depth / baseStep)) {
-    depth /= 2;
-  }
-  return depth === baseStep ? 1 : Math.min(step, depth) / step;
+/** What `fitDrawnPart` gives. */
+export interface DrawnPartFit {
+  part: VoxelPart;
+  /**
+   * The IDs of the sockets with no place buried deep enough for a child at the part's own step
+   * (on a thin stroke, or a flat drawing one cube deep): each sits as deep as the drawing allows.
+   * The part is still valid, but such a child doesn't fit there; Draw mode shows them.
+   */
+  shallow: string[];
 }
-
-export type DrawnPartRefusalCode = "socket-not-buried";
-
-export interface DrawnPartRefusal {
-  code: DrawnPartRefusalCode;
-  /** The base part's socket that has no place. */
-  socket: string;
-  message: string;
-}
-
-export type DrawnPartFit = { ok: true; part: VoxelPart } | { ok: false; refusal: DrawnPartRefusal };
 
 /**
  * A voxel part made of drawn cubes with the attach point and sockets of `base`, a part of the same
  * type (ADR 0025): each point is scaled from the base part's box to the drawn one, then moved to
- * the nearest half-cube point where it belongs. The attach point goes onto a filled cube. A socket
- * goes where it is buried as deep as the joint depth rule asks (`socketDepth`); the mirrored socket
- * of a mirror pair whose base sockets mirror each other goes to the mirror image of its pair, both
- * buried, so the pair stays mirrored. A refusal when a socket has nowhere deep enough, such as on
- * a flat drawing one cube deep. The part has `base`'s type and no `source`.
+ * the nearest half-cube point where it belongs.
+ *
+ * - The attach point goes onto a filled cube: a cube's corner, edge, face or middle.
+ * - A socket goes where the joint depth rule (ADR 0022 §12, `isBuried` in the assembly validator)
+ *   holds for a child at the part's own step: every cube within one cube of it filled. Where no
+ *   point does, it goes where the cubes around it are filled half a cube deep, then a quarter, down
+ *   to the finest step, and at last just onto a filled cube, and is listed in `shallow`.
+ * - The sockets of a mirror pair whose base sockets mirror each other are placed together, the
+ *   mirrored one at the mirror image of the other about the part's middle plane, at the deepest
+ *   level both reach. Only if no mirrored place touches the cubes at all (a lopsided front view)
+ *   is each placed on its own.
+ *
+ * The part has `base`'s type and no `source`. The same cubes and base give the same part.
  */
 export function fitDrawnPart(drawn: DrawnVoxels, base: VoxelPart): DrawnPartFit {
   const { size } = drawn;
   const count = new FilledCount(size, drawn.grid);
-  const baseCount = new FilledCount(base.size, decodeVoxels(base.voxels, base.size));
   const scale = (point: VoxelPoint): VoxelPoint => ({
     x: (point.x * size.x) / base.size.x,
     y: (point.y * size.y) / base.size.y,
     z: (point.z * size.z) / base.size.z,
   });
   const mirror = (point: VoxelPoint): VoxelPoint => ({ ...point, z: size.z - point.z });
-  const step = stepUnits(drawn.step);
 
   const attach =
     nearestPoint(size, scale(base.attach), (point) => count.touches(point)) ?? scale(base.attach);
+
+  // How deep a socket may sit, deepest first, in cubes: a whole cube (the rule), then half as deep
+  // down to the finest step, then anywhere on a filled cube.
+  const levels: ((point: VoxelPoint) => boolean)[] = [];
+  for (let depth = 1; depth * stepUnits(drawn.step) >= stepUnits(0.0125); depth /= 2) {
+    levels.push((point) => count.buried(point, depth));
+  }
+  levels.push((point) => count.touches(point));
+  /** The nearest point to `target` at the deepest level `accept` passes, and that level. */
+  const deepest = (
+    target: VoxelPoint,
+    accept: (fits: (p: VoxelPoint) => boolean, p: VoxelPoint) => boolean,
+  ) => {
+    for (const [level, fits] of levels.entries()) {
+      const position = nearestPoint(size, target, (point) => accept(fits, point));
+      if (position) return { position, level };
+    }
+    return undefined;
+  };
 
   const byId = new Map(base.sockets.map((socket) => [socket.id, socket]));
   /** The mirrored socket of each pair whose base positions mirror exactly, by its pair's ID. */
@@ -403,44 +410,34 @@ export function fitDrawnPart(drawn: DrawnVoxels, base: VoxelPart): DrawnPartFit 
   const followers = new Set([...mirroredBy.values()].map((socket) => socket.id));
 
   const placed = new Map<string, VoxelPoint>();
-  const place = (socket: VoxelSocket): DrawnPartRefusal | undefined => {
-    const depth = socketDepth(base, baseCount, socket, step);
-    const position = nearestPoint(size, scale(socket.position), (point) =>
-      count.buried(point, depth),
-    );
-    if (!position) {
-      return {
-        code: "socket-not-buried",
-        socket: socket.id,
-        message: `The drawing has no room for socket "${socket.id}": it needs to be deeper there`,
-      };
-    }
-    placed.set(socket.id, position);
-    return undefined;
+  const shallow = new Set<string>();
+  const put = (id: string, position: VoxelPoint, level: number) => {
+    placed.set(id, position);
+    if (level > 0) shallow.add(id);
+  };
+  const place = (socket: VoxelSocket) => {
+    const found = deepest(scale(socket.position), (fits, point) => fits(point));
+    // Some cube is filled, so a point on one is always found.
+    if (found) put(socket.id, found.position, found.level);
   };
   for (const socket of base.sockets) {
     if (followers.has(socket.id)) continue;
     const partner = mirroredBy.get(socket.id);
-    if (partner) {
-      // Both of the pair buried, the mirrored one at the mirror image of the other.
-      const depth = socketDepth(base, baseCount, socket, step);
-      const partnerDepth = socketDepth(base, baseCount, partner, step);
-      const position = nearestPoint(
-        size,
-        scale(socket.position),
-        (point) => count.buried(point, depth) && count.buried(mirror(point), partnerDepth),
-      );
-      if (position) {
-        placed.set(socket.id, position);
-        placed.set(partner.id, mirror(position));
-        continue;
-      }
-      // An asymmetric drawing (front view) may have no such place: each goes its own way.
-      const refusal = place(partner);
-      if (refusal) return { ok: false, refusal };
+    if (!partner) {
+      place(socket);
+      continue;
     }
-    const refusal = place(socket);
-    if (refusal) return { ok: false, refusal };
+    const found = deepest(
+      scale(socket.position),
+      (fits, point) => fits(point) && fits(mirror(point)),
+    );
+    if (found) {
+      put(socket.id, found.position, found.level);
+      put(partner.id, mirror(found.position), found.level);
+    } else {
+      place(socket);
+      place(partner);
+    }
   }
 
   const parsed = VoxelPartSchema.safeParse({
@@ -456,5 +453,8 @@ export function fitDrawnPart(drawn: DrawnVoxels, base: VoxelPart): DrawnPartFit 
     })),
   });
   if (!parsed.success) throw new Error(`A drawn part is invalid: ${parsed.error.message}`);
-  return { ok: true, part: parsed.data };
+  return {
+    part: parsed.data,
+    shallow: base.sockets.filter((socket) => shallow.has(socket.id)).map((socket) => socket.id),
+  };
 }

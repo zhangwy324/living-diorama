@@ -31,7 +31,7 @@ function entry(): PlayerPartEntryInput {
     attach: { x: 1, y: 3, z: 1 },
     sockets: [],
   });
-  if (!fit.ok) throw new Error(fit.refusal.message);
+  expect(fit.shallow).toEqual([]);
   return {
     schemaVersion: 1,
     id: playerPartId(UUID),

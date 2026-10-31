@@ -285,7 +285,7 @@ function holds(root: VoxelPart, child: VoxelPart) {
 
 const fitted = (drawn: DrawnVoxels, base: VoxelPart): VoxelPart => {
   const fit = fitDrawnPart(drawn, base);
-  if (!fit.ok) throw new Error(fit.refusal.message);
+  expect(fit.shallow).toEqual([]);
   return fit.part;
 };
 
@@ -368,9 +368,10 @@ describe("fitDrawnPart", () => {
     expect(y).toBeGreaterThanOrEqual(limb.size.y - 1);
   });
 
-  it("keeps a shallow socket as shallow, for the finer parts it fits", () => {
+  it("buries a base's shallow socket a whole cube deep", () => {
     const face = fitted(voxels(drawing(blob, { rule: "puffy", step: 0.05 })), head);
     expect(holds(face, eye).success).toBe(true);
+    expect(holds(face, leg(0.05)).success).toBe(true);
     const left = face.sockets.find((socket) => socket.id === "left-eye")!.position;
     const right = face.sockets.find((socket) => socket.id === "right-eye")!.position;
     expect(right).toEqual({ ...left, z: face.size.z - left.z });
@@ -382,9 +383,29 @@ describe("fitDrawnPart", () => {
     expect(holds(body, leg(0.05)).success).toBe(true);
   });
 
-  it("refuses a drawing with no room for a socket", () => {
-    const fit = fitDrawnPart(voxels(drawing(blob, { rule: "flat", step: 0.05 })), torso);
-    expect(fit).toMatchObject({ ok: false, refusal: { code: "socket-not-buried" } });
+  it("lists the sockets with no room as shallow, placed as deep as the drawing allows", () => {
+    // One cube deep: a socket on the middle plane is half a cube deep at most.
+    const flat = fitDrawnPart(voxels(drawing(blob, { rule: "flat", step: 0.05 })), torso);
+    expect(flat.shallow).toEqual(torso.sockets.map((socket) => socket.id));
+    expect(VoxelPartSchema.safeParse(flat.part).success).toBe(true);
+    for (const socket of flat.part.sockets) expect(socket.position.z).toBe(0.5);
+    // A finer child fits there.
+    expect(holds(flat.part, leg(0.0125)).success).toBe(true);
+    expect(holds(flat.part, leg(0.05)).success).toBe(false);
+    // The pairs stay mirrored.
+    const position = (id: string) => flat.part.sockets.find((socket) => socket.id === id)!.position;
+    expect(position("front-right")).toEqual(position("front-left"));
+  });
+
+  it("puts a socket on a stroke too thin to bury it", () => {
+    // A one-pixel-wide flat stroke, two cubes deep.
+    const rows = ["1", "1", "1", "1"];
+    const fit = fitDrawnPart(
+      voxels(drawing(rows, { rule: "flat", flatThickness: 2, step: 0.05 })),
+      head,
+    );
+    expect(fit.shallow).toEqual(["left-eye", "right-eye"]);
+    expect(VoxelPartSchema.safeParse(fit.part).success).toBe(true);
   });
 
   it("fits a leaf part on a flat drawing one cube deep", () => {
@@ -398,7 +419,8 @@ describe("fitDrawnPart", () => {
     // Taller on the canvas's left (the creature's right): the pair can't mirror there.
     const rows = ["1111......", ...bar(10, 5), "1111......", "1111......"];
     const fit = fitDrawnPart(voxels(drawing(rows, { rule: "tube", view: "front" })), head);
-    expect(fit.ok).toBe(true);
+    expect(fit.shallow).toEqual([]);
+    expect(holds(fit.part, eye).success).toBe(true);
   });
 
   it("gives the same part for the same drawing and base", () => {
